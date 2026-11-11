@@ -66,8 +66,18 @@ on:
         default: "90"
 
 concurrency:
+  # A NEW RUN REPLACES THE ONE BEFORE IT, AND THAT IS THE OPPOSITE OF WHAT I FIRST WROTE.
+  #
+  # `cancel-in-progress: false` assumed every run is a precious measurement. It is not: a run started
+  # against an older image reports failures that the current commit already fixed, and while it holds
+  # the group no new run can start - the newest one sits `pending` for as long as the stale one takes
+  # to reach its next check.
+  #
+  # MEASURED: run 43050175134 held this group for twenty minutes after the image it was running had
+  # been superseded twice, and the run dispatched against the current image waited behind it. The
+  # matrix is the measurement, and a newer matrix is a better one.
   group: walkthrough
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 env:
   # THE IMAGE THIS REPOSITORY BUILDS, which is also the environment every stage runs in: qemu 11.1,
