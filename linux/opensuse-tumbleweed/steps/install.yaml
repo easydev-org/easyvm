@@ -81,6 +81,25 @@ steps:
   # but a desktop that answered by merely selecting the icon looks exactly like one that
   # ignored it, and a second attempt costs 40 s. The `expect_any` is a log line, not a gate:
   # the retry below is a separate step so a miss costs one more click, not a failed walk.
+  # THE LIVE DESKTOP FIRST, BECAUSE A DOUBLE-CLICK ON A SCREEN THAT HAS NOT DRAWN IS A CLICK ON NOTHING.
+  #
+  # Measured twice: `open yast2` reported
+  #
+  #	did not advance: wanted "language" or "welcome", read "Guest has not initialized the display
+  #	(yet)."
+  #
+  # "GUEST HAS NOT INITIALIZED THE DISPLAY" IS THE VNC SERVER'S OWN TEXT while the guest has drawn no
+  # frame at all - so the double-click landed on a black screen forty seconds after qemu started,
+  # while the live medium was still unpacking from a 4 GiB ISO.
+  #
+  # A DESKTOP IS THE HONEST GATE, and this installer is the one distribution here whose live image
+  # takes long enough that a `settle` is a guess. `desktop: linux` is a measurement of the panel that
+  # the booted session draws - the same test every other Linux walkthrough ends on.
+  - name: wait for the live desktop
+    desktop: linux
+    timeout: 900
+    poll: 5
+
   - name: open yast2
     double: [267, 34]
     settle: 40

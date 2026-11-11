@@ -61,6 +61,24 @@ steps:
     os: linux
     iso: installer_iso
     timeout: 1800
+  # THE LIVE DESKTOP FIRST, BECAUSE A CLICK ON A SCREEN THAT HAS NOT DRAWN IS A CLICK ON NOTHING.
+  #
+  # `boot:` RETURNS WHEN QEMU IS RUNNING, WHICH IS NOT WHEN THE INSTALLER IS VISIBLE. A live medium
+  # unpacks itself from a multi-gigabyte ISO after that: measured on opensuse-tumbleweed, whose first
+  # click landed on
+  #
+  #	Guest has not initialized the display (yet).
+  #
+  # - the VNC server's own text, meaning the guest had drawn NO FRAME AT ALL.
+  #
+  # `desktop: linux` is a measurement of the panel a booted session draws, which is the honest gate
+  # for every live installer here. The `timeout` is generous because unpacking a 4 GiB image is real
+  # work, and a fixed `settle` would be a guess that is right on a fast runner and wrong on a slow one.
+  - name: wait for the live desktop
+    desktop: linux
+    timeout: 900
+    poll: 5
+
 
   # =======================================================================================
   # 0. THE LAUNCHER, THEN THE SCREEN SAVER - AND THE ORDER IS THE WHOLE OF IT
