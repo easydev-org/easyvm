@@ -94,10 +94,18 @@ jobs:
   stage:
     # THE FILTER IS THE INPUT, AND ITS DEFAULT IS "all". A matrix leg whose name is not in the list
     # stops before it starts, so choosing three stages costs three legs rather than eight.
+    # TWO CONDITIONS, AND THEY ARE ABOUT DIFFERENT THINGS.
     #
-    # THE EVENT IS NAMED FIRST, AS EVERY OTHER `inputs.` TEST IN THIS REPOSITORY HAS TO BE. On a
-    # `push` a dispatch input is EMPTY, so `inputs.stages == ''` is true for the wrong reason - and
-    # a condition that is true by accident is one that stops being true when the trigger changes.
+    # THE EVENT IS THE JOB'S BUSINESS. This workflow has one trigger - `workflow_dispatch` - but
+    # GitHub creates a run for any push that touches the workflow file, evaluated against the OLD
+    # definition. On such a run a dispatch input is EMPTY; a leg that tested `inputs.stages` was
+    # skipped, the matrix produced zero legs, and the run was reported FAILED. The repository grew
+    # a red badge for a workflow that had correctly done nothing (runs 43037274437, 43042630231,
+    # 43043002991, 43043556912).
+    #
+    # A JOB skipped by `if` is neutral; a matrix whose every LEG is skipped is a failure. So the
+    # event is named here, on the job, and the leg filter below only has to answer "did the
+    # dispatch ask for this stage".
     if: |
       github.event_name == 'workflow_dispatch'
       && (inputs.stages == 'all'
