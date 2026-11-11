@@ -1,6 +1,8 @@
 package opencore
 
 import (
+	"encoding/binary"
+	"hash/crc32"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -452,5 +454,87 @@ func TestUnpackARealArchive(t *testing.T) {
 	}
 	if fi.Mode()&0o111 == 0 {
 		t.Fatalf("macserial is not executable (%v); the identity step runs it", fi.Mode())
+	}
+}
+
+// A GPT HEADER'S CRC IS COMPUTED WITH THE CRC FIELD ITSELF SET TO ZERO.
+//
+// THAT IS A RULE OF THE FORMAT, NOT A DETAIL, AND BOTH SIDES OF THIS BUILD GOT IT WRONG IN OPPOSITE
+// WAYS. The writer put the checksum in and then computed over the header containing it; the verifier
+// computed over the header it read, which contains the stored value. The two numbers could never be
+// equal, and the first CI run of macos-setup reported it as a broken image:
+//
+//	boot.img has a GPT header whose CRC is 04e45106 but the header says 76dd1daf
+//
+// The header was correct BY THE FORMAT'S RULE and this build's own check was not, which is the worst
+// shape for a self-check: it rejects exactly the images that are right.
+//
+// THIS TEST DOES NOT USE checkGPT, because checkGPT is what was broken. It parses the bytes the way
+// another GPT implementation would: clear the field, compute, compare.
+func TestTheGPTHeaderCRCIsComputedTheWayTheFormatSays(t *testing.T) {
+	for _, tool := range []string{"mformat", "mcopy", "mdir"} {
+		if _, err := lookPath(tool); err != nil {
+			t.Skipf("%s is not installed, so a boot image cannot be built here", tool)
+		}
+	}
+	dir := t.TempDir()
+	efi := filepath.Join(dir, "efi")
+	for _, d := range []string{"EFI/BOOT", "EFI/OC"} {
+		if err := os.MkdirAll(filepath.Join(efi, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, f := range []string{"EFI/BOOT/BOOTx64.efi", "EFI/OC/OpenCore.efi"} {
+		if err := os.WriteFile(filepath.Join(efi, f), []byte("MZ-fake"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	image := filepath.Join(dir, "boot.img")
+	if err := BuildBootImage(efi, image, func(string) {}); err != nil {
+		t.Fatal(err)
+	}
+
+	f, err := os.Open(image)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	head := make([]byte, SectorSize)
+	if _, err := f.ReadAt(head, SectorSize); err != nil {
+		t.Fatal(err)
+	}
+	if string(head[0:8]) != "EFI PART" {
+		t.Fatalf("no GPT signature at LBA 1: %q", head[0:8])
+	}
+
+	// AN INDEPENDENT READER'S ALGORITHM.
+	stored := binary.LittleEndian.Uint32(head[16:])
+	head[16], head[17], head[18], head[19] = 0, 0, 0, 0
+	computed := crc32.ChecksumIEEE(head[:92])
+	if stored != computed {
+		t.Fatalf("the header's stored CRC is %08x and an independent reader computes %08x. The "+
+			"format says HeaderCRC32 covers the header WITH ITS OWN FIELD ZERO, so a mismatch here "+
+			"means the image is wrong for every GPT implementation, not only for this one",
+			stored, computed)
+	}
+	// AND THE BACKUP HEADER AT THE LAST SECTOR, with the same rule.
+	fi, err := f.Stat()
+	if err != nil {
+		t.Fatal(err)
+	}
+	last := fi.Size() - SectorSize
+	backup := make([]byte, SectorSize)
+	if _, err := f.ReadAt(backup, last); err != nil {
+		t.Fatal(err)
+	}
+	if string(backup[0:8]) != "EFI PART" {
+		t.Fatal("no backup GPT header in the last sector; OVMF falls back to it when the primary " +
+			"is damaged, so leaving it out is a disk that works until it does not")
+	}
+	backupStored := binary.LittleEndian.Uint32(backup[16:])
+	backup[16], backup[17], backup[18], backup[19] = 0, 0, 0, 0
+	if got := crc32.ChecksumIEEE(backup[:92]); got != backupStored {
+		t.Fatalf("the backup header's CRC is %08x and an independent reader computes %08x",
+			backupStored, got)
 	}
 }

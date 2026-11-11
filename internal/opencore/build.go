@@ -562,10 +562,18 @@ func writeGPT(path string, espFirst, espLast, totalSectors int64) error {
 		binary.LittleEndian.PutUint32(head[80:], 128)
 		binary.LittleEndian.PutUint32(head[84:], 128)
 		binary.LittleEndian.PutUint32(head[88:], entriesCRC)
-		// THE CRC COVERS THE HEADER'S DECLARED SIZE - 92 BYTES - NOT THE WHOLE SECTOR. The rest
-		// is padding and is not part of the header. Computing it over all 512 was the bug: the
-		// write and the read agreed with each other and disagreed with every other GPT
-		// implementation.
+		// THE CRC COVERS THE HEADER'S DECLARED SIZE - 92 BYTES - NOT THE WHOLE SECTOR.
+		//
+		// AND THE CRC FIELD ITSELF IS ZERO WHILE IT IS COMPUTED. That is a rule of the format rather
+		// than a detail: the checksum is over the header with `HeaderCRC32` set to 0, so a reader
+		// computes it the same way and compares. Writing the header with the field already holding a
+		// stale value - or verifying without clearing it - produces two numbers that never match,
+		// which is exactly what the first CI run of macos-setup reported:
+		//
+		//	boot.img has a GPT header whose CRC is 04e45106 but the header says 76dd1daf
+		//
+		// The header was correct by the format's rule and this build's own check was not.
+		binary.LittleEndian.PutUint32(head[16:], 0)
 		binary.LittleEndian.PutUint32(head[16:], crc32IEEE(head[:92]))
 		return head
 	}
@@ -604,7 +612,13 @@ func checkGPT(path string, espFirst int64) error {
 			"EFI system partition in a partition table and a filesystem at LBA 0 is not one",
 			path, string(head[0:8]))
 	}
+	// THE FIELD IS CLEARED BEFORE COMPUTING, WHICH IS THE FORMAT'S OWN RULE.
+	//
+	// `HeaderCRC32` covers the header with ITSELF SET TO ZERO. Verifying without clearing it compares
+	// a checksum-of-the-header-with-a-checksum-in-it against the checksum stored in it, and those two
+	// can never be equal. This checker was wrong, not the header it rejected.
 	want := binary.LittleEndian.Uint32(head[16:])
+	binary.LittleEndian.PutUint32(head[16:], 0)
 	if got := crc32IEEE(head[:92]); got != want {
 		return fmt.Errorf("%s has a GPT header whose CRC is %08x but the header says %08x; "+
 			"firmware rejects it and the run reads as a broken bootloader", path, got, want)
