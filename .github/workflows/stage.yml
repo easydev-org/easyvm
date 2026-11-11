@@ -195,7 +195,20 @@ jobs:
           summary=${GITHUB_STEP_SUMMARY:-/dev/null}
           printf '| time | state |\n|---|---|\n' >> "$summary"
           rounds=0
-          limit=$(( ${{ matrix.timeout }} + 5 ))
+          # THE LOOP MUST END BEFORE GITHUB ENDS THE JOB, OR THE DIAGNOSIS IS NEVER PRINTED.
+          #
+          # This was `timeout + 5`, which is five rounds PAST the job's own `timeout-minutes`. Every
+          # leg that overran was therefore killed by the runner mid-sleep, and the line a person needs
+          #
+          #	=== THE WALKTHROUGH DID NOT FINISH IN TIME ===
+          #	<daemon.log: the step it was on and the error it hit>
+          #
+          # NEVER APPEARED. Measured on macos-setup: 97 minutes in `follow it`, still going, with 150
+          # for the job - so its conclusion was going to be an opaque cancellation and not a reason.
+          #
+          # TEN MINUTES OF HEADROOM, because the two steps after this one are not instant either:
+          # `what it produced` lists and the artifact upload pushes the disk, which is gigabytes.
+          limit=$(( ${{ matrix.timeout }} - 10 ))
           while [ "$rounds" -lt "$limit" ]; do
             rounds=$((rounds + 1))
             state=$(easyvm status --work "$GITHUB_WORKSPACE/work" 2>&1 || true)

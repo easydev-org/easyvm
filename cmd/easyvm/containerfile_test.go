@@ -2,7 +2,9 @@ package main
 
 import (
 	"os"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -226,4 +228,57 @@ func sortedKeys(m map[string]bool) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// THE FOLLOW LOOP MUST END BEFORE THE RUNNER ENDS THE JOB, OR THE DIAGNOSIS IS NEVER PRINTED.
+//
+// IT WAS `timeout + 5`, which is FIVE ROUNDS PAST the job's own `timeout-minutes`. Every leg that
+// overran was therefore killed by GitHub mid-sleep, and the three lines a person needs
+//
+//	=== THE WALKTHROUGH DID NOT FINISH IN TIME ===
+//	<daemon.log: which step it was on, and the error it hit>
+//
+// NEVER APPEARED. Measured on macos-setup: 97 minutes in `follow it` with 150 for the job, so its
+// conclusion was going to be an opaque cancellation rather than a reason.
+//
+// THE TWO NUMBERS ARE IN DIFFERENT FILES AND MUST AGREE: `matrix.timeout` sets `timeout-minutes` on
+// the job and the loop derives its own limit from it. A limit at or above the job's own budget cannot
+// be reached, so the loop is a no-op and every overrun is silent.
+func TestTheFollowLoopEndsBeforeTheJobDoes(t *testing.T) {
+	body, err := os.ReadFile("../../.github/workflows/stage.yml")
+	if err != nil {
+		t.Skipf("no stage.yml here (%v)", err)
+	}
+	src := string(body)
+
+	// THE LIMIT IS DERIVED, AND IT SUBTRACTS RATHER THAN ADDS.
+	limit := regexp.MustCompile(`limit=\$\(\( *\$\{\{ *matrix\.timeout *\}\} *([+-]) *(\d+) *\)\)`).FindStringSubmatch(src)
+	if limit == nil {
+		t.Fatal("the follow loop does not derive its limit from `matrix.timeout`; if it uses a " +
+			"fixed number it cannot track the per-leg budget")
+	}
+	if limit[1] != "-" {
+		t.Fatalf("the loop's limit is `matrix.timeout %s %s`, so it runs PAST the job's own "+
+			"`timeout-minutes` and the runner kills it before the diagnosis is printed", limit[1], limit[2])
+	}
+
+	// AND THE JOB'S TIMEOUT IS THE SAME VALUE, not a second number that drifted.
+	if !strings.Contains(src, "timeout-minutes: ${{ matrix.timeout }}") {
+		t.Fatal("the job's `timeout-minutes` is not `matrix.timeout`, so the two are unrelated " +
+			"and the subtraction above guarantees nothing")
+	}
+
+	// AND THERE IS ENOUGH HEADROOM FOR WHAT COMES AFTER. `what it produced` lists the work
+	// directory and the artifact upload pushes the disk, which is gigabytes - ten minutes is the
+	// floor for that on a slow runner, and less than that would make the loop end after the upload
+	// was already cut off.
+	headroom, err := strconv.Atoi(limit[2])
+	if err != nil {
+		t.Fatalf("the loop's headroom is not a number: %q", limit[2])
+	}
+	if headroom < 5 || headroom > 20 {
+		t.Fatalf("the loop leaves %d minute(s) for the listing and the artifact upload; measured "+
+			"uploads of a 128 GiB disk image need more than 5 and there is no reason to give away "+
+			"more than 20", headroom)
+	}
 }
