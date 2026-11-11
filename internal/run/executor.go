@@ -387,6 +387,23 @@ func (e *Executor) doRequireSSH(s walk.Step) error {
 	}
 	e.Driver.Log(fmt.Sprintf("  ssh answers on port %d after %s",
 		target.Port, time.Since(start).Round(time.Second)))
+
+	// AND THE DRIVER'S CACHED CONNECTION IS DROPPED, BECAUSE "SSHD IS READY" MEANS THE OLD ONE IS NOT.
+	//
+	// `require_ssh` PROBES WITH A FRESH CONNECTION, but the driver keeps ONE connection for the run -
+	// so a step sequence of `reboot:` -> `require_ssh:` -> `ssh:` had the probe succeed and the next
+	// `ssh:` write into the pre-reboot socket:
+	//
+	//	status: failed step 20/20 "read what this boot did"
+	//	error: read what this boot did: ssh session: EOF
+	//
+	// Measured on opensuse-tumbleweed, whose last step is exactly that. `Reboot()` already closes the
+	// cache; a `reboot:` done INSIDE an `ssh:` command - `systemctl reboot` - does not go through it,
+	// and that is the case the probe above exists for. Closing here covers both: whichever way the
+	// machine restarted, the connection that survives a successful probe is the one the probe made.
+	if closer, ok := e.Driver.(interface{ DropGuest() }); ok {
+		closer.DropGuest()
+	}
 	return nil
 }
 

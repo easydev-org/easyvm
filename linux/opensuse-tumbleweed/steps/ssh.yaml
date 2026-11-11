@@ -256,6 +256,24 @@ steps:
     timeout: 120
 
   # AND THE UNIT IS STARTED FRESH FROM THAT STATE, SO A FAILURE NAMES ITSELF.
+  # PASSWORD AUTHENTICATION IS TURNED ON EXPLICITLY, AND TWO DISTRIBUTIONS NEEDED IT.
+  #
+  # Measured on run 43071278612's siblings: manjaro and endeavour reached
+  #
+  #	wait for sshd: the port is open but no shell answers: ssh: handshake failed:
+  #	ssh: unable to authenticate, attempted methods [none password], no supported methods remain
+  #
+  # THE PORT WAS OPEN AND SSHD WAS RUNNING. What refused was the AUTHENTICATION METHOD, so the stage
+  # that exists to install sshd could connect to a machine that would not admit it.
+  #
+  # Every other distribution happens to default to `PasswordAuthentication yes`; these two do not, and
+  # relying on a vendor default for the one thing this stage depends on is the "fact in another place"
+  # this port keeps removing. The drop-in is idempotent and harmless where the default is already yes.
+  - name: allow password authentication
+    run: echo {{ password }} | sudo -S sh -c 'mkdir -p /etc/ssh/sshd_config.d && printf "PasswordAuthentication yes\n" > /etc/ssh/sshd_config.d/99-vm.conf' 2>&1 | tail -3
+    terminal_wait: 0
+    settle: 3
+
   - name: restart sshd now that the keys are on disk
     ssh: |
       printf '%s\n' '{{ password }}' | sudo -S -p '' systemctl restart sshd 2>&1 | tail -3

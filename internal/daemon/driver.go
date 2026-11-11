@@ -205,6 +205,21 @@ func (d *Driver) Guest() *guest.Client {
 	return d.ssh
 }
 
+// DropGuest closes the cached ssh connection, so the next step dials a new one.
+//
+// IT IS CALLED BY `require_ssh:` AFTER A SUCCESSFUL PROBE. The probe always makes its own connection;
+// the driver keeps one for the run; and a machine that restarted - by `reboot:` or by the guest's own
+// `systemctl reboot` inside an `ssh:` command - leaves the cached one writing into a dead socket.
+// Measured as `ssh session: EOF` on the step after the probe.
+func (d *Driver) DropGuest() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.ssh != nil {
+		_ = d.ssh.Close()
+		d.ssh = nil
+	}
+}
+
 // --- the machine ----------------------------------------------------------------------
 
 func (d *Driver) Machine() run.Machine { return machineControl{d} }

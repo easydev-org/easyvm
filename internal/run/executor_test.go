@@ -2,6 +2,7 @@ package run
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -344,4 +345,49 @@ func TestDiskGBCreatesTheSizeItSays(t *testing.T) {
 	}
 	// Anything else is a real failure of this step and should be seen.
 	t.Fatalf("createDisk failed unexpectedly: %v", err)
+}
+
+// A SUCCESSFUL `require_ssh:` MAKES THE DRIVER DROP ITS CACHED CONNECTION.
+//
+// THE DRIVER KEEPS ONE SSH CONNECTION FOR THE RUN, and `require_ssh:` probes with a FRESH one. So a
+// sequence of `reboot:` -> `require_ssh:` -> `ssh:` had the probe succeed and then the next `ssh:`
+// write into the pre-reboot socket:
+//
+//	status: failed step 20/20 "read what this boot did"
+//	error: read what this boot did: ssh session: EOF
+//
+// Measured on opensuse-tumbleweed, whose last step is exactly that. `Reboot()` closes the cache for
+// the `reboot:` step, but a machine that restarts from `systemctl reboot` INSIDE an `ssh:` command
+// never goes through it - and that is the case the probe exists for.
+//
+// THE RULE: whichever way the guest restarted, the connection that survives a successful probe is the
+// one the probe made.
+func TestRequireSSHDropsTheCachedConnection(t *testing.T) {
+	body, err := os.ReadFile("executor.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(body)
+	start := strings.Index(src, "func (e *Executor) doRequireSSH(")
+	if start < 0 {
+		t.Fatal("no doRequireSSH")
+	}
+	rest := src[start:]
+	end := strings.Index(rest[1:], "\nfunc ")
+	if end > 0 {
+		rest = rest[:end+1]
+	}
+	if !strings.Contains(rest, "DropGuest()") {
+		t.Fatal("`require_ssh:` does not drop the driver's cached connection, so a step after a " +
+			"guest-initiated reboot writes into a dead socket and reports `ssh session: EOF`")
+	}
+	// AND THE DRIVER MUST HAVE THE METHOD, OR THE TYPE ASSERTION SILENTLY DOES NOTHING.
+	driver, err := os.ReadFile("../daemon/driver.go")
+	if err != nil {
+		t.Skipf("no daemon driver here (%v)", err)
+	}
+	if !strings.Contains(string(driver), "func (d *Driver) DropGuest()") {
+		t.Fatal("DropGuest exists in the executor's type assertion and not on the driver, so the " +
+			"assertion fails silently and nothing is dropped")
+	}
 }
