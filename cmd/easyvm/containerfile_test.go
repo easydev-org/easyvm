@@ -97,3 +97,47 @@ func splitInstallAndAssert(t *testing.T) (installs, asserts string) {
 	}
 	return install.String(), assert.String()
 }
+
+// THE IMAGE MUST START THE PROGRAM WHEN A CALLER NAMES A SUBCOMMAND.
+//
+// `ENTRYPOINT []` MADE EVERY CALLER SPELL A PATH INSIDE THE IMAGE. Docker treats the first word of
+// the command as an executable when the entrypoint is empty, so
+//
+//	docker run ghcr.io/easydev-org/easyvm:latest serve --work /work
+//
+// failed with `exec: "serve": executable file not found in $PATH` and exit 127 (run 43014353957),
+// and `easyvm pull` only worked because that step happened to pass --entrypoint explicitly. An
+// image whose own subcommands cannot be typed is not usable, and the failure names a shell path
+// rather than the image.
+func TestTheImageEntrypointIsTheProgram(t *testing.T) {
+	body, err := os.ReadFile("../../Containerfile")
+	if err != nil {
+		t.Skipf("no Containerfile here (%v)", err)
+	}
+	// COMMENT LINES ARE WHERE THE FILE RECORDS WHY THE EMPTY ENTRYPOINT WAS WRONG, so the check
+	// reads INSTRUCTIONS - a line that starts with the word.
+	var instructions []string
+	for _, line := range strings.Split(string(body), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		instructions = append(instructions, trimmed)
+	}
+	text := strings.Join(instructions, "\n")
+
+	if strings.Contains(text, "ENTRYPOINT []") {
+		t.Fatal("the image has an empty entrypoint, so `docker run IMAGE serve` looks for an " +
+			"executable named `serve` and exits 127")
+	}
+	if !strings.Contains(text, `ENTRYPOINT ["/usr/local/bin/easyvm"]`) {
+		t.Fatal("the entrypoint must be the easyvm binary itself, at the path the COPY above " +
+			"writes - a caller should never have to spell a path inside the image")
+	}
+	// AND NO DEFAULT SUBCOMMAND. A container that starts a daemon when the caller asked for
+	// `check` is worse than one that prints usage: the first looks like it worked.
+	if strings.Contains(text, `CMD ["serve"]`) || strings.Contains(text, "CMD serve") {
+		t.Fatal("the image must not have a default `serve`; a container with no arguments " +
+			"should print usage rather than start a daemon")
+	}
+}

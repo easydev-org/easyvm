@@ -190,8 +190,23 @@ RUN set -eux; \
 RUN set -eux; mkdir -p /work
 VOLUME ["/work"]
 
-# NO ENTRYPOINT. The qemux base ships one that configures a VM from environment variables; this
-# image has no such thing, so the caller names the command. `easyvm serve` for a daemon, `easyvm
-# run` is the client and needs no container of its own.
-ENTRYPOINT []
+# THE ENTRYPOINT IS THE PROGRAM, BECAUSE THAT IS THE ONLY THING THIS IMAGE IS FOR.
+#
+# `ENTRYPOINT []` WAS WRONG AND IT COST A RUN (43014353957). An empty entrypoint makes docker treat
+# the first word of the command as an EXECUTABLE, so
+#
+#     docker run ghcr.io/easydev-org/easyvm:latest serve --work /work
+#
+# fails with `exec: "serve": executable file not found in $PATH` and exit 127 - while
+#
+#     docker run ghcr.io/easydev-org/easyvm:latest versions
+#
+# fails the same way, and only an explicit `--entrypoint /usr/local/bin/easyvm` works. That is not
+# a usable image: every caller would have to know a path inside it.
+#
+# CMD IS STILL THE CALLER'S. An entrypoint and a default command are two different things, and the
+# second is left empty on purpose - `serve` is not a default this program should assume, because a
+# container that starts a daemon when the caller wanted `check` is worse than one that prints usage.
+ENTRYPOINT ["/usr/local/bin/easyvm"]
+CMD []
 WORKDIR /work

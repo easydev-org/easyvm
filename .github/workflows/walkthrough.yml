@@ -103,8 +103,10 @@ jobs:
         # message rather than a boot that waits out its timeout on a file that is not there.
         run: |
           set -euo pipefail
+          # NO --entrypoint: the image's entrypoint IS easyvm, which is what a caller should be
+          # able to assume. A step that spelled the path would keep working after the entrypoint
+          # regressed, and the regression is exactly what run 43014353957 cost.
           docker run --rm \
-            --entrypoint /usr/local/bin/easyvm \
             -e GITHUB_TOKEN="${{ secrets.GITHUB_TOKEN }}" \
             -v "$PWD/work:/work" \
             "${{ env.IMAGE }}" \
@@ -152,7 +154,7 @@ jobs:
         # YAML: the same file must be runnable against any copy of the disk.
         run: |
           set -euo pipefail
-          docker exec easyvm /usr/local/bin/easyvm run \
+          docker exec easyvm easyvm run \
             /src/windows/11/steps/ssh.yaml \
             --work /work \
             --boot-disk /work/disk.qcow2 \
@@ -168,7 +170,7 @@ jobs:
           set -euo pipefail
           deadline=$((SECONDS + 60 * 60))
           while [ $SECONDS -lt $deadline ]; do
-            state=$(docker exec easyvm /usr/local/bin/easyvm status --work /work 2>&1 || true)
+            state=$(docker exec easyvm easyvm status --work /work 2>&1 || true)
             printf '%s\n' "$state"
             case "$state" in
               *"status: finished"*)
