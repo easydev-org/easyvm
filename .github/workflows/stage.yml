@@ -1,0 +1,254 @@
+name: stage
+
+# THE ONE COPY OF "HOW A STAGE RUNS", CALLED BY ONE WORKFLOW PER OPERATING SYSTEM.
+#
+# WHY THIS EXISTS RATHER THAN ONE BIG MATRIX.
+#
+# A single `walkthrough.yml` with 21 legs under one `concurrency:` group means DISPATCHING TO TEST
+# LINUX CANCELS A RUNNING WINDOWS INSTALL. That is not a hypothetical: it happened, and forty minutes
+# of a Windows install were thrown away so a Linux fix could be measured. The concurrency group exists
+# to stop two runs fighting over one machine, and a matrix leg is not one machine - every leg gets its
+# own runner.
+#
+# WHY IT IS ONE FILE AND NOT TWENTY-SIX.
+#
+# easydiskbake has 26 workflows, and the same container stanza appears in 23 of them - 73 duplicated
+# lines of `options: --device /dev/kvm --device /dev/net/tun --cap-add NET_ADMIN`. Copying that shape
+# would reintroduce exactly the "one fact in many places" this port keeps removing, and the first time
+# a device or a capability changed, twenty-three files would need the same edit.
+#
+# SO: THE MECHANISM IS HERE ONCE, AND EACH OS FILE DECLARES ONLY ITS OWN MATRIX. Windows gets its own
+# concurrency group, Linux its own, and one can be re-run while another is installing.
+
+on:
+  workflow_call:
+    inputs:
+      stages:
+        description: "the matrix legs this workflow runs"
+        type: string
+        required: true
+      # A NAME FOR THE CONCURRENCY GROUP. One per operating system, so that re-running Linux does not
+      # cancel a Windows install - which is the whole reason this file exists.
+      group:
+        description: "the concurrency group, one per OS"
+        type: string
+        required: true
+      # THE DEFAULT TAG EACH LEG PULLS. A stage that installs has none.
+      disks_repository:
+        type: string
+        default: "easydev-org/easydiskbake"
+
+# STILL `cancel-in-progress: true`, BUT NOW SCOPED TO ONE OPERATING SYSTEM.
+#
+# Within one OS a newer run IS a better measurement: the alternative is a stale run reporting failures
+# the current commit already fixed, while the new one waits. Across operating systems that is false,
+# and a group per OS is what makes the difference expressible.
+concurrency:
+  group: ${{ inputs.group }}
+  cancel-in-progress: true
+
+jobs:
+  stage:
+    runs-on: ubuntu-24.04
+    # THE LEG'S OWN TIMEOUT, NOT ONE NUMBER FOR ALL. A 150-minute macOS install must not be bounded by
+    # a default chosen for a 70-minute Windows stage.
+    timeout-minutes: ${{ matrix.timeout }}
+    container:
+      image: ghcr.io/${{ github.repository }}:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+      # THE THREE THINGS EVERY GUEST NEEDS, IN ONE PLACE. `--device /dev/net/tun` is the tap the NIC is
+      # attached to; `--cap-add NET_ADMIN` creates the tap, the bridge and the iptables rules;
+      # `--device /dev/kvm` is the accelerator, without which a macOS guest cannot be given `+invtsc`
+      # and deadlocks, and every other guest runs fifty times slower.
+      options: --device /dev/kvm --device /dev/net/tun --cap-add NET_ADMIN
+    permissions:
+      contents: read
+      packages: read
+    strategy:
+      # EVERY LEG AT ONCE. Each matrix leg gets its own runner, with its own /dev/kvm and its own
+      # container, so the legs do not compete - and `max-parallel: 1` would make a stage wait for the
+      # sum of every stage before it rather than the longest.
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(inputs.stages) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: prepare
+        # THE DEVICES ARE OPENED, NOT LISTED, BECAUSE A NODE THAT EXISTS IS NOT A DEVICE THAT WORKS.
+        # On run 43063744565 `test -e /dev/kvm` passed while qemu ran on TCG - pure software emulation -
+        # because the node was there and the ioctl behind it was not reachable. The symptom was not an
+        # error: the guest boots, everything takes fifty times as long, and macOS cannot get the CPU
+        # flags it needs.
+        #
+        # EVERY PROBE HERE ASKS THE OPERATION RATHER THAN THE FILE:
+        #
+        #	: < /dev/net/tun        opens it, and fails if the open is refused
+        #	qemu -accel kvm -S      starts the accelerator and opens /dev/kvm, qemu's own handshake
+        #
+        # ONE SPELLING OF THE ACCELERATOR. `-machine q35,accel=kvm` AND `-accel kvm` ARE MUTUALLY
+        # EXCLUSIVE - qemu says so: "The -accel and \"-machine accel=\" options are incompatible" - and
+        # the first version of this probe passed both, so it reported that the runner could not
+        # accelerate a guest when its KVM had never been asked.
+        run: |
+          set -eu
+          test -e /dev/kvm || { echo "=== NO /dev/kvm ==="; exit 1; }
+          test -e /dev/net/tun || { echo "=== NO /dev/net/tun ==="; exit 1; }
+          ls -l /dev/kvm /dev/net/tun
+          : < /dev/net/tun || { echo "=== /dev/net/tun CANNOT BE OPENED ==="; exit 1; }
+
+          qemu-system-x86_64 -accel kvm -nodefaults -display none -S \
+            -monitor none -serial none > /tmp/kvm-probe.log 2>&1 &
+          QPID=$!
+          sleep 2
+          if kill -0 "$QPID" 2>/dev/null; then
+            echo "=== KVM STARTED (qemu accepted accel=kvm) ==="
+            kill "$QPID" 2>/dev/null || true
+            wait "$QPID" 2>/dev/null || true
+          else
+            wait "$QPID" 2>/dev/null || true
+            echo "=== QEMU REFUSED accel=kvm - THIS CONTAINER CANNOT ACCELERATE A GUEST ==="
+            cat /tmp/kvm-probe.log || true
+            echo "  every leg would run on TCG: fifty times slower, and macOS deadlocks"
+            exit 1
+          fi
+
+          easyvm versions
+          qemu-img --version | head -1
+          # THE HOST-SIDE TOOLS THE FILES USE, named so a missing one is this step rather than a
+          # failure forty minutes into an install that needed `xorriso` to build an answer CD.
+          for tool in qemu-img 7z xorriso unzip mformat mcopy mdir; do
+            command -v "$tool" > /dev/null || echo "  (optional, not present: $tool)"
+          done
+          mkdir -p "$GITHUB_WORKSPACE/work"
+
+      - name: pull the input disk
+        # AN INSTALL HAS NO INPUT: its first step creates the disk it writes to. Every other stage
+        # starts from a published one, and `pull` is the tag - so a leg can be pointed at any disk this
+        # repository has ever published.
+        if: matrix.pull != ''
+        run: |
+          set -eu
+          easyvm pull --tag "${{ matrix.pull }}" \
+                      --repository "${{ inputs.disks_repository }}" \
+                      --dest "$GITHUB_WORKSPACE/work/disk.qcow2"
+          ls -l "$GITHUB_WORKSPACE/work/"
+          # A TRUNCATED ARTIFACT IS ONE LINE HERE RATHER THAN A BOOT TIMEOUT.
+          qemu-img check "$GITHUB_WORKSPACE/work/disk.qcow2" || true
+
+      - name: start the daemon
+        # ONE PROCESS OWNS THE MACHINE FOR THE WHOLE STAGE. It runs in the background because
+        # `easyvm run` is a CLIENT: it sends a request and returns, and the daemon drives the file.
+        #
+        # THE READY LINE IS THE CONTRACT, not the socket file: a file that exists is not a daemon that
+        # answers. The output is CAPTURED FIRST and matched with `case`, because `| grep -q` closes the
+        # pipe on its first match, the writer takes SIGPIPE, and `set -o pipefail` turns that into exit
+        # 141 for a check that SUCCEEDED.
+        run: |
+          set -eu
+          easyvm serve --work "$GITHUB_WORKSPACE/work" --novnc-port 6080 \
+            > "$GITHUB_WORKSPACE/work/daemon.log" 2>&1 &
+          echo $! > "$GITHUB_WORKSPACE/work/daemon.pid"
+          for i in $(seq 1 30); do
+            logs=$(cat "$GITHUB_WORKSPACE/work/daemon.log" || true)
+            case "$logs" in *"listening on"*) break ;; esac
+            sleep 1
+          done
+          logs=$(cat "$GITHUB_WORKSPACE/work/daemon.log" || true)
+          printf '%s\n' "$logs"
+          case "$logs" in
+            *"listening on"*) echo "the daemon is up" ;;
+            *) echo "=== THE DAEMON DID NOT COME UP ==="; exit 1 ;;
+          esac
+
+      - name: ask for the run
+        # THE FILE IS THE ARGUMENT. `--boot-disk` names what to start and `--out` where a `compress:`
+        # writes - both are facts about the job, so they are flags and not YAML.
+        run: |
+          set -eu
+          disk_args=""
+          if [ -f "$GITHUB_WORKSPACE/work/disk.qcow2" ]; then
+            disk_args="--boot-disk $GITHUB_WORKSPACE/work/disk.qcow2"
+          fi
+          # shellcheck disable=SC2086
+          easyvm run "$GITHUB_WORKSPACE/${{ matrix.file }}" \
+            --work "$GITHUB_WORKSPACE/work" \
+            $disk_args \
+            --out "$GITHUB_WORKSPACE/work/${{ matrix.out }}" \
+            --password admin \
+            || {
+              echo "=== THE DAEMON REFUSED THE RUN ==="
+              cat "$GITHUB_WORKSPACE/work/daemon.log"
+              exit 1
+            }
+
+      - name: follow it
+        # SIXTY SECONDS AT A TIME, TO THE STEP SUMMARY AS WELL AS STDOUT - a step that runs for an hour
+        # has invisible stdout until it ends, and "which step is it on" is the one question an
+        # in-progress stage has.
+        #
+        # POSIX SH ONLY, BECAUSE A `container:` JOB RUNS STEPS WITH /bin/sh. `$SECONDS` is bash and
+        # dash does not define it, and `set -o pipefail` is ignored rather than refused - both measured
+        # here.
+        run: |
+          set -eu
+          summary=${GITHUB_STEP_SUMMARY:-/dev/null}
+          printf '| time | state |\n|---|---|\n' >> "$summary"
+          rounds=0
+          limit=$(( ${{ matrix.timeout }} + 5 ))
+          while [ "$rounds" -lt "$limit" ]; do
+            rounds=$((rounds + 1))
+            state=$(easyvm status --work "$GITHUB_WORKSPACE/work" 2>&1 || true)
+            printf '[%s] %s\n' "$(date +%H:%M:%S)" "$state"
+            one_line=$(printf '%s' "$state" | tr '\n' ' ' | tr -s ' ')
+            printf '| %s | %s |\n' "$(date +%H:%M:%S)" "$one_line" >> "$summary"
+            case "$state" in
+              *"status: finished"*)
+                echo "=== THE WALKTHROUGH FINISHED ==="
+                exit 0 ;;
+              *"status: failed"*)
+                echo "=== THE WALKTHROUGH FAILED ==="
+                cat "$GITHUB_WORKSPACE/work/daemon.log"
+                exit 1 ;;
+            esac
+            if [ "$rounds" -lt "$limit" ]; then sleep 60; fi
+          done
+          echo "=== THE WALKTHROUGH DID NOT FINISH IN TIME ==="
+          cat "$GITHUB_WORKSPACE/work/daemon.log"
+          exit 1
+
+      - name: what it produced
+        if: always()
+        run: |
+          set -u
+          ls -l "$GITHUB_WORKSPACE/work/" || true
+          for f in "$GITHUB_WORKSPACE"/work/*.qcow2; do
+            [ -e "$f" ] || continue
+            printf '%s: %s MiB\n' "$f" "$(( $(stat -c %s "$f") >> 20 ))"
+          done
+
+      - name: stop the daemon
+        if: always()
+        run: |
+          set -u
+          if [ -f "$GITHUB_WORKSPACE/work/daemon.pid" ]; then
+            pid=$(cat "$GITHUB_WORKSPACE/work/daemon.pid")
+            kill "$pid" 2>/dev/null || true
+            easyvm stop --work "$GITHUB_WORKSPACE/work" 2>/dev/null || true
+            sleep 5
+            kill -9 "$pid" 2>/dev/null || true
+          fi
+          pgrep -a qemu-system-x86_64 || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ${{ matrix.name }}
+          path: |
+            work/daemon.log
+            work/*.mp4
+            work/*.qcow2
+          if-no-files-found: warn
+          retention-days: 7

@@ -1,0 +1,65 @@
+name: windows
+
+# WINDOWS 11, FOUR STAGES: install -> ssh -> vm-configure -> dev.
+#
+# `windows-install` PULLS NOTHING - it creates the disk it installs to. The other three start from
+# a published tag, so a stage can be run without the install before it, and the install is 45 to 90
+# minutes of one.
+
+on:
+  workflow_dispatch:
+    inputs:
+      disks_repository:
+        description: "the ghcr repository that holds the disks"
+        default: "easydev-org/easydiskbake"
+
+# ITS OWN CONCURRENCY GROUP, WHICH IS THE POINT OF THE SPLIT.
+#
+# A single group for every operating system meant DISPATCHING A LINUX FIX CANCELLED A RUNNING WINDOWS
+# INSTALL - forty minutes of one, thrown away. The group exists to stop two runs fighting over a
+# machine, and a matrix leg is not one machine: every leg gets its own runner. Scoping the group to one
+# OS keeps "a newer run of THIS is better" without making an unrelated stage collateral.
+concurrency:
+  group: windows
+  cancel-in-progress: true
+
+jobs:
+  stages:
+    uses: ./.github/workflows/stage.yml
+    secrets: inherit
+    with:
+      group: windows
+      disks_repository: ${{ inputs.disks_repository }}
+      # THE LEGS, AS JSON. `fromJSON` in the called workflow turns this back into a matrix, so the
+      # mechanism stays in one file and each OS declares only what it runs.
+      stages: |
+        [
+          {
+            "name": "windows-install",
+            "file": "windows/11/steps/install.yaml",
+            "pull": "",
+            "out": "windows11.qcow2",
+            "timeout": 130
+          },
+          {
+            "name": "windows-ssh",
+            "file": "windows/11/steps/ssh.yaml",
+            "pull": "windows11-ssh",
+            "out": "windows11-ssh.qcow2",
+            "timeout": 70
+          },
+          {
+            "name": "windows-vm-configure",
+            "file": "windows/11/steps/vm-configure.yaml",
+            "pull": "windows11-vm-configure",
+            "out": "windows11-vm-configure.qcow2",
+            "timeout": 70
+          },
+          {
+            "name": "windows-dev",
+            "file": "windows/11/steps/dev.yaml",
+            "pull": "windows11-dev",
+            "out": "windows11-dev.qcow2",
+            "timeout": 120
+          }
+        ]

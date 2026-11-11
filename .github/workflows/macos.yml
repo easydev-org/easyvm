@@ -1,0 +1,69 @@
+name: macos
+
+# MACOS 15, FOUR STAGES: setup -> ssh -> vm-configure -> dev.
+#
+# `macos-setup` IS THE ONE THAT PROVES THE FIRMWARE: OpenCore as a pflash pair built from the
+# recovery image, the boot image in a GPT partition at bootindex 0, the Apple SMC, twenty CPU flags
+# of which `+invtsc` is the one whose absence deadlocks the guest, vmware-svga rather than -vga, and
+# the recovery image as removable media because macOS installs FROM USB.
+#
+# IT TAKES 45 TO 90 MINUTES because macOS copies 36 GiB, and `discard=unmap` is off for exactly that
+# reason.
+
+on:
+  workflow_dispatch:
+    inputs:
+      disks_repository:
+        description: "the ghcr repository that holds the disks"
+        default: "easydev-org/easydiskbake"
+
+# ITS OWN CONCURRENCY GROUP, WHICH IS THE POINT OF THE SPLIT.
+#
+# A single group for every operating system meant DISPATCHING A LINUX FIX CANCELLED A RUNNING WINDOWS
+# INSTALL - forty minutes of one, thrown away. The group exists to stop two runs fighting over a
+# machine, and a matrix leg is not one machine: every leg gets its own runner. Scoping the group to one
+# OS keeps "a newer run of THIS is better" without making an unrelated stage collateral.
+concurrency:
+  group: macos
+  cancel-in-progress: true
+
+jobs:
+  stages:
+    uses: ./.github/workflows/stage.yml
+    secrets: inherit
+    with:
+      group: macos
+      disks_repository: ${{ inputs.disks_repository }}
+      # THE LEGS, AS JSON. `fromJSON` in the called workflow turns this back into a matrix, so the
+      # mechanism stays in one file and each OS declares only what it runs.
+      stages: |
+        [
+          {
+            "name": "macos-setup",
+            "file": "macos/15/steps/setup.yaml",
+            "pull": "",
+            "out": "macos15-setup.qcow2",
+            "timeout": 150
+          },
+          {
+            "name": "macos-ssh",
+            "file": "macos/15/steps/ssh.yaml",
+            "pull": "macos15-ssh",
+            "out": "macos15-ssh.qcow2",
+            "timeout": 90
+          },
+          {
+            "name": "macos-vm-configure",
+            "file": "macos/15/steps/vm-configure.yaml",
+            "pull": "macos15-vm-configure",
+            "out": "macos15-vm-configure.qcow2",
+            "timeout": 90
+          },
+          {
+            "name": "macos-dev",
+            "file": "macos/15/steps/dev.yaml",
+            "pull": "macos15-dev",
+            "out": "macos15-dev.qcow2",
+            "timeout": 150
+          }
+        ]

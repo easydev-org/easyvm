@@ -298,3 +298,90 @@ func TestMatrixIsNotUsedInJobLevelConditions(t *testing.T) {
 		}
 	}
 }
+
+// EACH OPERATING SYSTEM HAS ITS OWN WORKFLOW, AND ITS OWN CONCURRENCY GROUP.
+//
+// A SINGLE `walkthrough.yml` WITH ALL 21 LEGS UNDER ONE `concurrency:` GROUP MEANT THAT DISPATCHING A
+// LINUX FIX CANCELLED A RUNNING WINDOWS INSTALL. That is measured, not hypothetical: forty minutes of
+// a Windows install were thrown away so a Linux stage could be re-run.
+//
+// THE GROUP EXISTS TO STOP TWO RUNS FIGHTING OVER ONE MACHINE, AND A MATRIX LEG IS NOT ONE MACHINE -
+// every leg gets its own runner with its own /dev/kvm. So the group belongs to an operating system:
+// re-running Linux is a better measurement of Linux and says nothing about Windows.
+//
+// AND THERE MUST BE ONE `stage.yml` AND NOT TWENTY-SIX COPIES. easydiskbake has 26 workflows with the
+// same container stanza in 23 of them - 73 duplicated lines naming the same three devices. The
+// mechanism is a callable workflow here; each OS file declares only its own matrix.
+func TestEachOperatingSystemHasItsOwnGroupAndOneSharedMechanism(t *testing.T) {
+	dir := "../../.github/workflows"
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		t.Skipf("no workflows directory here (%v)", err)
+	}
+
+	// THE SHARED MECHANISM EXISTS AND IS CALLABLE.
+	stage, err := os.ReadFile(dir + "/stage.yml")
+	if err != nil {
+		t.Fatalf("no .github/workflows/stage.yml: the container stanza, the prepare probe and the "+
+			"daemon steps would have to be copied into every OS workflow - which is the 73-line "+
+			"duplication this split exists to avoid: %v", err)
+	}
+	if !strings.Contains(string(stage), "workflow_call:") {
+		t.Fatal("stage.yml is not callable; it must be `on: workflow_call:` so the OS workflows can " +
+			"share it")
+	}
+	// AND THE DEVICES ARE NAMED THERE ONCE, WHICH IS THE WHOLE POINT - COUNTED OVER INSTRUCTIONS,
+	// because the comment at the top QUOTES the line it is explaining.
+	deviceLines := 0
+	for _, line := range strings.Split(string(stage), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if strings.Contains(trimmed, "--device /dev/kvm") {
+			deviceLines++
+		}
+	}
+	if deviceLines != 1 {
+		t.Fatalf("stage.yml names the device options on %d instruction lines, and it must be one: a "+
+			"second copy is the duplication this file exists to prevent", deviceLines)
+	}
+
+	groups := map[string]string{}
+	for _, f := range files {
+		name := f.Name()
+		if !strings.HasSuffix(name, ".yml") || name == "stage.yml" || name == "image.yml" {
+			continue
+		}
+		body, err := os.ReadFile(dir + "/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		text := string(body)
+		if !strings.Contains(text, "uses: ./.github/workflows/stage.yml") {
+			continue // not a stage wrapper
+		}
+		// A CONCURRENCY GROUP PER FILE, AND NO TWO THE SAME.
+		var group string
+		for _, line := range strings.Split(text, "\n") {
+			if strings.HasPrefix(strings.TrimSpace(line), "group: ") &&
+				!strings.HasPrefix(strings.TrimSpace(line), "group: ${{") {
+				group = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "group: "))
+			}
+		}
+		if group == "" {
+			t.Errorf("%s has no explicit concurrency group; two OS workflows sharing one group means "+
+				"dispatching one cancels the other", name)
+			continue
+		}
+		if other, dup := groups[group]; dup {
+			t.Errorf("%s and %s share the concurrency group %q; dispatching one would cancel the "+
+				"other, which is the failure this split fixed", other, name, group)
+		}
+		groups[group] = name
+	}
+	if len(groups) < 4 {
+		t.Fatalf("only %d operating systems have their own group (%v); this repository migrates "+
+			"windows, macos, linux and bsd", len(groups), groups)
+	}
+}
