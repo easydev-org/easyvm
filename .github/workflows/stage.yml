@@ -259,6 +259,14 @@ jobs:
           name: ${{ matrix.name }}
           path: |
             work/daemon.log
+            # THE GUEST'S OWN SERIAL CONSOLE, WHICH IS THE ONLY RECORD OF WHAT THE FIRMWARE DID.
+            #
+            # MEASURED ON UBUNTU-INSTALL: `console.log` was 24 KB - the firmware had booted something,
+            # and its output is the only place that says WHAT - and the artifact carried only
+            # `disk.qcow2` and `daemon.log`, so the one file that would have answered it was thrown
+            # away. The step's failure said `drop=+0.0 ... on a 1920x1080 frame`, which is a black
+            # screen and no reason.
+            work/console.log
             work/*.mp4
             work/*.qcow2
           if-no-files-found: warn

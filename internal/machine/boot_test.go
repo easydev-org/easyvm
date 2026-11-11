@@ -592,3 +592,58 @@ func TestTheGuestAgentPortAndTheScreenSizeAreInTheCommandLine(t *testing.T) {
 			"vmware-svga device")
 	}
 }
+
+// EVERY MEDIUM IS IN THE BOOT ORDER, AND THE ONE THAT INSTALLS IS FIRST.
+//
+// MEASURED ON UBUNTU-INSTALL: `console.log` grew to 24 KB - the firmware had booted something - while
+// every frame was `drop=+0.0 ratio=0.0x sat=+0.00` for fifteen minutes. A BLACK MACHINE.
+//
+// The comment in `StorageArgs` said "the firmware boots the first thing it can", which assumed OVMF
+// would scan the CD-ROM and find its El Torito image by itself. A FRESH OVMF_VARS HAS NO SAVED BOOT
+// ENTRY, so that scan is the firmware's own choice rather than a request - and the note on the macOS
+// path already recorded the lesson for its own disk:
+//
+//	"a disk with no bootindex is not in the boot order at all" - the firmware then reports it could
+//	not load Boot0001, six runs in a row
+//
+// IT WAS APPLIED ONLY WHERE macOS NEEDED IT. This asserts it for a Linux installer and a Windows one,
+// because the reason is about OVMF rather than about a guest.
+func TestEveryMediumThatCanBootIsInTheBootOrder(t *testing.T) {
+	for _, tc := range []struct {
+		os   OS
+		name string
+	}{
+		{Linux, "linux"},
+		{Windows, "windows"},
+	} {
+		disk, iso, _, _, _, _, _, _ := fixture(t)
+		b := Boot{OS: tc.os, ISO: iso, Disk: disk}
+		if err := b.Validate(); err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		args := strings.Join(b.StorageArgs(), " ")
+
+		// THE INSTALLER IS bootindex=0, because it is what has to run.
+		isoPart := ""
+		for _, part := range strings.Fields(args) {
+			if strings.Contains(part, "installer") || strings.Contains(part, ".iso") {
+				isoPart = part
+			}
+		}
+		if !strings.Contains(isoPart, "bootindex=0") {
+			t.Fatalf("%s: the installer has no bootindex=0, so the firmware is left to find it by "+
+				"scanning - and a fresh OVMF_VARS has nothing saved. Got %q", tc.name, isoPart)
+		}
+		// AND THE TARGET IS NEXT, not implicitly first by being a disk.
+		target := ""
+		for _, part := range strings.Fields(args) {
+			if strings.Contains(part, "disk.qcow2") || strings.HasSuffix(part, ".qcow2") {
+				target = part
+			}
+		}
+		if !strings.Contains(target, "bootindex=1") {
+			t.Fatalf("%s: the target disk is not bootindex=1, so it could outrank the installer. "+
+				"Got %q", tc.name, target)
+		}
+	}
+}

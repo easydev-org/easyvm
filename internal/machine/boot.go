@@ -288,12 +288,31 @@ func (b Boot) StorageArgs() []string {
 	// to pick up network and ballooning. Setup only reads $WinPEDriver$ during windowsPE." It has
 	// to be attached for the installed system, but nothing during setup needs it in a particular
 	// place - so it goes after the disk, where it cannot be mistaken for the boot medium.
+	//
+	// EVERY MEDIUM CARRIES A `bootindex`, AND THAT IS NOT DECORATION. The note ten lines up - "a disk
+	// with no bootindex is not in the boot order at all" - was learned on the macOS path and applied
+	// only there. The comment here said "the firmware boots the first thing it can", which assumed OVMF
+	// would scan the CD-ROM and find a bootable El Torito image.
+	//
+	// MEASURED ON UBUNTU-INSTALL: `console.log` was 24 KB of firmware output and the screen was
+	// `drop=+0.0 ratio=0.0x sat=+0.00` for fifteen minutes - A BLACK MACHINE. A fresh OVMF_VARS has no
+	// saved boot entry, and an implicit scan is the firmware's choice rather than a request.
+	//
+	// THE ORDER IS THE ARGUMENT ORDER, made explicit: whatever is installing gets 0, the target disk
+	// gets 1, and anything else gets 2 or more so it cannot win.
+	nextIndex := 0
 	appendMedia := func(path string) {
 		if path == "" {
 			return
 		}
 		// `media=cdrom,readonly=on` IS WHAT MAKES IT A CD-ROM rather than another hard disk.
-		args = append(args, "-drive", "file="+path+",media=cdrom,readonly=on")
+		//
+		// A DISK GETS `if=virtio,format=qcow2` AND A CD GETS NO `if=` AT ALL, so the two cannot share
+		// one drive string - the bootindex is added per kind, below.
+		idx := nextIndex
+		nextIndex++
+		args = append(args, "-drive",
+			fmt.Sprintf("file=%s,media=cdrom,readonly=on,bootindex=%d", path, idx))
 	}
 
 	// 1. THE INSTALLER, SO THE FIRMWARE BOOTS IT.
@@ -308,7 +327,9 @@ func (b Boot) StorageArgs() []string {
 	// `discard=unmap` IS ON WHEN NOTHING IS INSTALLING, for the same reason and with the opposite
 	// sign as macOS: after a system is on the disk, its TRIMs are information the qcow2 can use to
 	// stay small.
-	disk := "file=" + b.Disk + ",if=virtio,format=qcow2"
+	diskIndex := nextIndex
+	nextIndex++
+	disk := fmt.Sprintf("file=%s,if=virtio,format=qcow2,bootindex=%d", b.Disk, diskIndex)
 	if b.Discardable() {
 		disk += ",discard=unmap"
 	}
