@@ -485,3 +485,54 @@ func TestCheckKVMAnswersForThisMachine(t *testing.T) {
 	}
 	t.Logf("no KVM here, as expected for a test runner: %v", err)
 }
+
+// THE RECOVERY DEVICE NEEDS A USB CONTROLLER, AND ITS ABSENCE KILLED THE FIRST REAL OPENCORE BOOT.
+//
+// `usb-storage,bus=xhci.0` NAMES A BUS NOTHING CREATED unless a `qemu-xhci` device is added, and qemu
+// refuses at startup:
+//
+//	-device usb-storage,bus=xhci.0,drive=rec: Bus 'xhci.0' not found
+//
+// THEN IT EXITS, so the QMP socket never appears and the boot step reports a socket error - a
+// hypothesis about qmp.Registry, pointing a reader away from the machine that never started.
+//
+// THIS TEST IS ABOUT THE ORDER AS WELL AS THE PRESENCE: the controller must be added BEFORE the device
+// that names its bus, because qemu resolves `bus=` as it parses.
+func TestTheRecoveryDeviceHasAController(t *testing.T) {
+	disk, _, _, _, recovery, rom, vars, bootImg := fixture(t)
+	b := Boot{OS: MacOS, Disk: disk, Recovery: recovery,
+		OpenCoreROM: rom, OpenCoreVars: vars, BootImage: bootImg}
+	if err := b.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	args := b.StorageArgs()
+	joined := strings.Join(args, " ")
+
+	controller := -1
+	for i, a := range args {
+		if strings.HasPrefix(a, "qemu-xhci") {
+			controller = i
+		}
+	}
+	if controller < 0 {
+		t.Fatalf("no qemu-xhci device, so `bus=xhci.0` names a bus that does not exist and qemu "+
+			"refuses to start:\n%s", joined)
+	}
+	// THE CONTROLLER MUST BE DECLARED BEFORE THE DEVICE THAT USES IT.
+	usb := strings.Index(joined, "usb-storage")
+	if usb < 0 {
+		t.Fatalf("the recovery image is not attached as usb-storage:\n%s", joined)
+	}
+	// Compare positions in the joined string, which is where qemu parses them.
+	if at := strings.Index(joined, "qemu-xhci"); at > usb {
+		t.Fatalf("`usb-storage,bus=xhci.0` comes before the controller it names:\n%s", joined)
+	}
+
+	// AND WITHOUT A RECOVERY IMAGE THERE IS NEITHER THE DEVICE NOR THE CONTROLLER: an installed macOS
+	// disk does not install, and an extra USB disk is one more row in Disk Utility's sidebar.
+	installed := Boot{OS: MacOS, Disk: disk, OpenCoreROM: rom, OpenCoreVars: vars, BootImage: bootImg}
+	body := strings.Join(installed.StorageArgs(), " ")
+	if strings.Contains(body, "qemu-xhci") || strings.Contains(body, "usb-storage") {
+		t.Fatalf("a macOS boot with no recovery image attached USB devices anyway:\n%s", body)
+	}
+}

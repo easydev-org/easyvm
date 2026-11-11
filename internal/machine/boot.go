@@ -242,10 +242,27 @@ func (b Boot) StorageArgs() []string {
 		// `choose the target disk by capacity` reads the sidebar. Attaching it on an installed
 		// disk could select the recovery volume instead of the target.
 		//
+		// AND IT NEEDS A CONTROLLER TO BE ATTACHED TO.
+		//
+		// `usb-storage,bus=xhci.0` NAMES A BUS THAT DOES NOT EXIST UNLESS SOMETHING CREATES IT, and qemu
+		// refuses at startup:
+		//
+		//	-device usb-storage,bus=xhci.0,drive=rec: Bus 'xhci.0' not found
+		//
+		// - and then exits, so the QMP socket never appears and the boot step reports a socket error
+		// rather than the missing device. Measured on the first macos-setup run that got past
+		// OpenCore: `qmp .../drive.sock.qmp: connect: connection refused`.
+		//
+		// THE CONTROLLER IS UNCONDITIONAL WHEN THERE IS A RECOVERY IMAGE, and it is not only for the
+		// disk: lib/vm.py gives the same bus a usb-tablet and a usb-kbd, because a macOS guest has no
+		// PS/2 and every pointer or key it receives arrives over USB. This build gives the tablet its
+		// own `virtio-tablet-pci`, which macOS drives; the bus here exists for the installer.
+		//
 		// `usb-storage` has no bootindex and does not need one: the firmware reaches it only
 		// after OpenCore hands over.
 		if b.Recovery != "" {
 			args = append(args,
+				"-device", "qemu-xhci,id=xhci",
 				"-drive", "file="+b.Recovery+",media=disk,if=none,id=rec,readonly=on",
 				"-device", "usb-storage,bus=xhci.0,drive=rec",
 			)

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/easydev-org/easyvm/internal/guest"
@@ -478,7 +479,32 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 
 	// WAIT FOR THE SOCKET BEFORE RETURNING, so the next step can act on the machine rather than
 	// racing its creation.
+	//
+	// AND WHEN IT DOES NOT APPEAR, THE QUESTION IS WHY QEMU IS NOT THERE. A QMP socket error is a
+	// SOCKET error - `connect: connection refused`, or a thirty-second wait that says nothing - and the
+	// reason qemu never created the socket is in QEMU'S OWN OUTPUT, which the caller cannot see:
+	//
+	//	-device usb-storage,bus=xhci.0,drive=rec: Bus 'xhci.0' not found
+	//
+	// Measured on the first macos-setup run that got past OpenCore. qemu printed that and exited, and
+	// the step reported `qmp .../drive.sock.qmp: connect: connection refused (waited 30s; is another
+	// process already holding this socket?)` - a hypothesis about the socket, pointing a reader at
+	// qmp.Registry, while the machine had never started.
+	//
+	// SO THE PROCESS IS CHECKED FIRST. If it is gone, that is the answer and it is reported as such,
+	// with qemu's exit status attached.
 	if _, err := d.qmpSocketLocked(); err != nil {
+		if d.proc != nil {
+			if waitErr := d.proc.Process.Signal(syscall.Signal(0)); waitErr != nil {
+				exit := "unknown"
+				if d.proc.ProcessState != nil {
+					exit = d.proc.ProcessState.String()
+				}
+				return fmt.Errorf("qemu exited before its QMP socket appeared (%s): %w. "+
+					"qemu's own output is above - a missing -device, a bad -machine option or an "+
+					"accelerator it cannot use all say so there and then exit", exit, err)
+			}
+		}
 		return err
 	}
 	return nil
