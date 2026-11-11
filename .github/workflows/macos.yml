@@ -44,7 +44,8 @@ jobs:
             "file": "macos/15/steps/setup.yaml",
             "pull": "",
             "out": "macos15-setup.qcow2",
-            "timeout": 150
+            "timeout": 195,
+            "note": "THE INSTALL IS A 120-MINUTE WAIT, NOT A HANG DETECTOR. `the copy runs until the Setup Assistant appears` is 7200s because writing macOS onto a 128 GiB disk on a shared runner genuinely takes that long. With boot (15), the recovery menu (15), the erase report (5), the copy returning (5) and the shutdown (5) the real floor is 165 minutes, so a 150-minute job was cut off DURING the install however well every step behaved."
           },
           {
             "name": "macos-ssh",

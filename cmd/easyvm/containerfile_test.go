@@ -282,3 +282,62 @@ func TestTheFollowLoopEndsBeforeTheJobDoes(t *testing.T) {
 			"more than 20", headroom)
 	}
 }
+
+// A STEP'S `timeout` IS TWO DIFFERENT THINGS, AND ONLY ONE OF THEM CAN BE SUMMED.
+//
+// MOST ARE HANG DETECTORS: 900 seconds for "a screen that should change", 300 for "a dialog that should
+// close". A step that takes nine minutes inside a 900-second budget is normal, so summing forty of them
+// describes a machine stuck on every step at once - which is the arithmetic I did first, reached
+// "28 of 47 legs are impossible", and gave windows-dev 440 minutes.
+//
+// ONE KIND IS DIFFERENT, AND macos-setup IS THE ONLY PLACE IT MATTERS: `the copy runs until the Setup
+// Assistant appears` is 7200 seconds because WRITING MACOS ONTO A 128 GiB DISK REALLY TAKES TWO HOURS.
+// That is not a limit the step might exceed; it is the work. With the boot (15) and recovery-menu (15)
+// waits, the erase report (5), the copy's return (5) and the shutdown (5), the floor is 165 minutes -
+// and the job had 150, so the install was cut off however well every step behaved.
+//
+// SO THIS TEST CHECKS THE ONE LEG WHERE THE SUM IS MEANINGFUL: macos-setup's job timeout must exceed the
+// sum of the waits that are WORK, identified by being longer than the hang-detection default.
+func TestMacOSSetupHasTimeForTheInstallItWaitsFor(t *testing.T) {
+	body, err := os.ReadFile("../../.github/workflows/macos.yml")
+	if err != nil {
+		t.Skipf("no macos.yml here (%v)", err)
+	}
+	src := string(body)
+
+	// THE JOB'S BUDGET, FROM THE FILE THAT DECLARES IT.
+	leg := regexp.MustCompile(`"name": "macos-setup"[\s\S]*?"timeout": (\d+)`).FindStringSubmatch(src)
+	if leg == nil {
+		t.Fatal("no macos-setup leg in macos.yml")
+	}
+	job, err := strconv.Atoi(leg[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// THE WORK, FROM THE WALKTHROUGH ITSELF. Every limit of ten minutes or more is a wait for something
+	// real - the install, and the boot and recovery-menu gates - and they are what the job must fit.
+	wf, err := os.ReadFile("../../macos/15/steps/setup.yaml")
+	if err != nil {
+		t.Skipf("no setup.yaml here (%v)", err)
+	}
+	var work int
+	for _, m := range regexp.MustCompile(`(?m)^\s+timeout:\s*(\d+)\s*$`).FindAllStringSubmatch(string(wf), -1) {
+		n, err := strconv.Atoi(m[1])
+		if err != nil {
+			continue
+		}
+		if n >= 600 {
+			work += n
+		}
+	}
+	workMin := work / 60
+
+	// AND THE LOOP LEAVES HEADROOM BENEATH THE JOB, so the reason is printed rather than cancelled.
+	const headroom = 10
+	if job-headroom <= workMin {
+		t.Fatalf("macos-setup gets %d minutes and its waits for real work are %d, so with the %d minutes "+
+			"`follow it` leaves for its own diagnosis the job is cut off mid-install and reports a "+
+			"cancellation instead of a step name", job, workMin, headroom)
+	}
+}
