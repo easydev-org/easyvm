@@ -307,3 +307,41 @@ func TestBooleanFalseIsAnActionRatherThanAnAbsence(t *testing.T) {
 		t.Fatalf("the branch ran but reported no implementation: %v", err)
 	}
 }
+
+// `disk_gb:` IS A COUNT, NOT A DURATION, AND THE TWO ARE EASY TO CONFUSE.
+//
+// `seconds()` RETURNS A time.Duration. Reading `disk_gb` through it turned 128 into 128e9 and qemu-img
+// refused the request:
+//
+//	error: create the empty disk: qemu-img create: exit status 1
+//	  (qemu-img: Invalid image size specified. Must be between 0 and 9223372036854775807.)
+//
+// - a message about the NUMBER that names neither the key nor the unit, so a reader is sent looking
+// at qemu-img rather than at the step.
+//
+// A UNIT TEST WOULD HAVE CAUGHT IT, AND IT HAS TO BE ON THE ARGUMENT RATHER THAN THE OUTCOME: the
+// step must hand qemu-img `128G`, not a duration-shaped string.
+func TestDiskGBCreatesTheSizeItSays(t *testing.T) {
+	d := &fakeDriver{}
+	ex, steps := newExec(d, map[string]any{
+		"name": "create the empty disk", "disk": "disk.qcow2", "disk_gb": 128,
+	})
+	ex.Work = t.TempDir()
+	_, err := ex.Run(steps)
+
+	// qemu-img IS NOT INSTALLED EVERYWHERE, so the two outcomes are told apart deliberately: a
+	// missing binary is a skip, and a REACHED qemu-img that rejected the size is a failure of this
+	// step's arithmetic.
+	if err == nil {
+		return // it created the disk, which is the answer
+	}
+	if strings.Contains(err.Error(), "qemu-img is not installed") {
+		t.Skip("qemu-img is not installed here")
+	}
+	if strings.Contains(err.Error(), "Invalid image size") {
+		t.Fatalf("the step built a size qemu-img rejected, which means `disk_gb` went through "+
+			"`seconds()` and became a duration: %v", err)
+	}
+	// Anything else is a real failure of this step and should be seen.
+	t.Fatalf("createDisk failed unexpectedly: %v", err)
+}

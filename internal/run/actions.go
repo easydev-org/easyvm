@@ -234,10 +234,19 @@ func (e *Executor) doDisk(s walk.Step) error {
 // assistant picks its target by CAPACITY, and every coordinate in macos/15/steps was measured on the
 // disk the workflow actually bakes. A different size moves a window that was measured once.
 func (e *Executor) createDisk(s walk.Step) error {
-	gb := seconds(s, "disk_gb", 128)
-	if gb <= 0 {
-		return fail(s.Name, "`disk_gb:` must be a positive size")
+	// A COUNT, NOT A DURATION. `seconds()` RETURNS A time.Duration, and reading `disk_gb` through
+	// it produced a size of 128 * 10^9 - which qemu-img refused with
+	//
+	//     Invalid image size specified. Must be between 0 and 9223372036854775807.
+	//
+	// a message about the NUMBER that names neither the key nor the unit. `s.Float` reads the number
+	// the file wrote.
+	gbFloat, err := s.Float("disk_gb", 128)
+	if err != nil || gbFloat <= 0 {
+		return fail(s.Name, "`disk_gb:` must be a positive number of gigabytes, got %v",
+			s.Spec["disk_gb"])
 	}
+	gb := int(gbFloat)
 	path := s.Get("disk")
 	if path == "" {
 		return fail(s.Name, "a `disk_gb:` step must also name the file it creates: `disk: disk.qcow2`")
