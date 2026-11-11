@@ -125,13 +125,34 @@ steps:
     timeout: 900
     poll: 5
 
+  # THE DESKTOP IS CLICKED FIRST, THEN THE CHORD, THEN THE CHORD AGAIN.
+  #
+  # MEASURED, FOUR RUNS IN: the desktop gate PASSES - `a desktop is on screen (1m1s);
+  # drop=+53.2 ratio=3.9x sat=+0.21 on a 1920x1080 frame` - and the five `run:` steps
+  # after it STILL each finish in a tenth of a second with the right character counts.
+  # So a session exists, the chord is delivered, and no shell receives it.
+  #
+  # TWO THINGS WERE NEVER TRIED. A SESSION THAT HAS JUST DRAWN ITS PANEL DOES NOT NECESSARILY
+  # HAVE KEYBOARD FOCUS - the window under the pointer does, and the pointer is wherever the
+  # last click left it. A CLICK ON THE DESKTOP GIVES IT FOCUS, and that is what a person does
+  # before pressing a shortcut.
+  #
+  # AND A CHORD SENT ONCE IS EASY TO MISS: XFCE binds `ctrl+alt+t` to `xfce4-terminal`, and a
+  # key that arrives while the session is still setting up its keymap is dropped silently.
+  # Pressing again two seconds later costs nothing when the first one worked - the second
+  # lands on the terminal that is already open, where `ctrl+alt+t` is an unbound chord.
+  - name: focus the desktop
+    at: [960, 540]
+    settle: 3
+
   - name: open the terminal
     key: ctrl+alt+t
-    settle: 20
+    settle: 8
 
-  # ATOMIC STEPS, the shape macOS' and Windows' vm-configure files were split into
-  # (commit 96596c2): one act per step, so a failure names the act. This was a single `run:`
-  # that installed, enabled, started and verified in one line.
+  - name: open the terminal again, in case the first chord was dropped
+    key: ctrl+alt+t
+    settle: 8
+
   - name: install openssh
     run: echo {{ password }} | sudo -S pacman -Sy --noconfirm --needed openssh 2>&1 | tail -5
     terminal_wait: 15
@@ -151,6 +172,13 @@ steps:
   # SO BOTH FILES, BEFORE THE START: the drop-in (right where the directory is included, and it
   # survives a package update that rewrites the main file) and an append to the main file itself,
   # guarded by a grep so a second run adds no second line.
+    # THE FIRST PROOF THAT A SHELL RECEIVED THE TYPING, AND IT IS A SIDE EFFECT RATHER THAN A
+    # SECOND ACTION: a terminal echoes what is typed into it, so `pacman` or `sudo` appearing
+    # on screen is the difference between "the keystrokes went somewhere" and "they went into
+    # a shell". Nothing here clicks or types - it reads what the step above already did.
+    expect_any:
+      - [pacman]
+      - [sudo]
   - name: allow password authentication
     run: |
       echo {{ password }} | sudo -S sh -c '
