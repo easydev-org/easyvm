@@ -401,7 +401,38 @@ steps:
   # `netstat` are cheap, but the CALL arrives over the ssh session this step is proving, and 90 was the
   # edge the previous two steps were already standing on.
   - name: prove sshd is listening
-    ssh: cmd /c 'netstat -ano | findstr /C:"LISTENING" | findstr /C:":22 "'
+    # A REGULAR EXPRESSION RATHER THAN TWO LITERAL FILTERS, BECAUSE THE NESTED QUOTES ARE THE PROBLEM.
+    #
+    # `findstr /C:":22 "` is a literal filter whose argument CONTAINS A SPACE AND QUOTES, and it sits
+    # inside `cmd /c "..."` - two levels of quoting that cmd resolves differently from a shell. The
+    # measured failure was the whole chain being passed as one token:
+    #
+    #   ssh: cmd /c 'netstat -ano | findstr /C:"LISTENING" | findstr /C:":22 "' -> 1
+    #     ''netstat' is not recognized as an internal or external command,
+    #
+    # - SINGLE QUOTES ARE NOT QUOTING IN cmd.exe, so `'netstat'` was a command name with quotes in it.
+    #
+    # ONE REGULAR EXPRESSION IN ONE QUOTED ARGUMENT: a LISTEN line whose local address ends in :22.
+    # The address column is what makes 2222 and a client socket to somebody's sshd both impossible:
+    # `:22` must be the END of the address field, and `[^0-9]` stops `:2222`.
+    # NO `cmd /c` AND NO OUTER QUOTES, BECAUSE THE GUEST'S SSH SHELL IS ALREADY cmd.exe AND EVERY
+    # LAYER OF QUOTING WAS ONE MORE THING TO GET WRONG.
+    #
+    # MEASURED, TWICE:
+    #
+    #   ssh: cmd /c 'netstat -ano | findstr -C:"LISTENING" | findstr -C:":22"'  -> 1
+    #   ssh: cmd /c 'netstat -ano | findstr /C:"LISTENING" | findstr /C:":22 "' -> 1
+    #     ''netstat' is not recognized as an internal or external command,
+    #
+    # THE SECOND LINE IS THE ONE THAT EXPLAINS THE FIRST. `/C:` IS CORRECT - and it made no difference,
+    # because SINGLE QUOTES ARE NOT QUOTING IN cmd.exe: `'netstat'` became a command NAME with quotes
+    # in it, so the tool was never found. The findstr switch was a real defect and not the only one,
+    # which is why fixing it changed nothing and the step exited 1 identically.
+    #
+    # cmd.exe IS WHAT sshd STARTS, so the pipeline needs no wrapper at all. `":22 "` is quoted only
+    # because findstr would otherwise split on the space.
+    ssh: >-
+      netstat -ano | findstr LISTENING | findstr ":22 "
 
     timeout: 180
 

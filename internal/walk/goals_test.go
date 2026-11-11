@@ -701,3 +701,59 @@ func TestEverySCPSourceIsProducedByAnEarlierStep(t *testing.T) {
 	}
 	t.Logf("checked %d scp source(s)", checked)
 }
+
+// A WINDOWS `ssh:` COMMAND IS RUN BY cmd.exe, WHERE SINGLE QUOTES ARE NOT QUOTING.
+//
+// MEASURED ON windows-ssh, STEP 24 OF 29, TWICE:
+//
+//	ssh: cmd /c 'netstat -ano | findstr -C:"LISTENING" | findstr -C:":22"'   -> 1
+//	ssh: cmd /c 'netstat -ano | findstr /C:"LISTENING" | findstr /C:":22 "'  -> 1
+//	  ''netstat' is not recognized as an internal or external command,
+//
+// THE SECOND RUN FIXED THE REAL findstr DEFECT (`/C:` not `-C:`) AND CHANGED NOTHING, because the whole
+// chain was still inside `cmd /c '...'` and cmd has no single-quote quoting: `'netstat'` became a command
+// NAME with quotes in it. The tool was never invoked.
+//
+// THE LESSON IS NOT "QUOTE DIFFERENTLY" - it is that the guest's ssh shell is ALREADY cmd.exe, so a
+// POSIX wrapper is a layer that can only be wrong. A `ssh:` body for a Windows guest must not start with
+// `cmd /c '` or contain a POSIX single-quoted argument.
+func TestWindowsSSHStepsDoNotUsePOSIXQuoting(t *testing.T) {
+	root := filepath.Join("..", "..")
+	files, err := filepath.Glob(filepath.Join(root, "windows", "*", "steps", "*.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) == 0 {
+		t.Skip("no Windows walkthroughs here")
+	}
+	var checked int
+	for _, path := range files {
+		rel, _ := filepath.Rel(root, path)
+		doc, err := Load(path, nil)
+		if err != nil {
+			continue
+		}
+		for _, step := range doc.Steps {
+			body := step.Get("ssh")
+			if body == "" {
+				continue
+			}
+			checked++
+			// `cmd /c '...'` - THE EXACT SHAPE THAT FAILED, and any `'...'` argument inside it.
+			if strings.HasPrefix(strings.TrimSpace(body), "cmd /c '") {
+				t.Errorf("%s: the step %q runs `cmd /c '<...>'`, and cmd.exe has no single-quote "+
+					"quoting - the first word becomes a command name with quotes in it, so the tool "+
+					"is never found", rel, step.Name)
+			}
+			// AND A SHELL USED ONLY TO QUOTE IS NOT NEEDED: sshd on Windows starts cmd.exe already.
+			if strings.Contains(body, "cmd /c '") || strings.Contains(body, "cmd /c \"'") {
+				t.Errorf("%s: the step %q wraps a command in `cmd /c '...'`. The guest's ssh shell "+
+					"IS cmd.exe, so the wrapper adds a quoting layer that can only be wrong", rel, step.Name)
+			}
+		}
+	}
+	if checked == 0 {
+		t.Skip("no Windows ssh steps here")
+	}
+	t.Logf("checked %d Windows ssh step(s)", checked)
+}
