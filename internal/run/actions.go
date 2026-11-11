@@ -463,19 +463,70 @@ func (e *Executor) doShareServe(s walk.Step) error {
 	return notImplemented(s, "share_serve")
 }
 
+// shareDirOrEmpty is the directory being served, for a proof that must look on the host side.
+func (e *Executor) shareDirOrEmpty() string {
+	if d, ok := e.Driver.(interface{ ShareDir() string }); ok {
+		return d.ShareDir()
+	}
+	return ""
+}
+
 func (e *Executor) doShareMount(s walk.Step) error {
 	family := s.Get("share_family")
 	if family == "" {
 		family = "windows"
 	}
 	e.Driver.Log(fmt.Sprintf("  share: the %s guest mounts it", family))
-	if mv, ok := e.Driver.(interface{ MountShare(string) error }); ok {
-		if err := mv.MountShare(family); err != nil {
-			return fail(s.Name, "%v", err)
-		}
+	mv, ok := e.Driver.(interface {
+		MountShare(string) error
+		ShareDir() string
+	})
+	if !ok {
+		return notImplemented(s, "share_mount")
+	}
+	if err := mv.MountShare(family); err != nil {
+		return fail(s.Name, "%v", err)
+	}
+
+	// AND THE SHARE IS PROVEN FROM THE HOST SIDE, BECAUSE THE GUEST'S OWN ROUND TRIP PROVES NOTHING.
+	//
+	// Measured on manjaro: the mount never happened - `sudo: a password is required` - so `~/shared`
+	// was an ordinary empty directory in the guest. A file written there and read back from there
+	// came back unchanged:
+	//
+	//	--- what is mounted ---
+	//	--- the mount point ---
+	//	drwx------ 1 vmuser vmuser
+	//	--- the round trip ---
+	//	read back: written-by-the-guest
+	//
+	// THAT IS A PROOF OF THE GUEST'S OWN FILESYSTEM. A file the HOST writes into the served directory
+	// and the guest then reads is a proof of the share: it crosses the boundary, and it can only
+	// cross it one way.
+	dir := mv.ShareDir()
+	if dir == "" {
+		// Nothing served means nothing to prove; the step above would already have failed.
 		return nil
 	}
-	return notImplemented(s, "share_mount")
+	sentinel := fmt.Sprintf(".easyvm-share-proof-%d", time.Now().UnixNano())
+	path := filepath.Join(dir, sentinel)
+	if err := os.WriteFile(path, []byte("from-the-host\n"), 0o644); err != nil {
+		return fail(s.Name, "writing the proof file on the host: %v", err)
+	}
+	defer os.Remove(path)
+
+	client := e.Driver.Guest()
+	if client == nil {
+		return fail(s.Name, "no ssh connection to read the proof with")
+	}
+	res, err := client.Run("cat ~/shared/"+sentinel, 60*time.Second)
+	if err != nil || strings.TrimSpace(res.Stdout) != "from-the-host" {
+		return fail(s.Name, "the guest cannot see a file this host wrote into %s: the mount is not "+
+			"in place, and a guest writing to ~/shared would have written into its OWN directory. "+
+			"(%v, read %q)", dir, err, firstLineOf(res.Combined()))
+	}
+	e.Driver.Log("  share: a file written on the host is readable in the guest - the mount is real")
+	return nil
 }
 
 // --- recording and publishing ---------------------------------------------------------

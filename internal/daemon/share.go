@@ -108,6 +108,21 @@ func (d *Driver) ServeShare(dir string) error {
 		"The config is %s; samba's own account of why is on this log", dir, conf)
 }
 
+// ShareDir is the directory this run serves, or "" when nothing is served.
+//
+// IT EXISTS SO A PROOF CAN LOOK ON THE HOST SIDE. A guest that writes to `~/shared` when the mount is
+// ABSENT writes into a local directory, and reading the file back from that same directory succeeds -
+// which is a proof of the guest's own filesystem and not of the share. Measured: `read back:
+// written-by-the-guest` passed while `mount` listed nothing and the mount point held only `..`.
+func (d *Driver) ShareDir() string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.share == nil {
+		return ""
+	}
+	return d.share.dir
+}
+
 // MountShare makes the guest mount the share on the bridge.
 //
 // IT IS ONE `mount -t cifs` WITH THE CREDENTIALS ON THE COMMAND LINE, because a credentials FILE
@@ -132,11 +147,28 @@ func (d *Driver) MountShare(family string) error {
 	// THE MOUNT POINT IS THE GUEST'S, AND SO IS THE COMMAND: this is a `ssh:` wearing a key's name,
 	// because "mount it" is one action and giving it a name is what lets a file say WHAT it wants
 	// rather than HOW.
+	//
+	// `sudo -S` AND THE PASSWORD ON STDIN, BECAUSE AN SSH EXEC HAS NO TERMINAL. Measured:
+	//
+	//	share: sudo: a terminal is required to read the password; either use ssh's -t option
+	//	       or configure an askpass helper
+	//	share: sudo: a password is required
+	//	share: the guest mounted //172.30.0.1/shared at ~/shared     <- AND SAID IT WORKED
+	//
+	// The mount never ran and this function reported success, because it only checked the error of a
+	// shell whose LAST command was `ls` on an empty directory - which succeeds.
+	//
+	// `sudo -S` reads the password from standard input and `-p ''` suppresses the prompt, so the
+	// password is a line in the script rather than a terminal nobody has.
 	cmd := strings.Join([]string{
 		"set -e",
 		"mkdir -p ~/shared",
-		"sudo umount ~/shared 2>/dev/null || true",
-		"sudo mount -t cifs //172.30.0.1/shared ~/shared -o username=guest,password=,vers=3.0,uid=$(id -u),gid=$(id -g),iocharset=utf8",
+		"printf '%s\\n' " + shellQuote(d.pass) + " | sudo -S -p '' umount ~/shared 2>/dev/null || true",
+		"printf '%s\\n' " + shellQuote(d.pass) + " | sudo -S -p '' mount -t cifs //172.30.0.1/shared ~/shared -o username=guest,password=,vers=3.0,uid=$(id -u),gid=$(id -g),iocharset=utf8",
+		// THE MOUNT IS PROVEN HERE, NOT BY THE STEP AFTER. `mount` lists the device it was given, so
+		// its absence is the fact that the previous line did not work - and this is the only place
+		// that can still return an error about it.
+		"mount | grep -q '//172.30.0.1/shared' || { echo 'MOUNT_NOT_PRESENT'; exit 1; }",
 		"ls -la ~/shared | head -5",
 	}, " && ")
 	res, err := client.Run("sh -c "+shellQuote(cmd), 120*time.Second)
