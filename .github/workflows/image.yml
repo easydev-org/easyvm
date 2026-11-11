@@ -83,7 +83,12 @@ jobs:
         run: |
           set -euo pipefail
           ./dist/easyvm versions
-          ./dist/easyvm versions | grep -q 'Skylake-Client-v4'
+          # THE OUTPUT IS CAPTURED FIRST, THEN SEARCHED. `easyvm versions | grep -q` exits 141:
+          # grep -q closes the pipe on its first match, the writer takes SIGPIPE, and
+          # `set -euo pipefail` turns that into a failed step - for a check that SUCCEEDED.
+          versions=$(./dist/easyvm versions)
+          printf '%s\n' "$versions"
+          printf '%s\n' "$versions" | grep 'Skylake-Client-v4'
 
       - uses: actions/upload-artifact@v4
         with:

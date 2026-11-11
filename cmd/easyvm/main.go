@@ -147,7 +147,18 @@ func cmdVersions() int {
 	fmt.Printf("cpu model  %s\n", machine.CPUModel)
 	// THE BINARIES ARE NAMED BUT NOT INVOKED, so this works on a machine with no qemu - which is
 	// where a file needs validating.
-	for _, tool := range []string{"qemu-system-x86_64", "qemu-img", "smbd", "websockify"} {
+	//
+	// websockify IS NOT ON THIS LIST BECAUSE IT IS NO LONGER USED: the console is served by
+	// internal/daemon, which bridges the WebSocket itself. Listing it would be a build that claims
+	// a dependency it does not have, and the next reader would go looking for the package.
+	//
+	// THE LIST IS THE HOST-SIDE COMMANDS THE PROGRAM ACTUALLY RUNS: the machine, the disks, the
+	// share's server, and the network's four.
+	for _, tool := range []string{
+		"qemu-system-x86_64", "qemu-img",
+		"smbd", "dnsmasq", "ip", "iptables", "sysctl",
+		"ffmpeg", "tesseract",
+	} {
 		if p, err := exec.LookPath(tool); err == nil {
 			fmt.Printf("%-18s %s\n", tool, p)
 		} else {
