@@ -164,6 +164,17 @@ steps:
   # ctrl+alt+t is this desktop's own shortcut. The step EXISTS on its own - rather than being
   # folded into the `run:` - because "did the terminal open" is the first question when an
   # install produces nothing, and the recording now answers it.
+  # THE DESKTOP FIRST, BECAUSE `ctrl+alt+t` IS A SHORTCUT OF A RUNNING SESSION.
+  #
+  # Measured on manjaro: the chord was sent, the wait was raised from 10 to 20, and the five
+  # `run:` steps after it still each finished in a TENTH OF A SECOND with the right
+  # character counts. That rules out "the chord needs longer" and leaves "there is no
+  # session yet" - which `desktop: linux` answers by measuring the panel the session draws.
+  - name: wait for the desktop
+    desktop: linux
+    timeout: 900
+    poll: 5
+
   - name: open the terminal
     key: ctrl+alt+t
     settle: 20

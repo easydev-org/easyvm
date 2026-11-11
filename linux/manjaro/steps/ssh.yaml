@@ -111,6 +111,20 @@ steps:
   # ctrl+alt+t is this desktop's own shortcut. The step EXISTS on its own - rather than being
   # folded into the `run:` - because "did the terminal open" is the first question when an
   # install produces nothing, and the recording now answers it.
+  # THE DESKTOP FIRST, BECAUSE `ctrl+alt+t` IS A SHORTCUT OF A RUNNING SESSION.
+  #
+  # Measured twice: `open the terminal` sent the chord, waited, and the five `run:` steps that
+  # followed each finished in a TENTH OF A SECOND with the right character counts - so the
+  # keystrokes left this program and reached no shell. Raising the wait from 10 to 20 did not
+  # change that, which rules out "the chord needs longer" and leaves "there is no session".
+  #
+  # `desktop: linux` measures the PANEL a booted session draws - the same test the install
+  # files end on - so it is a fact about the guest rather than a duration.
+  - name: wait for the desktop
+    desktop: linux
+    timeout: 900
+    poll: 5
+
   - name: open the terminal
     key: ctrl+alt+t
     settle: 20
@@ -120,7 +134,7 @@ steps:
   # that installed, enabled, started and verified in one line.
   - name: install openssh
     run: echo {{ password }} | sudo -S pacman -Sy --noconfirm --needed openssh 2>&1 | tail -5
-    terminal_wait: 0
+    terminal_wait: 15
     settle: 45
 
   # PASSWORD AUTHENTICATION BEFORE THE DAEMON STARTS, WHICH IS THE ONLY ORDER THAT WORKS.
