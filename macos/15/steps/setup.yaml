@@ -88,14 +88,29 @@ steps:
   #
   # NO `requires:` - a recovery image is not a capability of a running guest, it is an input
   # this stage was given, and `boot:` is the step that reads it.
-  - name: boot the recovery image
-  # OPENCORE AND THE RECOVERY IMAGE ARE PART OF EVERY MACOS BOOT, not only an install.
+  # OPENCORE AND THE RECOVERY IMAGE: THIS IS THE ONE STAGE THAT ATTACHES IT.
   #
-  # macOS has no install ISO. It starts through OpenCore, which is built from the recovery image -
-  # Apple's APFS driver is extracted from that image - and the recovery image stays attached as
-  # removable media because that is how macOS installs. The three disks, their boot order, the SMC
-  # device and the CPU flags all follow from `os: macos`; what the file has to say is where the
-  # recovery image is.
+  # macOS has no install ISO - it installs from a recovery image on REMOVABLE media. So the setup
+  # stage gives the guest three devices:
+  #
+  #     boot.img   OpenCore, bootindex=0   a disk with no bootindex is not in the boot order at
+  #                                        all, which is what "failed to load Boot0001" meant for
+  #                                        six runs
+  #     disk       the target, bootindex=1 the 128 GB disk the installer is told to erase
+  #     recovery   as USB                NOT in the boot order - the firmware must never boot it;
+  #                                        OpenCore hands over only after the boot image has run
+  #
+  # AND DISCARD IS OFF HERE, because this is the boot that WRITES. Measured:
+  #
+  #     41835253323   no discard, 128G   finished in 46 minutes
+  #     42009463444   discard,    128G   wrote 36774 MiB, dropped to 19761, never moved again
+  #
+  # The 17 GiB that vanished was the installer's own staging data: macOS takes an APFS snapshot,
+  # discards its staging volume and switches root, and with discard on every TRIM is honoured
+  # immediately - including the clusters the SNAPSHOT STILL REFERS TO. The progress bar froze at
+  # "About 48 minutes remaining". internal/machine turns discard off from the presence of
+  # `recovery:` alone; the file does not have to say so.
+  - name: boot the recovery image
     boot: true
     os: macos
     recovery: "{{ work }}/recovery.dmg"

@@ -40,18 +40,8 @@ func fixture(t *testing.T) (disk, iso, answer, driver, recovery, rom, vars, boot
 // A WINDOWS DISK BOOT IS ONE DISK AND OVMF, AND DISCARD IS ON.
 func TestWindowsDiskBoot(t *testing.T) {
 	disk, _, _, _, _, _, _, _ := fixture(t)
-	// A big disk means an installed system, which is when discard is safe.
-	big := make([]byte, 2<<30)
-	bigDisk := filepath.Join(t.TempDir(), "installed.qcow2")
-	if err := os.WriteFile(bigDisk, big[:1<<20], 0o644); err != nil {
-		t.Fatal(err)
-	}
-	// The size check reads Stat, so a sparse-looking file is not enough; skip if it did not take.
-	if fi, _ := os.Stat(bigDisk); fi.Size() < 1<<30 {
-		bigDisk = disk
-	}
 
-	b := Boot{OS: Windows, Disk: bigDisk}
+	b := Boot{OS: Windows, Disk: disk}
 	if err := b.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -59,6 +49,11 @@ func TestWindowsDiskBoot(t *testing.T) {
 	args := strings.Join(b.StorageArgs(), " ")
 	if !strings.Contains(args, "if=virtio") {
 		t.Fatalf("the target must be virtio; got %q", args)
+	}
+	// AND DISCARD IS ON, because a finished disk's TRIMs are what keep the published qcow2 small.
+	if !strings.Contains(args, "discard=unmap") {
+		t.Fatalf("a disk boot without an installer must have discard=unmap - it is the only "+
+			"thing that lets a guest's TRIM shrink the qcow2; got %q", args)
 	}
 	if !strings.Contains(args, "media=cdrom") {
 		// expected: no medium on a disk boot
@@ -96,26 +91,25 @@ func TestWindowsISOBoot(t *testing.T) {
 	args := b.StorageArgs()
 	joined := strings.Join(args, " ")
 
-	// THE DISK COMES FIRST.
-	diskAt := strings.Index(joined, "if=virtio")
-	cdAt := strings.Index(joined, "media=cdrom")
-	if diskAt < 0 || cdAt < 0 {
-		t.Fatalf("want a virtio disk and a cdrom; got %q", joined)
-	}
-	if diskAt > cdAt {
-		t.Fatalf("the CD-ROM is attached before the disk, which moves Setup's DiskID:\n%s",
-			joined)
-	}
-
-	// ALL THREE MEDIA, IN ORDER: installer, answer, drivers.
+	// THE ORDER IS INSTALLER, ANSWER, DISK, DRIVERS - MEASURED, NOT ARBITRARY.
+	//
+	// "the order matters only for the boot device: the install ISO is first so the firmware boots
+	//  it ... The drivers travel on the answer CD, which keeps the virtio disk at index 0."
+	//
+	// A CD-ROM DOES NOT TAKE A DISK INDEX - Windows numbers only fixed disks - so a virtio disk
+	// after two CD-ROMs is still DiskID 0. What the order decides is which medium the firmware
+	// tries first, and the driver CD sits last because only the INSTALLED system needs it.
+	order := []string{filepath.Base(iso), filepath.Base(answer), "if=virtio", filepath.Base(driver)}
 	last := -1
-	for _, want := range []string{filepath.Base(iso), filepath.Base(answer), filepath.Base(driver)} {
+	for _, want := range order {
 		at := strings.Index(joined, want)
 		if at < 0 {
 			t.Fatalf("%s is not attached:\n%s", want, joined)
 		}
 		if at < last {
-			t.Fatalf("%s is out of order; the installer must come first:\n%s", want, joined)
+			t.Fatalf("%s is out of order. Want installer, answer, disk, drivers - the installer "+
+				"first so the firmware boots it, the disk at index 0, the drivers last because "+
+				"only the installed system reads them:\n%s", want, joined)
 		}
 		last = at
 	}
@@ -155,6 +149,35 @@ func TestMacOSBootAlwaysHasOpenCore(t *testing.T) {
 	if !strings.Contains(joined, "usb-storage") {
 		t.Fatalf("the recovery image must be usb-storage; a virtio disk would be in the boot "+
 			"order and macOS installs from removable media:\n%s", joined)
+	}
+	// AND AN INSTALL MUST NOT DISCARD, because it is the one boot that writes.
+	//
+	//     41835253323   no discard, 128G   finished in 46 minutes
+	//     42009463444   discard,    128G   wrote 36774 MiB, dropped to 19761, never moved again
+	if strings.Contains(joined, "discard=unmap") {
+		t.Fatalf("discard is on while the recovery image is attached, which is the install. "+
+			"Measured: it loses the clusters the APFS snapshot still refers to and the "+
+			"progress bar freezes at \"About 48 minutes remaining\":\n%s", joined)
+	}
+
+	// AND WITHOUT A RECOVERY IMAGE THERE IS NO USB DEVICE AT ALL, AND DISCARD IS ON, because a
+	// later stage boots a system that is already installed. An extra USB disk is one more row the
+	// guest can pick in Disk Utility, where `choose the target disk by capacity` reads the
+	// sidebar; and discard is then exactly what keeps the published disk small.
+	installed := Boot{OS: MacOS, Disk: disk, OpenCoreROM: rom, OpenCoreVars: vars,
+		BootImage: bootImg}
+	if err := installed.Validate(); err != nil {
+		t.Fatalf("a macOS boot without a recovery image must be allowed - only an INSTALL needs "+
+			"the recovery device: %v", err)
+	}
+	body := strings.Join(installed.StorageArgs(), " ")
+	if strings.Contains(body, "usb-storage") {
+		t.Fatalf("a macOS boot with no recovery image attached a USB device anyway; that is one "+
+			"more disk the guest can select:\n%s", body)
+	}
+	if !strings.Contains(body, "discard=unmap") {
+		t.Fatalf("a macOS boot with no recovery image is a FINISHED system and must discard - "+
+			"that is what keeps the published disk small:\n%s", body)
 	}
 	if len(b.SMCArgs("")) == 0 {
 		t.Fatal("macOS needs isa-applesmc; without the key the kernel stops before it draws")
@@ -240,5 +263,123 @@ func TestAMissingMediumSaysWhatItWas(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "installer") {
 		t.Fatalf("the refusal should say the missing file was the installer medium; got %v", err)
+	}
+}
+
+// THE RECOVERY IMAGE IS ATTACHED BY THE INSTALL AND BY NOTHING ELSE.
+//
+// macOS installs FROM removable media, so setup.yaml spends it as a USB disk. Every later stage
+// boots a system that is already installed, and an installed macOS has no recovery volume - the
+// extra USB disk is then one more row the guest can pick in Disk Utility, where
+// `choose the target disk by capacity` reads the sidebar. So "attached where nothing installs" is
+// at best a row nobody looks at and at worst the row that gets picked.
+//
+// THIS IS THE TEST FOR THE BUG WHERE AN EMPTY `recovery:` STILL EMITTED A DEVICE: the code built
+// the -drive unconditionally, so a file with no `recovery:` produced
+//
+//	-drive file=,media=disk,if=none,id=rec,readonly=on
+//
+// which is an empty path and a qemu that refuses to start, with a message about a drive rather
+// than about the step that forgot to say what it was installing from.
+func TestOnlyAnInstallAttachesTheRecoveryImage(t *testing.T) {
+	disk, _, _, _, recovery, rom, vars, bootImg := fixture(t)
+
+	install := Boot{OS: MacOS, Disk: disk, Recovery: recovery,
+		OpenCoreROM: rom, OpenCoreVars: vars, BootImage: bootImg}
+	installed := Boot{OS: MacOS, Disk: disk,
+		OpenCoreROM: rom, OpenCoreVars: vars, BootImage: bootImg}
+
+	cases := []struct {
+		name     string
+		boot     Boot
+		attached bool
+	}{
+		{"the setup stage, which has `recovery:`", install, true},
+		{"a stage that boots an installed system", installed, false},
+	}
+	for _, c := range cases {
+		args := c.boot.StorageArgs()
+		joined := strings.Join(args, " ")
+		if got := strings.Contains(joined, "usb-storage"); got != c.attached {
+			t.Fatalf("%s: usb-storage attached = %v, want %v:\n%s", c.name, got, c.attached, joined)
+		}
+		// AN EMPTY PATH IS NEVER ALLOWED, whatever the answer. This is the assertion that would
+		// have caught the original bug even if the USB decision had been right.
+		if strings.Contains(joined, "file=,") || strings.Contains(joined, "file= ") {
+			t.Fatalf("%s: a -drive was built with an empty file path:\n%s", c.name, joined)
+		}
+		for _, a := range args {
+			if strings.HasPrefix(a, "file=") && a == "file=," {
+				t.Fatalf("%s: empty drive path in %q", c.name, a)
+			}
+			if a == "" {
+				t.Fatalf("%s: an empty argument reached the command line: %q", c.name, args)
+			}
+		}
+	}
+
+	// AND OPENCORE IS IN BOTH. It is the firmware, not the installer: an installed macOS disk
+	// still boots through it, and without these three files the guest sits in the UEFI shell.
+	for _, c := range cases {
+		joined := strings.Join(c.boot.StorageArgs(), " ")
+		if !strings.Contains(joined, "bootindex=0") {
+			t.Fatalf("%s: OpenCore's disk lost bootindex=0; without a bootindex the firmware "+
+				"does not try it at all:\n%s", c.name, joined)
+		}
+	}
+}
+
+// DISCARD IS OFF FOR AN INSTALL AND ON FOR A FINISHED DISK - AND THE DISK'S SIZE IS NOT THE
+// QUESTION.
+//
+// A size heuristic was here and it was wrong both ways: an overlay over an installed disk is a few
+// hundred MiB and still has a system, and an installer two hours in has written 30 GiB and still
+// needs discard off. The file already says which it is.
+func TestDiscardIsDecidedByTheMediaAndNotByTheDiskSize(t *testing.T) {
+	var (
+		disk, iso, answer, driver, recovery, rom, vars, bootImg = fixture(t)
+	)
+	_ = answer
+	_ = driver
+
+	macInstall := Boot{OS: MacOS, Disk: disk, Recovery: recovery,
+		OpenCoreROM: rom, OpenCoreVars: vars, BootImage: bootImg}
+	macInstalled := Boot{OS: MacOS, Disk: disk,
+		OpenCoreROM: rom, OpenCoreVars: vars, BootImage: bootImg}
+	winInstall := Boot{OS: Windows, Disk: disk, ISO: iso}
+	winInstalled := Boot{OS: Windows, Disk: disk}
+
+	for _, c := range []struct {
+		name       string
+		boot       Boot
+		discarding bool
+	}{
+		{"macOS installing", macInstall, false},
+		{"macOS installed", macInstalled, true},
+		{"windows installing", winInstall, false},
+		{"windows installed", winInstalled, true},
+	} {
+		joined := strings.Join(c.boot.StorageArgs(), " ")
+		got := strings.Contains(joined, "discard=unmap")
+		if got != c.discarding {
+			t.Fatalf("%s: discard=unmap = %v, want %v. An install that discards loses the "+
+				"clusters the APFS snapshot still refers to (42009463444: wrote 36774 MiB, "+
+				"dropped to 19761, froze at \"About 48 minutes remaining\"):\n%s",
+				c.name, got, c.discarding, joined)
+		}
+	}
+
+	// AND THE SIZE OF THE FILE ON DISK CHANGES NOTHING. This is the assertion that would have
+	// failed on the old heuristic: the same install boot, given a disk big enough that
+	// "> 1 GiB means installed" would fire, must still refuse to discard.
+	big := filepath.Join(t.TempDir(), "half-written.qcow2")
+	if err := os.WriteFile(big, make([]byte, 2<<20), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bigInstall := Boot{OS: MacOS, Disk: big, Recovery: recovery,
+		OpenCoreROM: rom, OpenCoreVars: vars, BootImage: bootImg}
+	if strings.Contains(strings.Join(bigInstall.StorageArgs(), " "), "discard=unmap") {
+		t.Fatal("discard was turned on because the install's disk had grown past a size " +
+			"threshold; the installer is still writing and this is the 17 GiB failure")
 	}
 }

@@ -123,16 +123,24 @@ func (b Boot) Validate() error {
 		return fmt.Errorf("`recovery:` is macOS's install medium; this guest is %s", b.OS)
 	}
 	if b.OS.IsMacOS() {
-		// OPENCORE IS NOT OPTIONAL FOR macOS, EVEN FROM AN INSTALLED DISK. The three files below
-		// are what the firmware boots: without them qemu starts, the firmware finds no loader, and
-		// the guest sits in the UEFI shell.
-		if b.Recovery == "" {
-			return fmt.Errorf("a macOS guest needs `recovery:`: OpenCore is built from it - the " +
-				"APFS driver comes out of that image - and it is also the install medium when the " +
-				"disk has no system yet")
-		}
-		if err := requireFile(b.Recovery, "the recovery image"); err != nil {
-			return err
+		// OPENCORE IS NOT OPTIONAL FOR macOS, EVEN FROM AN INSTALLED DISK. Those three files are
+		// what the firmware boots: without them qemu starts, the firmware finds no loader, and the
+		// guest sits in the UEFI shell.
+		//
+		// THE RECOVERY IMAGE **IS** OPTIONAL, AND ATTACHING IT WHEN IT IS NOT NEEDED IS A BUG.
+		// macOS installs FROM removable media, so only the stage that installs needs the recovery
+		// image as a device. Every later stage boots a system that is already installed and has no
+		// recovery volume - and an extra USB disk is one more row the guest can pick in Disk
+		// Utility, where `choose the target disk by capacity` reads the sidebar. A stage that
+		// attached it anyway could select the recovery volume instead of the target.
+		//
+		// It is still an INPUT to those stages, for one reason: opencore.build() extracts Apple's
+		// APFS driver out of the image. That is a file the HOST reads, not a device the guest is
+		// given - which is exactly why the two are separate fields.
+		if b.Recovery != "" {
+			if err := requireFile(b.Recovery, "the recovery image"); err != nil {
+				return err
+			}
 		}
 		for why, path := range map[string]string{
 			"OpenCore's firmware ROM": b.OpenCoreROM,
@@ -166,13 +174,20 @@ func requireFile(path, why string) error {
 
 // StorageArgs is the disk and the media, in the order the guest reads them.
 //
-// THE ORDER IS THE MODULE'S JOB BECAUSE IT IS PART OF THE MEANING. Windows Setup numbers disks in
-// the order it sees them and the answer file's DiskID is written against index 0, so a CD-ROM
-// attached before the disk moves the install target. That is why this is one function and not a
-// list a caller assembles.
+// THE ORDER IS THE MODULE'S JOB BECAUSE IT IS PART OF THE MEANING. Two different things are being
+// ordered and only one of them is about index numbers:
+//
+//	the BOOT MEDIUM     the firmware boots the first thing it can, so the installer ISO must come
+//	                    before the disk
+//	the DISK INDEX      Windows numbers only FIXED disks, so a virtio disk after two CD-ROMs is
+//	                    still DiskID 0 and the answer file stays valid
+//
+// A caller that assembled this list would eventually get one of those backwards, and the failure is
+// not a message: it is Setup offering to install onto the wrong disk, or a firmware screen.
 //
 // AND `discard=unmap` IS NOT ALWAYS RIGHT. It is what lets a guest's TRIM free clusters in the
-// qcow2, which keeps a published disk small - but during an INSTALL it is destructive. Measured:
+// qcow2, which keeps a published disk small - but during an INSTALL it is destructive. Measured on
+// the macOS 26 installs, which are the two runs that differ in exactly this argument:
 //
 //	41835253323   no discard,  128G   finished in 46 minutes
 //	42009463444   discard,     128G   wrote 36774 MiB, dropped to 19761, never moved again
@@ -182,13 +197,9 @@ func requireFile(path, why string) error {
 // honoured immediately and the clusters the SNAPSHOT STILL REFERS TO are deallocated under it. The
 // progress bar froze at "About 48 minutes remaining".
 //
-// So discard is off while an installer is attached, and on otherwise.
+// So discard is off while an installer is attached, and on otherwise. See installing() for what
+// "attached" means and for why it is read from the media rather than guessed from the file.
 func (b Boot) StorageArgs() []string {
-	// A DISK BOOT OF A MACOS GUEST STILL ATTACHES THE RECOVERY IMAGE - OpenCore uses it for the
-	// APFS driver - so "an installer is attached" is what decides discard, not the medium alone.
-	installing := b.ISO != "" || (b.OS.IsMacOS() && b.Recovery != "" && !b.hasSystemYet())
-	_ = installing // the recovery image is always attached on macOS; see below.
-
 	args := []string{}
 
 	if b.OS.IsMacOS() {
@@ -201,73 +212,141 @@ func (b Boot) StorageArgs() []string {
 		)
 		// THE TARGET, WITH discard ONLY WHEN NOTHING IS INSTALLING.
 		target := "file=" + b.Disk + ",if=none,format=qcow2,id=target"
-		if !b.installing() {
+		if b.Discardable() {
 			target = "file=" + b.Disk + ",if=none,format=qcow2,discard=unmap,id=target"
 		}
 		args = append(args,
 			"-drive", target,
 			"-device", "virtio-blk-pci,drive=target,bootindex=1",
 		)
-		// AND THE RECOVERY IMAGE AS REMOVABLE MEDIA. macOS installs from USB; the disk it installs
-		// TO is not the disk it boots FROM. `usb-storage` has no bootindex property and does not
-		// need one - the firmware reaches it only after OpenCore hands over.
-		args = append(args,
-			"-drive", "file="+b.Recovery+",media=disk,if=none,id=rec,readonly=on",
-			"-device", "usb-storage,bus=xhci.0,drive=rec",
-		)
+		// AND THE RECOVERY IMAGE AS REMOVABLE MEDIA, ONLY WHEN THIS BOOT INSTALLS.
+		//
+		// macOS installs FROM removable media; the disk it installs TO is not the disk it boots
+		// FROM. That is why the SETUP stage attaches it - and why every LATER stage must not:
+		// those boot a system that is already installed and has no recovery volume, and an extra
+		// USB disk is one more row the guest can pick in Disk Utility, where
+		// `choose the target disk by capacity` reads the sidebar. Attaching it on an installed
+		// disk could select the recovery volume instead of the target.
+		//
+		// `usb-storage` has no bootindex and does not need one: the firmware reaches it only
+		// after OpenCore hands over.
+		if b.Recovery != "" {
+			args = append(args,
+				"-drive", "file="+b.Recovery+",media=disk,if=none,id=rec,readonly=on",
+				"-device", "usb-storage,bus=xhci.0,drive=rec",
+			)
+		}
 		return args
 	}
 
-	// WINDOWS AND LINUX: THE DISK FIRST, AT INDEX 0.
+	// WINDOWS AND LINUX: THE INSTALLER, THE ANSWER CD, THE DISK, THE DRIVERS - IN THAT ORDER.
+	//
+	// THAT ORDER IS MEASURED, NOT ARBITRARY, and it is NOT "the disk first". The Python
+	// implementation's comment gives the reason:
+	//
+	//     "Three CDs at most, and the order matters only for the boot device: the install ISO is
+	//      first so the firmware boots it. ... The drivers travel on the answer CD, which keeps the
+	//      virtio disk at index 0 so the answer file's DiskID stays correct."
+	//
+	// A CD-ROM DOES NOT TAKE A DISK INDEX. Windows numbers only fixed disks, so a virtio disk after
+	// two CD-ROMs is still DiskID 0 - which is why the answer file's disk reference stays valid.
+	// Putting the CD-ROMs after the disk would ALSO work for DiskID and would break the other half:
+	// the firmware boots the first thing it can, and the installer must be it.
+	//
+	// THE DRIVER CD IS LAST for its own reason: "The same drivers again, for the installed system
+	// to pick up network and ballooning. Setup only reads $WinPEDriver$ during windowsPE." It has
+	// to be attached for the installed system, but nothing during setup needs it in a particular
+	// place - so it goes after the disk, where it cannot be mistaken for the boot medium.
+	appendMedia := func(path string) {
+		if path == "" {
+			return
+		}
+		// `media=cdrom,readonly=on` IS WHAT MAKES IT A CD-ROM rather than another hard disk.
+		args = append(args, "-drive", "file="+path+",media=cdrom,readonly=on")
+	}
+
+	// 1. THE INSTALLER, SO THE FIRMWARE BOOTS IT.
+	appendMedia(b.ISO)
+
+	// 2. THE ANSWER CD. Windows Setup scans removable media for Autounattend.xml and
+	//    $WinPEDriver$ at its root, which is why the virtio drivers also live here.
+	appendMedia(b.AnswerCD)
+
+	// 3. THE TARGET DISK, AT INDEX 0.
 	//
 	// `discard=unmap` IS ON WHEN NOTHING IS INSTALLING, for the same reason and with the opposite
-	// sign: after a system is on the disk, its TRIMs are information the qcow2 can use to stay
-	// small.
+	// sign as macOS: after a system is on the disk, its TRIMs are information the qcow2 can use to
+	// stay small.
 	disk := "file=" + b.Disk + ",if=virtio,format=qcow2"
-	if b.ISO == "" {
+	if b.Discardable() {
 		disk += ",discard=unmap"
 	}
 	args = append(args, "-drive", disk)
 
-	// THE MEDIA, IN THE ORDER SETUP EXPECTS. The install ISO first so the firmware finds it, then
-	// the answer file, then the drivers - which is the order the Python implementation measured and
-	// the reason the disk stays at index 0.
-	for _, m := range []struct{ path, why string }{
-		{b.ISO, "the installer"},
-		{b.AnswerCD, "the answer file"},
-		{b.DriverCD, "the drivers"},
-	} {
-		if m.path == "" {
-			continue
-		}
-		args = append(args, "-drive", "file="+m.path+",media=cdrom,readonly=on")
-	}
+	// 4. THE DRIVER CD, FOR THE SYSTEM THAT WILL RUN ON THIS DISK.
+	appendMedia(b.DriverCD)
 	return args
 }
 
-// hasSystemYet reports whether the target carries an installed system.
-//
-// IT IS A SIZE CHECK AND NOT A GUESS. An installed macOS disk is many gigabytes; a freshly created
-// qcow2 is a few hundred kilobytes of header. The distinction decides whether the recovery image is
-// an installer or just OpenCore's APFS driver source, and the two want opposite `discard` settings.
-func (b Boot) hasSystemYet() bool {
-	fi, err := os.Stat(b.Disk)
-	if err != nil {
-		return false
-	}
-	return fi.Size() > 1<<30
-}
-
 // installing reports whether a medium is writing to the disk, which is when discard must be off.
+//
+// IT READS THE MEDIA, NOT THE FILE SIZE. A size heuristic ("a big qcow2 already has a system")
+// is wrong in both directions: a 128G qcow2 that has only been created is 196 KiB and one that has
+// been installed onto is 30 GiB, but an OVERLAY over an installed disk is a few hundred MiB and
+// still has a system, while an installer that has just written 2 GiB into a fresh disk has neither
+// finished nor become large. The file already says which it is - it names `recovery:` or `iso:`
+// when a medium is installing - so that is what this asks.
+//
+// The two measured facts that make it matter are opposite halves of the same flag:
+//
+//	macOS install with discard    42009463444 wrote 36774 MiB, dropped to 19761, froze
+//	macOS install without         41835253323 finished in 46 minutes
+//	a finished disk being booted  discard is what keeps the published qcow2 small
+//
+// AND `discard=unmap` HAS A SECOND HAZARD, WHICH THE PYTHON IMPLEMENTATION ATTRIBUTED TO THIS
+// FLAG AND THEN RETRACTED. lib/clean_step.py passes `discard=False` because a guest booting out of
+// a zstd qcow2 must not be handed its clusters back - run 42778795463 died at
+//
+//	#[EB|LOG:HANDOFF TO XNU] _
+//
+// with no panic and nothing in the console after it. But run 42874167311 repeated the same death
+// WITH `discard=False` in place, so the flag was not the cause; the note that retracts it points at
+// the firmware state instead. The retraction is the part worth carrying: a plausible cause that
+// survives one run and not the next is not a cause.
+//
+// THIS BUILD DOES NOT PASS `discard=False` FOR A COMPRESSED ARTIFACT, AND THAT IS A GAP. The
+// Python implementation's answer is to open a WRITABLE OVERLAY over the published base - the base
+// is read-only and never handed a TRIM - and this build has no overlay yet. Until it does, a stage
+// that boots a pulled artifact discards into the artifact itself. See Boot.Discardable.
 func (b Boot) installing() bool {
 	if b.OS.IsMacOS() {
-		// A macOS disk with no system is being installed onto, and the recovery image is the
-		// installer. One with a system is only being booted, and the recovery image is then just
-		// where OpenCore reads the APFS driver from.
-		return !b.hasSystemYet()
+		// macOS's installer IS the recovery image on a USB device, so a boot that attaches it is
+		// the one that writes. Every later stage boots an installed system and attaches nothing.
+		return b.Recovery != ""
 	}
 	return b.ISO != ""
 }
+
+// Discardable reports whether `discard=unmap` belongs on the target.
+//
+// TWO ANSWERS, AND BOTH ARE MEASURED: no while an installer is writing (the 17 GiB that vanished),
+// yes for a finished disk (its TRIMs are what keep the published qcow2 small).
+//
+// The third input - whether the file is a compressed artifact being read rather than written - is
+// deliberately NOT here. lib/clean_step.py blamed it for the HANDOFF TO XNU death and then found
+// the same death with the flag off; see the note above installing(). It belongs to the overlay,
+// which does not exist in this build yet.
+
+// Discardable reports whether `discard=unmap` belongs on the target.
+//
+// TWO ANSWERS, AND BOTH ARE MEASURED: no while an installer is writing (the 17 GiB that vanished),
+// yes for a finished disk (its TRIMs are what keep the published qcow2 small).
+//
+// The third input - whether the file is a compressed artifact being read rather than written - is
+// deliberately NOT here. lib/clean_step.py blamed it for the HANDOFF TO XNU death and then found
+// the same death with the flag off; see the note above installing(). It belongs to the overlay,
+// which does not exist in this build yet.
+func (b Boot) Discardable() bool { return !b.installing() }
 
 // FirmwareArgs is the pflash pair.
 //

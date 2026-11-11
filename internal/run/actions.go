@@ -37,9 +37,12 @@ func (e *Executor) doBoot(s walk.Step) error {
 		DriverCD: s.Get("driver_cd"),
 		Recovery: s.Get("recovery"),
 	}
-	// THE OPENCORE FILES ARE BUILT FROM THE RECOVERY IMAGE BY AN EARLIER STEP, and this names them
-	// the same way that step did: `<work>/opencore/`.
-	if spec.Recovery != "" {
+	// THE OPENCORE FILES ARE NEEDED BY EVERY MACOS BOOT, AND ONLY SOME OF THEM ATTACH THE
+	// RECOVERY IMAGE. They are built from it - Apple's APFS driver comes out of that image - but
+	// that is HOST work done by an earlier step, and the guest is not given the image on an
+	// installed disk. Tying these three paths to `recovery:` conflated the two, so an installed
+	// macOS disk would have booted with an empty pflash path.
+	if osName == "macos" {
 		spec.OpenCoreROM = filepath.Join(e.Work, "opencore", "opencore.rom")
 		spec.OpenCoreVars = filepath.Join(e.Work, "opencore", "vars.fd")
 		spec.BootImage = filepath.Join(e.Work, "opencore", "boot.img")

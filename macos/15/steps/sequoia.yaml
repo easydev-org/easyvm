@@ -127,17 +127,31 @@ steps:
   #
   # THE SHUTDOWN NEVER CARRIES THAT FLAG. Stopping the machine is exactly what has to happen on
   # the way out of a failed walk.
-  - name: boot the disk
-  # OPENCORE AND THE RECOVERY IMAGE ARE PART OF EVERY MACOS BOOT, not only an install.
+  # NO `recovery:` HERE, AND THAT IS THE POINT.
   #
-  # macOS has no install ISO. It starts through OpenCore, which is built from the recovery image -
-  # Apple's APFS driver is extracted from that image - and the recovery image stays attached as
-  # removable media because that is how macOS installs. The three disks, their boot order, the SMC
-  # device and the CPU flags all follow from `os: macos`; what the file has to say is where the
-  # recovery image is.
+  # macOS installs FROM removable media, so only the setup stage attaches the recovery image as a
+  # USB disk. This stage boots a system that is already installed, and an installed macOS has no
+  # recovery volume - an extra USB disk would be one more row the guest can pick in Disk Utility,
+  # where setup.yaml's "choose the target disk by capacity" reads the sidebar. Attaching it where
+  # nothing is being installed is at best a row nobody looks at and at worst the row that gets
+  # picked.
+  #
+  # THE RECOVERY IMAGE IS STILL AN INPUT to the step that builds OpenCore - the APFS driver comes
+  # out of that image - and that is host work on a file, not a device handed to the guest. The
+  # two are separate facts: opencore.build() reads it, `boot:` does not attach it.
+  #
+  # WHAT IS ALWAYS THERE, because macOS always boots through OpenCore:
+  #
+  #     boot.img   OpenCore, bootindex=0   a disk with no bootindex is not in the boot order at
+  #                                        all, which is what "failed to load Boot0001" meant for
+  #                                        six runs
+  #     disk       the target, bootindex=1 OpenCore finds the installed system here
+  #
+  # And discard is ON: this disk is finished, and a guest's TRIMs are what keep the published
+  # qcow2 small.
+  - name: boot the disk
     boot: true
     os: macos
-    recovery: "{{ work }}/recovery.dmg"
     timeout: 900
   # --- the panes that only need the footer ------------------------------------------------
   #
