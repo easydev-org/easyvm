@@ -166,7 +166,7 @@ steps:
   # install produces nothing, and the recording now answers it.
   - name: open the terminal
     key: ctrl+alt+t
-    settle: 10
+    settle: 20
 
   # THE FIREWALL IS REAL ON THIS IMAGE, AND THIS FILE SAID IT WAS NOT.
   #

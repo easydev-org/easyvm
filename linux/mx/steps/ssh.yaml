@@ -119,7 +119,7 @@ steps:
   # install produces nothing, and the recording now answers it.
   - name: open the terminal
     key: ctrl+alt+t
-    settle: 10
+    settle: 20
 
   # `apt-get update` IS NOT OPTIONAL, AND RUN 42567710130 PROVED IT.
   #

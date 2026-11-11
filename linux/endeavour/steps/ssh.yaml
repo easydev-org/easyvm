@@ -113,7 +113,7 @@ steps:
   # install produces nothing, and the recording now answers it.
   - name: open the terminal
     key: ctrl+alt+t
-    settle: 10
+    settle: 20
 
   # ATOMIC STEPS, the shape macOS' and Windows' vm-configure files were split into
   # (commit 96596c2): one act per step, so a failure names the act. This was a single `run:`

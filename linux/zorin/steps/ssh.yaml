@@ -169,7 +169,7 @@ steps:
   # install produces nothing, and the recording now answers it.
   - name: open the terminal
     key: ctrl+alt+t
-    settle: 10
+    settle: 20
 
   # ZORIN'S SOFTWARE UPDATER PUTS A DIALOG OVER THE DESKTOP, AND IT TAKES THE KEYBOARD.
   #

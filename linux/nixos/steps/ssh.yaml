@@ -309,7 +309,7 @@ steps:
 
   - name: open the terminal
     at: [960, 160]
-    settle: 14
+    settle: 20
 
   # BOTH LINES RUN AS ROOT, AND THE FIRST ONE HAD TO BE FIXED TO DO SO.
   #

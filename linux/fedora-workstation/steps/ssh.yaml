@@ -197,7 +197,7 @@ steps:
 
   - name: open the terminal
     at: [960, 178]
-    settle: 12
+    settle: 20
 
   # `systemctl enable` IS NOT `systemctl start`, AND ONLY THE SECOND ONE OPENS PORT 22.
   #

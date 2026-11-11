@@ -413,3 +413,69 @@ func TestNoStepNameRepeats(t *testing.T) {
 		}
 	}
 }
+
+// A SCRIPTED REWRITE DELETED TEN FILES' WORTH OF STEPS, AND NOTHING NOTICED.
+//
+// `re.sub(r'  - name: open the terminal\n(?:    .*\n)+', NEW, s, flags=re.S)` LOOKS HARMLESS and is
+// catastrophic: `re.S` makes `.` match newlines, so `(?:    .*\n)+` runs past the end of the step and
+// swallows everything indented after it. Measured here: ubuntu went from 14 steps to 6, manjaro from
+// 21 to 6, and eight more lost their entire install-and-enable sequence.
+//
+// THE FILES STILL LOADED. A walkthrough with six steps is a valid walkthrough, so `easyvm check`
+// passed - which is why the first thing to fail was a CI leg, twenty minutes later.
+//
+// THIS TEST GUARDS THE SHAPE RATHER THAN THE COUNT: every file whose name says it installs sshd must
+// have the steps that DO it. A count would need updating on every edit; the presence of the actions is
+// the fact that matters.
+func TestTheLinuxSSHFilesStillInstallAndEnableSSHD(t *testing.T) {
+	root := filepath.Join("..", "..")
+	files, err := filepath.Glob(filepath.Join(root, "linux", "*", "steps", "ssh.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) == 0 {
+		t.Skip("no Linux ssh walkthroughs here")
+	}
+
+	for _, path := range files {
+		f, err := Load(path, nil)
+		if err != nil {
+			continue // TestEveryWalkthroughLoads reports it
+		}
+		rel, _ := filepath.Rel(root, path)
+		var installs, enables, waits bool
+		for _, s := range f.Steps {
+			body := strings.ToLower(s.Get("run") + " " + s.Get("ssh"))
+			// THE INSTALL IS ONE OF FIVE PACKAGE MANAGERS OR A DECLARATION, and nixos needs the last
+			// one: `services.openssh.enable = true` in configuration.nix IS the install there, and
+			// `nixos-rebuild` is what makes it so. Requiring a package-manager verb refused the one
+			// distribution whose package manager does not have one.
+			if strings.Contains(body, "openssh") &&
+				(strings.Contains(body, "apt-get") || strings.Contains(body, "pacman") ||
+					strings.Contains(body, "dnf") || strings.Contains(body, "zypper") ||
+					strings.Contains(body, "pkg ") || strings.Contains(body, "pkg_add") ||
+					strings.Contains(body, "services.openssh")) {
+				installs = true
+			}
+			if strings.Contains(body, "enable") && strings.Contains(body, "ssh") {
+				enables = true
+			}
+			if s.Has("require_ssh") {
+				waits = true
+			}
+		}
+		if !installs {
+			t.Errorf("%s has no step that installs openssh. A scripted rewrite can delete a step "+
+				"without breaking the YAML, and a six-step walkthrough that only logs in is still a "+
+				"valid file", rel)
+		}
+		if !enables {
+			t.Errorf("%s has no step that enables or starts sshd, so the disk it produces has no "+
+				"remote login and every later stage fails on `wait for sshd`", rel)
+		}
+		if !waits {
+			t.Errorf("%s never waits for sshd, so it reports success without proving the thing it "+
+				"exists to do", rel)
+		}
+	}
+}

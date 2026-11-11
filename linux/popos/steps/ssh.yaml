@@ -137,7 +137,7 @@ steps:
   # The yellow `>` is what identifies it: it is the only yellow glyph in the dock.
   - name: open the terminal
     at: [1092, 1048]
-    settle: 12
+    settle: 20
 
   # `apt-get update` IS NOT OPTIONAL, AND RUN 42567710130 PROVED IT.
   #

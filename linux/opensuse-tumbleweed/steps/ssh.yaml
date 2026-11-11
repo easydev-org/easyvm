@@ -117,7 +117,7 @@ steps:
   # install produces nothing, and the recording now answers it.
   - name: open the terminal
     key: ctrl+alt+t
-    settle: 10
+    settle: 20
 
   # `systemctl enable` IS NOT `systemctl start`, AND ONLY THE SECOND ONE OPENS PORT 22.
   #
