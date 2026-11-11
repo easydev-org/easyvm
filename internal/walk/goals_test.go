@@ -362,3 +362,54 @@ func TestAFileThatNeedsAGuestStartsOne(t *testing.T) {
 		}
 	}
 }
+
+// NO WALKTHROUGH READS A STEP NAME TWICE.
+//
+// IT IS A MISTAKE THIS PORT HAS NOW MADE AND CAUGHT ONCE, IN THE HARDEST WAY TO NOTICE: a scripted edit
+// of eleven Linux files INSERMED a replacement block without removing the original, so
+// `linux/manjaro/steps/ssh.yaml` had `allow password authentication` at step 14 AND step 16.
+//
+// THE FILE STILL LOADED. The second run would have succeeded - the step is idempotent - and the cost
+// would have been a duplicate line in every log and a reader wondering which one mattered.
+//
+// THE NAME IS A STEP'S IDENTITY in `--start-at`, `--stop-before` and in the log, so a duplicate is
+// ambiguous for three things at once.
+func TestNoStepNameRepeats(t *testing.T) {
+	root := filepath.Join("..", "..")
+	var files []string
+	for _, pat := range []string{
+		filepath.Join(root, "windows", "*", "steps", "*.yaml"),
+		filepath.Join(root, "macos", "*", "steps", "*.yaml"),
+		filepath.Join(root, "linux", "*", "steps", "*.yaml"),
+		filepath.Join(root, "bsd", "*", "steps", "*.yaml"),
+	} {
+		matches, err := filepath.Glob(pat)
+		if err != nil {
+			t.Fatal(err)
+		}
+		files = append(files, matches...)
+	}
+	if len(files) == 0 {
+		t.Skip("no walkthroughs here")
+	}
+
+	for _, path := range files {
+		f, err := Load(path, nil)
+		if err != nil {
+			continue // TestEveryWalkthroughLoads reports it
+		}
+		seen := map[string]int{}
+		for i, s := range f.Steps {
+			if s.Name == "" {
+				continue
+			}
+			if first, dup := seen[s.Name]; dup {
+				rel, _ := filepath.Rel(root, path)
+				t.Errorf("%s: step name %q appears at %d and again at %d. The name is a step's "+
+					"identity in --start-at, --stop-before and in the log, so a duplicate is "+
+					"ambiguous for all three", rel, s.Name, first, i+1)
+			}
+			seen[s.Name] = i + 1
+		}
+	}
+}

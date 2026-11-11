@@ -166,22 +166,41 @@ steps:
     run: echo {{ password }} | sudo -S update-rc.d ssh enable 2>&1 | tail -3
     terminal_wait: 0
     settle: 8
-  # PASSWORD AUTHENTICATION IS SET EXPLICITLY, BECAUSE THIS STAGE'S NEXT STEP DEPENDS ON IT.
+  # PASSWORD AUTHENTICATION IS SET TWO WAYS, BECAUSE ONE OF THEM SILENTLY DID NOT TAKE.
   #
-  # FOUR DISTRIBUTIONS REACHED
+  # A DROP-IN IS ONLY READ IF THE MAIN CONFIG INCLUDES THE DIRECTORY. Measured: the drop-in was written
+  # and manjaro STILL refused the same handshake
   #
   #	wait for sshd: the port is open but no shell answers: ssh: handshake failed:
   #	ssh: unable to authenticate, attempted methods [none password], no supported methods remain
   #
-  # - manjaro, endeavour, opensuse-tumbleweed and cachyos. THE PORT WAS OPEN AND SSHD WAS RUNNING; what
-  # refused was the METHOD, so the stage that exists to install sshd could reach a machine that would
-  # not admit it.
+  # - because that release's `/etc/ssh/sshd_config` has no `Include /etc/ssh/sshd_config.d/*.conf`. A
+  # file that nothing reads is not a setting.
   #
-  # The eight that pass only do so because their vendor defaults to `PasswordAuthentication yes`. THAT
-  # IS A FACT IN ANOTHER PLACE: an image update can change it, and the failure names a handshake rather
-  # than a setting. The drop-in is idempotent and harmless where the default is already yes.
+  # SO BOTH: the drop-in (right for every release that does include the directory, and it survives a
+  # package update that rewrites the main file) AND an append to the main file itself. The append is
+  # guarded by a grep so a second run does not add a second line.
   - name: allow password authentication
-    run: echo {{ password }} | sudo -S sh -c 'mkdir -p /etc/ssh/sshd_config.d && printf "PasswordAuthentication yes\n" > /etc/ssh/sshd_config.d/99-vm.conf' 2>&1 | tail -3
+    run: |
+      echo {{ password }} | sudo -S sh -c '
+        mkdir -p /etc/ssh/sshd_config.d
+        printf "PasswordAuthentication yes\n" > /etc/ssh/sshd_config.d/99-vm.conf
+        grep -q "^PasswordAuthentication yes" /etc/ssh/sshd_config || \
+          printf "\nPasswordAuthentication yes\n" >> /etc/ssh/sshd_config
+      ' 2>&1 | tail -3
+    terminal_wait: 0
+    settle: 3
+
+  # AND THE SETTING IS PROVEN, NOT ASSUMED. `sshd -T` prints the EFFECTIVE configuration after every
+  # include and override has been resolved - the only answer to "did my file get read". A drop-in that
+  # nothing includes and a main file that was overwritten by an update both look identical without it.
+  - name: prove password authentication took
+    run: echo {{ password }} | sudo -S sh -c 'sshd -T 2>/dev/null | grep -i "^passwordauthentication"' 2>&1 | tail -3
+    terminal_wait: 0
+    settle: 3
+
+  - name: prove the setting took
+    run: echo {{ password }} | sudo -S sh -c 'sshd -T 2>/dev/null | grep -i "^passwordauthentication" || echo PASSWORDAUTH-UNREADABLE' 2>&1 | tail -3
     terminal_wait: 0
     settle: 3
 
