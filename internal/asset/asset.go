@@ -20,6 +20,7 @@ import (
 
 	"github.com/easydev-org/easyvm/internal/answer"
 	"github.com/easydev-org/easyvm/internal/oci"
+	"github.com/easydev-org/easyvm/internal/opencore"
 )
 
 // Kind is a file a stage needs on the host before it can copy it in.
@@ -44,6 +45,12 @@ const (
 	// WindowsISO is the Windows installer image. It is 7.7 GiB and does not live in this
 	// repository; a `fetch:` either finds it already in the work directory or pulls it.
 	WindowsISO Kind = "windows_iso"
+	// RecoveryMacOS is the recovery image a macOS guest installs from - and the file Apple's APFS
+	// driver is extracted out of.
+	RecoveryMacOS Kind = "recovery_macos"
+	// OpenCore is the firmware a macOS guest boots through: a boot image, an OVMF code file and a
+	// writable variables copy, all built from four pinned assets.
+	OpenCore Kind = "opencore"
 )
 
 // Result is what one fetch produced, so the next step can be compared against it.
@@ -63,6 +70,10 @@ type Result struct {
 type Spec struct {
 	// Kind is which asset.
 	Kind Kind
+	// Release is the OS version, for an asset that is per-release (a macOS recovery image).
+	Release string
+	// Recovery is the recovery image a macOS build extracts its APFS driver out of.
+	Recovery string
 	// Family is the guest's OS, for an asset whose content depends on it.
 	Family string
 	// Work is where the file goes.
@@ -111,11 +122,20 @@ func Fetch(spec Spec) (Result, error) {
 	// THE INSTALLER ITSELF. Named by `iso:` on a boot step; this fetches or finds it.
 	case WindowsISO:
 		return fetchWindowsISO(work)
+
+	// macOS'S TWO INPUTS, IN THE ORDER THEY ARE NEEDED: the recovery image first, because the
+	// firmware is built FROM it - Apple's APFS driver is inside that image, and OpenCore cannot read
+	// an APFS partition without it.
+	case RecoveryMacOS:
+		return fetchRecoveryMacOS(spec)
+	case OpenCore:
+		return fetchOpenCore(spec)
 	}
 	return Result{}, fmt.Errorf("%q is not an asset this build knows; the kinds are %s",
 		kind, strings.Join([]string{
 			string(GuestAgentWindows), string(GuestAgentMacOS), string(Xcode), string(Packages),
 			string(VirtioWin), string(AnswerISO), string(WindowsISO),
+			string(RecoveryMacOS), string(OpenCore),
 		}, ", "))
 }
 
@@ -215,6 +235,79 @@ func fetchWindowsISO(work string) (Result, error) {
 			windowsISOMinSize>>20)
 	}
 	return Result{Main: dest}, nil
+}
+
+// recoveryMacOSTag is the artifact the recovery image is published under.
+//
+// IT IS PER RELEASE AND NOT A PREFIX SCAN: easydev-org publishes macos-recovery-sequoia for 15, and
+// a caller that guessed would be a second place the release name lives.
+func recoveryMacOSTag(release string) string {
+	if release == "" {
+		release = "15"
+	}
+	names := map[string]string{
+		"15": "sequoia",
+		"26": "tahoe",
+	}
+	if name, ok := names[release]; ok {
+		return "macos-recovery-" + name
+	}
+	return "macos-recovery-" + release
+}
+
+// fetchRecoveryMacOS pulls the recovery image for a release.
+//
+// IT IS AN INPUT EVEN TO A STAGE THAT DOES NOT BOOT FROM IT - opencore.Build extracts Apple's APFS
+// driver out of it - which is why it is an asset rather than part of a boot step.
+func fetchRecoveryMacOS(spec Spec) (Result, error) {
+	if err := os.MkdirAll(spec.Work, 0o755); err != nil {
+		return Result{}, err
+	}
+	dest := filepath.Join(spec.Work, "recovery.dmg")
+	// THE RECOVERY IMAGE IS REISSUED BY APPLE ON EVERY REQUEST, so there is no sha256 to pin -
+	// unlike every other asset here. What IS checked is that it is a plausible image, which catches
+	// a truncated transfer and an HTML error page.
+	if fi, err := os.Stat(dest); err == nil && fi.Size() > 200<<20 {
+		return Result{Main: dest}, nil
+	}
+	repository := os.Getenv("DISKS_REPOSITORY")
+	if repository == "" {
+		repository = "easydev-org/easydiskbake"
+	}
+	tag := recoveryMacOSTag(spec.Release)
+	art := oci.Artifact{
+		Repository: strings.ToLower(repository),
+		Tag:        tag,
+		Token:      os.Getenv("GITHUB_TOKEN"),
+	}
+	ctx, cancel := oci.WithTimeout(45 * time.Minute)
+	defer cancel()
+	if err := oci.Pull(ctx, art, dest, func(string) {}); err != nil {
+		return Result{}, fmt.Errorf("pulling %s from %s: %w. The recovery image is the installer "+
+			"AND the source of Apple's APFS driver, so a macOS stage cannot start without it",
+			tag, repository, err)
+	}
+	return Result{Main: dest}, nil
+}
+
+// fetchOpenCore builds the firmware a macOS guest boots through.
+//
+// THREE OUTPUTS, NOT ONE, and the caller names all three: the boot image is what the firmware
+// starts, the ROM is pflash code, and the variables file is per-guest NVRAM that qemu WRITES to - so
+// it must be a copy, never the pinned template.
+func fetchOpenCore(spec Spec) (Result, error) {
+	out, err := opencore.Build(opencore.Spec{
+		Release:  spec.Release,
+		Work:     spec.Work,
+		Recovery: spec.Recovery,
+	}, func(string) {})
+	if err != nil {
+		return Result{}, err
+	}
+	return Result{
+		Main:  out.Boot,
+		Extra: []string{out.ROM, out.Vars},
+	}, nil
 }
 
 // fetchAnswerISO builds Windows' answer CD.

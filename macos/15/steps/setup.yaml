@@ -110,10 +110,34 @@ steps:
   # immediately - including the clusters the SNAPSHOT STILL REFERS TO. The progress bar froze at
   # "About 48 minutes remaining". internal/machine turns discard off from the presence of
   # `recovery:` alone; the file does not have to say so.
+  # THE TWO HOST-SIDE INPUTS COME FIRST, AND THE ORDER MATTERS.
+  #
+  # THE RECOVERY IMAGE IS BOTH the installer and the source of Apple's APFS driver: macOS ships
+  # apfs.efi inside BaseSystem at usr/standalone/i386/apfs.efi, and OpenCore cannot read an APFS
+  # partition without it. EnableJumpstart=true is often mistaken for a driver - it HOOKS one the
+  # firmware is expected to have, and OVMF has none, so the symptom is an install that completes and
+  # a picker that lists nothing.
+  #
+  # IT IS PINNED BY NOTHING, because Apple reissues it on every request - unlike the four OpenCore
+  # assets, which carry sha256 values. What is checked is that it is a plausible image rather than a
+  # truncated transfer or an HTML error page.
+  - name: fetch the recovery image
+    fetch: recovery_macos
+    release: "15"
+
+  # OPENCORE IS BUILT FROM THE FOUR PINNED ASSETS AND THAT IMAGE. It produces three files, and all
+  # three are inputs to the boot: a boot image the firmware starts, OVMF's code, and a WRITABLE
+  # variables copy - writable because qemu writes to it, and a run that pointed qemu at the pinned
+  # template would mutate the template every later guest starts from.
+  - name: build OpenCore from the recovery image
+    fetch: opencore
+    release: "15"
+    recovery: recovery_macos
+
   - name: boot the recovery image
     boot: true
     os: macos
-    recovery: "{{ work }}/recovery.dmg"
+    recovery: recovery_macos
     timeout: 900
   # =======================================================================================
   # 1. THE RECOVERY MENU, WHICH IS DRAWN - NOT LOADED

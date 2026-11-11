@@ -43,9 +43,19 @@ func (e *Executor) doBoot(s walk.Step) error {
 	// installed disk. Tying these three paths to `recovery:` conflated the two, so an installed
 	// macOS disk would have booted with an empty pflash path.
 	if osName == "macos" {
-		spec.OpenCoreROM = filepath.Join(e.Work, "opencore", "opencore.rom")
-		spec.OpenCoreVars = filepath.Join(e.Work, "opencore", "vars.fd")
-		spec.BootImage = filepath.Join(e.Work, "opencore", "boot.img")
+		// THE THREE PATHS COME FROM THE `fetch: opencore` STEP WHEN ONE RAN, and from the work
+		// directory's layout otherwise. A build that produced them somewhere else must be able to
+		// say where: guessing a path is how a stage boots a boot.img from a previous run.
+		if boot, ok := e.assets[string(asset.OpenCore)]; ok {
+			spec.BootImage = boot
+			if extras, ok := e.assetExtras[string(asset.OpenCore)]; ok && len(extras) >= 2 {
+				spec.OpenCoreROM, spec.OpenCoreVars = extras[0], extras[1]
+			}
+		} else {
+			spec.BootImage = filepath.Join(e.Work, "boot.img")
+			spec.OpenCoreROM = filepath.Join(e.Work, "macos.rom")
+			spec.OpenCoreVars = filepath.Join(e.Work, "macos.vars")
+		}
 	}
 
 	e.Driver.Log(fmt.Sprintf("  booting %s from %s%s", spec.OS, bootSourceName(spec),
@@ -592,6 +602,17 @@ func (e *Executor) doFetch(s walk.Step) error {
 		Family:   family,
 		Work:     e.Work,
 		Template: s.Get("template"),
+		Release:  s.Get("release"),
+		// THE RECOVERY IMAGE IS AN INPUT TO THE OPENCORE BUILD, not a device this step gives a
+		// guest: Apple's APFS driver comes out of that image, and OpenCore cannot read an APFS
+		// partition without it. The two are separate facts, which is why this is a path here and a
+		// `recovery:` on a boot step.
+		Recovery: e.assetPath(s.Get("recovery")),
+	}
+	if spec.Release == "" && e.File != nil {
+		if v, ok := e.File.Vars["release"]; ok {
+			spec.Release = str(v)
+		}
 	}
 	// THE ANSWER FILE'S PLACEHOLDERS. `{{ user }}` and `{{ password }}` are resolved by the
 	// walkthrough loader, so a file writes them the same way it writes every other fact; these
@@ -619,7 +640,13 @@ func (e *Executor) doFetch(s walk.Step) error {
 	if e.assets == nil {
 		e.assets = map[string]string{}
 	}
+	if e.assetExtras == nil {
+		e.assetExtras = map[string][]string{}
+	}
 	e.assets[kind] = res.Main
+	if len(res.Extra) > 0 {
+		e.assetExtras[kind] = res.Extra
+	}
 	// THE ANSWER CD IS BUILT FROM THE VENDOR ISO, and the boot step needs that ISO attached as the
 	// driver CD - "the same drivers again, for the installed system". Recording it here means the
 	// file is named in ONE place (the asset layer) rather than spelled into the YAML.

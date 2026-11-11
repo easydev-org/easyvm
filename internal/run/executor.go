@@ -39,6 +39,9 @@ type Executor struct {
 	// the asset layer; a `boot:` that hard-coded `answer.iso` would be a second place that name
 	// lives, and the two would disagree the first time one moved.
 	assets map[string]string
+	// assetExtras is the other files one `fetch:` produced, in its own order - the three OpenCore
+	// outputs are a boot image, a ROM and a variables file, and a boot step names all three.
+	assetExtras map[string][]string
 	// OnStep is called as each step begins, for a daemon that must answer "where is it now".
 	//
 	// IT IS NOT LOGGING. The log is a stream a human reads; this is the one fact a client needs to
