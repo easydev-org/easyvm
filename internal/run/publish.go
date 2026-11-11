@@ -7,7 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
+
+	"github.com/easydev-org/easyvm/internal/walk"
 )
 
 // --- recording ------------------------------------------------------------------------
@@ -139,4 +142,84 @@ func (e *Executor) stopSampler() {
 		close(e.recDone)
 		e.recDone = nil
 	}
+}
+
+// --- waiting for a disk to stop growing ------------------------------------------------
+
+// doDiskSettle waits until the target stops growing, once it has been written to at all.
+//
+// AN INSTALLATION WRITES GIGABYTES INTO THE TARGET QCOW2 AND A GUEST THAT HAS STOPPED WRITES
+// NOTHING. That is the only measurement that can tell SLOW from STOPPED - and the alternative, a
+// sentence on screen, does not: `Finalizing installation may take a few moments` is printed WHILE
+// it is still writing, so ending a wait on it declares the install done at the moment the last files
+// are being copied.
+//
+// `disk_min_mb` IS THE FLOOR, and it is not decoration: an untouched sparse image has a few MiB of
+// metadata and would look settled immediately. 512 MiB is well above that and well below any real
+// install.
+//
+// `disk_settle: 180` COVERS ONE QCOW2 FLUSH without spending minutes afterwards. The check is the
+// file's ALLOCATED size - `st_blocks`, not the apparent size - because a sparse qcow2 reports its
+// full virtual size from the first second.
+func (e *Executor) doDiskSettle(s walk.Step) error {
+	quiet, err := s.Float("disk_settle", 60)
+	if err != nil || quiet <= 0 {
+		return fail(s.Name, "`disk_settle:` must be a positive number of quiet seconds")
+	}
+	floor, _ := s.Float("disk_min_mb", 0)
+	timeout := seconds(s, "timeout", 3600)
+	poll := seconds(s, "poll", 20)
+
+	path := e.bootDisk()
+	if path == "" {
+		return fail(s.Name, "no disk is known; a `disk:` step must come first")
+	}
+
+	e.Driver.Log(fmt.Sprintf("  waiting until %s stops growing for %.0fs, after %s has %.0f MiB",
+		filepath.Base(path), quiet, filepath.Base(path), floor))
+
+	start := time.Now()
+	var lastSize int64 = -1
+	var quietSince time.Time
+	for time.Since(start) < timeout {
+		size := allocatedBytes(path)
+		if size < 0 {
+			return fail(s.Name, "no disk at %s", path)
+		}
+		mb := float64(size) / (1 << 20)
+		switch {
+		case mb < floor:
+			// NOT WRITTEN TO YET. The floor is what stops an untouched image looking settled.
+			quietSince = time.Time{}
+		case size != lastSize:
+			quietSince = time.Time{}
+		case quietSince.IsZero():
+			quietSince = time.Now()
+		case time.Since(quietSince) >= time.Duration(quiet*float64(time.Second)):
+			e.Driver.Log(fmt.Sprintf("  %.0f MiB, unchanged for %.0fs after %s - the write is "+
+				"finished", mb, quiet, time.Since(start).Round(time.Second)))
+			return nil
+		}
+		lastSize = size
+		if s.Has("keep_alive") {
+			// A GUEST THAT BLANKS ITS OWN SCREEN wakes on a click, and a blank screen during an
+			// install is normal rather than a failure.
+			_ = e.Driver.Click(400+(int(time.Since(start).Seconds())%40), 300)
+		}
+		time.Sleep(poll)
+	}
+	return failWithScreen(s.Name, e.Driver,
+		"the disk never stopped growing within %s; it is at %.0f MiB. A disk still moving after an "+
+			"hour is a slow install; one that has not reached the floor is an install that never "+
+			"started", timeout, float64(allocatedBytes(path))/(1<<20))
+}
+
+// allocatedBytes is st_blocks * 512: what the file actually occupies, which is what grows on a
+// sparse qcow2. Stat().Size() is the virtual size from the first second and says nothing.
+func allocatedBytes(path string) int64 {
+	var st syscall.Stat_t
+	if err := syscall.Stat(path, &st); err != nil {
+		return -1
+	}
+	return st.Blocks * 512
 }

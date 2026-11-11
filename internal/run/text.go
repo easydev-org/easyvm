@@ -672,3 +672,63 @@ func (e *Executor) doHostLog(s walk.Step) error {
 	}
 	return fail(s.Name, "`host_log: %s` is not a log this build prints; the one it knows is smbd", name)
 }
+
+// --- a shell line typed into the guest's own terminal ----------------------------------
+
+// doRun types a shell command into the guest's terminal, one line at a time.
+//
+// IT IS A GUI ACTION, NOT AN SSH COMMAND. The whole point of `run:` is a guest whose sshd does not
+// exist yet - the Linux and BSD `ssh.yaml` stages install sshd this way. `ssh:` would need the thing
+// being installed.
+//
+// THE TERMINAL IS NORMALLY OPENED BY ITS OWN STEP (`open the terminal` / `key: ctrl+alt+t`), because
+// "did the terminal open" is the first question when an install produces nothing - and a recording
+// answers it. `terminal_wait` therefore DEFAULTS TO ZERO HERE, meaning "the terminal is already up".
+//
+// The Python implementation pressed ctrl+alt+t unconditionally, and that is wrong for a desktop whose
+// shortcut does not work: Pop!_OS' COSMIC ignores it, and pressing it again after a dock click opened
+// the terminal types a control chord into the focused window. A file that wants the shortcut says
+// `terminal_wait: 8` and gets it.
+func (e *Executor) doRun(s walk.Step) error {
+	body := s.Get("run")
+	if strings.TrimSpace(body) == "" {
+		return fail(s.Name, "`run:` must contain a command")
+	}
+	if wait, _ := s.Float("terminal_wait", 0); wait > 0 {
+		if err := e.Driver.Stroke([]string{"ctrl", "alt"}, "t"); err != nil {
+			return fail(s.Name, "opening the terminal: %v", err)
+		}
+		time.Sleep(time.Duration(wait * float64(time.Second)))
+	}
+	perChar, _ := s.Float("type_gap", 0.02)
+	lineGap, _ := s.Float("line_gap", 1.0)
+	gap := time.Duration(perChar * float64(time.Second))
+	between := time.Duration(lineGap * float64(time.Second))
+
+	// MULTI-LINE, AND THAT IS NOT COSMETIC. `keys.for_text` refuses a newline, and a version that
+	// typed the body as one string silently dropped everything after it - measured, in the Python
+	// implementation's own note. Each line is typed, Return, then the next: exactly what a person
+	// does at a terminal.
+	lines := strings.Split(strings.ReplaceAll(body, "\r\n", "\n"), "\n")
+	for i, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		unsupported, err := e.Driver.Type(line, gap)
+		if err != nil {
+			return fail(s.Name, "typing line %d: %v", i+1, err)
+		}
+		if len(unsupported) > 0 {
+			// LOUD, because a command that lost a character is a command that will fail in the
+			// guest with a message about ITS syntax rather than about this step.
+			e.Driver.Log(fmt.Sprintf("  COULD NOT TYPE %q on line %d", string(unsupported), i+1))
+		}
+		if err := e.Driver.Key("ret"); err != nil {
+			return fail(s.Name, "pressing Return after line %d: %v", i+1, err)
+		}
+		if i < len(lines)-1 {
+			time.Sleep(between)
+		}
+	}
+	return e.settle(s)
+}

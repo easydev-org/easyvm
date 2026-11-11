@@ -184,6 +184,10 @@ func (e *Executor) runOne(s walk.Step) error {
 		return e.doUntil(s)
 	case s.Has("expect_any") || s.Has("expect"):
 		return e.doExpectAny(s)
+	case s.Has("disk_settle"):
+		return e.doDiskSettle(s)
+	case s.Has("run"):
+		return e.doRun(s)
 	case hasKey(s, "host_log"):
 		return e.doHostLog(s)
 	case hasKey(s, "at_button"):
