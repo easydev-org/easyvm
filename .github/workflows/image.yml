@@ -32,6 +32,20 @@ on:
       - "go.sum"
       - ".github/workflows/image.yml"
 
+# ONE IMAGE BUILD AT A TIME, AND THE NEWEST ONE WINS.
+#
+# WITHOUT THIS, EVERY PUSH TO A FILE UNDER `internal/**` QUEUES A FULL BUILD - four minutes of apt, a Go
+# build, and a multi-hundred-megabyte push - and they run ONE AFTER ANOTHER. Measured: six builds queued
+# behind two running walkthroughs, the oldest waiting thirty-five minutes for a commit four revisions
+# stale. Every one but the last is work whose result nobody will use.
+#
+# The image a workflow pulls is `:latest`, so only the newest build can be the one that matters - and
+# cancelling the older ones is not losing information, it is skipping a version that was already
+# superseded before it started.
+concurrency:
+  group: image
+  cancel-in-progress: true
+
 env:
   IMAGE: ghcr.io/${{ github.repository }}
 

@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -340,4 +341,63 @@ func TestMacOSSetupHasTimeForTheInstallItWaitsFor(t *testing.T) {
 			"`follow it` leaves for its own diagnosis the job is cut off mid-install and reports a "+
 			"cancellation instead of a step name", job, workMin, headroom)
 	}
+}
+
+// EVERY WORKFLOW THAT PRODUCES A SHARED ARTEFACT MUST DECLARE CONCURRENCY.
+//
+// `image.yml` HAD NONE, and it publishes `:latest` - so every push queued another full build and they
+// ran one after another. Measured: SIX BUILDS QUEUED behind two running walkthroughs, the oldest waiting
+// thirty-five minutes to build a commit four revisions stale. Five of those six produced an image nobody
+// would ever pull.
+//
+// THE OS WORKFLOWS ALREADY HAD THIS, each with its own group so dispatching one cannot cancel a run of
+// another - that lesson cost forty minutes of a Windows install. `image.yml` is the one that was missed,
+// because it is not dispatched by hand and nothing in a feature change makes a person think about it.
+//
+// THE RULE: any workflow with a `push:` trigger or a shared published artefact needs a group, and a
+// group that cancels. A queued build of superseded code is not information worth keeping.
+func TestEveryWorkflowThatPublishesDeclaresConcurrency(t *testing.T) {
+	files, err := filepath.Glob("../../.github/workflows/*.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) == 0 {
+		t.Skip("no workflows here")
+	}
+	var checked int
+	for _, path := range files {
+		rel, _ := filepath.Rel(filepath.Join("..", ".."), path)
+		body, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		text := string(body)
+		// THE REUSABLE MECHANISM (`stage.yml`) IS CALLED BY OTHERS AND MUST NOT DECLARE A WORKFLOW-LEVEL
+		// GROUP: doing so makes it unparseable and the dispatch creates zero jobs.
+		if strings.Contains(text, "workflow_call:") {
+			if strings.Contains(text, "\nconcurrency:") {
+				t.Errorf("%s is a `workflow_call` workflow and declares `concurrency:`, which makes it "+
+					"unparseable - the dispatch creates zero jobs", rel)
+			}
+			continue
+		}
+		// A `push:` TRIGGER MEANS EVERY COMMIT STARTS IT. That is the case that queued six image builds.
+		if !strings.Contains(text, "\npush:") && !strings.Contains(text, "branches: [main]") {
+			continue
+		}
+		checked++
+		if !strings.Contains(text, "\nconcurrency:") {
+			t.Errorf("%s has a `push:` trigger and no `concurrency:`, so every commit queues another "+
+				"full run that the next commit supersedes before it starts", rel)
+			continue
+		}
+		if !strings.Contains(text, "cancel-in-progress: true") {
+			t.Errorf("%s declares `concurrency:` without `cancel-in-progress: true`, so superseded "+
+				"runs queue instead of being replaced", rel)
+		}
+	}
+	if checked == 0 {
+		t.Skip("no push-triggered workflows here")
+	}
+	t.Logf("checked %d push-triggered workflow(s)", checked)
 }
