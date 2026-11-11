@@ -280,6 +280,12 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 	if err != nil {
 		return err
 	}
+	// THE ACCELERATOR IS CHECKED BEFORE THE MACHINE IS BUILT, because there is no fallback to fall
+	// back to: `-accel kvm` is in the command line below, and a guest on TCG is a guest that either
+	// times out or deadlocks.
+	if err := machine.CheckKVM(); err != nil {
+		return err
+	}
 	opts, err := machine.CommonOptions{CPUs: spec.CPUs, MemMB: spec.MemMB, SSHPort: d.port}.
 		Normalise()
 	if err != nil {
@@ -337,7 +343,23 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 	d.vncPort = vncBase + vncDisplay
 
 	args := []string{
-		"-machine", "q35",
+		// THE ACCELERATOR IS NAMED, AND ITS ABSENCE WAS THE REASON EVERY LEG RAN ON TCG.
+		//
+		// `-machine q35` WITH NO `-accel` LETS QEMU CHOOSE, and qemu's default is `tcg` - pure
+		// software emulation. It does not fail, it does not warn in a way that reads as a problem,
+		// and the guest boots: slowly. Measured on run 43063744565's macos-setup leg, whose log is
+		// full of
+		//
+		//	qemu-system-x86_64: warning: TCG doesn't support requested feature:
+		//	  CPUID[80000007h].EDX.invtsc [bit 8]
+		//
+		// - `+invtsc` is one of the twenty CPU flags macOS needs, and TCG cannot provide it. That is
+		// the deadlock documented in internal/machine: every vCPU at 100%, block I/O frozen, the
+		// serial output ending at `[EB|LOG:HANDOFF TO XNU]` with no panic.
+		//
+		// `-accel kvm` MAKES THE FAILURE LOUD: a container without a usable /dev/kvm now says so at
+		// startup instead of running at a fiftieth of the speed and timing out forty minutes later.
+		"-machine", "q35,accel=kvm",
 		"-cpu", cpu,
 		"-smp", boot.SMP(opts.CPUs),
 		"-m", fmt.Sprint(opts.MemMB),

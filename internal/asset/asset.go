@@ -93,8 +93,27 @@ type Spec struct {
 // truncated filename. If 7z is absent the build is wrong and this says so.
 func Fetch(spec Spec) (Result, error) {
 	kind, work := spec.Kind, spec.Work
-	_ = spec.Family // no kind's content depends on the guest's OS yet; the field stays for one
-	// that will (the macOS agent bundle is per-release).
+
+	// `guest_agent` IS THE FILE'S NAME FOR IT, AND THE FAMILY PICKS THE BINARY.
+	//
+	// TWO FILES WRITE `fetch: guest_agent` - windows/11/steps/vm-configure.yaml and
+	// macos/15/steps/vm-configure.yaml - and both were refused with
+	//
+	//	"guest_agent" is not an asset this build knows; the kinds are guest_agent_windows,
+	//	guest_agent_macos, ...
+	//
+	// WHICH IS A VOCABULARY THE CALLER DID NOT NEED TO KNOW. The family is already on the step (or
+	// on the walkthrough), so the suffix is a fact the implementation can resolve rather than one a
+	// file should have to repeat. The two explicit kinds still work - a file that wants to be
+	// unambiguous may say one - and this is the default.
+	if kind == "guest_agent" {
+		switch spec.Family {
+		case "macos":
+			kind = GuestAgentMacOS
+		default:
+			kind = GuestAgentWindows
+		}
+	}
 	switch kind {
 	case GuestAgentWindows:
 		return fetchWindowsAgent(work)

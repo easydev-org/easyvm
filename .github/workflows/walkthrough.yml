@@ -301,9 +301,29 @@ jobs:
         # refuses; the refusal is right, but this says which one and stops in two seconds.
         run: |
           set -eu
+          # A DEVICE NODE THAT EXISTS IS NOT A DEVICE THAT WORKS, AND CHECKING ONLY FOR EXISTENCE
+          # COST EVERY LEG ITS ACCELERATOR.
+          #
+          # `test -e /dev/kvm` passed on run 43063744565 while qemu ran on TCG - pure software
+          # emulation - because the node was there and the ioctl behind it was not reachable. The
+          # symptom was not an error: the guest boots, everything takes fifty times as long, and the
+          # log says `TCG doesn't support requested feature` about the CPU flags macOS needs.
+          #
+          # THESE TWO CHECKS OPEN THE DEVICES. /dev/kvm answers an ioctl only if this process may use
+          # it; /dev/net/tun can be opened read-write only with the right device permissions. Both are
+          # what qemu will do a second later, and both fail here with a message instead.
           test -e /dev/kvm || { echo "=== NO /dev/kvm ==="; exit 1; }
           test -e /dev/net/tun || { echo "=== NO /dev/net/tun ==="; exit 1; }
           ls -l /dev/kvm /dev/net/tun
+          # BOTH ARE OPENED, NOT JUST LISTED. `test -e` passed on run 43063744565 while qemu ran
+          # on TCG, because a device node can exist and still refuse the ioctl behind it - and the
+          # result was not an error but a guest at a fiftieth of the speed.
+          #
+          # A shell can open a device with `exec` and `/dev/zero`'s own trick: `: < /dev/kvm` opens
+          # it for reading and fails loudly if the open is refused.
+          : < /dev/kvm || { echo "=== /dev/kvm CANNOT BE OPENED (qemu would fall back to TCG) ==="; exit 1; }
+          : < /dev/net/tun || { echo "=== /dev/net/tun CANNOT BE OPENED ==="; exit 1; }
+          echo "/dev/kvm and /dev/net/tun are openable"
           easyvm versions
           qemu-img --version | head -1
           # THE HOST-SIDE TOOLS THE FILES USE. Named here so a missing one is this step rather than

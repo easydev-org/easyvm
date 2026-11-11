@@ -429,3 +429,52 @@ func TestBSDIsAcceptedAndBootsLikeLinux(t *testing.T) {
 		t.Fatal("bsd must not get the SMC device or the macOS ICH9 arguments")
 	}
 }
+
+// KVM IS NAMED, NOT NEGOTIATED.
+//
+// `-machine q35` WITH NO `-accel` LETS QEMU CHOOSE, and qemu's default is `tcg` - pure software
+// emulation. It does not fail and it does not visibly warn: the guest boots, everything takes fifty
+// times as long, and on macOS the twenty CPU flags it needs are refused one by one:
+//
+//	qemu-system-x86_64: warning: TCG doesn't support requested feature:
+//	  CPUID[80000007h].EDX.invtsc [bit 8]
+//
+// `+invtsc` is the flag whose absence deadlocks macOS at `[EB|LOG:HANDOFF TO XNU]` with every vCPU at
+// 100%, which internal/machine's own comment records. On TCG that is not a risk, it is the outcome.
+//
+// THESE TESTS ARE ABOUT THE TWO HALVES OF THE GUARANTEE: the command line names the accelerator, and
+// the check behind it says what is wrong when the device is not usable - because "qemu exited 1" is a
+// message about neither.
+func TestTheAcceleratorIsInTheCommandLine(t *testing.T) {
+	body, err := os.ReadFile("../daemon/driver.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(body)
+	if !strings.Contains(src, "accel=kvm") {
+		t.Fatal("the qemu command line does not name `accel=kvm`. Without it qemu defaults to TCG: the " +
+			"guest boots, runs at a fiftieth of the speed, and macOS cannot be given `+invtsc` - the " +
+			"flag whose absence deadlocks it at HANDOFF TO XNU")
+	}
+	if !strings.Contains(src, "machine.CheckKVM()") {
+		t.Fatal("CheckKVM exists and nothing calls it, so a container without a usable /dev/kvm " +
+			"finds out from qemu's exit code instead of from a sentence about the device")
+	}
+}
+
+// AND THE CHECK REPORTS SOMETHING THIS MACHINE DOES OR DOES NOT HAVE, rather than passing by being
+// untested. It must not PANIC and must not claim an answer it did not measure.
+func TestCheckKVMAnswersForThisMachine(t *testing.T) {
+	err := CheckKVM()
+	if err == nil {
+		t.Log("this machine can accelerate guests")
+		return
+	}
+	// A machine without KVM must get a message naming the device and the consequence.
+	for _, want := range []string{"/dev/kvm"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("the refusal must name %q; got %v", want, err)
+		}
+	}
+	t.Logf("no KVM here, as expected for a test runner: %v", err)
+}
