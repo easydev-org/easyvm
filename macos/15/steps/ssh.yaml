@@ -116,9 +116,31 @@ steps:
     record: install.mp4
     poll: 20
 
+  # A MACOS BOOT IS NOT "BOOT THE DISK": IT IS OPENCORE, THE TARGET, AND THE RECOVERY IMAGE.
+  #
+  # There is no `iso:` and there never will be - macOS has no install ISO, only a recovery image.
+  # And the recovery image is attached on EVERY macOS boot, not only when something is being
+  # installed, because OpenCore reads Apple's APFS driver out of it:
+  #
+  #     IT IS AN INPUT EVEN THOUGH THIS STAGE DOES NOT BOOT FROM IT. opencore.build() extracts
+  #     Apple's APFS driver out of it, and a job inherits no other job's inputs.
+  #
+  # AND THE THREE DISKS HAVE A BOOT ORDER, WHICH IS PART OF THE MEANING:
+  #
+  #     boot.img   OpenCore, bootindex=0   "a disk with no bootindex is not in the boot order at
+  #                                        all, which is what failed to load Boot0001 meant for
+  #                                        six runs"
+  #     disk       the target, bootindex=1 after the installer writes a system, OpenCore finds it
+  #     recovery   as USB                macOS installs from REMOVABLE media; the disk it installs
+  #                                        TO is not the disk it boots FROM
+  #
+  # All of that is internal/machine's job. This step says which macOS and where the recovery image
+  # is; the firmware, the boot indexes, the SMC, the CPU flags and the video adapter follow from
+  # `os: macos` alone.
   - name: boot the disk
     boot: true
     os: macos
+    recovery: "{{ work }}/recovery.dmg"
     timeout: 900
 
   # THE ACCOUNT'S PASSWORD, INTO THE LOGIN WINDOW.

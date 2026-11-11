@@ -370,3 +370,8 @@ func qcodeByName(name string) (raw.KeyValueQcode, error) {
 	}
 	return raw.KeyValueQcode(code), nil
 }
+
+// Reset asks qemu to reset the guest, which is a warm reboot.
+func (c *Conn) Reset() error {
+	return c.raw.SystemReset()
+}

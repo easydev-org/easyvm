@@ -46,8 +46,16 @@ steps:
   # about the disk, and `require_ssh:` below is the step that asks for it. A file that installs
   # an operating system has no sshd to wait for.
   - name: boot the disk
+  # OPENCORE AND THE RECOVERY IMAGE ARE PART OF EVERY MACOS BOOT, not only an install.
+  #
+  # macOS has no install ISO. It starts through OpenCore, which is built from the recovery image -
+  # Apple's APFS driver is extracted from that image - and the recovery image stays attached as
+  # removable media because that is how macOS installs. The three disks, their boot order, the SMC
+  # device and the CPU flags all follow from `os: macos`; what the file has to say is where the
+  # recovery image is.
     boot: true
     os: macos
+    recovery: "{{ work }}/recovery.dmg"
     timeout: 900
 
   # THE ONLY STEP THAT WAITS FOR A SHELL. Its own timeout, visible here.

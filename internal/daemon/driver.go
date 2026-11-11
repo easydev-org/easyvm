@@ -221,22 +221,42 @@ func (m machineControl) Disk() string {
 }
 
 // Start launches qemu with the ONE command line every family shares.
-func (m machineControl) Start() error {
+func (m machineControl) Boot(spec run.BootSpec) error {
 	d := m.d
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.proc != nil {
 		return fmt.Errorf("a machine is already running")
 	}
-	if d.diskPath == "" {
-		return fmt.Errorf("no disk to boot; a `disk:` step must come first, or pass --boot-disk")
-	}
 
-	opts, err := machine.CommonOptions{SSHPort: d.port}.Normalise()
+	guestOS, err := machine.ParseOS(spec.OS)
 	if err != nil {
 		return err
 	}
-	cpu, err := machine.ResolveCPU("")
+	opts, err := machine.CommonOptions{CPUs: spec.CPUs, MemMB: spec.MemMB, SSHPort: d.port}.
+		Normalise()
+	if err != nil {
+		return err
+	}
+
+	// THE BOOT DESCRIPTION GOES THROUGH Validate BEFORE ANY PATH IS USED. A stage that never ran
+	// its `fetch:` gets a sentence naming what is missing, not qemu's message about a drive.
+	boot := machine.Boot{
+		OS:           guestOS,
+		Disk:         spec.Disk,
+		ISO:          spec.ISO,
+		AnswerCD:     spec.AnswerCD,
+		DriverCD:     spec.DriverCD,
+		Recovery:     spec.Recovery,
+		OpenCoreROM:  spec.OpenCoreROM,
+		OpenCoreVars: spec.OpenCoreVars,
+		BootImage:    spec.BootImage,
+	}
+	if err := boot.Validate(); err != nil {
+		return err
+	}
+
+	cpu, err := boot.CPU("")
 	if err != nil {
 		return err
 	}
@@ -245,46 +265,36 @@ func (m machineControl) Start() error {
 	_ = os.Remove(qmpPath)
 
 	// THE DISPLAY NUMBER IS FIXED AT 0 INSIDE THE CONTAINER: one guest per container, and a
-	// computed number would make the log line and the -vnc argument disagree about it.
+	// computed number would make the log line and the -vnc argument disagree.
 	const vncDisplay = 0
 	d.vncPort = vncBase + vncDisplay
 
 	args := []string{
 		"-machine", "q35",
-		// THE CPU IS FIXED FOR EVERY GUEST. See internal/machine: `host` makes a run
-		// unreproducible across runners, and cachyos panicked on the first second of boot because
-		// of it.
 		"-cpu", cpu,
-		"-smp", fmt.Sprint(opts.CPUs),
+		"-smp", boot.SMP(opts.CPUs),
 		"-m", fmt.Sprint(opts.MemMB),
-		"-vga", opts.VGA,
+		"-vga", boot.VGA(opts.VGA),
 		"-display", "none",
-		"-drive", "file=" + d.diskPath + ",if=virtio,format=qcow2",
-		"-qmp", "unix:" + qmpPath + ",server=on,wait=off",
-		// VNC LISTENS ON THE LOOPBACK ONLY, and websockify is what a browser reaches. Binding
-		// qemu's own VNC to 0.0.0.0 would expose an unauthenticated VNC server; websockify in
-		// front of it on 127.0.0.1 is the same page with one door.
+	}
+	// THE GUEST'S OWN DEVICES, IN THE ORDER THE GUEST READS THEM. This is where the three-way split
+	// between a Windows disk boot, a Windows ISO boot and a macOS boot lives - all of it in
+	// internal/machine, none of it here.
+	args = append(args, boot.StorageArgs()...)
+	args = append(args, boot.SMCArgs("")...)
+	args = append(args, boot.ExtraArgs()...)
+	args = append(args,
+		"-qmp", "unix:"+qmpPath+",server=on,wait=off",
 		"-vnc", fmt.Sprintf("127.0.0.1:%d", vncDisplay),
-		// THE ONE NETWORK MODE: tap on a bridge that internal/net built. There is no `-netdev user`
-		// anywhere in this program, and the reason is in that package's header - the host's smbd
-		// listens on the bridge address, and a user-mode guest cannot route to it.
-		//
-		// `script=no,downscript=no` BECAUSE THERE IS NO HELPER. qemu's default runs /etc/qemu-ifup
-		// when the tap comes up, and a container has no such file - so the default fails loudly,
-		// after the guest has been created.
 		"-netdev", fmt.Sprintf("tap,id=net0,ifname=%s,script=no,downscript=no",
 			easyvmnet.TapName),
-		// `host_mtu` IS THE ONLY WAY THE GUEST LEARNS THE LINK'S MTU. A guest at 1500 over a 1450
-		// tap drops every full segment, and the symptom is a TLS handshake that never completes
-		// rather than a network error. `romfile=` must be empty: a value there is read as a
-		// firmware path.
 		"-device", fmt.Sprintf("virtio-net-pci,netdev=net0,mac=%s,romfile=,host_mtu=%d",
 			easyvmnet.TapMAC, easyvmnet.MTU),
 		"-device", "virtio-tablet-pci",
-	}
+	)
 
-	// FIRMWARE IS THE ONE THING THAT IS GENUINELY PER-FAMILY. Windows and Linux take OVMF; macOS
-	// takes OpenCore. It is a fact about the guest, not an accident of who wrote the file.
+	// FIRMWARE. OVMF for Windows and Linux, OpenCore for macOS - and the variables file is COPIED
+	// rather than referenced, because qemu writes to it.
 	ovmfCode := os.Getenv("OVMF_CODE")
 	if ovmfCode == "" {
 		ovmfCode = "/usr/share/OVMF/OVMF_CODE_4M.fd"
@@ -294,15 +304,12 @@ func (m machineControl) Start() error {
 	if tmpl == "" {
 		tmpl = "/usr/share/OVMF/OVMF_VARS_4M.fd"
 	}
-	if _, err := os.Stat(ovmfVars); err != nil {
-		if err := copyFile(tmpl, ovmfVars); err != nil {
-			return fmt.Errorf("firmware variables: %w", err)
+	if !guestOS.IsMacOS() {
+		if err := machine.TouchOvmfVars(tmpl, ovmfVars); err != nil {
+			return err
 		}
 	}
-	args = append(args,
-		"-drive", "if=pflash,format=raw,readonly=on,file="+ovmfCode,
-		"-drive", "if=pflash,format=raw,file="+ovmfVars,
-	)
+	args = append(args, boot.FirmwareArgs(ovmfCode, ovmfVars)...)
 
 	// THE NETWORK BEFORE THE MACHINE, because qemu opens the tap itself: a tap that does not exist
 	// is `qemu: could not configure /dev/net/tun`, which reads as a qemu problem.
@@ -325,13 +332,10 @@ func (m machineControl) Start() error {
 	d.proc = cmd
 	d.qmpReg = qmp.NewRegistry()
 
-	// THE PAGE, ONCE THE MACHINE IS UP. It is a child of this driver, so Stop() and the shutdown
-	// path reap it - no supervisor, and no detached process outliving the run.
+	// THE PAGE, ONCE THE MACHINE IS UP.
 	if d.novncPort > 0 {
 		page, err := startConsole("127.0.0.1", d.novncPort, d.vncPort, d.logf)
 		if err != nil {
-			// A PORT ALREADY IN USE IS A CONFIGURATION MISTAKE, not a missing package, so it
-			// stops the boot rather than continuing without a page.
 			_ = cmd.Process.Kill()
 			_ = cmd.Wait()
 			d.proc = nil
@@ -379,12 +383,25 @@ func (m machineControl) Stop(method string) error {
 	return nil
 }
 
+// Reboot resets the machine and waits for it to answer again.
+//
+// IT RESETS RATHER THAN STOPPING AND STARTING, and that is not an optimisation: a stop-and-start
+// gives the guest a cold boot, which for an installer means it starts over. `system_reset` through
+// QMP is what `REBOOT` means in every file that asks for one.
 func (m machineControl) Reboot() error {
-	if err := m.Stop("kill"); err != nil {
+	d := m.d
+	conn, err := d.qmpSocket()
+	if err != nil {
 		return err
 	}
-	time.Sleep(2 * time.Second)
-	return m.Start()
+	// QEMU'S OWN RESET, NOT A PROCESS RESTART. The command is the machine's, and the guest sees a
+	// warm reboot - which is what a stage that says `reboot:` wants, because the alternative is a
+	// cold boot that restarts an installer.
+	if err := conn.Reset(); err != nil {
+		return fmt.Errorf("resetting the machine: %w", err)
+	}
+	d.logf("  the machine was reset")
+	return nil
 }
 
 func (m machineControl) IsRunning() bool {

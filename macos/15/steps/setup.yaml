@@ -89,8 +89,16 @@ steps:
   # NO `requires:` - a recovery image is not a capability of a running guest, it is an input
   # this stage was given, and `boot:` is the step that reads it.
   - name: boot the recovery image
+  # OPENCORE AND THE RECOVERY IMAGE ARE PART OF EVERY MACOS BOOT, not only an install.
+  #
+  # macOS has no install ISO. It starts through OpenCore, which is built from the recovery image -
+  # Apple's APFS driver is extracted from that image - and the recovery image stays attached as
+  # removable media because that is how macOS installs. The three disks, their boot order, the SMC
+  # device and the CPU flags all follow from `os: macos`; what the file has to say is where the
+  # recovery image is.
     boot: true
     os: macos
+    recovery: "{{ work }}/recovery.dmg"
     timeout: 900
   # =======================================================================================
   # 1. THE RECOVERY MENU, WHICH IS DRAWN - NOT LOADED

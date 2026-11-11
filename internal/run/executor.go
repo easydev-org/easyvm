@@ -31,6 +31,8 @@ type Executor struct {
 	rec     *recorder
 	recDone chan struct{}
 
+	// BootDisk is the disk a `boot:` starts when no `disk:` step named one - the --boot-disk flag.
+	BootDisk string
 	// OnStep is called as each step begins, for a daemon that must answer "where is it now".
 	//
 	// IT IS NOT LOGGING. The log is a stream a human reads; this is the one fact a client needs to

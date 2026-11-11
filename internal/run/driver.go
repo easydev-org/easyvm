@@ -48,8 +48,12 @@ type Frame interface {
 
 // Machine is the part of a running guest a step can change.
 type Machine interface {
-	// Start boots the disk this walkthrough named.
-	Start() error
+	// Boot starts the machine this step describes.
+	//
+	// IT TAKES THE DESCRIPTION RATHER THAN READING ONE. A driver that consulted the step's own
+	// fields would need to know which of `iso:`, `recovery:` and `os:` meant what - and that
+	// mapping is the thing this call exists to make single-sourced.
+	Boot(spec BootSpec) error
 	// Stop shuts down by a NAMED method, or reports that it cannot.
 	Stop(method string) error
 	// Reboot resets and waits for it to come back.
@@ -112,4 +116,31 @@ func failWithScreen(step string, d Driver, format string, args ...any) error {
 		}
 	}
 	return e
+}
+
+// BootSpec is what a `boot:` step says, in the shape the driver needs.
+//
+// THE FIELDS ARE PATHS AND NAMES, NOT DECISIONS. Which firmware to load, whether to attach a
+// recovery image and whether discard is safe are decided by internal/machine from what is here -
+// because those depend on each other, and a caller that decided them separately would get one of
+// them wrong.
+type BootSpec struct {
+	// OS is windows, linux or macos.
+	OS string
+	// Disk is the target, and for a disk boot it is also what boots.
+	Disk string
+	// ISO is an installer medium. Windows and Linux only.
+	ISO string
+	// AnswerCD and DriverCD are the two extra media Windows Setup reads.
+	AnswerCD string
+	DriverCD string
+	// Recovery is macOS's recovery image, attached as removable media.
+	Recovery string
+	// OpenCoreROM, OpenCoreVars and BootImage are the macOS loader, built from the recovery image.
+	OpenCoreROM  string
+	OpenCoreVars string
+	BootImage    string
+	// CPUs and MemMB are the machine's size.
+	CPUs  int
+	MemMB int
 }

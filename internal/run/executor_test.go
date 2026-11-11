@@ -21,6 +21,7 @@ type fakeDriver struct {
 	strokes  [][2]string
 	typed    []string
 	started  int
+	boot     *BootSpec
 	stopped  []string
 	frames   int
 	guestNil bool
@@ -67,7 +68,12 @@ func (stubFrame) Words() []string  { return nil }
 
 type fakeMachine struct{ d *fakeDriver }
 
-func (m *fakeMachine) Start() error { m.d.started++; return nil }
+func (m *fakeMachine) Boot(spec BootSpec) error {
+	// THE SPEC IS RECORDED, so a test can assert what a `boot:` step asked for without a machine.
+	m.d.boot = &spec
+	m.d.started++
+	return nil
+}
 func (m *fakeMachine) Stop(method string) error {
 	m.d.stopped = append(m.d.stopped, method)
 	return nil

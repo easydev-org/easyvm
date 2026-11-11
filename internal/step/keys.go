@@ -110,6 +110,25 @@ var Keys = map[string]Key{
 		Summary: "which family the machine is: windows, macos, linux, android"},
 	"family": {Name: "family", Kind: KindString,
 		Summary: "the older spelling of os, kept for files not yet renamed"},
+	// --- how a boot gets its first instruction -------------------------------------------
+	//
+	// A GUEST HAS TWO INDEPENDENT FACTS: which OS it is, and whether an installer is attached.
+	// `os:` says the first. These say the second, and the presence of one IS the statement - the
+	// same rule `disk:` follows, so a file cannot say two contradictory things about what it
+	// starts.
+	"iso": {Name: "iso", Kind: KindString,
+		Summary: "an installer ISO. Windows and Linux boot it directly; macOS has none and is " +
+			"refused by name if given one"},
+	"recovery": {Name: "recovery", Kind: KindString,
+		Summary: "macOS's recovery image, attached as removable media. It is the install medium " +
+			"AND the source of the APFS driver OpenCore needs, so it is attached on every macOS " +
+			"boot"},
+	"answer_cd": {Name: "answer_cd", Kind: KindString,
+		Summary: "a second CD-ROM carrying Windows' answer file. Setup finds it nowhere on the " +
+			"install ISO"},
+	"driver_cd": {Name: "driver_cd", Kind: KindString,
+		Summary: "a third CD-ROM carrying the virtio drivers, for the installed system to pick up " +
+			"network and ballooning"},
 	"cpu": {Name: "cpu", Kind: KindString,
 		Summary: "the guest's -cpu model when the disk's packages need a fixed one; empty is " +
 			"-cpu host"},

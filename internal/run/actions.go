@@ -20,22 +20,79 @@ func (e *Executor) doBoot(s walk.Step) error {
 	if m == nil {
 		return fail(s.Name, "this driver has no machine to start")
 	}
-	// `os:` REPLACED `family:`, and both are accepted so a file that has not been renamed still
-	// runs. The Python implementation's `_os_of()` was the single place this was decided, because
-	// two answers to "which family" produce two machine definitions.
-	family := s.Get("os")
-	if family == "" {
-		family = s.Get("family")
+	// `os:` REPLACED `family:`, and both are read so a file that has not been renamed still runs.
+	osName := s.Get("os")
+	if osName == "" {
+		osName = s.Get("family")
 	}
-	if family == "" {
-		return fail(s.Name, "a boot step must name `os:` (windows, macos, linux or android)")
+	if osName == "" {
+		return fail(s.Name, "a boot step must name `os:` (windows, linux or macos)")
 	}
-	e.Driver.Log(fmt.Sprintf("  booting %s with -cpu %s", family, "Skylake-Client-v4"))
-	if err := m.Start(); err != nil {
+
+	spec := BootSpec{
+		OS:       osName,
+		Disk:     e.bootDisk(),
+		ISO:      s.Get("iso"),
+		AnswerCD: s.Get("answer_cd"),
+		DriverCD: s.Get("driver_cd"),
+		Recovery: s.Get("recovery"),
+	}
+	// THE OPENCORE FILES ARE BUILT FROM THE RECOVERY IMAGE BY AN EARLIER STEP, and this names them
+	// the same way that step did: `<work>/opencore/`.
+	if spec.Recovery != "" {
+		spec.OpenCoreROM = filepath.Join(e.Work, "opencore", "opencore.rom")
+		spec.OpenCoreVars = filepath.Join(e.Work, "opencore", "vars.fd")
+		spec.BootImage = filepath.Join(e.Work, "opencore", "boot.img")
+	}
+
+	e.Driver.Log(fmt.Sprintf("  booting %s from %s%s", spec.OS, bootSourceName(spec),
+		mediaNote(spec)))
+	if err := m.Boot(spec); err != nil {
 		return fail(s.Name, "boot: %v", err)
 	}
 	e.Driver.Log("  qemu started")
 	return nil
+}
+
+// bootSourceName is what the log calls this: the fact a reader checks first.
+func bootSourceName(spec BootSpec) string {
+	switch {
+	case spec.Recovery != "":
+		return "the recovery image"
+	case spec.ISO != "":
+		return "the installer"
+	}
+	return "the disk"
+}
+
+// mediaNote lists the media, because a boot line that names only the primary medium hides the other
+// two a Windows install needs.
+func mediaNote(spec BootSpec) string {
+	var parts []string
+	for _, m := range []struct{ path, why string }{
+		{spec.ISO, "installer"},
+		{spec.AnswerCD, "answer"},
+		{spec.DriverCD, "drivers"},
+		{spec.Recovery, "recovery"},
+	} {
+		if m.path != "" {
+			parts = append(parts, m.why+"="+filepath.Base(m.path))
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return " + " + strings.Join(parts, " + ")
+}
+
+// bootDisk is the target, from the `disk:` step when it ran and from the flag otherwise.
+func (e *Executor) bootDisk() string {
+	if d, ok := e.Driver.Machine().(interface{ Disk() string }); ok {
+		if p := d.Disk(); p != "" {
+			return p
+		}
+	}
+	return e.BootDisk
 }
 
 func (e *Executor) doShutdown(s walk.Step) error {
