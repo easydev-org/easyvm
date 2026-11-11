@@ -373,7 +373,19 @@ func UnpackOpencore(archive, dest, work string) error {
 	// stripped: the tree the firmware wants is EFI/, not X64/EFI/.
 	stage := filepath.Join(work, "opencore-unpacked")
 	_ = os.RemoveAll(stage)
-	cmd := exec.Command(sevenZip, "x", "-y", "-o"+stage, archive, "X64/*")
+	// TWO PATTERNS, BECAUSE THE ARCHIVE HOLDS TWO TREES THIS BUILD NEEDS AND ONE IT DOES NOT.
+	//
+	//	X64/EFI                       the payload the firmware starts
+	//	Utilities/macserial/*         the serial generator, which ships WITH that payload
+	//
+	// The first version unpacked only `X64/*`, so macserial was never present and the identity step
+	// failed after 20 MB of assets and a template extraction. Found by running the REAL archive: four
+	// fixture-based tests all passed while the build could not produce a boot image from a release.
+	//
+	// IA32/ AND Docs/ ARE EXCLUDED ON PURPOSE: this guest is x86-64, and the documentation would go
+	// into the boot image.
+	cmd := exec.Command(sevenZip, "x", "-y", "-o"+stage, archive, "X64/*",
+		"Utilities/macserial/*")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("unpacking %s: %v (%s)", filepath.Base(archive),
 			err, firstLine(string(out)))
@@ -386,7 +398,39 @@ func UnpackOpencore(archive, dest, work string) error {
 	if err := copyTree(source, filepath.Join(dest, "EFI")); err != nil {
 		return err
 	}
-	return nil
+
+	// AND THE SERIAL GENERATOR, WHICH IS NOT IN THAT TREE.
+	//
+	// macserial travels INSIDE OpenCore's own archive - the generator ships with the payload it
+	// describes, rather than being a second download that can drift from it - but it is under
+	// `Utilities/macserial/macserial.linux`, which `X64/*` does not match. Unpacking only the EFI
+	// tree therefore produced a build whose identity step failed with "macserial is not at ..." AFTER
+	// 20 MB of assets and a template extraction.
+	//
+	// FOUND BY RUNNING THE REAL ARCHIVE: the four unit tests used a fixture and none of them could
+	// see which paths a real release contains.
+	utilities := filepath.Join(stage, "Utilities")
+	if dirExists(utilities) {
+		if err := copyTree(utilities, filepath.Join(dest, "Utilities")); err != nil {
+			return err
+		}
+	}
+	macserial := filepath.Join(dest, "Utilities", "macserial", "macserial.linux")
+	if !fileExists(macserial) {
+		return fmt.Errorf("%s holds no Utilities/macserial/macserial.linux. Apple's serial numbers "+
+			"carry a checksum over the model and factory code, and a hand-rolled one fails it - the "+
+			"guest then stops booting when the NVRAM remembers it", filepath.Base(archive))
+	}
+	if err := os.Chmod(macserial, 0o755); err != nil {
+		return err
+	}
+	// AND AT THE PATH generateSerial LOOKS FOR, so the two do not have to agree about a directory
+	// name: one copy, named where it is used.
+	tool := filepath.Join(work, "macserial")
+	if err := copyFile(macserial, tool); err != nil {
+		return err
+	}
+	return os.Chmod(tool, 0o755)
 }
 
 // IdentityFor reads the identity a previous run wrote, or makes one.

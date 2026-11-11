@@ -395,3 +395,62 @@ func TestAMissingRecoveryPathIsRefused(t *testing.T) {
 		t.Fatalf("the refusal must say what is missing; got %v", err)
 	}
 }
+
+// A REAL OPENCORE ARCHIVE, BECAUSE A FIXTURE CANNOT KNOW WHICH PATHS A RELEASE CONTAINS.
+//
+// THE FOUR TESTS ABOVE PASSED WHILE THIS BUILD COULD NOT UNPACK A REAL RELEASE. `UnpackOpencore`
+// copied only `X64/EFI`, and macserial lives under `Utilities/` - so the identity step failed with
+// "macserial is not at ..." after 20 MB of assets had been fetched and the template extracted. Every
+// fixture agreed with the code, because a fixture is written by whoever wrote the code.
+//
+// IT SKIPS WHEN THE ARCHIVE IS NOT PRESENT rather than fetching it: a unit test must not need the
+// network, and the asset is pinned by sha256 so the CI image can carry one copy. `OPENCORE_ARCHIVE`
+// names it.
+func TestUnpackARealArchive(t *testing.T) {
+	archive := os.Getenv("OPENCORE_ARCHIVE")
+	if archive == "" {
+		archive = "/tmp/oc-test/opencore.zip"
+	}
+	if _, err := os.Stat(archive); err != nil {
+		t.Skipf("no real OpenCore archive at %s (set OPENCORE_ARCHIVE)", archive)
+	}
+	// AND IT IS THE PINNED ONE, or this test would be about some other release.
+	got, err := sha256File(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != Assets["opencore"].SHA256 {
+		t.Fatalf("the archive at %s is sha256 %s, not the pinned %s", archive, got,
+			Assets["opencore"].SHA256)
+	}
+
+	work := t.TempDir()
+	dest := filepath.Join(work, "efi")
+	if err := UnpackOpencore(archive, dest, work); err != nil {
+		t.Fatalf("unpacking the pinned archive: %v", err)
+	}
+
+	// THE TWO PATHS THE FIRMWARE OPENS.
+	for _, want := range []string{"EFI/BOOT/BOOTx64.efi", "EFI/OC/OpenCore.efi"} {
+		p := filepath.Join(dest, want)
+		fi, err := os.Stat(p)
+		if err != nil {
+			t.Fatalf("the pinned archive contains %s and this build did not produce it: %v", want, err)
+		}
+		if fi.Size() == 0 {
+			t.Fatalf("%s came out empty", want)
+		}
+	}
+
+	// AND THE SERIAL GENERATOR, which is the one this build failed to unpack. A hand-rolled serial
+	// fails Apple's checksum and the guest stops booting when the NVRAM remembers it.
+	tool := filepath.Join(work, "macserial")
+	fi, err := os.Stat(tool)
+	if err != nil {
+		t.Fatalf("macserial was not placed at %s: %v. It is under Utilities/ in the real archive, "+
+			"which an X64/EFI-only unpack skips", tool, err)
+	}
+	if fi.Mode()&0o111 == 0 {
+		t.Fatalf("macserial is not executable (%v); the identity step runs it", fi.Mode())
+	}
+}
