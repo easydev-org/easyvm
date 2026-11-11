@@ -100,14 +100,26 @@ func (e *Executor) readScreen(s walk.Step, label string) ([]string, error) {
 	if region, ok := rectOf(s, "region"); ok {
 		// `region_at` EXISTS BECAUSE A CROP MEASURED AT ONE RESOLUTION IS WRONG AT ANOTHER. A step
 		// that says [880, 960, 1045, 1000] was measured on a 1920x1080 guest; a guest booted at
-		// another size would have the crop on the wrong part of the screen, and the read would
-		// come back empty for a reason nobody could see.
+		// another size would have the crop on the wrong part of the screen.
+		//
+		// BUT A MISMATCH IS NOT ALWAYS A MISTAKE IN THE FILE, AND FAILING ON IT WAS WRONG.
+		// THE GUEST CHANGES SIZE DURING A BOOT - the UEFI shell draws at 1280x800, the desktop at
+		// 1920x1080 - so a poll can land before the mode changes. The Python implementation reports
+		// it and reads NOTHING, which for an `until` means "try again next poll", and the caller's
+		// timeout decides whether the pane ever arrives at the size the file expects.
+		//
+		// Measured on run 43063744565's nixos leg, which failed with
+		//
+		//     wait for the Console result: `region_at` is [1920, 1080] but this frame is 1280x800
+		//
+		// on a file whose region is right and whose guest had not finished switching modes. A
+		// hard failure turned "the pane is not up yet" into "the file is broken".
 		if at, ok := pairOf(s, "region_at"); ok {
 			w, h := f.Size()
 			if at[0] != w || at[1] != h {
-				return nil, fmt.Errorf("`region_at` is [%d, %d] but this frame is %dx%d: the crop "+
-					"was measured at another resolution and would land on the wrong part of the "+
-					"screen", at[0], at[1], w, h)
+				e.Driver.Log(fmt.Sprintf("  %s: the framebuffer is %dx%d but this region was "+
+					"measured at %dx%d; not reading it", s.Name, w, h, at[0], at[1]))
+				return nil, nil
 			}
 		}
 		scale := 3

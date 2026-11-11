@@ -485,7 +485,24 @@ func (m machineControl) Reboot() error {
 	if err := conn.Reset(); err != nil {
 		return fmt.Errorf("resetting the machine: %w", err)
 	}
-	d.logf("  the machine was reset")
+	// AND THE CACHED SSH CONNECTION DIES WITH THE GUEST.
+	//
+	// `Guest()` KEEPS ONE CONNECTION for the whole run, which is right until the machine reboots:
+	// after a reset the guest's sshd is gone with its TCP state, so the next `ssh:` step writes into
+	// a socket that will never answer and reports
+	//
+	//	error: read what this boot did: ssh session: EOF
+	//
+	// Measured on run 43063744565's manjaro and opensuse legs, whose LAST step is an `ssh:` after a
+	// `reboot:`. Closing it here means the next step dials fresh, which is the only correct answer:
+	// a connection to a machine that restarted is not a connection.
+	d.mu.Lock()
+	if d.ssh != nil {
+		_ = d.ssh.Close()
+		d.ssh = nil
+	}
+	d.mu.Unlock()
+	d.logf("  the machine was reset; the ssh connection was closed with it")
 	return nil
 }
 
