@@ -1,0 +1,16 @@
+# Build output. `dist/easyvm` is produced by the workflow's first job and copied into the image;
+# it is never committed, because a binary in a repository is a binary nobody rebuilds.
+/dist/
+
+# A run's scratch: frames, disks and recordings. The daemon defaults its work directory to the
+# walkthrough's own directory, so these can land anywhere.
+*.qcow2
+*.qcow2.part
+*.mp4
+*.ppm
+*.sock
+
+# Editors.
+.idea/
+.vscode/
+*.swp

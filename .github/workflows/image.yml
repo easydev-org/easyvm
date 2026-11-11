@@ -1,0 +1,181 @@
+name: image
+
+# Build the easyvm image on GitHub, never locally.
+#
+# WHY AN IMAGE AT ALL. A walkthrough drives a real qemu against a real disk, so a test needs the
+# machine every stage runs on - qemu 11.1 with KVM, OVMF, swtpm, samba, tesseract. Installing those
+# per job is four minutes of apt before a single step runs, and the installed set drifts from the
+# one a real run uses. The image is the environment as a fact rather than as a hope.
+#
+# TWO JOBS, AND THE SECOND DEPENDS ON THE FIRST FOR A REASON: the binary is built once and copied
+# into the image, so the image does not carry a Go toolchain (400 MB) for a binary that is already
+# compiled. If the build fails, there is nothing to put in the image and the second job does not
+# start.
+
+on:
+  workflow_dispatch:
+    inputs:
+      push:
+        description: "Push the image to ghcr"
+        type: boolean
+        default: true
+      platforms:
+        description: "Platforms to build"
+        default: "linux/amd64"
+  push:
+    branches: [main]
+    paths:
+      - "Containerfile"
+      - "cmd/**"
+      - "internal/**"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/image.yml"
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  # ===========================================================================
+  # BUILD THE BINARY, AND PROVE IT RUNS.
+  #
+  # `go test` FIRST, because a binary that passes its own tests is the only thing worth putting in
+  # an image. The tests include the vocabulary check against the real walkthrough files, so a
+  # bundle that cannot read them fails here rather than inside a VM.
+  # ===========================================================================
+  binary:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: vet
+        run: go vet ./...
+
+      - name: test
+        # -timeout bounds a hung step. One test deliberately waits on a socket that never answers,
+        # so a generous ceiling is still a real one.
+        run: go test ./... -count=1 -timeout 300s
+
+      - name: build
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          # CGO_ENABLED=0 because the binary must run in a distroless-shaped layer with no libc
+          # assumptions; the ssh and qmp packages are pure Go.
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+            go build -trimpath -ldflags "-s -w" -o dist/easyvm ./cmd/easyvm
+          ls -l dist/easyvm
+
+      - name: the binary answers for itself
+        # A BINARY THAT CANNOT DESCRIBE ITSELF IS ONE NOBODY CAN DEBUG IN A CONTAINER. This is the
+        # check that the thing in dist/ is the program and not a stub: `versions` reports the CPU
+        # model it will use and the tools it can see.
+        run: |
+          set -euo pipefail
+          ./dist/easyvm versions
+          ./dist/easyvm versions | grep -q 'Skylake-Client-v4'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: easyvm-binary
+          path: dist/easyvm
+          if-no-files-found: error
+          retention-days: 7
+
+  # ===========================================================================
+  # BUILD THE IMAGE.
+  # ===========================================================================
+  image:
+    needs: binary
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: easyvm-binary
+          path: dist
+
+      - name: the binary arrived
+        # THE ARTIFACT IS A SEPARATE JOB'S OUTPUT, so its presence is checked rather than assumed -
+        # a `download-artifact` that finds nothing leaves an empty directory and the COPY in the
+        # Containerfile then fails with a message about a missing file, which points at the wrong
+        # place.
+        run: |
+          set -euo pipefail
+          test -x dist/easyvm || { echo "=== dist/easyvm IS NOT EXECUTABLE ==="; ls -l dist/; exit 1; }
+          ./dist/easyvm versions | head -2
+
+      - uses: docker/setup-qemu-action@v3
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: log in to ghcr
+        if: inputs.push != false
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          # TWO TAGS AND BOTH MATTER. `latest` is what a run pulls by default; the sha is what makes
+          # a run reproducible and lets a reader say which image produced a log line.
+          tags: |
+            type=raw,value=latest
+            type=sha,prefix=,format=short
+
+      - name: build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Containerfile
+          platforms: ${{ inputs.platforms || 'linux/amd64' }}
+          push: ${{ inputs.push != false }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # THE SELF-CHECKS IN THE CONTAINERFILE ARE THE PRODUCT OF THIS JOB. They assert qemu,
+          # ffmpeg, smbd, swtpm, websockify, noVNC, OVMF and `-cpu Skylake-Client-v4` - so a base
+          # image that loses one of them fails the build here rather than twenty minutes into a
+          # walkthrough. `no-cache` on the checks would be the way to force them; layer caching is
+          # kept because the RUN that carries them also carries the apt install.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: the image runs, and its binary does
+        # THE BUILD SUCCEEDING IS NOT THE SAME AS THE IMAGE WORKING. This starts the built image and
+        # asks the binary inside it to describe itself - which proves the COPY put it where the
+        # entrypoint looks, that it is executable, and that the qemu it will drive is the one the
+        # Containerfile asserted.
+        if: inputs.platforms == '' || inputs.platforms == 'linux/amd64'
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint /usr/local/bin/easyvm \
+            "${{ env.IMAGE }}:latest" versions
+
+      - name: the CPU model is the one every guest uses
+        # THE ONE ASSERTION THAT MATTERS MOST, ASKED OF THE BUILT IMAGE RATHER THAN THE BUILDER.
+        # `-cpu host` makes a run unreproducible across runners, and cachyos panicked in its first
+        # second because of it. If this image's qemu does not know the model, every walkthrough
+        # fails on its first boot.
+        if: inputs.platforms == '' || inputs.platforms == 'linux/amd64'
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint qemu-system-x86_64 \
+            "${{ env.IMAGE }}:latest" -cpu help 2>&1 | grep -q 'Skylake-Client-v4'
+          echo "the image knows -cpu Skylake-Client-v4"
