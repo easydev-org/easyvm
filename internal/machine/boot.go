@@ -36,7 +36,21 @@ const (
 	Windows OS = "windows"
 	Linux   OS = "linux"
 	MacOS   OS = "macos"
+	// BSD IS A DIFFERENT OPERATING SYSTEM AND THE SAME MACHINE.
+	//
+	// GhostBSD boots the way every Linux here does - UEFI firmware, a virtio disk, std VGA at the
+	// resolution the coordinates were measured at - because that is what lib/ssh_step.py built for
+	// it with the same `uefi.shape_with_uefi(shape, work, kind)` call every Linux distribution uses.
+	// So it is its own NAME and not its own machine: the name appears in logs and in a file's
+	// `os:`, and nothing else about the guest changes.
+	BSD OS = "bsd"
 )
+
+// IsLinuxLike reports whether this guest boots UEFI with a virtio disk - every Linux and the BSD.
+//
+// IT EXISTS SO `StorageArgs` DOES NOT HAVE TO LIST THEM: a `switch` over three cases where two share
+// every field is a place for the third to be forgotten when a fourth arrives.
+func (o OS) IsLinuxLike() bool { return o == Linux || o == BSD }
 
 // IsMacOS reports whether this guest boots through OpenCore.
 //
@@ -47,7 +61,7 @@ func (o OS) IsMacOS() bool { return o == MacOS }
 // ParseOS refuses anything that is not a machine this build can start.
 func ParseOS(s string) (OS, error) {
 	switch OS(s) {
-	case Windows, Linux, MacOS:
+	case Windows, Linux, MacOS, BSD:
 		return OS(s), nil
 	case "":
 		return "", fmt.Errorf("a boot step must name `os:` - windows, linux or macos")

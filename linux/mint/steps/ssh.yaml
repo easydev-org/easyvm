@@ -63,6 +63,27 @@ vars:
   # Removed. The account is the one every other Linux image here has.
 
 steps:
+  # THE MACHINE IS STARTED HERE, IN THE FILE, AND IT WAS NOT BEFORE.
+  #
+  # THIS STAGE'S DISK COMES FROM THE PREVIOUS ONE - so `boot_disk: from_caller` says the caller's
+  # `--boot-disk` supplies it - but SOMETHING STILL HAS TO START QEMU. In the Python implementation
+  # that something was lib/ssh_step.py, which built the machine, started it, and only then ran this
+  # file. The first CI run of these thirteen legs proved the cost of leaving it there:
+  #
+  #     error: open the terminal: key "ctrl+alt+t": qmp .../drive.sock.qmp: dial unix
+  #            .../drive.sock.qmp: connect: no such file or directory (waited 30s)
+  #
+  # - the first GUI step of a file whose machine had never been started. The launcher pulled the
+  # disk, started the daemon, asked for the run, and the run had nothing to click on.
+  #
+  # `os: linux` IS THE WHOLE MACHINE DESCRIPTION: UEFI firmware, a virtio disk, `-vga std` at
+  # 1920x1080, and the OVMF variable store that makes the installed system bootable. Every field of
+  # it was in lib/ssh_step.py's `vm.Shape(...)` call, and none of it was in the file.
+  - name: boot the disk
+    boot: true
+    os: linux
+    timeout: 900
+
 
   # =======================================================================================
   # 0. GET PAST THE GREETER, WHEN THIS DISK DOES NOT AUTOLOGIN

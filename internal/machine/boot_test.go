@@ -383,3 +383,49 @@ func TestDiscardIsDecidedByTheMediaAndNotByTheDiskSize(t *testing.T) {
 			"threshold; the installer is still writing and this is the 17 GiB failure")
 	}
 }
+
+// BSD IS A DIFFERENT OPERATING SYSTEM ON THE SAME MACHINE.
+//
+// GhostBSD boots the way every Linux here does - UEFI firmware, a virtio disk, std VGA - because
+// lib/ssh_step.py built it with the same `uefi.shape_with_uefi(shape, work, kind)` call every Linux
+// distribution uses. So `os: bsd` is its own NAME and not its own machine: the name appears in logs
+// and in a file, and nothing else about the guest changes.
+//
+// THE FIRST CI RUN OF THE THIRTEEN LINUX/BSD LEGS IS WHY THIS EXISTS AT ALL: those files had no
+// `boot:` step, because in the Python implementation lib/ssh_step.py started the machine before
+// running them. Reproducing that as a file means the file has to say `os:` - and `os: bsd` was
+// refused by ParseOS, so a file that named it correctly would still not boot.
+func TestBSDIsAcceptedAndBootsLikeLinux(t *testing.T) {
+	os_, err := ParseOS("bsd")
+	if err != nil {
+		t.Fatalf("`os: bsd` must be accepted: %v", err)
+	}
+	if !os_.IsLinuxLike() {
+		t.Fatal("bsd must be linux-like: same firmware, same disk bus, same video adapter")
+	}
+	if os_.IsMacOS() {
+		t.Fatal("bsd is not macOS; it must not get OpenCore, the SMC or the Apple CPU flags")
+	}
+
+	disk, iso, answer, driver, _, _, _, _ := fixture(t)
+	_ = answer
+	_ = driver
+	installed := Boot{OS: BSD, Disk: disk}
+	if err := installed.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	// THE STORAGE IS ONE VIRTIO DISK AND THE SAME DISCARD RULE AS LINUX.
+	args := strings.Join(installed.StorageArgs(), " ")
+	if !strings.Contains(args, "if=virtio") || !strings.Contains(args, "discard=unmap") {
+		t.Fatalf("a booted BSD disk must be one virtio disk with discard on:\n%s", args)
+	}
+	// AND AN INSTALLER ISO TURNS DISCARD OFF, the same rule as every other family.
+	installing := Boot{OS: BSD, Disk: disk, ISO: iso}
+	if strings.Contains(strings.Join(installing.StorageArgs(), " "), "discard=unmap") {
+		t.Fatal("an installing BSD boot must not discard")
+	}
+	// AND IT GETS NO APPLE OR WINDOWS PARTS.
+	if len(installed.SMCArgs("")) != 0 || len(installed.ExtraArgs()) != 0 {
+		t.Fatal("bsd must not get the SMC device or the macOS ICH9 arguments")
+	}
+}
