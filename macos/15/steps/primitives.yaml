@@ -67,6 +67,26 @@ steps:
   #
   # And discard is ON: this disk is finished, and a guest's TRIMs are what keep the published
   # qcow2 small.
+  # OPENCORE AND THE RECOVERY IMAGE ARE INPUTS EVEN THOUGH THIS STAGE DOES NOT INSTALL.
+  #
+  # The firmware three - a boot image, OVMF's code and a writable variables copy - are built FROM the
+  # recovery image, because Apple's APFS driver lives inside it (usr/standalone/i386/apfs.efi) and
+  # OpenCore cannot read an APFS partition without one. EnableJumpstart=true does not supply a
+  # driver; it HOOKS one the firmware is expected to have, and OVMF has none. The symptom is silent:
+  # a picker that lists only Reset NVRAM and Toggle SIP.
+  #
+  # NO `recovery:` ON THE BOOT, THOUGH. That key attaches the image to the GUEST as removable media,
+  # and only the setup stage installs from it. An installed disk has no recovery volume, and an extra
+  # USB disk is one more row in Disk Utility's sidebar - which is what `choose the target disk by
+  # capacity` reads. Two facts, two places: this step reads the image, the boot does not give it away.
+  - name: fetch the recovery image
+    fetch: recovery_macos
+    release: "15"
+  - name: build OpenCore from the recovery image
+    fetch: opencore
+    release: "15"
+    recovery: recovery_macos
+
   - name: boot the disk
     boot: true
     os: macos

@@ -130,10 +130,20 @@ func (d *Daemon) runWalkthrough(req Request, work string, done chan struct{}) {
 	// `args.work` IS A RUN FACT LIKE `args.out`. A `fetch:` puts its file in the work directory and
 	// the `scp:` that follows names it - so the file has to be able to say where that is, rather
 	// than hard-coding a path the daemon chose.
-	file, err := walk.Load(req.File, map[string]string{
+	overrides := map[string]string{
 		"args.out":  req.Out,
 		"args.work": work,
-	})
+	}
+	// THE CALLER'S VARIABLES. A command-line `--shutdown kill` reaches a file's `shutdown:` var the
+	// same way `--out` reaches `{{ out }}`, so an empty one is dropped rather than turned into an
+	// empty string - "present but empty" and "absent, use the default" are different answers and
+	// the file has a default for exactly this reason.
+	for k, v := range req.Vars {
+		if v != "" {
+			overrides["args."+k] = v
+		}
+	}
+	file, err := walk.Load(req.File, overrides)
 	if err != nil {
 		fail("the walkthrough could not be loaded", err)
 		return

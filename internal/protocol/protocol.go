@@ -68,6 +68,14 @@ type Request struct {
 	Password string `json:"password,omitempty"`
 	// NoVNCPort is where the page should listen; 0 uses the default.
 	NoVNCPort int `json:"novnc_port,omitempty"`
+	// Vars are the file's own variables, overridden from the command line.
+	//
+	// IT IS A MAP RATHER THAN MORE FIELDS, AND THAT IS THE POINT. Each stage names run facts of its
+	// own - `shutdown` for a stage that must not ask macOS to power down, `disk_name` and
+	// `expected_gb` for the erase step, `boot_timeout` for a loaded runner - and a struct that grew
+	// a field per stage would be a second place the vocabulary lives. The file declares them; this
+	// supplies values.
+	Vars map[string]string `json:"vars,omitempty"`
 }
 
 type Response struct {

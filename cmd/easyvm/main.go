@@ -63,6 +63,7 @@ run flags:
   --out PATH        where a compress: step writes
   --password PW     the guest account's password
   --novnc-port N    where the browser page listens; 0 disables it
+  --name=value       set one of the file's own variables (e.g. --shutdown=kill)
 
 every guest starts with -cpu ` + machine.CPUModel + `; -cpu host is refused.
 `
@@ -341,6 +342,11 @@ func cmdRun(args []string) int {
 	}
 	defer cl.Close()
 
+	// THE FILE'S OWN VARIABLES COME FROM THE COMMAND LINE, because a run fact is not a property of
+	// the walkthrough: the same file runs against a throwaway overlay (`shutdown: kill`) and against
+	// a disk it owns (`shutdown: ssh`).
+	vars := gatherVars(args)
+
 	resp, err := cl.Do(client.Request{
 		Command:  "run",
 		File:     absPath(file),
@@ -348,6 +354,7 @@ func cmdRun(args []string) int {
 		BootDisk: *bootDisk,
 		Out:      *out,
 		Password: *password,
+		Vars:     vars,
 		// THE DAEMON'S OWN --novnc-port WINS, because the page's port is a fact about the
 		// machine's host rather than about this file. A client that passed one here would be
 		// overriding a decision it cannot see.
@@ -534,4 +541,24 @@ func workDirFor(file, work string) string {
 		return work
 	}
 	return filepath.Dir(absPath(file))
+}
+
+// gatherVars reads `--name=value` pairs, which is how a run sets a variable the file declared.
+//
+// IT IS THE `key=value` FORM RATHER THAN A PAIR OF ARGUMENTS, and that is deliberate: a bare
+// `--shutdown kill` would be indistinguishable from a flag taking a value, and Go's flag package
+// would claim it. `--shutdown=kill` says what it is.
+func gatherVars(args []string) map[string]string {
+	out := map[string]string{}
+	for _, a := range args {
+		if !strings.HasPrefix(a, "--") || !strings.Contains(a, "=") {
+			continue
+		}
+		kv := strings.SplitN(strings.TrimPrefix(a, "--"), "=", 2)
+		if kv[0] == "" {
+			continue
+		}
+		out[kv[0]] = kv[1]
+	}
+	return out
 }
