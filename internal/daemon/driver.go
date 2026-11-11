@@ -193,16 +193,34 @@ func (d *Driver) sendStrokes(conn *qmp.Conn, strokes []keys.Stroke, perChar time
 // --- the guest ------------------------------------------------------------------------
 
 func (d *Driver) Guest() *guest.Client {
+	// THE LOCK IS HELD TO LOOK AND TO STORE, NEVER TO DIAL.
+	//
+	// A dial to a guest that is not answering takes the full thirty seconds, and holding `d.mu` across
+	// it blocks every other caller of this driver - `status`, `Frame`, the console page - for exactly
+	// as long. The same shape deadlocked `Stop`: a lock around a network round trip is wrong even
+	// when nothing recurses.
 	d.mu.Lock()
-	defer d.mu.Unlock()
 	if d.ssh != nil {
-		return d.ssh
+		existing := d.ssh
+		d.mu.Unlock()
+		return existing
 	}
 	target := guest.Target{Host: "172.30.0.1", Port: d.port, User: d.file.SSHUser, Password: d.pass}
+	d.mu.Unlock()
+
 	client, err := guest.Dial(target, 30*time.Second)
 	if err != nil {
 		d.logf(fmt.Sprintf("  could not open an ssh connection: %v", err))
 		return nil
+	}
+
+	// AND A CONNECTION THAT ARRIVED WHILE THIS ONE WAS DIALING WINS. Two steps that both needed a
+	// guest would otherwise leave two connections, and only the last one would ever be closed.
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.ssh != nil {
+		_ = client.Close()
+		return d.ssh
 	}
 	d.ssh = client
 	return d.ssh
@@ -568,9 +586,21 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 // Stop shuts down by the method the file named, and there is no silent fallback between them.
 func (m machineControl) Stop(method string) error {
 	d := m.d
+	// THE LOCK IS TAKEN TO LOOK, NOT TO WORK.
+	//
+	// MEASURED ON UBUNTU-VM: the leg reported `stop the machine` and then sat in `follow it` for
+	// thirty minutes with `status` still saying `running`. `Stop` held `d.mu` for its whole body, and
+	// the first thing a graceful shutdown does is `d.Guest()` - which takes `d.mu` itself. Same
+	// goroutine, same mutex, no way out: the stage had finished every step it exists to do and could
+	// never report it.
+	//
+	// A LOCK AROUND A NETWORK ROUND TRIP WOULD BE WRONG EVEN IF IT DID NOT DEADLOCK: `poweroff` waits
+	// on a guest, and every other caller of this driver - `status`, `Frame`, the console - would be
+	// blocked behind it for up to five minutes.
 	d.mu.Lock()
-	defer d.mu.Unlock()
-	if d.proc == nil {
+	running := d.proc != nil
+	d.mu.Unlock()
+	if !running {
 		return nil
 	}
 	switch method {
@@ -609,13 +639,26 @@ func (m machineControl) Stop(method string) error {
 	if err := d.waitForExit(shutdownTimeout); err != nil {
 		return err
 	}
-	if d.page != nil {
-		d.page.stop()
-		d.page = nil
+	d.mu.Lock()
+	page := d.page
+	d.page = nil
+	d.mu.Unlock()
+	if page != nil {
+		page.stop()
 	}
-	_ = d.proc.Process.Kill()
-	_ = d.proc.Wait()
+	// `waitForExit` ALREADY REAPED IT - CALLING `Wait` AGAIN BLOCKS FOREVER.
+	//
+	// Measured on ubuntu-vm: the leg sat in `follow it` for thirty minutes with `status` still saying
+	// `running`, on a machine that had been asked to power off. `waitForExit` calls `d.proc.Wait()`
+	// in a goroutine and returns when it comes back; the SECOND `Wait()` below it blocks on an
+	// `os.Process` that has already been reaped, and Go's `Wait` does not return an error for that - it
+	// waits on a channel nothing will ever close.
+	//
+	// THE KILL IS ALSO `waitForExit`'S JOB NOW: it returns after reaping, or kills and returns. What
+	// is left here is closing the page and clearing the field.
+	d.mu.Lock()
 	d.proc = nil
+	d.mu.Unlock()
 	return nil
 }
 
@@ -673,12 +716,20 @@ func (d *Driver) shutdownOverACPI() error {
 
 // waitForExit waits for qemu to leave, and kills it if it does not.
 func (d *Driver) waitForExit(limit time.Duration) error {
-	if d.proc == nil {
+	// THE PROCESS IS TAKEN ONCE, UNDER THE LOCK, AND THE WAIT RUNS ON THAT VALUE.
+	//
+	// `Stop` clears `d.proc` when it is done, and `status` reads it - so a wait that dereferenced the
+	// field from a goroutine would race with both. One local pointer means this function owns what it
+	// is waiting for, whatever else happens to the field.
+	d.mu.Lock()
+	proc := d.proc
+	d.mu.Unlock()
+	if proc == nil {
 		return nil
 	}
 	done := make(chan struct{})
 	go func() {
-		_ = d.proc.Wait()
+		_ = proc.Wait()
 		close(done)
 	}()
 	select {
@@ -690,6 +741,11 @@ func (d *Driver) waitForExit(limit time.Duration) error {
 		// guest whose disk will need a journal replay, and the next stage's "slow boot" is this line.
 		d.logf(fmt.Sprintf("  the guest did not power off within %s; killing it - the disk will need "+
 			"a journal replay on its next boot", limit))
+		// AND IT IS KILLED AND REAPED HERE, because the goroutine above is still blocked on `Wait`
+		// and this function is the only place that knows the guest missed its deadline. A kill with
+		// no reap is a zombie holding the disk open.
+		_ = proc.Process.Kill()
+		<-done
 		return nil
 	}
 }

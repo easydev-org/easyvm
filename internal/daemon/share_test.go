@@ -198,3 +198,170 @@ func TestTheAgentShutdownReadsItsAnswer(t *testing.T) {
 		}
 	}
 }
+
+// A SECOND `Wait()` ON AN ALREADY-REAPED PROCESS BLOCKS FOREVER, AND IT DID.
+//
+// MEASURED ON UBUNTU-VM: the leg sat in `follow it` for thirty minutes with `status` still saying
+// `running`, on a machine that had been asked to power off. `waitForExit` calls `d.proc.Wait()` in a
+// goroutine and returns when it comes back - and `Stop` then called `d.proc.Wait()` AGAIN, which
+// blocks on an `os.Process` that has already been reaped. Go's `Wait` does not return an error for
+// that; it waits on a channel nothing will ever close.
+//
+// THE STAGE HAD DONE ALL ITS WORK and could not report it, which reads from the outside exactly like a
+// hung guest.
+func TestStopWaitsExactlyOnce(t *testing.T) {
+	body, err := os.ReadFile("driver.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(body)
+	start := strings.Index(src, "func (m machineControl) Stop(")
+	if start < 0 {
+		t.Fatal("no Stop")
+	}
+	rest := src[start:]
+	if end := strings.Index(rest[1:], "\nfunc "); end > 0 {
+		rest = rest[:end+1]
+	}
+	// THE COMMENTS ARE STRIPPED FIRST, AND THAT IS NOT COSMETIC: the comment explaining this defect
+	// QUOTES the offending call, so a check over the raw text fails on its own explanation. Measured -
+	// this test reported the bug present after the bug was gone, because the note next to the fix
+	// says `` `d.proc.Wait()` `` in prose.
+	rest = stripGoComments(rest)
+	// THE ONLY WAIT ALLOWED IS THE ONE INSIDE waitForExit, which is a different function.
+	if strings.Contains(rest, "d.proc.Wait()") {
+		t.Fatal("`Stop` calls `d.proc.Wait()` itself as well as through `waitForExit`, and the " +
+			"second call blocks forever on a process that was already reaped")
+	}
+	if !strings.Contains(rest, "waitForExit") {
+		t.Fatal("`Stop` does not wait for the process at all")
+	}
+	// AND THE TIMEOUT PATH MUST KILL AND REAP, or a guest that misses its deadline is left running.
+	wfe := src[strings.Index(src, "func (d *Driver) waitForExit("):]
+	if end := strings.Index(wfe[1:], "\nfunc "); end > 0 {
+		wfe = wfe[:end+1]
+	}
+	wfe = stripGoComments(wfe)
+	if !strings.Contains(wfe, "Process.Kill()") {
+		t.Fatal("the timeout path logs that it is killing the guest and does not")
+	}
+	if !strings.Contains(wfe, "<-done") {
+		t.Fatal("the timeout path kills without reaping, leaving a zombie that holds the disk open")
+	}
+}
+
+// stripGoComments removes `//` comments and /* */ blocks so a check can read the CODE.
+//
+// A TEST THAT MATCHES RAW SOURCE CANNOT TELL A DEFECT FROM THE NOTE THAT DESCRIBES IT, and here it
+// could not: the fix carries a paragraph explaining the double `Wait`, which quotes the call it
+// removed. The test went red on its own documentation.
+//
+// This is not a Go parser and does not need to be - it removes comments only, and preserves string
+// and rune literals, which is the one place a `//` is not a comment.
+func stripGoComments(src string) string {
+	var out []byte
+	i := 0
+	for i < len(src) {
+		c := src[i]
+		switch {
+		case c == '"' || c == '\'':
+			// COPY THE LITERAL WHOLE, so a `//` inside a string is not mistaken for a comment.
+			quote := c
+			out = append(out, c)
+			i++
+			for i < len(src) {
+				out = append(out, src[i])
+				if src[i] == '\\' && i+1 < len(src) {
+					out = append(out, src[i+1])
+					i += 2
+					continue
+				}
+				if src[i] == quote {
+					i++
+					break
+				}
+				i++
+			}
+		case c == '/' && i+1 < len(src) && src[i+1] == '/':
+			for i < len(src) && src[i] != '\n' {
+				i++
+			}
+		case c == '/' && i+1 < len(src) && src[i+1] == '*':
+			i += 2
+			for i+1 < len(src) && !(src[i] == '*' && src[i+1] == '/') {
+				i++
+			}
+			i += 2
+		default:
+			out = append(out, c)
+			i++
+		}
+	}
+	return string(out)
+}
+
+// `Stop` HELD THE DRIVER'S MUTEX AND THEN ASKED FOR IT AGAIN THROUGH `Guest()`.
+//
+// MEASURED ON UBUNTU-VM, AND IT IS THE THIRTY-MINUTE HANG:
+//
+//	=== stop the machine
+//	(follow it ... thirty minutes, `status` still saying `running`)
+//
+// `Stop` locks `d.mu` for its whole body. The first thing `shutdown: ssh` does is `d.Guest()`, which
+// locks `d.mu` itself. SAME GOROUTINE, SAME MUTEX, NO PATH OUT - and Go's mutex is not reentrant, so
+// the stage that had finished every step it exists to do could never report it.
+//
+// A LOCK AROUND A NETWORK ROUND TRIP IS WRONG EVEN WITHOUT THE RECURSION: `poweroff` waits on a
+// guest, and `status`, `Frame` and the console page would all be blocked behind it for minutes.
+func TestStopDoesNotHoldTheLockWhileItWorks(t *testing.T) {
+	body, err := os.ReadFile("driver.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(body)
+	start := strings.Index(src, "func (m machineControl) Stop(")
+	if start < 0 {
+		t.Fatal("no Stop")
+	}
+	rest := src[start:]
+	if end := strings.Index(rest[1:], "\nfunc "); end > 0 {
+		rest = rest[:end+1]
+	}
+	code := stripGoComments(rest)
+	if strings.Contains(code, "defer d.mu.Unlock()") {
+		t.Fatal("`Stop` unlocks with `defer`, which means it holds the lock for its whole body - " +
+			"including the `d.Guest()` call that takes the same lock")
+	}
+	if !strings.Contains(code, "d.mu.Lock()") {
+		t.Fatal("`Stop` reads `d.proc` without the lock at all")
+	}
+}
+
+// AND `Guest()` DOES NOT DIAL UNDER THE LOCK EITHER - the same rule, one function over.
+//
+// A dial to a guest that is not answering takes the full thirty seconds. Held across `d.mu`, that
+// blocks `status`, `Frame` and the console page for thirty seconds per attempt.
+func TestGuestDoesNotDialUnderTheLock(t *testing.T) {
+	body, err := os.ReadFile("driver.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(body)
+	start := strings.Index(src, "func (d *Driver) Guest(")
+	if start < 0 {
+		t.Fatal("no Guest")
+	}
+	rest := src[start:]
+	if end := strings.Index(rest[1:], "\nfunc "); end > 0 {
+		rest = rest[:end+1]
+	}
+	code := stripGoComments(rest)
+	dial := strings.Index(code, "guest.Dial(")
+	if dial < 0 {
+		t.Fatal("`Guest` does not dial at all")
+	}
+	if unlock := strings.Index(code, "d.mu.Unlock()"); unlock < 0 || unlock > dial {
+		t.Fatal("`Guest` dials while holding the driver's mutex, so every other caller waits out " +
+			"the full dial timeout")
+	}
+}
