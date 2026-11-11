@@ -273,6 +273,25 @@ steps:
     run: echo {{ password }} | sudo -S systemctl enable ssh 2>&1 | tail -3
     terminal_wait: 0
     settle: 8
+  # PASSWORD AUTHENTICATION IS SET EXPLICITLY, BECAUSE THIS STAGE'S NEXT STEP DEPENDS ON IT.
+  #
+  # FOUR DISTRIBUTIONS REACHED
+  #
+  #	wait for sshd: the port is open but no shell answers: ssh: handshake failed:
+  #	ssh: unable to authenticate, attempted methods [none password], no supported methods remain
+  #
+  # - manjaro, endeavour, opensuse-tumbleweed and cachyos. THE PORT WAS OPEN AND SSHD WAS RUNNING; what
+  # refused was the METHOD, so the stage that exists to install sshd could reach a machine that would
+  # not admit it.
+  #
+  # The eight that pass only do so because their vendor defaults to `PasswordAuthentication yes`. THAT
+  # IS A FACT IN ANOTHER PLACE: an image update can change it, and the failure names a handshake rather
+  # than a setting. The drop-in is idempotent and harmless where the default is already yes.
+  - name: allow password authentication
+    run: echo {{ password }} | sudo -S sh -c 'mkdir -p /etc/ssh/sshd_config.d && printf "PasswordAuthentication yes\n" > /etc/ssh/sshd_config.d/99-vm.conf' 2>&1 | tail -3
+    terminal_wait: 0
+    settle: 3
+
 
   - name: start ssh
     run: echo {{ password }} | sudo -S systemctl restart ssh 2>&1 | tail -3
