@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -29,21 +30,28 @@ func TestAssertedToolsAreInstalled(t *testing.T) {
 		"qemu-img":        "qemu-utils",
 		"ovmf":            "ovmf",
 		"swtpm":           "swtpm",
-		"smbd":            "samba-common-bin",
-		"dnsmasq":         "dnsmasq",
-		"ip":              "iproute2",
-		"iptables":        "iptables",
-		"sysctl":          "procps",
-		"ffmpeg":          "ffmpeg",
-		"tesseract":       "tesseract-ocr",
-		"debugfs":         "e2fsprogs",
-		"xorriso":         "xorriso",
-		"genisoimage":     "genisoimage",
-		"mformat":         "mtools",
-		"7z":              "p7zip-full",
-		"aria2c":          "aria2",
-		"unzstd":          "zstd",
-		"wimlib-imagex":   "wimtools",
+		// `smbd` IS IN `samba`, NOT `samba-common-bin`. This map said the latter and the test passed
+		// while a built image could not run `smbd` at all:
+		//
+		//	serve the host share: smbd is not installed: exec: "smbd": executable file not found
+		//
+		// THE TEST COMPARED TWO LISTS THAT WERE BOTH WRONG IN THE SAME WAY, which is what a map from
+		// tool to package is when nobody has built the image and run the tool.
+		"smbd":          "samba",
+		"dnsmasq":       "dnsmasq",
+		"ip":            "iproute2",
+		"iptables":      "iptables",
+		"sysctl":        "procps",
+		"ffmpeg":        "ffmpeg",
+		"tesseract":     "tesseract-ocr",
+		"debugfs":       "e2fsprogs",
+		"xorriso":       "xorriso",
+		"genisoimage":   "genisoimage",
+		"mformat":       "mtools",
+		"7z":            "p7zip-full",
+		"aria2c":        "aria2",
+		"unzstd":        "zstd",
+		"wimlib-imagex": "wimtools",
 	}
 
 	for tool, pkg := range from {
@@ -140,4 +148,82 @@ func TestTheImageEntrypointIsTheProgram(t *testing.T) {
 		t.Fatal("the image must not have a default `serve`; a container with no arguments " +
 			"should print usage rather than start a daemon")
 	}
+}
+
+// THE PACKAGE THAT OWNS `smbd` IS `samba`, AND THE MAP SAID OTHERWISE FOR AS LONG AS NOTHING RAN IT.
+//
+// THIS IS THE FAILURE MODE THE MAP ITSELF HAS: it compares a list of tools against a list of packages,
+// so when the MAP is what is wrong, both sides agree and the test passes. A built image then answered
+//
+//	serve the host share: smbd is not installed: exec: "smbd": executable file not found in $PATH
+//
+// `samba-common-bin` carries the shared libraries, `smbclient`, `smbpasswd` and the init scripts. The
+// DAEMON is in `samba`.
+func TestTheDaemonPackagesAreTheOnesThatCarryTheDaemons(t *testing.T) {
+	body, err := os.ReadFile("../../Containerfile")
+	if err != nil {
+		t.Skipf("no Containerfile here (%v)", err)
+	}
+
+	// THE APT LIST, AS NAMES. A package line is indented, may be quoted, and may carry a version pin
+	// (`"qemu-utils=${VERSION_QEMU}"`), so the name is the token before any `=`.
+	installed := map[string]bool{}
+	inApt := false
+	for _, line := range strings.Split(string(body), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "#") || trimmed == "" {
+			continue
+		}
+		if strings.Contains(trimmed, "apt-get") && strings.Contains(trimmed, "install") {
+			inApt = true
+			continue
+		}
+		if inApt {
+			if !strings.HasSuffix(trimmed, "\\") {
+				inApt = false
+				continue
+			}
+			name := strings.Trim(strings.TrimSuffix(trimmed, "\\"), ` "`)
+			if i := strings.IndexByte(name, '='); i > 0 {
+				name = name[:i]
+			}
+			installed[name] = true
+		}
+	}
+	if len(installed) == 0 {
+		t.Fatal("no apt install list was found in the Containerfile; this test is looking for " +
+			"the wrong shape and would pass on an empty image")
+	}
+
+	// THE PAIRS THAT ARE EASY TO GET WRONG, because the tool's name and the package's do not match
+	// and a near-miss package exists.
+	pairs := map[string]string{
+		"smbd":      "samba",         // NOT samba-common-bin: that has the libraries and smbclient
+		"qemu-img":  "qemu-utils",    // not qemu-system-x86
+		"sysctl":    "procps",        //
+		"tesseract": "tesseract-ocr", //
+		"7z":        "p7zip-full",    //
+		"mformat":   "mtools",        // not dosfstools
+	}
+	for tool, pkg := range pairs {
+		if !installed[pkg] {
+			t.Errorf("%s comes from %s, which is not in the apt list. Installed: %v", tool, pkg,
+				sortedKeys(installed))
+		}
+	}
+	// AND `samba-common-bin` ALONE IS NOT ENOUGH - it is the exact wrong answer this test exists for.
+	if installed["samba-common-bin"] && !installed["samba"] {
+		t.Fatal("`samba-common-bin` is installed without `samba`, so `smbd` is missing while " +
+			"`smbclient` and the libraries are present - a container that looks configured and " +
+			"cannot serve a share")
+	}
+}
+
+func sortedKeys(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }

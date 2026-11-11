@@ -59,10 +59,25 @@ ARG DEBIAN_SNAPSHOT="20260819T142328Z"
 #   procps            `sysctl`: net.ipv4.ip_forward=1, and IPv6 disabled per interface.
 #
 # THE SHARE
-#   samba-common-bin  smbd, and NOT the full `samba` metapackage: Winbind and the AD tooling are
-#                     for a domain member and this is a standalone share. The server is host-side on
-#                     purpose - `-netdev user,smb=` makes qemu fork its own smbd, which is a second
-#                     server with a second config, and telling the two apart cost several runs.
+#   samba             `smbd`, AND IT IS NOT IN `samba-common-bin`. That package carries the shared
+#                     libraries, `smbclient`, `smbpasswd` and the init scripts; the DAEMON itself is
+#                     in `samba`. Measured: a container built with only `samba-common-bin` answered
+#
+#                         serve the host share: smbd is not installed: exec: "smbd":
+#                         executable file not found in $PATH
+#
+#                     - a sentence that names the binary and not the package, which is why the
+#                     comment here said the wrong one for as long as the code did not run.
+#
+#                     THE FULL PACKAGE IS TAKEN AND NOTHING ELSE IS STARTED FROM IT: winbind and the
+#                     AD tooling are for a domain member and this is a standalone share, so they are
+#                     installed and never run. Splitting the package would mean a metapackage of one
+#                     binary, and the cost of the working one is 30 MB in an image that already
+#                     carries qemu.
+#
+#                     The server is host-side on purpose - `-netdev user,smb=` makes qemu fork its
+#                     own smbd, which is a second server with a second config, and telling the two
+#                     apart cost several runs.
 #
 # THE VERDICT
 #   ffmpeg            frames to a video. A recording is the one artefact that shows an installer
@@ -101,6 +116,7 @@ RUN set -eux; \
         iptables \
         dnsmasq \
         procps \
+        samba \
         samba-common-bin \
         ffmpeg \
         tesseract-ocr \
