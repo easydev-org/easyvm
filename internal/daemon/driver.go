@@ -59,7 +59,9 @@ type Driver struct {
 	page        *consoleServer
 	vncPort     int
 	netUp       bool
-	logf        func(string)
+	// share is the smbd this driver started, if a `share_serve:` step asked for one.
+	share *shareServer
+	logf  func(string)
 }
 
 // NewDriver builds the driver and returns a closer for the caller's defer.
@@ -687,6 +689,9 @@ func (d *Driver) shutdown() {
 		easyvmnet.Down()
 		d.netUp = false
 	}
+	// THE SHARE GOES WITH THE MACHINE. It is one smbd per run, started by a step, and a daemon that
+	// exits without stopping it leaves a server bound to a bridge that is about to be removed.
+	d.stopShare()
 	// AND THE DIFF IS RELEASED AND ITS BASE VERIFIED, EVEN WHEN THE WALK FAILED.
 	//
 	// `compress:` releases it on the success path. A walk that failed before that step never

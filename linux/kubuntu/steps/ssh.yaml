@@ -139,24 +139,20 @@ steps:
     terminal_wait: 0
     settle: 90
 
-  - name: enable ssh at boot
-    run: echo {{ password }} | sudo -S systemctl enable ssh 2>&1 | tail -3
-    terminal_wait: 0
-    settle: 8
-  # PASSWORD AUTHENTICATION IS SET TWO WAYS, BECAUSE ONE OF THEM SILENTLY DID NOT TAKE.
+  # PASSWORD AUTHENTICATION BEFORE THE DAEMON STARTS, WHICH IS THE ONLY ORDER THAT WORKS.
   #
-  # A DROP-IN IS ONLY READ IF THE MAIN CONFIG INCLUDES THE DIRECTORY. Measured: the drop-in was written
-  # and manjaro STILL refused the same handshake
+  # A DROP-IN IS ONLY READ IF THE MAIN CONFIG INCLUDES THE DIRECTORY, AND SSHD READS IT ONCE AT START.
+  # Measured: the setting was written and manjaro still refused the same handshake
   #
   #	wait for sshd: the port is open but no shell answers: ssh: handshake failed:
   #	ssh: unable to authenticate, attempted methods [none password], no supported methods remain
   #
-  # - because that release's `/etc/ssh/sshd_config` has no `Include /etc/ssh/sshd_config.d/*.conf`. A
-  # file that nothing reads is not a setting.
+  # - because that release's `/etc/ssh/sshd_config` has no `Include /etc/ssh/sshd_config.d/*.conf`,
+  # and because the write happened AFTER the daemon had already started.
   #
-  # SO BOTH: the drop-in (right for every release that does include the directory, and it survives a
-  # package update that rewrites the main file) AND an append to the main file itself. The append is
-  # guarded by a grep so a second run does not add a second line.
+  # SO BOTH FILES, BEFORE THE START: the drop-in (right where the directory is included, and it
+  # survives a package update that rewrites the main file) and an append to the main file itself,
+  # guarded by a grep so a second run adds no second line.
   - name: allow password authentication
     run: |
       echo {{ password }} | sudo -S sh -c '
@@ -168,14 +164,11 @@ steps:
     terminal_wait: 0
     settle: 3
 
-  # AND THE SETTING IS PROVEN, NOT ASSUMED. `sshd -T` prints the EFFECTIVE configuration after every
-  # include and override has been resolved - the only answer to "did my file get read". A drop-in that
-  # nothing includes and a main file that was overwritten by an update both look identical without it.
-  - name: prove password authentication took
-    run: echo {{ password }} | sudo -S sh -c 'sshd -T 2>/dev/null | grep -i "^passwordauthentication"' 2>&1 | tail -3
-    terminal_wait: 0
-    settle: 3
 
+  - name: enable ssh at boot
+    run: echo {{ password }} | sudo -S systemctl enable ssh 2>&1 | tail -3
+    terminal_wait: 0
+    settle: 8
   - name: prove the setting took
     run: echo {{ password }} | sudo -S sh -c 'sshd -T 2>/dev/null | grep -i "^passwordauthentication" || echo PASSWORDAUTH-UNREADABLE' 2>&1 | tail -3
     terminal_wait: 0
