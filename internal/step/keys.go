@@ -284,6 +284,38 @@ var Keys = map[string]Key{
 	"release": {Name: "release", Kind: KindString,
 		Summary: "which OS release is being driven; the Apple Account pane differs by release"},
 
+	// --- host-side files, written or fetched before a copy -------------------------------
+	//
+	// THESE REPLACE `python:` STEPS, and the split is the same one the Python implementation had:
+	// the file is WRITTEN or FETCHED here, the `scp:` after it moves it in, and the `ssh:` after
+	// that runs it. A single step that wrote, copied and ran reported "the launcher install
+	// exited 1" and named neither the file nor the action.
+	"write": {Name: "write", Kind: KindString,
+		Summary: "write one of the login/bootstrap files on the HOST, for the scp: after it. " +
+			"Kinds: launcher, macos_agent_plist, macos_mount_script, macos_mount_plist, " +
+			"windows_task"},
+	"dismiss": {Name: "dismiss", Kind: KindString,
+		Summary: "click away the overlays a first login puts up - post_login is the Keyboard " +
+			"Setup Assistant and its neighbours, which swallow the next keystroke"},
+	"wait_for": {Name: "wait_for", Kind: KindString,
+		Summary: "wait for a control with no readable title; login_window is the password field, " +
+			"twelve pixels tall, read from a crop at 6x"},
+	"select_disk": {Name: "select_disk", Kind: KindString,
+		Summary: "pick the target disk in an installer's disk list; by_capacity chooses by size " +
+			"because the row order depends on what the installer enumerated"},
+	"apple_account": {Name: "apple_account", Kind: KindString,
+		Summary: "leave the Apple Account pane; skip is the only action, and the way to leave it " +
+			"differs between macOS 15 and 26"},
+	"copy_in": {Name: "copy_in", Kind: KindString,
+		Summary: "copy a fetched asset into the guest over sftp; xcode and dev_packages are the " +
+			"two names the macOS dev stage uses"},
+	"demo_script": {Name: "demo_script", Kind: KindString,
+		Summary: "write a throwaway script, for the primitives walkthrough that exists to exercise " +
+			"the vocabulary itself"},
+	"fetch": {Name: "fetch", Kind: KindString,
+		Summary: "download or extract a host-side asset: guest_agent_windows, guest_agent_macos, " +
+			"xcode, packages"},
+
 	// --- extensions ---------------------------------------------------------------------
 	"python": {Name: "python", Kind: KindString,
 		Summary: "DEPRECATED AND NOT SUPPORTED BY THIS IMPLEMENTATION. The Python stage " +

@@ -1,0 +1,499 @@
+# macOS 15 ssh: turn Remote Login on through System Settings, then prove it from the host.
+#
+#     python3 lib/steps.py macos/15/steps/ssh.yaml --qmp /work/drive.sock.qmp --ssh-port 2222
+#
+# THIS IS THE STAGE THE `ssh:` STEP WAS ADDED FOR, AND IT IS THE CLEAREST CASE FOR EITHER
+# MECHANISM BEING RIGHT.
+#
+# The first half is GUI and cannot be anything else: `systemsetup -setremotelogin on` is refused
+# by TCC, and `launchctl` does not expose "Allow full disk access for remote users" - so the two
+# switches have to be pressed in System Settings. macos/15/ssh.py records six runs of
+# diagnostics that proved it.
+#
+# The second half is the opposite: once sshd answers, everything worth asserting is a command.
+# "Is the port open", "does `sw_vers` run", "is the build the one we installed" are exit codes,
+# not words on a screen - and a word on a screen is a weaker answer than a return code.
+#
+# SO THE FILE HAS A BOUNDARY IN IT, VISIBLE AT THE LINE WHERE `at:` STOPS AND `ssh:` STARTS.
+# That boundary is exactly where Remote Login comes on, and a reader can see it.
+#
+# WHY THE GUI HALF IS STEPS AND NOT `python:`
+#
+# It used to be a Python step, argued for on two grounds - and both of them turn out to be
+# expressible as a step, so it is now seventeen of them with no code at all:
+#
+#   the search field      "has to be clicked AFTER Spotlight has drawn, and a click that
+#                         arrives first leaves the pane on the Sharing overview" - that is a
+#                         `settle:` of ten seconds, which is exactly what ssh.py did. The
+#                         value is the measurement; the code was only holding it.
+#   full disk access      IS ALREADY ON. Turning Remote Login on turns it on with it, and
+#                         clicking it again turns it OFF - which is the bug that made the
+#                         clean fail with `diskutil apfs trim WAS REFUSED`. The answer is not
+#                         code: it is simply NOT A STEP. The sequence does not click it, and
+#                         `the switch reads on` reads the pane afterwards to prove the switch
+#                         that DOES matter moved.
+#
+# The one decision left in code is the state check in ssh.py ("is sshd already answering"),
+# because it needs a socket rather than a click. The same decision also exists here as a step,
+# for a walkthrough run on its own: `turn remote login on` carries an `unless:`.
+#
+# BOTH DIRECTIONS WERE MEASURED ON ONE GUEST, back to back.
+#
+#   from OFF, one full run of this file:
+#       the remote login pane is up    'remote login: off ... lets users of other computers'
+#       turn remote login on - unless  reads the same sentence, so the click happens
+#       the switch reads on            'remote login: on ... to log in to this computer'
+#       wait for sshd                  ssh answers after 0s
+#       5 x ssh:                       exit 0, WALKTHROUGH COMPLETE: 17 step(s) ran
+#
+#   from ON, the same file again:
+#       turn remote login on           skipped, the screen already shows log in to this
+#                                      computer
+#       5 x ssh:                       exit 0, WALKTHROUGH COMPLETE: 17 step(s) ran
+#
+# The second run is the one that matters for a resumed bake. Before `unless:` existed it
+# clicked anyway, and this stage - the one that turns Remote Login ON - turned it OFF:
+#
+#     connect to address 172.30.0.1 port 2222: Connection refused
+
+name: macos 15 remote login
+resolution: [1920, 1080]
+# This is a sequence, not a pane set: the settings window does not skip panes, and each step
+# depends on the one before it having landed.
+#
+# THE ACCOUNT THE ssh: STEPS LOG IN AS is the one the Setup Assistant created, and it is named
+# here rather than left to lib/steps.py's fallback: a stage that depends on a default it does
+# not state is a stage that breaks when the default moves - and this default has just moved
+# from `docker` to `vmuser`.
+ssh_user: vmuser
+ssh_port: 2222
+
+vars:
+  user:
+    from: args.user
+    default: vmuser
+  password:
+    from: args.password
+    default: admin
+  # WHERE THIS STAGE'S DISK GOES - a fact about the run, so it arrives on the command line.
+  out:
+    from: args.out
+    default: out/macos15-ssh.qcow2
+  # THE SHUTDOWN METHOD, BECAUSE IT IS A FACT ABOUT THE RUN AND NOT ABOUT THE SCREEN.
+  #
+  # `kill` when the stage handed this file a throwaway overlay (nothing it wrote survives), `ssh`
+  # when the guest owns the real disk (the filesystem this file is about to publish has to be
+  # closed, and macOS answers the power button with a dialog nobody clicks). The stage passes it;
+  # the default is the careful one, so a standalone run of this file cannot publish a torn disk.
+  shutdown:
+    from: args.shutdown
+    default: ssh
+
+steps:
+  # --- 0. THE MACHINE, IN THE FILE -------------------------------------------------------
+  #
+  # THIS STAGE USED TO START QEMU ITSELF, and so did the other three, and only one of the four
+  # knew what a disk expects. That is why `clean` once booted a machine whose daemon mounted a
+  # server nobody was running. The lifecycle is a step now.
+  #
+  # BOOT IS OVER WHEN QEMU IS RUNNING - it does not wait for sshd. The disk this stage is given
+  # has never been logged into, so there is no sshd until this file turns it on.
+  #
+  # NO `requires:` HERE, AND THAT IS THE POINT. `overlay` is checked against a machine that is
+  # already running, and this is the step that starts one - so asking before it runs can only
+  # ever fail. The stage that made (or did not make) the overlay is the one that knows, and it
+  # says so in `shutdown:` at the bottom of this file.
+  # THE VIDEO IS A STEP, NOT A LINE IN `ssh.py`.
+  #
+  # It is started BEFORE the boot and stopped AFTER the shutdown, so the file contains the boot
+  # itself - which is the part that used to be invisible when a stage failed early. `lib/live.py`
+  # re-encodes every `poll` seconds, so a run killed at any point still leaves something playable.
+  #
+  # THIS IS WHY IT IS HERE RATHER THAN IN THE DRIVER: `record:` is an atomic step (lib/steps.py),
+  # shared by every family, and the file is what says whether a stage is filmed. A stage that
+  # wants no video omits the step; one that wants it names the file.
+  - name: start recording
+    record: install.mp4
+    poll: 20
+
+  - name: boot the disk
+    boot: true
+    os: macos
+    timeout: 900
+
+  # THE ACCOUNT'S PASSWORD, INTO THE LOGIN WINDOW.
+  #
+  # desktop.py stops the guest after the Setup Assistant without logging in, so this disk boots
+  # to a login window: wallpaper, clock, account tile, password field. Nothing is wrong with it
+  # and nothing can be done on it - Spotlight, Terminal and `systemsetup` all need a session.
+  #
+  # THE WAIT BEFORE THE CLICK IS A LOOP OVER THE RECORDING, NOT A SLEEP. A login window has no
+  # words on it - tesseract reads zero of the whole frame - so the only way to know it is up is
+  # lib/desktop.py's password-field crop, which is what macos/15/desktop.py uses for the same
+  # window. `python:` because a loop is the one shape the vocabulary does not have; `optional`
+  # because a window that never appears is not a failure here - the desktop wait below is the
+  # verdict, and typing into a machine that is not listening only costs the keystrokes.
+  - name: wait for the login window
+    wait_for: login_window
+    timeout: 240
+
+  # THE ESCAPE COMES FIRST because a wake hint or a notification banner swallows the next
+  # keystroke, and it also takes focus off the field. The click afterwards is the one place this
+  # file uses a coordinate that is not a decision about what is on screen: (965, 981) is the
+  # centre of the "Enter Password" pill, which spans x=880..1210 at y=960..1000 on every boot.
+  - name: dismiss anything over the login window
+    key: esc
+    settle: 2
+
+  - name: click the password field
+    at: [965, 981]
+    settle: 1
+
+  - name: type the password
+    type: "{{ password }}"
+    settle: 1
+
+  - name: press return
+    key: ret
+    settle: 20
+
+  # THE KEYBOARD SETUP ASSISTANT COMES UP WITH THE FIRST DESKTOP SESSION, and it eats the next
+  # keystroke - which is how sshd was never enabled on six runs: the Return meant for Spotlight
+  # went to the dialog (run 42034256322). Quit, not Continue: Continue asks the guest to identify
+  # a keyboard, which is another wizard and needs hardware this guest does not have.
+  #
+  # THREE CLICKS SPACED OUT, because a click that arrives before the dialog is drawn lands on
+  # wallpaper and looks identical in the log to one that dismissed it (run 42162859846).
+  - name: dismiss the overlays macOS puts up on a first login
+    dismiss: post_login
+    timeout: 240
+
+  # AND NOW THE PASSWORD CAN BE JUDGED. This is the only step that can tell an accepted password
+  # from a rejected one: a failed login leaves the same window up and shakes the field, and the
+  # ssh failure two dozen steps later reads like a broken daemon rather than a wrong password.
+  #
+  # FIVE MINUTES IS MEASURED, not cautious: a first session builds the Dock, starts Spotlight
+  # indexing fourteen gigabytes, and composites a wallpaper it has not cached. A run that gave up
+  # after 180 s (42383829203) reported failure over a clean desktop.
+  - name: wait for the desktop
+    desktop: macos
+    timeout: 300
+
+  # --- 1. THE GUI, WHICH IS THE ONLY WAY TO TURN THIS ON --------------------------------
+  #
+  # `systemsetup -setremotelogin on` is refused by TCC and launchctl does not expose
+  # "Allow full disk access for remote users", so the switch has to be pressed in System
+  # Settings. Every coordinate and every wait below is a measurement from ssh.py, moved here
+  # unchanged - the sequence is clicks and waits, and it never needed to be code.
+  #
+  # THE ESC IS THE FIRST ACTION, and it is not cosmetic: a notification banner or the keyboard
+  # hint swallows the next keystroke, and this guest has just come from a login window.
+  - name: dismiss anything over the desktop
+    key: esc
+    settle: 2
+
+  # SPOTLIGHT, BY ITS FULL NAME. A short query's first row can be a web suggestion, and Return
+  # takes the highlighted row - so "system settings", not "settings".
+  - name: open spotlight
+    key: meta_l+spc
+    settle: 4
+  - name: type the settings app name
+    type: system settings
+    settle: 7
+  - name: open it
+    key: ret
+    settle: 14
+
+  # THE WINDOW HAS TO BE UP BEFORE ANYTHING IS TYPED INTO IT, and every click below assumes a
+  # layout that only exists once it is. Spotlight on a cold CI runner takes longer to resolve
+  # than the four seconds above, and a Return that arrives too early opens whatever row was
+  # highlighted - on one measured run that was a web suggestion, which opened Safari.
+  #
+  # This waits for the window's own title and is `optional` because a slow window is not a
+  # failure yet: the clicks below are the real test, and this only costs time when it is right.
+  - name: the settings window is up
+    until_any:
+      - [system, settings]
+      - [general]
+      - [wi-fi]
+    timeout: 90
+    poll: 3
+
+  # THE SEARCH FIELD, AND THE FIELD IS CLEARED AS PART OF TYPING INTO IT.
+  #
+  # `at` AND `type` ARE ONE STEP ON PURPOSE. Split into "click the box" and "type into it",
+  # the second step has no `at`, so it takes the type-into-focus branch and never clears
+  # anything - and System Settings REMEMBERS THE LAST QUERY. Measured on the local guest,
+  # second run of this stage:
+  #
+  #     search field reads   'remote login' + 'remote login'
+  #     result list reads    No Results
+  #     right-hand pane      Sharing's overview, every switch off
+  #
+  # The row at (703, 336) was then an empty area, the "switch" click hit the Sharing list,
+  # and the stage still reported success - because sshd had been left on by the previous run
+  # and `require_ssh` cannot tell who turned it on. On a fresh CI disk the field starts empty
+  # and one typed query works, which is exactly why this only shows up on a second run.
+  #
+  # (715, 267) is the centre of a box whose interior spans x 630..800, y 250..284 at
+  # 1920x1080.
+  #
+  # `modifier: meta_l` IS NOT COSMETIC. Select-all is Control+A on Linux and Command+A on
+  # macOS; with the default Control+A on macOS the caret jumps to the start of the line, the
+  # old text stays, and the new text is inserted before it. That is the doubled query above.
+  - name: search for remote login
+    at: [715, 267]
+    type: remote login
+    clear: true
+    modifier: meta_l
+    settle: 10
+
+  # THE RESULT HAS TO BE ON SCREEN BEFORE THE ROW IS CLICKED.
+  #
+  # This was a single `at: [703, 336]` with `settle: 12`, and run 42584262403 lost the stage to
+  # it. The log says the click went out at 09:47:23 - and the recording's frames show the
+  # sidebar still filtering at that moment, with the "Remote Login" row arriving afterwards.
+  # The click landed on the row's future position while the list was empty, the detail pane
+  # stayed on "Sign in", and the gate below waited out its 97 seconds and failed.
+  #
+  # A `settle:` is a guess about how long a filter takes; a wait for the result is the fact.
+  #
+  # THE LIST HAS A 'Sharing' HEADER AND THE ROW UNDER IT, and that pair is what the wait reads
+  # for - not the words in the search field above them, which say 'remote login' whether or not
+  # the list has produced anything.
+  #
+  # THE CROP COVERS BOTH SHAPES, because macOS 15 draws this two ways and both are in the
+  # recordings here: run 42473082131 got a SHEET ('Remote Login: off ... allow full disk access
+  # for remote users'), run 42584262403 got the row INLINE in the sidebar ('Sharing' header,
+  # 'Remote Login' beneath it). The rectangle is the sidebar strip joined to the sheet's body,
+  # and the four frames say it separates cleanly:
+  #
+  #                       sharing+remote      allow full disk access
+  #     sheet, off             -                       HIT
+  #     sheet, on              -                       HIT
+  #     inline row            HIT                      -
+  #     No Results             -                       -
+  #
+  # so either group means the result is there, and No Results satisfies neither.
+  - name: the remote login result is on screen
+    until_any:
+      - [sharing, remote]
+      - [allow, full, disk, access]
+    region: [590, 240, 1210, 720]
+    scale: 2
+    timeout: 90
+    poll: 2
+
+  # THE RESULT ROW. The list puts "Sharing" as a header and "Remote Login" under it, and the
+  # pane has to finish swapping - that swap is a whole page of layout, and a click that
+  # arrives first selects the sidebar item while the right side still shows Sharing's
+  # overview, putting every later click on a list row.
+  - name: open the remote login pane
+    at: [703, 336]
+    settle: 12
+
+  # ...AND IT IS CLICKED AGAIN IF THE PANE DID NOT SWAP.
+  #
+  # The gate below is the real check, and on run 42584262403 it failed with the row visibly
+  # present - the click had gone out too early. A second click costs two seconds and turns
+  # that failure into a retry; the gate still decides, so a machine that never swaps is still
+  # a failure and not a silent success.
+  - name: open the remote login pane again
+    unless: [allow, full, disk, access]
+    region: [726, 300, 1200, 715]
+    scale: 2
+    at: [703, 336]
+    settle: 12
+
+  # THE PANE HAS TO BE THE REMOTE LOGIN PANE BEFORE ANYTHING IS PRESSED.
+  #
+  # This is the check that was missing, and its absence is why a run that never opened the
+  # pane could still end in "ssh answers": the two clicks below landed on the Sharing
+  # overview, changed nothing, and `require_ssh` connected to a daemon that was already
+  # listening. Reading the pane is the only thing that distinguishes "I turned it on" from
+  # "it was on when I arrived".
+  #
+  # THE WORDS ARE THE ROW THIS PANE ALONE HAS, NOT ITS TITLE. The title would be useless
+  # here: the search field on the left still holds the text that was just typed into it, so a
+  # full-screen read for "remote login" matches whether or not the pane ever opened. This row
+  # exists only in this pane - it is the same label ssh.py's own comment quotes from a
+  # measured frame of run 42167875539, 'Allow full disk access for remote users' - and the
+  # Sharing overview that a failed click leaves on screen does not contain it. Measured
+  # against this stage's own failure frame, which reads 'No Results' and then the overview's
+  # list of shares.
+  #
+  # THE REGION IS THE SHEET ITSELF, AND IT IS WHAT MAKES THE READ WORK AT ALL. Full-screen,
+  # this same frame does not yield 'allow full disk access' - the sheet's text is small and
+  # the frame is 1920 wide, so tesseract discards it as noise. Cropped to the sheet and
+  # enlarged 2x it reads, on both measured frames:
+  #
+  #     remote-login-3-pane.png              'remote login: off ... allow full disk access
+  #                                           for remote users ...'
+  #     remote-login-5-full-disk-access.png  'remote login: on ... to log in to this computer
+  #                                           remotely, type "ssh docker@..." ...'
+  #
+  # NOT `optional`: this is the precondition for the two clicks below, and a stage that
+  # presses a switch it never found is the failure mode this step exists to stop.
+  - name: the remote login pane is up
+    until_any:
+      - [allow, full, disk, access]
+    region: [726, 300, 1200, 715]
+    scale: 2
+    timeout: 90
+    poll: 3
+
+  # THE SWITCH IS A TOGGLE, SO IT IS ONLY PRESSED WHEN THE PANE SAYS IT IS OFF.
+  #
+  # This is not a nicety and it was measured: on a guest whose Remote Login was already on,
+  # the pane read 'Remote Login: on' before this step, the click turned it OFF, the read after
+  # it said 'off', and `wait for sshd` then failed with
+  #
+  #     connect to address 172.30.0.1 port 2222: Connection refused
+  #
+  # - the stage that exists to turn Remote Login ON turned it off and spent ten minutes
+  # waiting for a daemon it had just stopped. ssh.py has always had this guard for its Python
+  # path (the TCP probe above `enable_remote_login`); the YAML path had none, and a fresh CI
+  # disk hides the bug because there the switch really is off.
+  #
+  # `unless` is the vocabulary for exactly this: the step runs only if the screen does NOT
+  # already show the words. With the switch off the pane says "... lets users of other
+  # computers access this computer using SSH and SFTP"; with it on it says "to log in to this
+  # computer remotely, type ...". Both were read back from this guest in one run.
+  - name: turn remote login on
+    unless: [log, in, to, this, computer]
+    region: [726, 300, 1200, 715]
+    scale: 2
+    at: [1145, 353]
+    settle: 4
+
+  # WHAT THE PANE SAYS AFTER THE PRESS, AS A REPORT AND NOT AS THE VERDICT.
+  #
+  # The switch's own drawing is a few pixels of blue and reading it is the least reliable
+  # thing in this file, so a failed read here must not fail the stage. But the pane's
+  # SENTENCE changes with the switch, and that is readable text:
+  #
+  #     Off   "Remote Login lets users of other computers access this computer using SSH
+  #            and SFTP."
+  #     On    "To log in to this computer remotely, type "ssh docker@..."".
+  #
+  # Only the On sentence contains "log in to this computer". Both were measured - the Off
+  # line on the failure frame that this stage's local run produced, the On line on
+  # remote-login-5-full-disk-access.png of run 42473082131.
+  #
+  # `require_ssh` below is the real verdict, for the reason ssh.py's own comment gives: a
+  # switch that looks on is not the same fact as a daemon that answers.
+  - name: the switch reads on
+    until_any:
+      - [log, in, to, this, computer]
+    region: [726, 300, 1200, 715]
+    scale: 2
+    timeout: 30
+    poll: 3
+    optional: true
+    # `optional` IS DELIBERATE AND IT IS NOT LAZINESS - `wait for sshd` below is the verdict.
+    # But read what the optional costs, because this step was the site of a trap worth naming:
+    # with the matcher written as `[remote, login, on]` (unquoted, so `on` is a bool), the
+    # crash happened ONLY when the switch was on. `all()` short-circuits, so a screen that did
+    # not contain "remote" never asked the bool for its lowercase form. The stage therefore
+    # failed on the correct screen and passed on the wrong one, and CI - where the pane read
+    # 'No Results' and never contained "remote login" - showed
+    #
+    #     the switch is on: did not appear, and the step is optional
+    #
+    # and went green. The word is quoted at the top of this file's history for that reason;
+    # this comment is here so the next person reading a green run knows what green meant.
+
+  # DONE, so the pane closes and the daemon settles rather than holding the change in a sheet.
+  - name: close the pane
+    at: [1145, 679]
+    settle: 5
+
+  # --- 2. THE HOST SIDE, WHERE EVERY ANSWER IS AN EXIT STATUS ---------------------------
+  #
+  # `require_ssh` waits for the daemon the step above just enabled, and reports how long it
+  # took. It replaces the flat `wait: 120` this stage used to have, which was the weakness
+  # ssh.py's own docstring names.
+  - name: wait for sshd
+    require_ssh: true
+    timeout: 600
+
+  # THE FIRST REAL PROOF. `sw_vers` is the guest answering a question about itself; a daemon
+  # that accepted the TCP connection and then closed it on the password packet - which is what
+  # six runs of diagnostics were about - fails here and nowhere earlier.
+  - name: prove the build
+    ssh: sw_vers -productVersion
+
+  - name: prove the account
+    ssh: id -un
+
+  # THE DISK HAS TO BE REPAIRABLE BY LATER STAGES, and this is the check that a remote session
+  # really does have the privilege the GUI switch granted. Without Full Disk Access, `diskutil`
+  # is refused here - which is the failure that made this stage hard in the first place, so it
+  # is asserted rather than assumed.
+  - name: prove disk utility works over ssh
+    ssh: diskutil list | head -5
+
+  # THE MACHINE'S OWN NAME - AND `scutil` NEEDS ROOT FOR EVERY NAME IT SETS.
+  #
+  # Measured on the live guest: `scutil --set LocalHostName docker` answers
+  #
+  #     Permission denied.
+  #
+  # so the LocalHostName is not the unprivileged alternative it looks like. The password goes
+  # through `sudo -S` on STDIN - `printf` in a pipe, not a here-string, because the remote shell
+  # is `sh` and `<<<` is a bash extension that fails with "unexpected redirection".
+  #
+  # THE NAME IS THE ACCOUNT'S, as it always was - this line used to carry the literal `docker`,
+  # which was the account name. It is `{{ user }}` now so that renaming the account renames the
+  # machine with it instead of leaving a disk whose login prompt and host name disagree.
+  #
+  # It is also `optional`: this step names the disk, it does not prove anything, and a naming
+  # failure must not fail a stage whose real evidence is the three checks above it.
+  - name: name the machine
+    ssh: printf '%s\n' "{{ password }}" | sudo -S scutil --set LocalHostName {{ user }}
+
+  # --- 3. A READ-MEANT-TO-FAIL IS NOT A FAILURE -----------------------------------------
+  #
+  # `optional` exists for exactly this: a check whose negative result is information. It is
+  # used here to record what is NOT installed, so a later reader knows the disk never had it
+  # rather than guessing from a silence.
+  - name: note what is absent
+    ssh: command -v brew || true
+    optional: true
+
+  # --- 4. THE MACHINE IS STOPPED BY THE FILE THAT STARTED IT -----------------------------
+  #
+  # WHICH METHOD IS NOT A DECISION THIS FILE CAN MAKE FROM THE SCREEN, so it arrives as a `var`
+  # and the stage that owns the disk supplies it. That is the same rule the account and the
+  # password follow: a fact about the run, not about the screen.
+  #
+  #     --overlay   the writes are a throwaway diff over a read-only parent, so there is nothing
+  #                 a graceful shutdown could protect. `kill` is correct AND cheaper, and the
+  #                 artifact is produced by flattening the overlay afterwards.
+  #     no overlay  the guest owns the real disk. `ssh` runs `shutdown -h now`, which closes the
+  #                 filesystem this stage is about to publish. ACPI is not an option: macOS
+  #                 answers the power button with a dialog nobody clicks.
+  #
+  # `shutdown: ssh` REFUSES BY NAME when nothing answers on the port - lib/steps.py checks the
+  # capability before the step runs - so a broken ssh fails here with "ssh: ..." rather than
+  # after a five-minute timeout that reads like a hung guest.
+  - name: stop the machine
+    shutdown: "{{ shutdown }}"
+    timeout: 300
+
+  # AND THE VIDEO IS CLOSED BY THE SAME FILE THAT OPENED IT. `record: false` finalises the file
+  # - the encoder does one last pass - so the recording ends at the shutdown rather than wherever
+  # the process happened to exit. It is a no-op when nothing is recording, which is what makes it
+  # safe for a stage that chose not to film.
+  # THE OUTPUT, AND THE LAST REASON THIS STAGE KEEPS A `finally:` IN PYTHON.
+  #
+  # `macos/15/ssh.py` ended with `compress.compress(disk, args.out)`. That is not a fact about a
+  # machine or a screen; it is "write the disk where the workflow looks for it".
+  #
+  # AFTER THE LAST REAL STEP, not in a `finally`: a failed walk leaves a disk the failed steps may
+  # have half-configured, and compressing it publishes that.
+  - name: publish the disk
+    compress: "{{ out }}"
+
+  - name: stop recording
+    record: false

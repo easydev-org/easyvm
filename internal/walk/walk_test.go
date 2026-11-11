@@ -11,16 +11,18 @@ import (
 // the only check that matters for the vocabulary: a key the files use and this package does not
 // know would be refused, so the test failing means the port is incomplete - which is exactly what
 // a reader needs to know, and better than a hand-written fixture that agrees with itself.
-const realFiles = "../../../easydiskbake"
+const realFiles = "../.."
 
 // TestLoadsEveryRealWalkthrough MEASURES THE PORT RATHER THAN ASSERTING IT IS FINISHED.
 //
-// The 26 files that do not load fail for exactly one reason - a `python:` step - and every one of
-// them is named in extensions.go. A test that simply failed would say "not done" every run and
-// teach nobody anything; a test that skipped would hide a regression in the other 28. So it
-// reports both numbers and fails only when the count goes DOWN, which is what a regression looks
-// like, or when a file fails for a reason that is NOT the known group.
-const portedFloor = 28
+// THE FLOOR IS THE COUNT OF FILES THIS REPOSITORY SHIPS, and it exists to catch a regression: a
+// key that stops parsing takes a file out of the set, and the number is the only thing that says
+// so. It is not a target to lower.
+//
+// THE WINDOWS AND MACOS FILES ARE NOW HERE, which is what moved this from "28 of 54 borrowed from
+// the Python repository" to "10 of 10 in this one". None of them uses a `python:` step any more:
+// the extension each one named became a key in the vocabulary.
+const portedFloor = 10
 
 func TestLoadsEveryRealWalkthrough(t *testing.T) {
 	if _, err := os.Stat(realFiles); err != nil {

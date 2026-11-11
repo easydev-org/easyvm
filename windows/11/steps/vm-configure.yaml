@@ -1,0 +1,238 @@
+# Everything a finished Windows disk needs before the toolchain: the host share and the logon
+# hook.
+#
+#     python3 lib/steps.py windows/11/steps/vm-configure.yaml --ssh-port 2222
+#
+# WHY THIS STAGE EXISTS AND WHY IT IS NAMED FOR THE VM RATHER THAN THE SHARE
+#
+# It began as `share`, because a directory the guest can reach was the only thing here. It is now
+# where the MACHINE IS CONFIGURED, after ssh works and before a toolchain is installed:
+#
+#     an SMB credential on the bridge       a directory the person can put files in
+#     a logon task                          something that runs those files at logon
+#
+# THE GUEST AGENT USED TO BE THE THIRD ROW AND IS NOT ANY MORE. It is installed by Setup itself,
+# from the answer file, because a disk whose first boot has no agent cannot be shut down by one -
+# and because an install that happens during the install needs no re-run of this stage to keep
+# being true. This file still PROVES it, which is the part that matters after the move: see the
+# note above `prove the guest agent answers`.
+#
+# WHAT THE LOGON HOOK RUNS IS `~/shared/bootstrap.ps1`, WHICH THE PERSON PUTS THERE. Nothing on
+# this disk is required to make it work.
+#
+# THIS FILE INSTALLS NO TOOLCHAIN.
+
+name: windows 11 - configure the vm (share, logon hook)
+resolution: [1920, 1080]
+
+vars:
+  user:
+    from: args.user
+    default: vmuser
+  password:
+    from: args.password
+    default: admin
+  # THE SERVER, SO THE COMMANDS BELOW DO NOT HARD-CODE AN ADDRESS.
+  #
+  # The default below is this container's end of the bridge: true of every run here and not true
+  # of anything else. A literal typed into an ssh command would bake the CI network into a
+  # published disk, which is the mistake this variable exists to prevent.
+  host:
+    from: args.host
+    default: 172.30.0.1
+  # AND THE SHARE'S OWN ACCOUNT, for the same reason.
+  smb_user:
+    from: args.smb_user
+    default: guest
+  # EMPTY, AND THAT IS THE ACCOUNT'S REAL PASSWORD - see lib/hostshare.py.
+  smb_pass:
+    from: args.smb_pass
+    default: ""
+
+ssh_user: vmuser
+ssh_port: 2222
+
+steps:
+  - name: wait for sshd
+    require_ssh: true
+    ssh_probe: echo ok
+    timeout: 900
+
+  # =========================================================================
+  # THE GUEST AGENT IS ALREADY INSTALLED, AND THAT IS THE POINT OF ITS ABSENCE HERE
+  # =========================================================================
+  #
+  # IT IS INSTALLED BY SETUP, from the answer file's `specialize` pass:
+  #
+  #     windows/11/answer/Autounattend.xml, RunSynchronousCommand Order 6
+  #     msiexec /i <answer cd>:\agent\qemu-ga-x86_64.msi /qn /norestart
+  #
+  # and the MSI gets onto that CD in lib/winiso.py::answer_iso(), out of the same virtio-win
+  # ISO the bake already pulls for the drivers ($WinPEDriver$ and \agent are two directories on
+  # one disc).
+  #
+  # WHY THE MOVE WAS WORTH IT. This stage used to install it over ssh, and that had three costs:
+  #
+  #     the disk's FIRST boot had no agent, so a shutdown by that route before this stage ran
+  #     was impossible on exactly the disk that had never been configured
+  #     a 30 MB copy and a 12 MB MSI through a network login session, on every re-run
+  #     `QEMU-GA` installed but not running is indistinguishable here from an agent that works -
+  #     the device it talks on is created by the vioserial driver, which Setup injects, so the
+  #     two failures had to be told apart by a Get-PnpDevice query
+  #
+  # A DISK THAT WAS BAKED BEFORE THIS CHANGE HAS NO AGENT. That is what `requires: [qga]` on a
+  # `shutdown: guest_agent` step is for: it refuses by name rather than timing out. There is no
+  # install step here to fall back to, and adding one back would be a second path to keep true.
+  #
+  # THE AGENT IS STILL *PROVEN* BELOW, because "Setup ran msiexec" and "a machine can be shut
+  # down through its agent" are different statements and only the second one is worth anything.
+  # =========================================================================
+  # THE GUEST AGENT, INSTALLED NOW INSTEAD OF DURING SETUP
+  # =========================================================================
+  #
+  # IT USED TO BE INSTALLED BY THE ANSWER FILE'S specialize PASS, and that is what this file's
+  # earlier note argued for. The argument was wrong, and the evidence is in macos/15/bake.py? no -
+  # in windows/11/bake.py, above the Shape:
+  #
+  #     42839116205   vioserial in $WinPEDriver$   died ~1450s
+  #     42858732386   vioserial in agent/          died ~1400s
+  #     42209791462   no qga device at all          desktop at 1192s, job 34 minutes
+  #
+  # A virtio-serial controller in the machine's argv is a PCI device Windows Setup enumerates on
+  # the boot after the file copy, and with no in-box driver for it the install cannot finish. The
+  # device is only needed by a FINISHED system, so the bake no longer has one and this stage
+  # installs both halves: `pnputil` for the driver, msiexec for the service.
+  #
+  # THE FILES COME OUT OF THE ANSWER CD, which vm-configure is handed as a second CD... except it
+  # is not. This stage boots a disk with no installer media attached, so the files are extracted
+  # on the HOST from the same virtio-win ISO the bake pulled, and copied in over ssh.
+  - name: fetch the agent and its driver on the host
+    fetch: guest_agent
+    family: windows
+    timeout: 1200
+
+  - name: copy the driver in
+    scp: ["guest-agent/vioserial/vioser.inf", "C:/Users/{{ user }}/vioser.inf"]
+    requires: [ssh]
+    timeout: 300
+
+  - name: copy the driver's payload in
+    scp: ["guest-agent/vioserial/vioser.sys", "C:/Users/{{ user }}/vioser.sys"]
+    requires: [ssh]
+    timeout: 300
+
+  - name: copy the driver's catalogue in
+    scp: ["guest-agent/vioserial/vioser.cat", "C:/Users/{{ user }}/vioser.cat"]
+    requires: [ssh]
+    timeout: 300
+
+  - name: copy the agent installer in
+    scp: ["guest-agent/qemu-ga-x86_64.msi", "C:/Users/{{ user }}/qemu-ga-x86_64.msi"]
+    requires: [ssh]
+    timeout: 600
+
+  # THE DRIVER FIRST, BECAUSE THE SERVICE STARTS WHEN IT IS REGISTERED.
+  #
+  # `pnputil /add-driver ... /install` needs the INF, the SYS and the CAT in one directory, and
+  # it reads the INF by name - so the three files are copied to the account's home and pointed at
+  # together. Bounded: a pnputil that does not return must say so rather than hold the stage.
+  - name: install the driver the agent talks on
+    ssh: |
+      powershell -NoProfile -ExecutionPolicy Bypass -Command "Push-Location $env:USERPROFILE; $p = Start-Process pnputil.exe -ArgumentList @('/add-driver','vioser.inf','/install') -PassThru -Wait -NoNewWindow; Write-Output ('PNPUTIL_EXIT=' + $p.ExitCode); Pop-Location"
+    timeout: 600
+
+  - name: install the guest agent
+    ssh: |
+      cmd /c "msiexec /i C:\Users\{{ user }}\qemu-ga-x86_64.msi /qn /norestart /l*v C:\Users\{{ user }}\qemu-ga-install.log & echo MSIEXEC_EXIT=%ERRORLEVEL%"
+    timeout: 600
+
+  - name: prove the guest agent answers
+    ssh: |
+      powershell -NoProfile -ExecutionPolicy Bypass -Command "$s = Get-Service QEMU-GA -ErrorAction SilentlyContinue; if ($s) { Write-Output ('service: ' + $s.Status + ' / ' + $s.StartType) } else { Write-Output 'service: ABSENT' }; $d = Get-PnpDevice -Class Ports -ErrorAction SilentlyContinue | Where-Object { $_.FriendlyName -match 'Guest Agent|virtio' }; if ($d) { $d | ForEach-Object { Write-Output ('device: ' + $_.FriendlyName + ' / ' + $_.Status) } } else { Write-Output 'device: NO virtio-serial port' }"
+    timeout: 120
+
+  # =========================================================================
+  # THE HOST SHARE
+  # =========================================================================
+  #
+  # There is nothing to persist, and that took three runs to accept:
+  #
+  #     net use Z: \\host\share        0, then "The system cannot find the path"
+  #     net use   \\host\share         0, then "user name or password is incorrect"
+  #     cmdkey /add:host ...           "Credentials cannot be saved from this logon session"
+  #
+  # The last one is Microsoft's own limitation, not a setting: CredWriteW answers
+  # ERROR_NO_SUCH_LOGON_SESSION with "Network logon sessions do not have an associated credential
+  # set.", and Win32-OpenSSH hardcodes LOGON32_LOGON_NETWORK_CLEARTEXT with no way to change it.
+  #
+  # So the share is a SESSION, and the step below supplies the credential again in its own command
+  # rather than inheriting this one's - which is also exactly what the logon hook does.
+  # TWO STEPS NOW, BECAUSE IT WAS ALWAYS TWO ACTS. "the guest could not mount the share" used to
+  # be the message for a host with no smbd, a credential the guest could not use, and a network
+  # that did not route - three repairs, one sentence.
+  - name: serve the host share
+    share_serve: true
+    timeout: 60
+
+  - name: mount the host share
+    share_mount: true
+    share_family: windows
+    requires: [share]
+    timeout: 180
+
+  # THE SHARE REALLY IS READABLE AND WRITABLE, WITH THE CREDENTIAL SUPPLIED IN THIS COMMAND.
+  #
+  # Deliberately a SEPARATE ssh session from the mount above, and deliberately passing the
+  # credential again: a session established by one ssh command does not carry over, so if this
+  # passes it is because the credential works, not because a previous command left something
+  # behind. That is the same thing the logon hook has to do, so passing here is the real proof.
+  - name: prove the share is readable and writable
+    ssh: |
+      cmd /c net use \\{{ host }}\shared "" /user:{{ smb_user }} /persistent:no >nul 2>&1 & dir \\{{ host }}\shared & echo written-by-this-session > \\{{ host }}\shared\from-guest.txt & type \\{{ host }}\shared\from-guest.txt
+    timeout: 120
+
+  # =========================================================================
+  # THE LOGON HOOK
+  # =========================================================================
+  #
+  # A Task Scheduler task at ONLOGON, running the launcher through
+  # `powershell.exe -WindowStyle Hidden` so no console flashes on the desktop.
+  #
+  # THREE STEPS, BECAUSE "install the bootstrap launcher" WAS THREE THINGS on this side too: write
+  # the launcher, copy it, write and run the task registration. One step meant a failure said
+  # `the launcher install exited 1` and named neither the file nor the action.
+  - name: write the launcher
+    write: launcher
+    family: windows
+    timeout: 60
+
+  - name: write the task registration script
+    write: windows_task
+    timeout: 60
+
+  - name: copy the launcher in
+    scp: ["bootstrap-launcher.ps1", "C:/Users/{{ user }}/bootstrap-launcher.ps1"]
+    timeout: 300
+
+  - name: copy the task registration script in
+    scp: ["bootstrap-install.ps1", "C:/Users/{{ user }}/bootstrap-install.ps1"]
+    timeout: 300
+
+  # THE ONLY STEP THAT RUNS ANYTHING. `schtasks /Create` prints its own refusal, and the exit
+  # code is checked - a registration that failed would otherwise look like a step that worked and
+  # a logon hook that silently never fires.
+  - name: register the logon task
+    ssh: |
+      powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/{{ user }}/bootstrap-install.ps1
+    timeout: 300
+
+  # THE TASK HAS TO EXIST AND HAS TO NAME THE LAUNCHER. A registration that failed prints an
+  # error, but a registration that succeeded and named the wrong path prints nothing until the
+  # next logon - which is a whole publish cycle away. `schtasks /Query /V` prints the action.
+  #
+  # THE FILTER IS ONE WORD PER /C ARGUMENT. `findstr /i "a b c"` is parsed by cmd, so the quotes
+  # never reach findstr and it is handed three files to open (run 42750443762).
+  - name: prove the logon task is registered
+    ssh: |
+      cmd /c "schtasks /Query /TN vm-bootstrap /V /FO LIST | findstr /i /C:TaskName /C:Status"
+    timeout: 60

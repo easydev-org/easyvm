@@ -16,4 +16,5 @@ require (
 	github.com/kovidgoyal/go-parallel v1.1.1 // indirect
 	github.com/kr/fs v0.1.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect
+	howett.net/plist v1.0.1 // indirect
 )

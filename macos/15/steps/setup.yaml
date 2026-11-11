@@ -1,0 +1,377 @@
+# macOS 15 setup: the recovery image to the Setup Assistant, as a sequence.
+#
+#     python3 lib/steps.py macos/15/steps/setup.yaml \
+#         --qmp /work/drive.sock.qmp --disk /work/macos15.qcow2
+#
+# WHAT THIS STAGE IS
+#
+# The guest boots Apple's recovery image. Nothing is installed yet. This walk:
+#
+#     1. waits for the recovery menu to be DRAWN (not for a duration)
+#     2. opens Disk Utility, erases the target disk as APFS named `main`, closes it
+#     3. opens Reinstall macOS, agrees twice, chooses the card, clicks Continue
+#     4. waits for the copy - by watching the disk grow, because the screen goes black
+#
+# and it ends when the wizard appears, which is the reboot into the installed system.
+#
+# WHY THIS FILE IS A SEQUENCE AND THE SETUP ASSISTANT IS PANES
+#
+# Recovery does not skip steps. Disk Utility, the menu, and the installer's four panes come in
+# one measured order, and a list of clicks is the whole truth. The Setup Assistant does skip
+# panes, which is why macos/15/steps/sequoia.yaml is the other shape - see that file.
+#
+# THE THREE PRIMITIVES THIS STAGE NEEDED, AND WHY THEY ARE NOT HACKS
+#
+#   wait_for_change   "has a different pane replaced this one" - not "has the picture stopped
+#                     moving". A sheet that never closed is perfectly still, which is how run
+#                     41615881004 clicked its licence Agree three times and then reported the
+#                     disk had not grown.
+#
+#   sweep             one control in Disk Utility has a hit area a few pixels tall that moves
+#                     as the toolbar redraws. A fixed y is a coin toss: 278 and 295 opened the
+#                     sheet, 296, 306, 309, 311 and 314 did not. Sweeping the band is what a
+#                     person does with an unreliable hit area.
+#
+#   until_dark        the installer's transition is: agree, choose the disk, then the screen
+#                     goes BLACK while it copies and reboots. A black screen is not a failure
+#                     here; it is the signal that the copy started.
+#
+# WHAT IS STILL PYTHON, AND WHY IT IS ONLY TWO THINGS
+#
+#   identifying the target disk   by CAPACITY, from a frame. A fixed click erased the 268 MB
+#                                 recovery volume instead of the 68 GB target, and a click
+#                                 whose safety depends on which row it lands on has to read
+#                                 first. This is the one place a decision before a click is
+#                                 CORRECT - the click is not "go here", it is "erase the disk
+#                                 of this size".
+#
+#   the copy wait                 disk growth, not a duration. A 90-minute guess was the bug
+#                                 that a duration cannot fix: it cannot tell slow from stopped.
+
+name: macos 15 setup (recovery image to setup assistant)
+resolution: [1920, 1080]
+
+vars:
+  disk_name:
+    default: main
+  expected_gb:
+    default: "68"
+  # THE SHUTDOWN METHOD IS `kill`, AND THIS STAGE HAS NO OTHER CHOICE FROM THE THREE METHODS
+  # THAT NEED A RUNNING SYSTEM.
+  #
+  # `ssh`       nothing in the recovery environment answers ssh; sshd is the NEXT stage's work.
+  # `guest_agent`  same problem - the agent is installed by vm-configure, two stages later.
+  # `acpi`      macOS answers the power button with the Restart/Sleep/Cancel/Shut Down dialog
+  #             and waits for a click. lib/steps.py REFUSES it on macOS by name, because a
+  #             method that can only ever time out is not a graceful shutdown - it is a
+  #             five-minute wait and then the kill it should have been.
+  #
+  # So `kill`, and what makes it safe is what the stage did just before it: the walk's last step
+  # is `until_any` on the Setup Assistant's own first page, which is the machine booted into
+  # the system it installed and idle. There is no write in flight to interrupt.
+  #
+  # THE REASON IT IS STILL A VAR is the same as everywhere else: how the run was started is not
+  # a fact about the screen, so a stage with a different answer can pass one.
+  shutdown:
+    from: args.shutdown
+    default: kill
+
+steps:
+  # =======================================================================================
+  # 0. THE MACHINE: OPENCORE, THE TARGET, AND THE INSTALLER AS A USB DEVICE
+  # =======================================================================================
+  #
+  # THIS STAGE STARTED QEMU ITSELF until now, with macos/15/machine.py's make_guest() - the
+  # eleven parameters that took eight runs to get right. Those are lib/vm_session.py's now,
+  # which is the same module every other macOS stage boots through, and the ONE thing this
+  # stage adds is passed as an option: the recovery image on a USB device.
+  #
+  # NO `requires:` - a recovery image is not a capability of a running guest, it is an input
+  # this stage was given, and `boot:` is the step that reads it.
+  - name: boot the recovery image
+    boot: true
+    os: macos
+    timeout: 900
+  # =======================================================================================
+  # 1. THE RECOVERY MENU, WHICH IS DRAWN - NOT LOADED
+  # =======================================================================================
+  #
+  # NO FIXED WAIT CAN DO THIS, AND THREE RUNS MEASURED IT:
+  #
+  #   run 41480111851, 60s:  the click at t=11s went into a BLANK framebuffer; the menu was
+  #                          fully drawn at t=20s
+  #   run 41498618924, 120s: the click landed during a white flash while the menu painted
+  #   a 240s wait:          also failed
+  #
+  # Both mis-timed clicks landed on the menu's FIRST row and put the guest inside "Time
+  # Machine System Restore", where Up, Erase, the name field and Done all mean nothing - and
+  # the failure surfaced much later with no sign of its cause.
+  #
+  # So the wait is for the ROWS, by name. The four labels are text that appears nowhere else
+  # in this sequence, which is what makes them a fair thing to wait for - and this is a
+  # `until`, not a `when`: it blocks until the menu is up, it does not choose anything.
+  #
+  # THE REGION IS THE RECOVERY WINDOW, not the whole frame. The menu is a fixed panel; reading
+  # it alone is faster and it cannot match a word somewhere else on the screen. (x0, y0, x1, y1)
+  # in frame pixels, and the words still come back with absolute coordinates.
+  - name: wait for the recovery menu
+    until: [disk, utility]
+    region: [760, 200, 1400, 560]
+    region_at: [1920, 1080]
+    scale: 2
+    timeout: 900
+    poll: 10
+
+  # =======================================================================================
+  # 2. DISK UTILITY: ERASE THE TARGET AS APFS, NAMED main
+  # =======================================================================================
+
+  # AN ENTRY IS OPENED BY SELECTING IT AND THEN PRESSING CONTINUE. Clicking the entry alone
+  # only highlights it. The row's clickable centre is between its title and its description:
+  # title y=502, description y=526, so 514.
+  - name: select disk utility
+    at: [837, 514]
+    settle: 3
+
+  - name: open disk utility
+    at: [1142, 586]
+    settle: 5
+
+  # WHICH ONE THIS IS, WHICH CHANGES THE INSTRUCTION FROM A POSITION TO A MEASUREMENT.
+  #
+  # Disk Utility lists both disks the moment it opens: `disk2s1` (2.88 GB, the recovery
+  # volume, read-only) and `disk0` (68.72 GB, the target). A frame of the sidebar showed two
+  # rows 28px apart, and a fixed click erased the 268 MB boot image instead. So the target is
+  # found by its capacity: the detail pane is read, and the selection steps up a row at a time
+  # until the number is one a target disk could have.
+  #
+  # THIS IS THE ONE PLACE A READ BEFORE A CLICK IS CORRECT, and the reason is that the click
+  # is not "go here" - it is "erase the disk of this size". A coordinate cannot say that. If
+  # no disk in range is found the run STOPS, because erasing the wrong one installs macOS into
+  # the recovery volume and the failure does not surface for fifty minutes.
+  - name: choose the target disk by capacity
+    select_disk: by_capacity
+
+  # =======================================================================================
+  # 2b. ERASE: ONE CLICK, THEN NAME THE VOLUME, CONFIRM, DONE
+  # =======================================================================================
+  #
+  # THE ERASE CONTROL IS AT (1290, 280), AND THE NUMBER THAT WAS WRONG FOR A DOZEN RUNS WAS
+  # THE Y: every attempt used the LABEL's baseline, about 297, and the label sits BELOW the
+  # button's hit area. Measured on a live guest by clicking both and watching which one
+  # opened the sheet:
+  #
+  #     (1180, 297)  First Aid's label   -> nothing
+  #     (1180, 280)  First Aid's icon    -> 'run first aid on "..."?'     the sheet appeared
+  #     (1290, 297)  Erase's label       -> nothing
+  #     (1290, 280)  Erase's icon        -> 'erase "..."? will be deleted' the sheet appeared
+  #
+  # The toolbar draws a glyph with its caption underneath; the caption is a label, not a
+  # control. That is why the old sweep of y=278..320 was a coin toss in BOTH directions - it
+  # was sweeping across the boundary between two different widgets, and the answers it
+  # collected (280 opened once, 306 opened once, the rest did nothing) describe where the
+  # caption of one control ends and the caption of the next begins.
+  - name: erase - open the sheet
+    # THE CONTROL MOVES WITH ITS WINDOW, SO THE OFFSET IS THE CONSTANT - NOT THE PIXEL.
+    #
+    # Disk Utility centres its window vertically AND REMEMBERS ITS HEIGHT, so two consecutive
+    # CI runs of this same stage put the identical toolbar at different heights:
+    #
+    #     run 42567290197   window top y=294   Erase icon y=309
+    #     run 42570035685   window top y=256   Erase icon y=271
+    #
+    # Measured off both frames: the icon is 15 pixels below the window's top edge in each, and
+    # its x is identical to the pixel (1283..1295, centre 1289). A fixed absolute y is therefore
+    # wrong on whichever run has the other window height - which is what made this coordinate
+    # look like a moving target through a dozen attempts and a sweep of 280..320.
+    #
+    # `at_window` scans one column for the first pixel brighter than the wallpaper and clicks
+    # the offset below it. No OCR, so a word in a dialog cannot be mistaken for the window.
+    at_window: [1289, 15]
+    window_x: 500
+    window_from: 180
+    window_to: 400
+    settle: 6
+    expect_any:
+      - [erase, deleted]
+      - [free, space]
+      - [security, option]
+  # THE SHEET IS UP. Its name field arrives holding the disk's own name with the text
+  # selected, so one backspace clears it - without that the typed name is appended and the
+  # volume is called something else.
+  - name: erase - clear the name field
+    key: backspace
+    settle: 3
+
+  - name: erase - name the volume
+    at: [960, 415]
+    type: "{{ disk_name }}"
+    settle: 4
+
+  # THE CENTRE, NOT A CORNER. (1140, 633) is inside the button's bounding box and did
+  # nothing: the label is drawn at the top and the hit area extends below it.
+  - name: erase - confirm
+    at: [1155, 646]
+    settle: 5
+
+  # THE SHEET REPORTS AND WAITS FOR Done, which is drawn rather than written - its text
+  # reads "Donffto" through tesseract, so the button is found by position.
+  - name: erase - wait for the report
+    until_any:
+      - [erase, complete]
+      - [erase, process]
+    timeout: 300
+    poll: 5
+
+  - name: erase - done
+    at: [1143, 601]
+    settle: 5
+
+  # DISK UTILITY IN RECOVERY HAS NO CLOSE BUTTON, so it is quit with the keyboard - the
+  # same thing a person does. Without this the recovery menu is behind a window and the
+  # next click lands on that window's own content.
+  - name: close disk utility
+    key: meta_l+q
+    settle: 12
+  # CLOSING DISK UTILITY IS PART OF ERASING. Without it the recovery menu is behind a window
+  # and the next click lands on the window's own content. select_and_erase() closes it, and
+  # this wait is for the menu to be back - a different question from the first wait, because
+  # the menu never left, it was covered - so it is an `until` on the rows.
+  - name: the recovery menu is back
+    until: [reinstall, macos]
+    region: [760, 200, 1400, 560]
+    region_at: [1920, 1080]
+    scale: 2
+    timeout: 300
+    poll: 5
+
+  # title y=324, description y=342, so the centre is 333.
+  - name: select reinstall macos
+    at: [837, 333]
+    settle: 3
+
+  - name: open the installer
+    at: [1142, 586]
+    settle: 20
+
+  # THE WELCOME PANE. "To set up the installation of macOS Sequoia, click Continue."
+  #
+  # The wait before it is for the first paint, which has nothing to compare against - that is
+  # the one question `wait_for_change` cannot answer, so it is a `wait` with the number
+  # install.py measured.
+  - name: wait for the welcome pane
+    wait: 10
+
+  - name: welcome continue
+    at: [960, 712]
+    settle: 5
+
+  # SIXTY SECONDS, AND IT IS A FIXED WAIT BECAUSE EVERY DYNAMIC WAIT WAS TRIED HERE.
+  #
+  # install.py states the measurement and the reason, and it is the single most important
+  # thing to know about driving a macOS installer:
+  #
+  #     wait_for_change never settles on a macOS screen - the wallpaper and the clock keep
+  #     the fingerprint moving - and wait_until_drawn returns while the OLD pane is still up,
+  #     which is exactly the pane the next click must not land on.
+  #
+  # Ten seconds was tried and was short by a factor: run 41626151499's log shows the licence
+  # click going out while the welcome pane was still there, which put every later click one
+  # pane out of step and ended as "the disk did not grow in 120s". Twenty-two seconds is what
+  # the licence actually took to draw; the run that worked waited 35. Sixty is that with room.
+  - name: wait for the licence pane
+    wait: 60
+
+  # THE LICENCE. Buttons at the foot of the pane, measured with psm 6 - psm 11 returns "ree,"
+  # for Agree, which is how a plausible-looking position gets missed. Note also that psm 11
+  # finds the word "agree" at y=451 in the middle of a sentence, so a lookup would click prose.
+  - name: agree to the licence
+    at: [1005, 713]
+    settle: 5
+
+  # THE SHEET COMES UP OVER THE SAME PANE, and its own Agree is the one that matters - the
+  # pane's Agree disabled itself when it raised the sheet. Confirmed before clicking it: a
+  # click on a sheet that never opened lands on the licence text underneath, which does
+  # nothing and looks exactly like the sheet's button being ignored.
+  - name: wait for the licence sheet
+    wait: 10
+
+  # THE SHEET THAT AGREE RAISES, with no readable buttons. Its lower right is the only
+  # measurable position, and it is measured on a frame of the sheet itself.
+  - name: agree in the sheet
+    at: [1060, 530]
+    settle: 10
+
+  # THE DESTINATION. Continue is grey until the card is selected, and a click on a grey button
+  # does nothing at all - which is why the card comes first, as two steps.
+  - name: select the destination card
+    at: [850, 550]
+    settle: 5
+
+  - name: destination continue
+    at: [1005, 712]
+    settle: 10
+
+  # =======================================================================================
+  # 4. THE COPY, WHICH IS NOT A PANE
+  # =======================================================================================
+  #
+  # NO `until_dark` HERE, AND THAT IS A CORRECTION. The guess was that the screen goes black
+  # while the installer copies. MEASURED on a live guest: it does not. After Continue the
+  # progress pane stays up and reads
+  #
+  #     macOS Sequoia will be installed on the disk main
+  #     about 2 hours and 52 minutes remaining
+  #
+  # at a mean grey of 26.6, unchanged for two minutes. A wait for darkness would have sat
+  # there until its timeout while the disk was being written the whole time.
+  # THE END OF THIS STAGE IS THE SETUP ASSISTANT, AND THAT IS WHAT IS WAITED FOR.
+  #
+  # This used to watch the target qcow2's allocated blocks and stop when it stopped growing,
+  # on the argument that a black screen cannot tell "copying 12 GB" from "hung". That argument
+  # is about the SCREEN, and the mistake was answering it with the disk instead of with the
+  # thing the stage actually wants:
+  #
+  #     macOS writes ~30 GiB, takes an APFS snapshot, discards its staging volume, switches the
+  #     root, reboots into the installed system - and only THEN draws the wizard.
+  #
+  # So a disk that has stopped growing is not the end; it is somewhere in the middle, and a
+  # run that stopped there published a disk with no system on it. The wizard appearing is the
+  # end, it is unambiguous, and it is one OCR phrase.
+  #
+  # THE PHRASES ARE lib/assistant.py's OWN - the same list reached_assistant() uses, which is
+  # what bake.py's wait_for_assistant() calls after this stage. Five ways the first page can
+  # read, because the wizard's first page depends on what the machine has: a fresh install with
+  # no network shows "How do you want to connect to the internet" before it shows anything
+  # else, and one with a network goes straight to the country list.
+  #
+  # TWO HOURS. The installer says "about 2 hours and 52 minutes remaining" on a cold CI disk,
+  # and the copy plus the reboot plus the first boot's first paint is what has to fit.
+  - name: the copy runs until the Setup Assistant appears
+    until_any:
+      - [select, your, country, or, region]
+      - [how, do, you, want, to, connect, to, the, internet]
+      - [transfer, your, information, to, this, mac]
+      - [choose, a, wireless, network]
+      - [sign, in, with, your, apple, id]
+    timeout: 7200
+    poll: 20
+
+  # =======================================================================================
+  # 5. THE MACHINE IS STOPPED BY THE FILE THAT STARTED IT
+  # =======================================================================================
+  #
+  # `kill`, BECAUSE NONE OF THE THREE GRACEFUL METHODS CAN WORK IN A RECOVERY ENVIRONMENT.
+  #
+  # `ssh` and `guest_agent` do not exist yet (they are the next two stages' work), and macOS
+  # refuses `acpi` - it opens a dialog and waits for a click. lib/steps.py says so by name
+  # rather than waiting five minutes to say it badly.
+  #
+  # AND IT IS SAFE HERE for the reason a stage on an overlay is: the walk does not stop until
+  # the Setup Assistant is on screen, which means the installer has finished, rebooted into the
+  # system it wrote, and is sitting on a page waiting for a person. Nothing is mid-write.
+  #
+  # See `vars:` above for why it is still a variable.
+  - name: stop the machine
+    shutdown: "{{ shutdown }}"
+    timeout: 300

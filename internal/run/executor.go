@@ -143,6 +143,35 @@ func (e *Executor) runOne(s walk.Step) error {
 		return e.doRequireSSH(s)
 	case s.Has("ssh"):
 		return e.doSSH(s)
+	case s.Has("unless"):
+		if err := e.doUnless(s); err != nil {
+			return err
+		}
+		return e.dispatchRest(s)
+	case s.Has("until") || s.Has("until_any"):
+		return e.doUntil(s)
+	case s.Has("expect_any") || s.Has("expect"):
+		return e.doExpectAny(s)
+	case s.Has("at_window"):
+		return e.doAtWindow(s)
+	case s.Has("dismiss"):
+		return e.doDismiss(s)
+	case s.Has("wait_for"):
+		return e.doWaitFor(s)
+	case s.Has("select_disk"):
+		return e.doSelectDisk(s)
+	case s.Has("apple_account"):
+		return e.doAppleAccount(s)
+	case s.Has("copy_in"):
+		return e.doCopyIn(s)
+	case s.Has("screenshot"):
+		return e.doScreenshot(s)
+	case s.Has("demo_script"):
+		return e.doDemoScript(s)
+	case s.Has("write"):
+		return e.doWrite(s)
+	case s.Has("fetch"):
+		return e.doFetch(s)
 	case s.Has("scp"):
 		return e.doSCP(s)
 	case s.Has("script"):
@@ -165,6 +194,23 @@ func (e *Executor) runOne(s walk.Step) error {
 		return e.doWait(s)
 	}
 	return fail(s.Name, "no implementation for this step's keys")
+}
+
+// dispatchRest runs the action of a step whose `unless:` gate passed.
+//
+// `unless` IS A GATE ON THE SAME STEP, not a step of its own: a file writes `unless:` next to the
+// click it qualifies. The dispatcher therefore has to run the rest after the gate opens, and the
+// alternative - treating `unless` as its own step - would need the file to name the action twice.
+func (e *Executor) dispatchRest(s walk.Step) error {
+	// A COPY WITHOUT THE GATE, so dispatchRest cannot recurse.
+	rest := walk.Step{Index: s.Index, Name: s.Name, Spec: make(map[string]any, len(s.Spec))}
+	for k, v := range s.Spec {
+		if k == "unless" || k == "region" || k == "region_at" || k == "scale" {
+			continue
+		}
+		rest.Spec[k] = v
+	}
+	return e.runOne(rest)
 }
 
 // --- the actions ---------------------------------------------------------------------

@@ -1,0 +1,93 @@
+# A whole macOS stage, declared in one file: boot, check, reboot, shut down.
+#
+#     python3 lib/steps.py macos/15/steps/lifecycle.yaml \
+#         --boot-disk out/macos15-share.qcow2 \
+#         --boot-share ~/shared
+#
+# THIS IS THE SHAPE THE STAGE SCRIPTS WILL BECOME. Everything a stage does to the machine as a
+# PROCESS is here; what stays in Python is what a step cannot be - fetching an image, publishing
+# an artifact, deciding whether the run passed.
+#
+# WHY EACH STEP IS WHAT IT IS
+#
+#   boot        starts the disk on an OVERLAY (lib/vm_session.py), so nothing this run does can
+#               reach the published artifact, and the guest can be killed at the end rather than
+#               asked politely - see `shutdown` below.
+#   require_ssh THE MACHINE IS NOT UP WHEN `boot:` RETURNS. A reset or a cold start answers QMP
+#               immediately and takes a minute to reach sshd; this is the wait, and doing it as a
+#               step means its timeout is visible in the log.
+#   reboot      system_reset through QMP. It exists because the guest's own shutdown path is the
+#               thing being avoided: macOS puts up a dialog on ACPI, and a loaded guest can
+#               outlast any timeout.
+#   shutdown    `graceful: false` is correct HERE and wrong for a stage that writes. This file
+#               runs on an overlay, so a kill destroys nothing; a stage whose output IS the disk
+#               (clean, dev) must let the guest close its filesystems first.
+#
+# WHAT THIS FILE DOES NOT DO, AND SHOULD NOT
+#
+#   install anything     that is a toolchain file, and it needs no reboot to run
+#   publish              a workflow step pushes what a stage produced
+#   decide pass/fail     the steps say it; a failing step is a failing run
+
+name: macos 15 - the machine's own lifecycle
+resolution: [1920, 1080]
+
+vars:
+  user:
+    from: args.user
+    default: vmuser
+  password:
+    from: args.password
+    default: admin
+
+ssh_user: vmuser
+ssh_port: 2222
+
+steps:
+  - name: boot the disk
+    boot: true
+    os: macos
+    timeout: 900
+
+  - name: wait for sshd
+    require_ssh: true
+    ssh_probe: echo ok
+    timeout: 900
+
+  # THE IDENTITY OF THE MACHINE, so the log says which disk was started rather than only that
+  # something answered.
+  - name: say what came up
+    ssh: |
+      sw_vers && uname -a && id -un
+    timeout: 120
+
+  # A REBOOT PROVES THE DISK BOOTS ON ITS OWN. A first boot can succeed out of a state the
+  # previous stage left in memory; the second one cannot.
+  - name: reboot into the same system
+    reboot: true
+    timeout: 900
+
+  - name: prove it came back
+    require_ssh: true
+    ssh_probe: echo ok
+    timeout: 900
+
+  - name: say what came up the second time
+    ssh: |
+      uptime && sw_vers
+    timeout: 120
+
+  # KILLED, NOT ASKED - this guest is on an overlay. See the note at the top.
+  #
+  # AND THE METHOD IS NAMED. `shutdown:` used to be a boolean that meant "careful or not", and
+  # the actual method was chosen by a chain inside vm_session.stop() - agent, then ssh, then the
+  # power button, then kill - with each step falling silently into the next. On macOS that chain
+  # was a lie: the power button opens a dialog, so the "graceful" shutdown was a 300-second wait
+  # and a kill that reported itself as clean.
+  #
+  #     guest_agent   a request the agent executes. Needs qga; stops the run if it is absent.
+  #     ssh           `shutdown -h now` over the walkthrough's own connection.
+  #     acpi          the power button. Windows and Linux honour it; macOS refuses it here.
+  #     kill          the process ends now. Right for an overlay, where nothing is kept.
+  - name: shut it down
+    shutdown: kill

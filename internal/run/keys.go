@@ -12,10 +12,13 @@ func ExecutableKeys() []string {
 		"boot", "shutdown", "reboot",
 		"disk",
 		"record", "compress",
-		"require_ssh", "ssh", "scp", "script",
+		"require_ssh", "ssh", "scp", "script", "write", "fetch",
 		"desktop",
 		"share_serve", "share_mount",
 		"type", "key", "double", "at",
+		"dismiss", "wait_for", "select_disk", "apple_account", "copy_in", "screenshot",
+		"unless", "until", "until_any", "expect", "expect_any", "at_window",
+		"demo_script",
 		"wait",
 	}
 }

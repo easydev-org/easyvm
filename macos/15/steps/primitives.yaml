@@ -1,0 +1,171 @@
+# Every primitive a walkthrough has, in one file that does nothing expensive.
+#
+#     python3 lib/steps.py macos/15/steps/primitives.yaml \
+#         --boot-disk out/macos15-vm-configure.qcow2
+#
+# THIS FILE IS THE VOCABULARY, WRITTEN DOWN. The stage files use the subset each one needs and a
+# reader has to infer the rest; this one shows what exists and what it means. It is not part of
+# the publish chain - nothing depends on it - and that is on purpose: an example that is a
+# dependency is an example that cannot be changed.
+#
+# THE FIVE SHAPES, IN THE ORDER A READER NEEDS THEM
+#
+#   1. THE MACHINE       boot / reboot / shutdown / require_ssh
+#   2. THE GUEST         ssh / scp / script
+#   3. THE HOST          share_serve / share_mount / python / screenshot / record
+#   4. THE SCREEN        at / type / key / until / when (the GUI half, not used here)
+#   5. THE ASSERTIONS    requires / expect / optional
+#
+# AND THE RULE THAT MATTERS MOST: A STEP DECLARES WHAT IT NEEDS, AND A MISSING CAPABILITY STOPS
+# THE RUN. `requires:` is checked before the step does anything, so the failure names the missing
+# thing rather than the timeout it would have caused.
+
+name: macos 15 - every primitive, nothing expensive
+resolution: [1920, 1080]
+
+vars:
+  user:
+    from: args.user
+    default: vmuser
+  password:
+    from: args.password
+    default: admin
+  host:
+    from: args.host
+    default: 172.30.0.1
+
+ssh_user: vmuser
+ssh_port: 2222
+
+steps:
+  # =========================================================================
+  # 1. THE MACHINE
+  # =========================================================================
+
+  # `boot:` IS OVER WHEN QEMU IS RUNNING. It does not wait for sshd - that is a separate fact
+  # about the disk, and `require_ssh:` below is the step that asks for it. A file that installs
+  # an operating system has no sshd to wait for.
+  - name: boot the disk
+    boot: true
+    os: macos
+    timeout: 900
+
+  # THE ONLY STEP THAT WAITS FOR A SHELL. Its own timeout, visible here.
+  - name: wait for sshd
+    require_ssh: true
+    ssh_probe: echo ok
+    timeout: 900
+
+  # =========================================================================
+  # 2. THE GUEST: three ways to make it do something
+  # =========================================================================
+
+  # ONE COMMAND. The exit status is the step's; `optional:` would let it fail without stopping.
+  - name: say what came up
+    ssh: |
+      sw_vers && uname -a && id -un
+    timeout: 120
+
+  # A FILE, COPIED IN. The local path is relative to the walkthrough's work directory, so a file
+  # a `python:` step just generated is found without spelling out where it went.
+  - name: write a script on the host
+    write: demo_script
+    timeout: 60
+
+  - name: copy it in
+    scp: ["demo.sh", "/tmp/demo.sh"]
+    timeout: 120
+
+  # A FILE, WRITTEN AND RUN IN ONE STEP, for the case where the body is short enough to live in
+  # the walkthrough. `script_shell` picks the interpreter.
+  - name: prove the copied script arrived
+    ssh: |
+      sh /tmp/demo.sh
+    timeout: 120
+
+  # =========================================================================
+  # 3. THE SCREEN: evidence, asked for by the file
+  # =========================================================================
+  #
+  # A FAILED STEP ALREADY TAKES A FRAME, and that is the one nobody asked for. These are the ones
+  # the author asks for - and they go into <work>/shots/, which is the same directory the failing
+  # step uses, so one upload pattern collects both.
+  - name: capture the screen
+    screenshot: after-boot.png
+    timeout: 60
+
+  # A VIDEO OF WHAT HAPPENS BETWEEN TWO STEPS. The encoder is lib/live.py's, the one every stage
+  # already runs. `record: false` stops it and finalises the file.
+  - name: start recording
+    record: primitives.mp4
+    timeout: 60
+
+  - name: do something worth recording
+    ssh: |
+      uptime
+    timeout: 60
+
+  - name: stop recording
+    record: false
+    timeout: 120
+
+  # =========================================================================
+  # 4. THE HOST: a directory the guest can reach
+  # =========================================================================
+  #
+  # TWO STEPS, BECAUSE IT WAS ALWAYS TWO ACTS. Starting the server and mounting it were one step,
+  # and "the guest could not mount the share" was the message for a host with no smbd, a
+  # credential the guest could not use, and a network that did not route.
+  - name: serve the host share
+    share_serve: true
+    timeout: 60
+
+  - name: mount the host share
+    share_mount: true
+    share_family: macos
+    requires: [share]
+    timeout: 180
+
+  - name: prove the share is writable
+    ssh: |
+      printf 'from-%s\n' "$(hostname)" > ~/shared/primitives.txt && cat ~/shared/primitives.txt
+    timeout: 120
+
+  # =========================================================================
+  # 5. THE ASSERTIONS
+  # =========================================================================
+
+  # A REBOOT IS A RESET, NOT A WAIT. The screen is rebuilt; whether an sshd answers afterwards is
+  # the next step's business.
+  - name: reboot
+    reboot: true
+    timeout: 300
+
+  - name: wait for sshd again
+    require_ssh: true
+    ssh_probe: echo ok
+    timeout: 900
+
+  # =========================================================================
+  # 6. STOPPING: A METHOD, NOT A PREFERENCE
+  # =========================================================================
+  #
+  #     guest_agent   a request the agent executes. Needs qga; stops the run if it is absent.
+  #     ssh           `shutdown -h now` over the walkthrough's own connection.
+  #     acpi          the power button. Windows and Linux honour it; macOS refuses it here.
+  #     kill          the process ends now. Right for an overlay, where nothing is kept.
+  #
+  # THIS FILE BOOTED ON AN OVERLAY, so `kill` is correct and costs nothing. So is `guest_agent` if
+  # the disk has one installed - both are shown, and only one runs; the other is refused with a
+  # message rather than quietly becoming something else.
+  - name: shut down through the agent
+    shutdown: guest_agent
+    requires: [qga]
+    optional: true
+    timeout: 300
+
+  # THE FALLBACK IS A STEP, NOT A CHAIN INSIDE A FUNCTION. If the agent above did not stop it -
+  # `optional:` means a missing capability does not end the run - this is what stops it.
+  - name: stop whatever is left
+    shutdown: kill
+    timeout: 120

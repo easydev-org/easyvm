@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/easydev-org/easyvm/internal/asset"
+	"github.com/easydev-org/easyvm/internal/bootstrap"
 	"github.com/easydev-org/easyvm/internal/screen"
 	"github.com/easydev-org/easyvm/internal/walk"
 )
@@ -374,4 +376,268 @@ func notImplementedCount(steps []walk.Step, can map[string]bool) (int, string) {
 func fileExists(path string) bool {
 	fi, err := os.Stat(path)
 	return err == nil && !fi.IsDir()
+}
+
+// --- host-side files ------------------------------------------------------------------
+
+// doWrite writes one of the bootstrap files on the host, for the `scp:` after it.
+//
+// IT DOES NOT COPY AND DOES NOT RUN. That split is from the Python implementation and it was
+// earned: a single step that wrote, copied and ran reported `the launcher install exited 1` and
+// named neither the file nor the action, so a failure could only be diagnosed by reading the script.
+//
+// `family:` IS TAKEN FROM THE STEP WHEN IT NAMES ONE, and from the walkthrough otherwise - the same
+// rule for the same reason as everywhere else: a fact about this disk belongs in the file that runs
+// on it.
+func (e *Executor) doWrite(s walk.Step) error {
+	kind := s.Get("write")
+	if kind == "" {
+		return fail(s.Name, "`write:` must name a file kind")
+	}
+	family := s.Get("family")
+	if family == "" {
+		family = s.Get("os")
+	}
+	if family == "" && e.File != nil {
+		// The walkthrough's own os, from its first boot step, if it names one.
+		for _, other := range e.File.Steps {
+			if v := other.Get("os"); v != "" {
+				family = v
+				break
+			}
+		}
+	}
+
+	opts := bootstrap.Options{
+		Family: bootstrap.Family(family),
+		Host:   "172.30.0.1",
+		Share:  "shared",
+		User:   "guest",
+	}
+	if e.File != nil {
+		if v := e.File.Vars["share_user"]; v != nil {
+			opts.User = fmt.Sprint(v)
+		}
+		if v := e.File.Vars["share"]; v != nil {
+			opts.Share = fmt.Sprint(v)
+		}
+	}
+
+	var body, name string
+	switch kind {
+	case "launcher":
+		body, name = bootstrap.Launcher(opts), bootstrap.LauncherName(opts.Family)
+	case "macos_agent_plist":
+		body, name = bootstrap.MacOSAgentPlist("$HOME/bootstrap-launcher.sh"),
+			"org.vm.bootstrap.plist"
+	case "macos_mount_script":
+		body, name = bootstrap.MacOSMountScript(opts), "vm-smbmount.sh"
+	case "macos_mount_plist":
+		body, name = bootstrap.MacOSMountPlist("/usr/local/bin/vm-smbmount.sh"),
+			"org.vm.smbmount.plist"
+	case "windows_task":
+		body, name = bootstrap.WindowsTaskScript(
+			"C:/Users/"+e.userForPaths()+"/bootstrap-launcher.ps1"), "bootstrap-install.ps1"
+	default:
+		return fail(s.Name, "`write: %s` is not a file this build writes; the kinds are "+
+			"launcher, macos_agent_plist, macos_mount_script, macos_mount_plist, windows_task", kind)
+	}
+
+	path := filepath.Join(e.Work, name)
+	if err := os.MkdirAll(e.Work, 0o755); err != nil {
+		return fail(s.Name, "%v", err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		return fail(s.Name, "writing %s: %v", name, err)
+	}
+	// THE PATH IS LOGGED because the `scp:` that follows names it, and a mismatch between the two
+	// is the failure this split exists to make visible.
+	e.Driver.Log(fmt.Sprintf("  wrote %s (%d bytes); the scp: step after this copies it in",
+		path, len(body)))
+	return nil
+}
+
+func (e *Executor) userForPaths() string {
+	if e.File != nil && e.File.SSHUser != "" {
+		return e.File.SSHUser
+	}
+	return "vmuser"
+}
+
+// doFetch produces a host-side asset.
+func (e *Executor) doFetch(s walk.Step) error {
+	kind := s.Get("fetch")
+	if kind == "" {
+		return fail(s.Name, "`fetch:` must name an asset")
+	}
+	family := s.Get("family")
+	if family == "" && e.File != nil {
+		family = string(e.File.SSHUser)
+		for _, other := range e.File.Steps {
+			if v := other.Get("os"); v != "" {
+				family = v
+				break
+			}
+		}
+	}
+	res, err := asset.Fetch(asset.Kind(kind), family, e.Work)
+	if err != nil {
+		return fail(s.Name, "%v", err)
+	}
+	e.Driver.Log(fmt.Sprintf("  ready for the copy: %s", res.Main))
+	for _, extra := range res.Extra {
+		e.Driver.Log(fmt.Sprintf("  also: %s", extra))
+	}
+	return nil
+}
+
+// --- macOS's own steps ----------------------------------------------------------------
+
+// doDismiss clicks away the overlays a first login puts up.
+//
+// THE KEYBOARD SETUP ASSISTANT IS THE ONE THAT MATTERS. macOS enumerates HID devices at login, finds
+// none it recognises (qemu has a usb-tablet and no keyboard), and asks the user to identify one -
+// across the middle of the screen. It EATS THE NEXT KEYSTROKE, which is how a stage types a command
+// into a dialog and reports "something answered, but not sshd" for its whole budget.
+//
+// IT APPEARS AFTER LOGGING IN, NOT BEFORE, so this runs after the password and before anything is
+// typed at Spotlight.
+func (e *Executor) doDismiss(s walk.Step) error {
+	what := s.Get("dismiss")
+	if what != "post_login" {
+		return fail(s.Name, "`dismiss:` knows post_login only; got %q", what)
+	}
+	// THE CLICKS ARE FIXED COORDINATES, AND THAT IS THE RULE. (1228, 826) is the Quit button on a
+	// 1920x1080 guest; a click there on a desktop with no dialog lands on the wallpaper and does
+	// nothing, which is the correct outcome for a machine that never showed one.
+	//
+	// A CLICK THAT LANDS ON NOTHING IS NOT A FAILURE, so this never fails on a screen without a
+	// dialog - but it says what it sent, because a missing dismissal shows up later as a keystroke
+	// that went somewhere unexpected.
+	for _, point := range [][2]int{{1228, 826}, {1228, 826}} {
+		if err := e.Driver.Click(point[0], point[1]); err != nil {
+			return fail(s.Name, "click (%d, %d): %v", point[0], point[1], err)
+		}
+		e.Driver.Log(fmt.Sprintf("  clicked Quit on the first-login overlay at (%d, %d)",
+			point[0], point[1]))
+	}
+	return nil
+}
+
+// doWaitFor waits for a control with no readable title.
+//
+// THE LOGIN WINDOW'S ONLY TEXT IS THE PASSWORD FIELD'S PLACEHOLDER, twelve pixels tall in a 165x40
+// box. A whole-frame read returns NOTHING on a finished Setup Assistant, which is why a walk whose
+// gate lists fifteen pane titles waits out its entire budget on a screen that is already done.
+func (e *Executor) doWaitFor(s walk.Step) error {
+	what := s.Get("wait_for")
+	if what != "login_window" {
+		return fail(s.Name, "`wait_for:` knows login_window only; got %q", what)
+	}
+	timeout := seconds(s, "timeout", 240)
+	poll := seconds(s, "poll", 3)
+
+	e.Driver.Log(fmt.Sprintf("  waiting up to %s for the login window", timeout))
+	start := time.Now()
+	for time.Since(start) < timeout {
+		f, err := e.Driver.Frame()
+		if err != nil {
+			time.Sleep(poll)
+			continue
+		}
+		img, err := screen.Load(f.Path())
+		if err != nil {
+			time.Sleep(poll)
+			continue
+		}
+		if screen.HasLoginWindow(img) {
+			e.Driver.Log(fmt.Sprintf("  the login window is up (%s)",
+				time.Since(start).Round(time.Second)))
+			return nil
+		}
+		time.Sleep(poll)
+	}
+	return failWithScreen(s.Name, e.Driver, "no login window within %s", timeout)
+}
+
+// doSelectDisk picks the target disk by capacity rather than by row.
+//
+// BY CAPACITY BECAUSE THE ROW ORDER IS NOT OURS. The installer enumerates disks as it finds them,
+// and a run whose disk appears second on one boot and first on the next would erase the wrong thing.
+func (e *Executor) doSelectDisk(s walk.Step) error {
+	if how := s.Get("select_disk"); how != "by_capacity" {
+		return fail(s.Name, "`select_disk:` knows by_capacity only; got %q", how)
+	}
+	return notImplemented(s, "select_disk:by_capacity")
+}
+
+// doAppleAccount leaves the Apple Account pane.
+func (e *Executor) doAppleAccount(s walk.Step) error {
+	if act := s.Get("apple_account"); act != "skip" {
+		return fail(s.Name, "`apple_account:` knows skip only; got %q", act)
+	}
+	return notImplemented(s, "apple_account:skip")
+}
+
+// doCopyIn copies a fetched asset into the guest.
+//
+// SFTP, NOT `scp`: the remote path is the guest's, and `scp` hands its argument to the remote shell -
+// so a path with a space or a backslash is re-parsed there. Same reason as internal/run/scp.go.
+func (e *Executor) doCopyIn(s walk.Step) error {
+	client := e.Driver.Guest()
+	if client == nil {
+		return fail(s.Name, "no ssh connection; a `require_ssh:` step must come first")
+	}
+	what := s.Get("copy_in")
+	local := ""
+	switch what {
+	case "xcode":
+		local = filepath.Join(e.Work, "Xcode.xip")
+	case "dev_packages":
+		local = filepath.Join(e.Work, "packages.tar")
+	default:
+		return fail(s.Name, "`copy_in:` knows xcode and dev_packages; got %q", what)
+	}
+	if _, err := os.Stat(local); err != nil {
+		return fail(s.Name, "no fetched asset at %s; a `fetch: %s` step must come first", local, what)
+	}
+	remote := "/tmp/" + filepath.Base(local)
+	if err := scpFile(client, local, remote); err != nil {
+		return fail(s.Name, "copying %s in: %v", filepath.Base(local), err)
+	}
+	e.Driver.Log(fmt.Sprintf("  copied %s -> %s", filepath.Base(local), remote))
+	return nil
+}
+
+// doScreenshot saves the screen, for a step that asks for the picture rather than a failure taking
+// one.
+func (e *Executor) doScreenshot(s walk.Step) error {
+	dest := s.Get("screenshot")
+	if dest == "" {
+		return fail(s.Name, "`screenshot:` must name a path")
+	}
+	f, err := e.Driver.Frame()
+	if err != nil {
+		return fail(s.Name, "%v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		return fail(s.Name, "%v", err)
+	}
+	src, err := os.ReadFile(f.Path())
+	if err != nil {
+		return fail(s.Name, "%v", err)
+	}
+	if err := os.WriteFile(dest, src, 0o644); err != nil {
+		return fail(s.Name, "%v", err)
+	}
+	e.Driver.Log(fmt.Sprintf("  screenshot: %s", dest))
+	return nil
+}
+
+// doDemoScript writes a throwaway script, for the primitives walkthrough.
+func (e *Executor) doDemoScript(s walk.Step) error {
+	if s.Get("demo_script") == "" {
+		return fail(s.Name, "`demo_script:` must name the file to write")
+	}
+	return notImplemented(s, "demo_script")
 }

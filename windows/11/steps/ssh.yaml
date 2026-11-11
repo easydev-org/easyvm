@@ -1,0 +1,346 @@
+# Windows 11 stage two: put OpenSSH on THIS disk, prove it answers, then configure the guest.
+#
+#     python3 lib/steps.py windows/11/steps/ssh.yaml --qmp /work/drive.sock.qmp --ssh-port 2222
+#
+# WHAT THIS REPLACES, AND WHY THE FILE IS THIS SHAPE
+#
+# windows/11/ssh.py was 1126 lines and about 300 of them were the sequence: warm the lock
+# screen, open PowerShell, type the winget line, type six sshd statements, wait for the port,
+# push 55 guest settings, read the power settings back. None of that is logic - every one of
+# them is a measurement of this guest - and it is the part that changed most often.
+#
+# THE HALF THAT STAYS IN PYTHON IS THE HALF THAT RUNS A MACHINE: copying the disk, building the
+# qemu command line, the fresh OVMF variable store, swtpm, compressing the result. Those are
+# `lib/vm.py` and `lib/compress.py` facts, not walkthrough steps.
+#
+# WINDOWS IS NOT A POSIX SHELL, AND THREE NUMBERS HERE ARE DIFFERENT BECAUSE OF IT:
+#
+#   type_gap: 0.15    PSReadLine redraws on every keystroke and drops them below ~150 ms.
+#                     Measured on run 41997580476: `winget install` arrived as `get install`,
+#                     the prompt came back, and the machine reported - correctly - that
+#                     OpenSSH was not installed. 40 ms - the POSIX floor - is not enough here.
+#   ssh_probe         `true` is the POSIX builtin every other guest has. cmd.exe says
+#                     "'true' is not recognized as an internal or external command", which is
+#                     run 41844808248 losing fifteen minutes to an sshd that was working.
+#   the shell         sshd on Windows starts cmd.exe, which is why every PowerShell statement
+#                     is wrapped in `powershell -Command "..."` and every guest setting is
+#                     prefixed. That is a fact about this guest, so it is written here rather
+#                     than re-derived at every call site (which is how configure_guest() ran
+#                     55 straight failures for one stage).
+#
+# WHY THE GUEST SETTINGS ARE ONE STEP OF MANY STATEMENTS
+#
+# They are 55 statements and DISM alone runs for minutes. Typed one at a time that is a
+# hundred keystrokes of settle and a keyboard woken for each - and ssh is already up by then,
+# which is the whole point of doing them after `require_ssh`. The `run:` step types them into
+# a PowerShell session only for the ones that have no ssh channel yet (configure_sshd); the
+# rest go over ssh, one `ssh:` step each, so a failure names the statement.
+
+name: windows 11 - ssh
+resolution: [1920, 1080]
+
+vars:
+  user:
+    from: args.user
+    default: vmuser
+  password:
+    from: args.password
+    default: admin
+  # WHERE THIS STAGE'S DISK GOES. It arrives on the command line because the workflow names the
+  # artifact path; writing it into the file would bake one job's output name into every run.
+  out:
+    from: args.out
+    default: out/windows11-ssh.qcow2
+  # HOW LONG THE GUEST MAY TAKE TO REACH A DESKTOP. `--boot-timeout` on the command line, because
+  # the same disk is slower on a loaded runner; 900 is what this stage measured on its own.
+  boot_timeout:
+    from: args.boot_timeout
+    default: "900"
+
+# The account the answer file creates, and the port the host's forward points at.
+# lib/vm.build_args() forwards host 2222 -> guest 22, so sshd has to be on 22.
+ssh_user: vmuser
+ssh_port: 2222
+
+steps:
+  # THE VIDEO IS A STEP, SO THE FILE SAYS WHETHER THIS STAGE IS FILMED.
+  #
+  # `windows/11/ssh.py` used to start `lib/snapshots.py` and `lib/live.py` itself, which meant the
+  # recording lived in Python while every other part of the walkthrough lived here - and the
+  # macOS stage had the same pair written a second time. `record:` is an atomic step shared by
+  # every family (lib/steps.py), so the driver only has to be a driver.
+  #
+  # STARTED BEFORE ANYTHING ELSE, because the sampler waits for the record socket and the boot is
+  # the part that used to be invisible when a stage failed early.
+  - name: start recording
+    record: install.mp4
+    poll: 20
+
+  # --- 0. THE MACHINE, WHICH USED TO BE `ssh.py`'S JOB --------------------------------
+  #
+  # Three steps that every stage wrote in Python and that are properties of THE RUN, not of the
+  # screen: which disk to write, which guest to start it on, and how to know the guest is up.
+  #
+  # `disk:` MOVES THE INPUT HERE. The default is to move rather than copy because the disk came
+  # from ghcr and the registry still has it - `lib/working_copy.py` documents the 28 GiB copy
+  # that protected a file which was never at risk.
+  - name: take the input disk
+    disk: disk.qcow2
+    # `boot:` BUILDS THE OVERLAY, so there is no `disk_overlay:` here any more.
+    #
+    # It was needed for one commit because a file that let `boot:` make the overlay had no way to
+    # tell `compress:` to flatten it. Now `boot:` records the overlay it made, so the two are the
+    # same path: every machine runs on a diff, and publishing flattens it.
+    #
+    # WHY THE DEFAULT IS A DIFF RATHER THAN A MOVE. `working_copy` moves the input by default,
+    # which is right for a disk that came from ghcr and is still there - but a stage that FAILS
+    # has already consumed it, so the retry pays 11 to 20 GiB of download again. `lib/overlay.py`
+    # leaves the base byte-for-byte intact and re-checks it on close, which is the only one of
+    # the three that can prove it.
+
+  # `os:` IS THE FACT THAT DECIDES THE MACHINE. A Windows guest is a UEFI firmware, a virtio
+  # disk, an OVMF variable store, optionally a TPM, and a fallback loader at \EFI\BOOT\BOOTX64.EFI
+  # so the disk does not depend on a bootstate archive. A macOS guest is OpenCore on its own boot
+  # image, the Apple SMC with an OSK, an APFS driver and a Skylake CPU model. Naming the OS is a
+  # shorter way of saying the same thing than listing twelve qemu arguments, and there is one
+  # place (`lib/vm_session.py`) where each name is expanded.
+  - name: boot the disk
+    boot: true
+    os: windows
+    timeout: 900
+
+  # AND THE GUEST IS UP WHEN ITS DESKTOP IS, judged by lib/desktop.py - the same test the bake
+  # uses, which is why it is not repeated here.
+  - name: wait for the desktop
+    desktop: windows
+    # FROM THE COMMAND LINE, because the same disk is slower on a loaded runner and a number
+    # measured once is a number that will be wrong on somebody else's machine.
+    timeout: "{{ boot_timeout }}"
+
+  # --- 1. THE KEYBOARD, WHICH IS THE ONLY CHANNEL UNTIL SSHD EXISTS --------------------
+  #
+  # Windows blanks its display after a minute of no input, and lib/desktop.py cannot tell a
+  # blank screen from a failed boot. The stage that produced this disk already stopped at a
+  # desktop, so this wakes what went dark rather than waiting for one to appear.
+  - name: wake the screen
+    key: esc
+    settle: 5
+  - name: wake the screen again
+    key: esc
+    settle: 3
+
+  # WIN+R, THEN THE SHELL. Esc first is not cosmetic: a Start menu, a notification or an
+  # update overlay swallows the chord that follows, and the symptom is a command that lands
+  # nowhere.
+  - name: open the run dialog
+    key: meta_l+r
+    settle: 3
+
+  # THE LINE IS TYPED, SO IT IS ONE LINE. `--exact` stops a search for
+  # Microsoft.OpenSSH.Preview resolving to a package whose id merely contains it;
+  # --disable-interactivity means the screenshot afterwards shows a prompt rather than a
+  # spinner that never ends; the two --accept-* switches answer the prompts that would
+  # otherwise wait for a keypress.
+  - name: type powershell
+    type: powershell
+    # THE SAME 150 ms AS THE LONGER LINES. `powershell` is eleven lowercase characters and 40 ms
+    # would probably survive it, but a typing speed is a property of this guest's PSReadLine,
+    # not of the string being typed - and a file where one step is faster than the others is a
+    # file that invites someone to lower the others to match.
+    type_gap: 0.15
+    settle: 2
+  - name: open powershell
+    key: ret
+    settle: 14
+
+  # THE INSTALL, AND A FIXED WAIT RATHER THAN A POLL FOR THE PROMPT.
+  #
+  # Run 41587909137 is why. The previous version watched the screen for "PS C:\...>" to come
+  # back and called that success - winget prints that prompt whether it installed the package
+  # or not, so the stage went on to configure a service that did not exist:
+  #
+  #     Get-Content : Cannot find path 'C:\ProgramData\ssh\sshd_config'
+  #     Start-Service : Cannot find any service with service name 'sshd'
+  #
+  # 120 seconds, because the measured installs are 51 and 54 seconds and winget's first-run
+  # metadata refresh has been seen to add most of a minute. Whether it worked is asked of the
+  # machine below, not of the screen.
+  # THE SCREEN HAS TO STAY ON FOR THE STAGE THAT HAS NO SHELL YET, AND THIS IS THE ONLY PLACE
+  # THAT CAN DO IT.
+  #
+  # `do not blank the screen` is an ssh step below, because every other guest setting is - but
+  # that means it only runs once sshd answers, and the whole point of the next four steps is to
+  # find out whether sshd answers. Run 42920273280 is the deadlock that produces: sshd never
+  # listened, so the setting never applied, so the monitor blanked during the 600-second wait,
+  # so the post-mortem frame
+  #
+  #     out/ssh-work/steps/failed-wait-for-sshd.png
+  #
+  # was a completely black screen. The STEP1/STEP2/STEP3 marks added for exactly this diagnosis
+  # were typed onto a display that had switched off.
+  #
+  # PowerShell is already open here - `open powershell` is two steps above - so this costs one
+  # typed line and needs no ssh at all.
+  - name: keep the screen on before ssh exists
+    type: powercfg /change monitor-timeout-ac 0; powercfg /change monitor-timeout-dc 0; powercfg /change standby-timeout-ac 0; powercfg /change standby-timeout-dc 0; 'SCREEN=kept-on'
+    type_gap: 0.15
+    settle: 2
+  - name: run the screen setting
+    key: ret
+    settle: 3
+
+  - name: install openssh
+    type: winget install --id Microsoft.OpenSSH.Preview --exact --source winget --accept-source-agreements --accept-package-agreements --disable-interactivity
+    type_gap: 0.15
+    settle: 2
+  - name: run the install
+    key: ret
+    settle: 120
+
+  # --- 2. SSHD, WHICH STILL HAS TO BE CONFIGURED AT THE KEYBOARD -----------------------
+  #
+  # The service is installed but Manual (nothing starts it at boot), password auth is
+  # commented out in the shipped config, and the default firewall rule points at 22 while the
+  # forward expects 22 - set explicitly so the value is readable afterwards rather than
+  # inferred.
+  #
+  # Each statement is typed, so each is one line. `;` joins them into one command line, which
+  # is what PowerShell expects and what the keyboard can produce.
+  # EACH HALF SAYS WHETHER IT WORKED, ON THE SCREEN THAT IS THE ONLY THING A FAILURE LEAVES.
+  #
+  # The previous version was ONE line that ended in a bare
+  #
+  #     Get-NetTCPConnection ... | Select-Object -First 1 LocalPort
+  #
+  # so the window showed `22` on success and NOTHING on failure, and the stage could not tell
+  # "the service started" from "the package was never installed". Run 42916715755 waited its full
+  # 600 seconds for `sshd` and the failure read `sshd did not answer in 600s`, which names no
+  # cause at all.
+  #
+  # THE THREE MARKS ARE THE DIAGNOSIS. `STEP1`, `STEP2` and `STEP3` each print with an explicit
+  # try/catch, so the post-mortem frame says which one threw rather than leaving a prompt.
+  - name: configure sshd
+    type: 'try { Set-Service sshd -StartupType Automatic -ErrorAction Stop; ''STEP1=ok'' } catch { ''STEP1=FAILED: '' + $_.Exception.Message }; try { $c = ''C:\ProgramData\ssh\sshd_config''; if (Test-Path $c) { (Get-Content $c) -replace ''^#?\s*PasswordAuthentication\s+.*'', ''PasswordAuthentication yes'' -replace ''^#?\s*Port\s+.*'', ''Port 22'' | Set-Content $c; ''STEP2=ok'' } else { ''STEP2=FAILED: no sshd_config'' } } catch { ''STEP2=FAILED: '' + $_.Exception.Message }; try { Start-Service sshd -ErrorAction Stop; ''STEP3=ok'' } catch { ''STEP3=FAILED: '' + $_.Exception.Message }; try { Get-NetFirewallRule -Name sshd-22 -ErrorAction SilentlyContinue | Remove-NetFirewallRule -ErrorAction SilentlyContinue; New-NetFirewallRule -Name sshd-22 -DisplayName ''OpenSSH 22'' -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22 -ErrorAction Stop | Out-Null; ''STEP4=ok'' } catch { ''STEP4=FAILED: '' + $_.Exception.Message }; Get-NetTCPConnection -State Listen -LocalPort 22 -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty LocalPort'
+    type_gap: 0.15
+    settle: 2
+  - name: run the sshd configuration
+    key: ret
+    settle: 25
+
+  # THE DAEMON, ASKED OF THE PORT RATHER THAN READ OFF A PICTURE. The probe is `echo ok`
+  # because this guest's shell is cmd.exe, where `true` does not exist.
+  - name: wait for sshd
+    require_ssh: true
+    ssh_probe: echo ok
+    timeout: 600
+
+  # --- 3. THE GUEST SETTINGS, WHICH ARE CHEAP ONCE THERE IS A SHELL --------------------
+  #
+  # Every one of these is something this pipeline was hurt by, in a run, rather than a tuning
+  # guide's suggestion: the display blanking after a minute (which lib/desktop.py cannot
+  # distinguish from a failed boot), Windows Update rebooting a disk mid-stage, OneDrive and
+  # the restore points filling a 40 GiB disk.
+  #
+  # EACH IS ITS OWN STEP SO THE FAILURE NAMES THE STATEMENT. sshd on Windows starts cmd.exe,
+  # which is why the value is `powershell -Command "..."` - configure_guest() returns
+  # PowerShell and a stage that hands that string straight to sshd runs it as cmd, which is
+  # how 55 statements all failed in one second on run 42020047027.
+  #
+  # NOT FATAL, ANY OF THEM. A policy key that lives elsewhere on this build is not a reason to
+  # publish nothing; what matters is read back at the end.
+  - name: do not blank the screen
+    ssh: powershell -Command "powercfg /change monitor-timeout-ac 0; powercfg /change monitor-timeout-dc 0; powercfg /change standby-timeout-ac 0; powercfg /change standby-timeout-dc 0"
+    timeout: 120
+    optional: true
+  - name: no hibernation file
+    ssh: powershell -Command "powercfg -h off"
+    timeout: 120
+  - name: hold windows update
+    ssh: powershell -Command "New-Item -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU' -Force | Out-Null; Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU' -Name NoAutoRebootWithLoggedOnUsers -Value 1 -Type DWord -Force; Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU' -Name NoAutoUpdate -Value 1 -Type DWord -Force"
+    timeout: 120
+  - name: turn off restore points
+    ssh: powershell -Command "Disable-ComputerRestore -Drive 'C:\' -ErrorAction SilentlyContinue"
+    timeout: 180
+
+  # THE COMPONENT STORE, WITHOUT `/ResetBase`.
+  #
+  # `/StartComponentCleanup` removes superseded components. `/ResetBase` additionally discards
+  # every superseded version OF EVERY COMPONENT, which is what makes an update afterwards
+  # un-uninstallable - and on this image it is the expensive half by a wide margin: the stage sat
+  # in this one command long enough to be mistaken for a hang twice (runs 42937358029 and
+  # 42943833902 both spent their whole `install ssh` step here).
+  #
+  # THE TRADE IS DELIBERATE. This disk exists to be a CI guest. Nothing in this repository reads
+  # the component store, nothing uninstalls an update from it, and `StartComponentCleanup` alone
+  # already reclaims the superseded components that make the image smaller. `/ResetBase` buys a
+  # few hundred MiB more and costs tens of minutes of the one resource the chain is short of.
+  #
+  # It is a cmd command and therefore NOT wrapped in powershell -Command, which is the one
+  # statement in this file that is not.
+  - name: compact the component store
+    ssh: DISM /Online /Cleanup-Image /StartComponentCleanup
+    timeout: 3600
+    optional: true
+
+  # --- 4. READ BACK WHAT CAN BE READ BACK ---------------------------------------------
+  #
+  # These three are the ones whose failure is invisible until a later stage, and each is a
+  # single value. A switch that looks right on a screenshot is not the same fact as a timeout
+  # that is zero.
+  - name: prove the power settings took
+    ssh: powershell -Command "$m = (powercfg /query SCHEME_CURRENT SUB_VIDEO VIDEOIDLE 2>$null | Select-String 'Current AC Power Setting').ToString().Split(':')[-1].Trim(); $s = (powercfg /query SCHEME_CURRENT SUB_SLEEP STANDBYIDLE 2>$null | Select-String 'Current AC Power Setting').ToString().Split(':')[-1].Trim(); 'MONITOR=' + $m + ' STANDBY=' + $s + ' HIBER=' + (Test-Path C:\hiberfil.sys)"
+    timeout: 180
+
+  - name: prove sshd is automatic
+    ssh: powershell -Command "(Get-Service sshd).StartupType"
+    timeout: 60
+
+  - name: prove sshd is listening
+    ssh: powershell -Command "(Get-NetTCPConnection -State Listen -LocalPort 22 | Select-Object -First 1).LocalPort"
+    timeout: 60
+
+  - name: prove the account can log in
+    ssh: whoami
+    timeout: 60
+
+  # THE DISK'S OWN VERSION, because the next stage's toolchain has to match it and a Windows
+  # build number is the only thing that says which SDKs will install here.
+  - name: prove the build
+    ssh: powershell -Command "[System.Environment]::OSVersion.Version.ToString()"
+    timeout: 60
+
+  # AND CLOSED HERE, so the file ends at the stage's last step rather than wherever the process
+  # exited. `record: false` finalises through the same encoder and is a no-op when nothing is
+  # recording.
+  # THE OUTPUT, AND THE REASON THIS STAGE NEEDS NO PYTHON AT ALL.
+  #
+  # `ssh.py` ended with `compress.compress(disk, args.out)` inside a `finally`, and every other
+  # stage had the same three lines. It is not a fact about a machine or a screen - it is "write
+  # the disk where the workflow looks for it", which is a step.
+  #
+  # AFTER THE LAST REAL STEP, not in a `finally`: a failed walk leaves a disk that the failed
+  # steps may have half-configured, and compressing it publishes that.
+  # THE MACHINE STOPS BEFORE THE DISK IS READ, AND THAT ORDER IS NOT OPTIONAL.
+  #
+  # The first real run of `compress:` (42949499311) failed with
+  #
+  #     could not flatten the overlay: qemu-img: Could not open 'session-overlay.qcow2':
+  #     Failed to get shared "write" lock
+  #
+  # because this file had no `shutdown:` at all - the machine was still running and qemu held the
+  # overlay. macOS' file has had one since it was converted; Windows' was converted later and the
+  # step was not carried over.
+  #
+  # `kill` RATHER THAN `ssh`: this guest's writes are a throwaway diff over a read-only base, so
+  # there is no filesystem state a graceful shutdown could protect - and `lib/overlay.py` deletes
+  # the diff either way. It is also what the file's own `record:` step expects, and a shutdown
+  # that needs sshd is one more thing that can fail after the work is done.
+  - name: stop the machine
+    shutdown: kill
+    timeout: 120
+
+  - name: publish the disk
+    compress: "{{ out }}"
+
+  - name: stop recording
+    record: false
