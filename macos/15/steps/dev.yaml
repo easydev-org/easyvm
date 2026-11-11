@@ -127,8 +127,23 @@ steps:
     # the next step copies it in over ssh - so declaring it saves this walkthrough from being
     # refused a HeadlessDriver on the grounds that some `python:` step might need one.
 
+  # THIS WAS A `copy_in: xcode` PRIMITIVE AND IT IS NOW TWO STEPS THAT ALREADY EXISTED.
+  #
+  # `copy_in:` did three things: find the fetched file, copy it, and CHECK ITS SIZE ON BOTH SIDES.
+  # The third is the interesting one, and it did not belong inside a copy step - it belongs to every
+  # copy. The note it came with:
+  #
+  #     THE SIZES ARE CHECKED ON BOTH SIDES. scp over a forwarded port through a container proxy is
+  #     the sort of transfer that can finish "successfully" with a short file when a middlebox cuts
+  #     it, and a truncated .xip fails at `xip -x` twenty minutes later with a message about a
+  #     corrupt archive.
+  #
+  # So `scp:` now compares the local stat, the write count AND the remote stat, and fails here. A
+  # that size check lives in the transport, every copy in every file gets it.
   - name: copy xcode into the guest
-    copy_in: xcode
+    scp:
+      - "{{ work }}/Xcode.xip"
+      - "/tmp/Xcode.xip"
 
   # EXPANDING AND SELECTING IS ONE SCRIPT BECAUSE IT IS ONE OPERATION. `xip -x` prints nothing
   # for twenty minutes, `xcodebuild -license accept` must come before anything asks Xcode a
@@ -177,8 +192,23 @@ steps:
   - name: fetch the packages on the host
     fetch: dev_packages
 
+  # THIS WAS A `copy_in: xcode` PRIMITIVE AND IT IS NOW TWO STEPS THAT ALREADY EXISTED.
+  #
+  # `copy_in:` did three things: find the fetched file, copy it, and CHECK ITS SIZE ON BOTH SIDES.
+  # The third is the interesting one, and it did not belong inside a copy step - it belongs to every
+  # copy. The note it came with:
+  #
+  #     THE SIZES ARE CHECKED ON BOTH SIDES. scp over a forwarded port through a container proxy is
+  #     the sort of transfer that can finish "successfully" with a short file when a middlebox cuts
+  #     it, and a truncated .xip fails at `xip -x` twenty minutes later with a message about a
+  #     corrupt archive.
+  #
+  # So `scp:` now compares the local stat, the write count AND the remote stat, and fails here. A
+  # that size check lives in the transport, every copy in every file gets it.
   - name: copy the packages into the guest
-    copy_in: dev_packages
+    scp:
+      - "{{ work }}/packages.tar"
+      - "/tmp/packages.tar"
 
   - name: install node
     script: |

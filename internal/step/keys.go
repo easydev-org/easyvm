@@ -299,15 +299,9 @@ var Keys = map[string]Key{
 			"when `until_any:` matches. This is the loop the vocabulary was missing: the two " +
 			"primitives it replaces (choose a disk by capacity, leave the Apple Account pane) " +
 			"were loops and decisions hidden in Go, where a reader of the file cannot see them"},
-	"dismiss": {Name: "dismiss", Kind: KindString,
-		Summary: "click away the overlays a first login puts up - post_login is the Keyboard " +
-			"Setup Assistant and its neighbours, which swallow the next keystroke"},
 	"wait_for": {Name: "wait_for", Kind: KindString,
 		Summary: "wait for a control with no readable title; login_window is the password field, " +
 			"twelve pixels tall, read from a crop at 6x"},
-	"copy_in": {Name: "copy_in", Kind: KindString,
-		Summary: "copy a fetched asset into the guest over sftp; xcode and dev_packages are the " +
-			"two names the macOS dev stage uses"},
 	"demo_script": {Name: "demo_script", Kind: KindString,
 		Summary: "write a throwaway script, for the primitives walkthrough that exists to exercise " +
 			"the vocabulary itself"},

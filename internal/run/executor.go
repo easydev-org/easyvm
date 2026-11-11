@@ -156,12 +156,8 @@ func (e *Executor) runOne(s walk.Step) error {
 		return e.doExpectAny(s)
 	case s.Has("at_window"):
 		return e.doAtWindow(s)
-	case s.Has("dismiss"):
-		return e.doDismiss(s)
 	case s.Has("wait_for"):
 		return e.doWaitFor(s)
-	case s.Has("copy_in"):
-		return e.doCopyIn(s)
 	case s.Has("screenshot"):
 		return e.doScreenshot(s)
 	case s.Has("demo_script"):

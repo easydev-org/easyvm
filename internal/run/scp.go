@@ -59,8 +59,37 @@ func scpFile(client *guest.Client, local, remote string) error {
 	if err != nil {
 		return fmt.Errorf("copy %s: %w", remote, err)
 	}
-	if fi, statErr := src.Stat(); statErr == nil && n != fi.Size() {
-		return fmt.Errorf("%s: wrote %d of %d bytes", remote, n, fi.Size())
+
+	// THE SIZE IS CHECKED ON BOTH SIDES, AND THE WRITE COUNT IS NOT ENOUGH.
+	//
+	// `n` is what this process SENT. A middlebox that cuts the stream after the SFTP layer has
+	// acknowledged the bytes produces a file that is short ON THE GUEST and complete as far as the
+	// writer knows - and a truncated .xip then fails at `xip -x` twenty minutes later with a
+	// message about a corrupt archive, which is the wrong place to learn about a proxy.
+	//
+	// So the remote file is asked for its own size, with a stat, and the two are compared:
+	//
+	//	local stat    what the file should be
+	//	write count   what was handed to the channel
+	//	remote stat   what arrived
+	//
+	// All three agreeing is the only version of "the copy worked" that does not depend on trusting
+	// one end.
+	localSize := int64(-1)
+	if fi, statErr := src.Stat(); statErr == nil {
+		localSize = fi.Size()
+		if n != localSize {
+			return fmt.Errorf("%s: wrote %d of %d bytes", remote, n, localSize)
+		}
+	}
+	remoteInfo, statErr := sc.Stat(remote)
+	if statErr != nil {
+		return fmt.Errorf("%s: the copy finished but the file cannot be stat'ed: %w", remote, statErr)
+	}
+	if localSize >= 0 && remoteInfo.Size() != localSize {
+		return fmt.Errorf("%s: %d bytes arrived of %d; a proxy or the guest cut the stream, and "+
+			"a truncated file fails much later with a message about a corrupt archive",
+			remote, remoteInfo.Size(), localSize)
 	}
 	return nil
 }

@@ -8,6 +8,7 @@ package walk
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -166,6 +167,18 @@ func Load(path string, overrides map[string]string) (*File, error) {
 		}
 	}
 	f.Notes, _ = doc["notes"].(string)
+
+	// `work` IS ALWAYS DEFINED, because it is a fact about where the file IS rather than about the
+	// run. A file that says `{{ work }}/Xcode.xip` means "beside me" when nobody named a directory,
+	// and a `check` that could not resolve it would refuse a file the daemon accepts.
+	if overrides == nil {
+		overrides = map[string]string{}
+	}
+	if _, ok := overrides["args.work"]; !ok {
+		if abs, err := filepath.Abs(path); err == nil {
+			overrides["args.work"] = filepath.Dir(abs)
+		}
+	}
 
 	f.Vars, err = resolveVars(doc["vars"], overrides)
 	if err != nil {

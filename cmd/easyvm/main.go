@@ -101,7 +101,14 @@ func cmdInspect(mode string, args []string) int {
 		return 2
 	}
 	path := args[0]
-	f, err := walk.Load(path, gatherOverrides(args[1:]))
+	overrides := gatherOverrides(args[1:])
+	// `work` IS A RUN FACT THE FILE MAY NAME, so `check` resolves it the same way `run` does. A
+	// validator that could not resolve `{{ work }}` would refuse a file the daemon accepts, which
+	// makes it useless for the thing it exists for.
+	if _, ok := overrides["args.work"]; !ok {
+		overrides["args.work"] = filepath.Dir(absPath(path))
+	}
+	f, err := walk.Load(path, overrides)
 	if err != nil {
 		// THE ERROR IS THE OUTPUT. A validator that prints "invalid" and exits has made the
 		// reader open the file to find out why; this one already knows.
@@ -232,7 +239,10 @@ func cmdRun(args []string) int {
 	// but the client has the file on disk and can say what is wrong without a round trip - and a
 	// client that hands over a broken file has made the daemon's log the place to look for a
 	// mistake that is not its own.
-	if _, err := walk.Load(file, map[string]string{"args.out": *out}); err != nil {
+	if _, err := walk.Load(file, map[string]string{
+		"args.out":  *out,
+		"args.work": workDirFor(file, *work),
+	}); err != nil {
 		fmt.Fprintf(os.Stderr, "FAILED: %v\n", err)
 		return 1
 	}
@@ -431,3 +441,12 @@ func gatherOverrides(args []string) map[string]string {
 }
 
 var _ = time.Now
+
+// workDirFor is the work directory a client would tell the daemon about: the same rule the daemon
+// uses, so a check resolves the same paths a run would.
+func workDirFor(file, work string) string {
+	if work != "" {
+		return work
+	}
+	return filepath.Dir(absPath(file))
+}

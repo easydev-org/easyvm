@@ -493,37 +493,6 @@ func (e *Executor) doFetch(s walk.Step) error {
 
 // --- macOS's own steps ----------------------------------------------------------------
 
-// doDismiss clicks away the overlays a first login puts up.
-//
-// THE KEYBOARD SETUP ASSISTANT IS THE ONE THAT MATTERS. macOS enumerates HID devices at login, finds
-// none it recognises (qemu has a usb-tablet and no keyboard), and asks the user to identify one -
-// across the middle of the screen. It EATS THE NEXT KEYSTROKE, which is how a stage types a command
-// into a dialog and reports "something answered, but not sshd" for its whole budget.
-//
-// IT APPEARS AFTER LOGGING IN, NOT BEFORE, so this runs after the password and before anything is
-// typed at Spotlight.
-func (e *Executor) doDismiss(s walk.Step) error {
-	what := s.Get("dismiss")
-	if what != "post_login" {
-		return fail(s.Name, "`dismiss:` knows post_login only; got %q", what)
-	}
-	// THE CLICKS ARE FIXED COORDINATES, AND THAT IS THE RULE. (1228, 826) is the Quit button on a
-	// 1920x1080 guest; a click there on a desktop with no dialog lands on the wallpaper and does
-	// nothing, which is the correct outcome for a machine that never showed one.
-	//
-	// A CLICK THAT LANDS ON NOTHING IS NOT A FAILURE, so this never fails on a screen without a
-	// dialog - but it says what it sent, because a missing dismissal shows up later as a keystroke
-	// that went somewhere unexpected.
-	for _, point := range [][2]int{{1228, 826}, {1228, 826}} {
-		if err := e.Driver.Click(point[0], point[1]); err != nil {
-			return fail(s.Name, "click (%d, %d): %v", point[0], point[1], err)
-		}
-		e.Driver.Log(fmt.Sprintf("  clicked Quit on the first-login overlay at (%d, %d)",
-			point[0], point[1]))
-	}
-	return nil
-}
-
 // doWaitFor waits for a control with no readable title.
 //
 // THE LOGIN WINDOW'S ONLY TEXT IS THE PASSWORD FIELD'S PLACEHOLDER, twelve pixels tall in a 165x40
@@ -557,37 +526,11 @@ func (e *Executor) doWaitFor(s walk.Step) error {
 		}
 		time.Sleep(poll)
 	}
-	return failWithScreen(s.Name, e.Driver, "no login window within %s", timeout)
-}
-
-// doCopyIn copies a fetched asset into the guest.
-//
-// SFTP, NOT `scp`: the remote path is the guest's, and `scp` hands its argument to the remote shell -
-// so a path with a space or a backslash is re-parsed there. Same reason as internal/run/scp.go.
-func (e *Executor) doCopyIn(s walk.Step) error {
-	client := e.Driver.Guest()
-	if client == nil {
-		return fail(s.Name, "no ssh connection; a `require_ssh:` step must come first")
-	}
-	what := s.Get("copy_in")
-	local := ""
-	switch what {
-	case "xcode":
-		local = filepath.Join(e.Work, "Xcode.xip")
-	case "dev_packages":
-		local = filepath.Join(e.Work, "packages.tar")
-	default:
-		return fail(s.Name, "`copy_in:` knows xcode and dev_packages; got %q", what)
-	}
-	if _, err := os.Stat(local); err != nil {
-		return fail(s.Name, "no fetched asset at %s; a `fetch: %s` step must come first", local, what)
-	}
-	remote := "/tmp/" + filepath.Base(local)
-	if err := scpFile(client, local, remote); err != nil {
-		return fail(s.Name, "copying %s in: %v", filepath.Base(local), err)
-	}
-	e.Driver.Log(fmt.Sprintf("  copied %s -> %s", filepath.Base(local), remote))
-	return nil
+	// THE CEILING IS NOT A FAILURE *WHEN THE FILE SAYS optional*. `wait_for` returning an error
+	// either way, with the tolerance baked in, made the file's own `optional:` a decoration - and
+	// the two disagreed about who decided. The decision is the file's, so this reports and lets
+	// the walk decide.
+	return fmt.Errorf("%s: no login window within %s", s.Name, timeout)
 }
 
 // doScreenshot saves the screen, for a step that asks for the picture rather than a failure taking

@@ -456,9 +456,46 @@ steps:
   # THE KEYBOARD SETUP ASSISTANT COMES UP WITH THE FIRST DESKTOP SESSION and eats the next
   # keystroke - which is how sshd was never enabled on six runs (42034256322). It is dismissed
   # here because this is where the first session begins.
+  # THIS WAS A `dismiss: post_login` PRIMITIVE, AND IT HID THREE DIFFERENT THINGS.
+  #
+  # What it did: click Quit on the Keyboard Setup Assistant, send ("esc", "meta_l+q", "esc") to
+  # close whatever accessibility sheet is on top, and MAKE ITS OWN QMP CONNECTION. The third of
+  # those is not a decision about a screen at all - it is how this framework must talk to qemu, and
+  # the Python implementation's own note records the cost of getting it wrong:
+  #
+  #     qemu's -qmp unix:... ACCEPTS ONE CLIENT PER SOCKET. This function first opened its own
+  #     connection and then called `dismiss_keyboard_assistant` WITHOUT passing it - so that
+  #     function opened a second one, which blocks on the greeting forever, because the first is
+  #     still held here. The step then sits inside its 240-second timeout with no output at all.
+  #
+  # THE CLICKS ARE HARMLESS ON A CLEAN DESKTOP: they land on wallpaper. And that is the reason the
+  # Keyboard Setup Assistant's Quit is clicked TWICE - one click can arrive before the dialog is
+  # drawn.
+  #
+  # THE VOICEOVER SHEET IS NOT RECOGNISED, IT IS DISMISSED. A keystroke on a desktop with no sheet
+  # is a keystroke; the price of guessing is one lost keystroke, and the price of not guessing is
+  # the whole stage.
   - name: dismiss the overlays macOS puts up on a first login
-    dismiss: post_login
-    timeout: 240
+    do:
+      # THREE CLICKS FOUR SECONDS APART, WHICH IS THE MEASURED NUMBER AND NOT A ROUND ONE.
+      #
+      # A click that arrives before the dialog is drawn lands on wallpaper and looks identical in
+      # the log to one that dismissed it (run 42162859846). Two seconds was not enough on a loaded
+      # guest; four is what the recorded runs used.
+      - at: [1228, 826]
+        settle: 4
+      - at: [1228, 826]
+        settle: 4
+      - at: [1228, 826]
+        settle: 4
+      # Whatever accessibility sheet is on top. `meta_l+q` is VoiceOver's own quit chord, and the
+      # escape on either side of it is what closes a sheet that is holding focus.
+      - key: esc
+        settle: 2
+      - key: meta_l+q
+        settle: 2
+      - key: esc
+        settle: 2
     optional: true
     skip_when_unfinished: true
 

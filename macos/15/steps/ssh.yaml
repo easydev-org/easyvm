@@ -127,15 +127,24 @@ steps:
   # to a login window: wallpaper, clock, account tile, password field. Nothing is wrong with it
   # and nothing can be done on it - Spotlight, Terminal and `systemsetup` all need a session.
   #
-  # THE WAIT BEFORE THE CLICK IS A LOOP OVER THE RECORDING, NOT A SLEEP. A login window has no
-  # words on it - tesseract reads zero of the whole frame - so the only way to know it is up is
-  # lib/desktop.py's password-field crop, which is what macos/15/desktop.py uses for the same
-  # window. `python:` because a loop is the one shape the vocabulary does not have; `optional`
-  # because a window that never appears is not a failure here - the desktop wait below is the
-  # verdict, and typing into a machine that is not listening only costs the keystrokes.
+  # THE WAIT BEFORE THE CLICK IS A LOOP OVER THE FRAME, NOT A SLEEP. A login window has no words
+  # on it - tesseract reads zero of the whole frame - so the only way to know it is up is the
+  # password-field band, which is a MEASUREMENT rather than a read. That is what `wait_for:` is,
+  # and it stays a key for that reason: `until:` cannot express it, because there is no text.
+  #
+  # BUT `optional: true` IS NOW WRITTEN HERE, AND IT WAS NOT BEFORE. The comment said "a window
+  # that never appears is not a failure here" while the key that decided that was in Go - the
+  # function returned True either way - so the file stated a decision it did not make. A step that
+  # cannot fail says so in the file, not in the implementation.
+  #
+  # A FIXED SLEEP WAS THE OLD SHAPE AND WAS MEASURED AS ONE: a booted macOS shows its login window
+  # two to four minutes after qemu starts, and a flat 120 seconds is the BOTTOM of that range - on
+  # a slower runner it typed into a window that had not been drawn, which reads later as "the
+  # password was wrong".
   - name: wait for the login window
     wait_for: login_window
     timeout: 240
+    optional: true
 
   # THE ESCAPE COMES FIRST because a wake hint or a notification banner swallows the next
   # keystroke, and it also takes focus off the field. The click afterwards is the one place this
@@ -164,9 +173,46 @@ steps:
   #
   # THREE CLICKS SPACED OUT, because a click that arrives before the dialog is drawn lands on
   # wallpaper and looks identical in the log to one that dismissed it (run 42162859846).
+  # THIS WAS A `dismiss: post_login` PRIMITIVE, AND IT HID THREE DIFFERENT THINGS.
+  #
+  # What it did: click Quit on the Keyboard Setup Assistant, send ("esc", "meta_l+q", "esc") to
+  # close whatever accessibility sheet is on top, and MAKE ITS OWN QMP CONNECTION. The third of
+  # those is not a decision about a screen at all - it is how this framework must talk to qemu, and
+  # the Python implementation's own note records the cost of getting it wrong:
+  #
+  #     qemu's -qmp unix:... ACCEPTS ONE CLIENT PER SOCKET. This function first opened its own
+  #     connection and then called `dismiss_keyboard_assistant` WITHOUT passing it - so that
+  #     function opened a second one, which blocks on the greeting forever, because the first is
+  #     still held here. The step then sits inside its 240-second timeout with no output at all.
+  #
+  # THE CLICKS ARE HARMLESS ON A CLEAN DESKTOP: they land on wallpaper. And that is the reason the
+  # Keyboard Setup Assistant's Quit is clicked TWICE - one click can arrive before the dialog is
+  # drawn.
+  #
+  # THE VOICEOVER SHEET IS NOT RECOGNISED, IT IS DISMISSED. A keystroke on a desktop with no sheet
+  # is a keystroke; the price of guessing is one lost keystroke, and the price of not guessing is
+  # the whole stage.
   - name: dismiss the overlays macOS puts up on a first login
-    dismiss: post_login
-    timeout: 240
+    do:
+      # THREE CLICKS FOUR SECONDS APART, WHICH IS THE MEASURED NUMBER AND NOT A ROUND ONE.
+      #
+      # A click that arrives before the dialog is drawn lands on wallpaper and looks identical in
+      # the log to one that dismissed it (run 42162859846). Two seconds was not enough on a loaded
+      # guest; four is what the recorded runs used.
+      - at: [1228, 826]
+        settle: 4
+      - at: [1228, 826]
+        settle: 4
+      - at: [1228, 826]
+        settle: 4
+      # Whatever accessibility sheet is on top. `meta_l+q` is VoiceOver's own quit chord, and the
+      # escape on either side of it is what closes a sheet that is holding focus.
+      - key: esc
+        settle: 2
+      - key: meta_l+q
+        settle: 2
+      - key: esc
+        settle: 2
 
   # AND NOW THE PASSWORD CAN BE JUDGED. This is the only step that can tell an accepted password
   # from a rejected one: a failed login leaves the same window up and shakes the field, and the
@@ -175,9 +221,36 @@ steps:
   # FIVE MINUTES IS MEASURED, not cautious: a first session builds the Dock, starts Spotlight
   # indexing fourteen gigabytes, and composites a wallpaper it has not cached. A run that gave up
   # after 180 s (42383829203) reported failure over a clean desktop.
+  # THE WAIT RETRIES THE DISMISSAL, AND THAT IS A `repeat_until:`, NOT A `desktop:` FLAG.
+  #
+  # A WINDOW CAN ARRIVE AFTER THE DISMISSER RAN, AND DID: run 42831281414 had the VoiceOver
+  # tutorial still on screen 300 seconds after `dismiss the overlays` had been through - either
+  # because it arrived late or because the sheet ignores a keystroke that lands while it is
+  # drawing. Waiting the full budget on it is a stage that fails over a machine that is logged in.
+  #
+  # SO THE LOOP IS: look at the desktop, and every 60 seconds send the dismissal keys again before
+  # looking. That was buried in the `desktop: macos` primitive; here every part of it is on one
+  # screen - the condition, the retry, and the interval.
+  #
+  # THE CONDITION IS THE DOCK, NOT THE MENU BAR: a macOS desktop's menu bar is twelve-pixel text
+  # that a whole-frame read returns nothing for ("Empty page!!", run 42383829203), while the Dock is
+  # a band of coloured icons on a lit wallpaper and both are measurable.
   - name: wait for the desktop
-    desktop: macos
-    timeout: 300
+    repeat_until:
+      attempts: 10
+      settle: 60
+      until_any:
+        - desktop: macos
+      actions:
+        # The VoiceOver quit chord and an escape, which is what closes a sheet that arrived late.
+        # Harmless on a desktop: these are keystrokes nobody is listening for.
+        - key: esc
+          settle: 1
+        - key: meta_l+q
+          settle: 1
+        - key: esc
+          settle: 1
+    timeout: 600
 
   # --- 1. THE GUI, WHICH IS THE ONLY WAY TO TURN THIS ON --------------------------------
   #

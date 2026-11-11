@@ -63,6 +63,8 @@ type condition struct {
 	NumberBetween *[2]float64
 	// Unit is "gb" or "mb", and a reading in the other unit is converted before comparison.
 	Unit string
+	// Desktop, when set, requires the frame to look like that family's desktop.
+	Desktop string
 }
 
 var numberPattern = regexp.MustCompile(`(\d+(?:\.\d+)?)\s*(gb|mb)\b`)
@@ -90,6 +92,15 @@ func (e *Executor) doRepeatUntil(s walk.Step) error {
 			return fail(s.Name, "reading the screen on attempt %d: %v", attempt, err)
 		}
 		for _, cond := range loop.Conditions {
+			// A DESKTOP CONDITION IS A MEASUREMENT ON THE FRAME, not on the words: a macOS desktop
+			// has no readable text to match, so it is decided by the Dock and the body brightness.
+			if cond.Desktop != "" {
+				if ok, why := e.desktopCondition(cond.Desktop); ok {
+					e.Driver.Log(fmt.Sprintf("  attempt %d: %s", attempt, why))
+					return nil
+				}
+				continue
+			}
 			if ok, why := cond.matches(words, numbers); ok {
 				e.Driver.Log(fmt.Sprintf("  attempt %d: %s", attempt, why))
 				return nil
@@ -177,6 +188,12 @@ func (e *Executor) parseRepeatUntil(s walk.Step) (repeatUntil, error) {
 				cond.Words = append(cond.Words, fmt.Sprint(w))
 			}
 		}
+		// A CONDITION MAY BE A SCREEN TEST RATHER THAN WORDS OR NUMBERS. `desktop:` is the one that
+		// needs this: a macOS desktop has no readable text to match on, so the condition is the
+		// same measurement the `desktop:` step makes, asked once per attempt.
+		if v, ok := mapping["desktop"]; ok {
+			cond.Desktop = fmt.Sprint(v)
+		}
 		if spec, ok := mapping["number_between"].([]any); ok && len(spec) == 2 {
 			lo, okLo := toFloat(spec[0])
 			hi, okHi := toFloat(spec[1])
@@ -189,7 +206,7 @@ func (e *Executor) parseRepeatUntil(s walk.Step) (repeatUntil, error) {
 				cond.Unit = "gb"
 			}
 		}
-		if len(cond.Words) == 0 && cond.NumberBetween == nil {
+		if len(cond.Words) == 0 && cond.NumberBetween == nil && cond.Desktop == "" {
 			return loop, fail(s.Name, "until_any[%d] has neither `words:` nor `number_between:`", i)
 		}
 		loop.Conditions = append(loop.Conditions, cond)
@@ -201,6 +218,9 @@ func (e *Executor) parseRepeatUntil(s walk.Step) (repeatUntil, error) {
 func (c condition) matches(words []string, numbers []float64) (bool, string) {
 	if len(c.Words) > 0 && !says(words, c.Words) {
 		return false, ""
+	}
+	if c.Desktop != "" {
+		return false, "" // resolved by the caller, which can read the screen
 	}
 	if c.NumberBetween == nil {
 		return true, fmt.Sprintf("saw %q", strings.Join(c.Words, " "))
@@ -309,3 +329,28 @@ func toFloat(v any) (float64, bool) {
 
 // unused keeps the screen import honest: readScreen uses it, and this file names it in a comment.
 var _ = screen.Crop
+
+// desktopCondition asks whether the current frame is that family's desktop.
+//
+// IT IS THE SAME MEASUREMENT THE `desktop:` STEP MAKES, asked once - which is why `repeat_until:`
+// can use it as a condition. Sharing the test rather than re-deriving it is what stops the two
+// from disagreeing about what "a desktop" means.
+func (e *Executor) desktopCondition(family string) (bool, string) {
+	f, err := e.Driver.Frame()
+	if err != nil {
+		return false, ""
+	}
+	img, err := screen.Load(f.Path())
+	if err != nil {
+		return false, ""
+	}
+	switch family {
+	case "macos":
+		ok, stats := screen.IsMacOSDesktop(img)
+		return ok, "a macOS desktop is on screen; " + stats.Explain()
+	case "windows":
+		ok, stats := screen.IsWindowsDesktop(img)
+		return ok, "a Windows desktop is on screen; " + stats.Explain()
+	}
+	return false, ""
+}

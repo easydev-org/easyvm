@@ -127,7 +127,13 @@ func (d *Daemon) runWalkthrough(req Request, work string, done chan struct{}) {
 		d.mu.Unlock()
 	}
 
-	file, err := walk.Load(req.File, map[string]string{"args.out": req.Out})
+	// `args.work` IS A RUN FACT LIKE `args.out`. A `fetch:` puts its file in the work directory and
+	// the `scp:` that follows names it - so the file has to be able to say where that is, rather
+	// than hard-coding a path the daemon chose.
+	file, err := walk.Load(req.File, map[string]string{
+		"args.out":  req.Out,
+		"args.work": work,
+	})
 	if err != nil {
 		fail("the walkthrough could not be loaded", err)
 		return
