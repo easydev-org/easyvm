@@ -108,3 +108,55 @@ func TestNoConditionDependsOnAnAbsentDispatchInput(t *testing.T) {
 		}
 	}
 }
+
+// A `container:` JOB RUNS STEPS WITH /bin/sh, SO BASH-ONLY SHELL FEATURES DIE THERE.
+//
+// run 43018660638 died on the third line of its polling loop:
+//
+//	/__w/_temp/c1bb5a9d-7830-40ee-8058-6be476d5f9b4.sh: 3: SECONDS: parameter not set
+//
+// `SECONDS` is a bash variable that dash does not define. The step had already printed nothing,
+// while the daemon it was watching was up and starting a guest - so the failure looked like a
+// broken walkthrough and was a broken loop.
+//
+// `set -o pipefail` IS NOT POSIX EITHER. Dash accepts `set -euo pipefail` as `set -e -u -o pipefail`
+// and then ignores it, which is worse than failing: the step looks protected and is not.
+func TestWorkflowShellIsPosix(t *testing.T) {
+	files, err := os.ReadDir("../../.github/workflows")
+	if err != nil {
+		t.Skipf("no workflows directory here (%v)", err)
+	}
+	// Names that only bash provides, checked because the failure is a runtime error in the middle
+	// of a step rather than a parse error at the top.
+	bashOnly := []string{"$SECONDS", "${SECONDS}", "pipefail"}
+	for _, f := range files {
+		if !strings.HasSuffix(f.Name(), ".yml") && !strings.HasSuffix(f.Name(), ".yaml") {
+			continue
+		}
+		body, err := os.ReadFile("../../.github/workflows/" + f.Name())
+		if err != nil {
+			t.Fatal(err)
+		}
+		// ONLY A JOB THAT DECLARES `container:` RUNS ITS STEPS UNDER /bin/sh. A job on the runner
+		// itself gets bash, where `pipefail` and `SECONDS` are both fine - and image.yml is such a
+		// job, so refusing them there would be a rule about the wrong thing.
+		if !strings.Contains(string(body), "container:") {
+			continue
+		}
+		for i, line := range strings.Split(string(body), "\n") {
+			trimmed := strings.TrimSpace(line)
+			// COMMENTS ARE WHERE THESE FILES EXPLAIN THE BUG, so they are exempt by definition.
+			if strings.HasPrefix(trimmed, "#") {
+				continue
+			}
+			for _, bad := range bashOnly {
+				if !strings.Contains(trimmed, bad) {
+					continue
+				}
+				t.Errorf("%s:%d uses %q, which /bin/sh in a `container:` job does not have:\n\t%s\n"+
+					"Count iterations, or count with `date`; do not count with a bash variable.",
+					f.Name(), i+1, bad, trimmed)
+			}
+		}
+	}
+}

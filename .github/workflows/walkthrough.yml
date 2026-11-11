@@ -79,7 +79,7 @@ jobs:
         # A runner without /dev/kvm or /dev/net/tun produces a qemu that crawls or a daemon that
         # refuses; the refusal is right, but this says which one and stops in two seconds.
         run: |
-          set -euo pipefail
+          set -eu
           test -e /dev/kvm || { echo "=== NO /dev/kvm ==="; exit 1; }
           test -e /dev/net/tun || { echo "=== NO /dev/net/tun ==="; exit 1; }
           ls -l /dev/kvm /dev/net/tun
@@ -97,7 +97,7 @@ jobs:
         # `easyvm pull`, NOT a shell-out: it resumes a partial transfer, it asks for one tag and
         # does not search, and the image carries no `oras` or `crane` to be a different version.
         run: |
-          set -euo pipefail
+          set -eu
           easyvm pull --tag "${{ inputs.windows_ssh_from || 'windows11-ssh' }}" \
                       --repository "${{ inputs.disks_repository }}" \
                       --dest $GITHUB_WORKSPACE/work/disk.qcow2
@@ -114,7 +114,7 @@ jobs:
         # the pipe on its first match, the writer takes SIGPIPE, and `set -o pipefail` turns that
         # into exit 141 for a check that SUCCEEDED. That has happened twice here already.
         run: |
-          set -euo pipefail
+          set -eu
           easyvm serve --work "$GITHUB_WORKSPACE/work" --novnc-port 6080 > $GITHUB_WORKSPACE/work/daemon.log 2>&1 &
           echo $! > $GITHUB_WORKSPACE/work/daemon.pid
           for i in $(seq 1 30); do
@@ -134,7 +134,7 @@ jobs:
         # `compress:` writes - both are facts about the job, which is why they are flags and not
         # YAML: the same file must be runnable against any copy of the disk.
         run: |
-          set -euo pipefail
+          set -eu
           easyvm run "$GITHUB_WORKSPACE/windows/11/steps/ssh.yaml" \
             --work "$GITHUB_WORKSPACE/work" \
             --boot-disk $GITHUB_WORKSPACE/work/disk.qcow2 \
@@ -149,10 +149,21 @@ jobs:
         # SIXTY SECONDS AT A TIME, AND THE STATUS EACH TIME. A stage that reports nothing for forty
         # minutes is a stage whose failure cannot be placed; `status` is one line and it is already
         # the fact a reader wants. Matched with `case`, for the SIGPIPE reason above.
+        #
+        # POSIX SH ONLY, BECAUSE A `container:` JOB RUNS STEPS WITH /bin/sh, NOT BASH. The first
+        # version of this loop counted with `$SECONDS`, which bash defines and dash does not:
+        #
+        #     /__w/_temp/xxx.sh: 3: SECONDS: parameter not set
+        #
+        # - so the step died on its third line, having already reported nothing, while the daemon
+        # it was watching was up and starting a guest (run 43018660638). The loop counts its own
+        # iterations instead: sixty sleeps of sixty seconds, which is the same hour and needs no
+        # shell feature beyond arithmetic.
         run: |
-          set -euo pipefail
-          deadline=$((SECONDS + 60 * 62))
-          while [ $SECONDS -lt $deadline ]; do
+          set -eu
+          rounds=0
+          while [ "$rounds" -lt 62 ]; do
+            rounds=$((rounds + 1))
             state=$(easyvm status --work "$GITHUB_WORKSPACE/work" 2>&1 || true)
             printf '[%s] %s\n' "$(date +%H:%M:%S)" "$state"
             case "$state" in
@@ -164,7 +175,7 @@ jobs:
                 cat $GITHUB_WORKSPACE/work/daemon.log
                 exit 1 ;;
             esac
-            sleep 60
+            if [ "$rounds" -lt 62 ]; then sleep 60; fi
           done
           echo "=== THE WALKTHROUGH DID NOT FINISH IN TIME ==="
           cat $GITHUB_WORKSPACE/work/daemon.log
@@ -173,7 +184,7 @@ jobs:
       - name: what it produced
         if: always()
         run: |
-          set -uo pipefail
+          set -u
           ls -l "$GITHUB_WORKSPACE/work/" || true
           # THE DISK IS THE THING THE STAGE EXISTS TO PROVE, so its size is the first number a
           # reader wants - and the last frame is what a failure is diagnosed from.
@@ -185,7 +196,7 @@ jobs:
       - name: stop the daemon
         if: always()
         run: |
-          set -uo pipefail
+          set -u
           if [ -f $GITHUB_WORKSPACE/work/daemon.pid ]; then
             pid=$(cat $GITHUB_WORKSPACE/work/daemon.pid)
             kill "$pid" 2>/dev/null || true
