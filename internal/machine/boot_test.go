@@ -536,3 +536,59 @@ func TestTheRecoveryDeviceHasAController(t *testing.T) {
 		t.Fatalf("a macOS boot with no recovery image attached USB devices anyway:\n%s", body)
 	}
 }
+
+// THE GUEST AGENT'S PORT AND THE SCREEN SIZE, BOTH OF WHICH WERE MISSING FROM THE COMMAND LINE.
+//
+// TWO FAILURES THAT LOOKED LIKE GUEST PROBLEMS AND WERE ARGUMENTS:
+//
+//	prove the guest agent is running: the command exited 3
+//	  THREE IS `systemctl is-active`'s "inactive". The agent was installed and could not start because
+//	  `/dev/virtio-ports/org.qemu.guest_agent.0` is created by a `virtserialport` on a `virtio-serial`
+//	  bus, and neither device was in the command line.
+//
+//	wait for the Console result: `region_at` is [1920, 1080] but this frame is 1280x800
+//	  EVERY WALKTHROUGH HERE WAS MEASURED AT 1920x1080, and `-vga std` brings a guest up at qemu's own
+//	  default 1280x800. Only the `-device VGA` form takes `xres`/`yres`.
+//
+// BOTH ARE ASSERTED ON THE DRIVER'S SOURCE, because they are assembled there rather than by
+// internal/machine - and a test that only ran the machine would need qemu and a guest for each.
+func TestTheGuestAgentPortAndTheScreenSizeAreInTheCommandLine(t *testing.T) {
+	body, err := os.ReadFile("../daemon/driver.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(body)
+
+	// THE AGENT'S PORT, BOTH TRANSPORTS.
+	if !strings.Contains(src, "virtio-serial") ||
+		!strings.Contains(src, "virtserialport,chardev=qga0,name=org.qemu.guest_agent.0") {
+		t.Fatal("the guest agent's virtio-serial port is not in the command line, so a guest that " +
+			"installs qemu-guest-agent cannot start it - `systemctl is-active` returns 3 and the " +
+			"step reports a stopped agent")
+	}
+	if !strings.Contains(src, "isa-serial,chardev=qga0") {
+		t.Fatal("macOS does not get `isa-serial` for its agent. Apple's own agent never loads under " +
+			"QEMU and the third-party one probes /dev/cu.serial1, which is the FIRST isa-serial device")
+	}
+	if !strings.Contains(src, "server=on,wait=off") {
+		t.Fatal("the agent's chardev does not use `server=on,wait=off`, so qemu would block waiting " +
+			"for a host to connect before the guest can start")
+	}
+
+	// THE SCREEN SIZE, WHICH `-vga std` CANNOT CARRY.
+	if !strings.Contains(src, "xres=1920,yres=1080") {
+		t.Fatal("the video adapter does not set xres/yres. Every walkthrough here was measured at " +
+			"1920x1080 and a guest on qemu's default 1280x800 puts every coordinate on a different " +
+			"screen - measured as `region_at is [1920, 1080] but this frame is 1280x800`")
+	}
+	if !strings.Contains(src, "vgamem_mb=32") {
+		t.Fatal("no vgamem_mb. The default is 8 MiB and 1920x1080 at 32bpp is 7.91 MiB before double " +
+			"buffering, so the adapter cannot hold a frame - and the symptom is a BLACK screen from " +
+			"the first capture, with no error")
+	}
+	// AND macOS STILL GETS `-vga none`, because its adapter is vmware-svga from ExtraArgs.
+	if !strings.Contains(src, `"-vga", "none"`) {
+		t.Fatal("the `-vga none` branch is gone; macOS would get a second adapter alongside its " +
+			"vmware-svga device")
+	}
+}

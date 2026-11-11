@@ -389,7 +389,6 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 		"-cpu", cpu,
 		"-smp", boot.SMP(opts.CPUs),
 		"-m", fmt.Sprint(opts.MemMB),
-		"-vga", boot.VGA(opts.VGA),
 		"-display", "none",
 		// THE CONSOLE GOES TO A FILE, BECAUSE ONE STEP HAS TO READ IT.
 		//
@@ -413,6 +412,60 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 	// THE GUEST'S OWN DEVICES, IN THE ORDER THE GUEST READS THEM. This is where the three-way split
 	// between a Windows disk boot, a Windows ISO boot and a macOS boot lives - all of it in
 	// internal/machine, none of it here.
+	// THE QEMU GUEST AGENT'S PORT, WHICH WAS MISSING ENTIRELY.
+	//
+	// `vm-configure` INSTALLS `qemu-guest-agent` AND THEN PROVES IT IS RUNNING, and the proof failed:
+	//
+	//	prove the guest agent is running: the command exited 3
+	//
+	// THREE IS `systemctl is-active`'s "inactive". The agent was installed and could not start, because
+	// the device it talks on does not exist: `/dev/virtio-ports/org.qemu.guest_agent.0` is created by a
+	// `virtserialport` on a `virtio-serial` bus, and neither was in this command line. The Python
+	// implementation has both, behind `shape.qga_socket`.
+	//
+	// `server=on,wait=off` SO QEMU STARTS WITHOUT A CLIENT: the host connects when it wants to ask
+	// something, and a guest with no host attached is normal.
+	//
+	// macOS GETS `isa-serial` RATHER THAN THE VIRTIO BUS, and that is not a preference: Apple's own
+	// agent never loads under QEMU, and the third-party one that does probes `/dev/cu.serial1` first -
+	// which is the FIRST isa-serial device qemu adds, so this must be the only one and it is.
+	qgaSocket := filepath.Join(d.work, "qga.sock")
+	_ = os.Remove(qgaSocket)
+	if guestOS.IsMacOS() {
+		args = append(args,
+			"-chardev", "socket,id=qga0,path="+qgaSocket+",server=on,wait=off",
+			"-device", "isa-serial,chardev=qga0",
+		)
+	} else {
+		args = append(args,
+			"-chardev", "socket,id=qga0,path="+qgaSocket+",server=on,wait=off",
+			"-device", "virtio-serial",
+			"-device", "virtserialport,chardev=qga0,name=org.qemu.guest_agent.0",
+		)
+	}
+
+	// THE VIDEO ADAPTER, AND `-vga std` CANNOT CARRY A RESOLUTION.
+	//
+	// EVERY WALKTHROUGH IN THIS REPOSITORY WAS MEASURED AT 1920x1080, and a guest given `-vga std`
+	// comes up at qemu's own default - 1280x800 - so every coordinate is read on a different screen.
+	// That is not hypothetical: `linux-nixos-ssh` failed with
+	//
+	//	wait for the Console result: `region_at` is [1920, 1080] but this frame is 1280x800
+	//
+	// Only the `-device VGA` form takes `xres`/`yres`. `vgamem_mb` IS NOT OPTIONAL AT THIS SIZE: the
+	// default is 8 MiB and 1920x1080 at 32 bits is 7.91 MiB before double buffering, so the adapter
+	// comes up unable to hold a frame - and the symptom is a black screen from the first capture,
+	// with no error.
+	//
+	// MACOS IS UNCHANGED: it passes `vga: none` because OpenCore's guest has `vmware-svga` as a PCIe
+	// -device from `machine.ExtraArgs`, and a second adapter would give the guest two.
+	if boot.VGA(opts.VGA) == "none" {
+		args = append(args, "-vga", "none")
+	} else {
+		args = append(args,
+			"-device", "VGA,xres=1920,yres=1080,vgamem_mb=32",
+		)
+	}
 	args = append(args, boot.StorageArgs()...)
 	args = append(args, boot.SMCArgs("")...)
 	args = append(args, boot.ExtraArgs()...)
