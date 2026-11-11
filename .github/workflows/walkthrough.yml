@@ -52,9 +52,6 @@ name: walkthrough
 on:
   workflow_dispatch:
     inputs:
-      stages:
-        description: "which stages to run: all, or a comma list of the names below"
-        default: "all"
       disks_repository:
         description: "the ghcr repository that holds the disks"
         default: "easydev-org/easydiskbake"
@@ -92,24 +89,30 @@ jobs:
   # be checked without re-running the install before it, and the install is an hour.
   # ===========================================================================
   stage:
-    # THE FILTER IS THE INPUT, AND ITS DEFAULT IS "all". A matrix leg whose name is not in the list
-    # stops before it starts, so choosing three stages costs three legs rather than eight.
-    # TWO CONDITIONS, AND THEY ARE ABOUT DIFFERENT THINGS.
+    # THE EVENT IS NAMED HERE AND NOWHERE ELSE, BECAUSE A PUSH CREATES A RUN TOO.
     #
-    # THE EVENT IS THE JOB'S BUSINESS. This workflow has one trigger - `workflow_dispatch` - but
-    # GitHub creates a run for any push that touches the workflow file, evaluated against the OLD
-    # definition. On such a run a dispatch input is EMPTY; a leg that tested `inputs.stages` was
-    # skipped, the matrix produced zero legs, and the run was reported FAILED. The repository grew
-    # a red badge for a workflow that had correctly done nothing (runs 43037274437, 43042630231,
-    # 43043002991, 43043556912).
+    # This workflow has one trigger - `workflow_dispatch` - but GitHub still creates a run for a
+    # push that touches the workflow file. On such a run there are no dispatch inputs, so anything
+    # that tested one would be false and the run would be reported FAILED for doing nothing.
+    # A job skipped by `if` is neutral; that is the difference this line buys (runs 43037274437,
+    # 43042630231, 43043002991, 43043556912).
     #
-    # A JOB skipped by `if` is neutral; a matrix whose every LEG is skipped is a failure. So the
-    # event is named here, on the job, and the leg filter below only has to answer "did the
-    # dispatch ask for this stage".
-    if: |
-      github.event_name == 'workflow_dispatch'
-      && (inputs.stages == 'all'
-          || contains(format(',{0},', inputs.stages), format(',{0},', matrix.name)))
+    # `matrix` IS NOT AVAILABLE IN A JOB-LEVEL `if:` AND THAT WAS THE WHOLE BUG. GitHub rejects the
+    # expression outright:
+    #
+    #     HTTP 422: failed to parse workflow: (Line: 109, Col: 9): Unrecognized named-value:
+    #     'matrix'. Located at position 133 within expression
+    #
+    # so the workflow could not be DISPATCHED AT ALL, and every push that touched the file created a
+    # run with zero jobs and a failure conclusion - five of them, with the only explanation in this
+    # one line from the dispatch API. `matrix` is defined inside `jobs.<id>.steps` and nowhere else.
+    #
+    # SO THE JOB TESTS ONLY THE EVENT. THERE IS NO STAGE SELECTOR ANY MORE, and that is the honest
+    # answer rather than a missing feature: a matrix's `include` list is static, so "run only these
+    # legs" would need either a per-step condition on eight steps (easy to get wrong, and wrong
+    # means a leg starts a VM it was not asked to start) or a matrix with zero legs for the stages
+    # not chosen - which GitHub reports as a FAILED run. Every leg runs; a leg is a stage.
+    if: github.event_name == 'workflow_dispatch' 
     runs-on: ubuntu-24.04
     # THE LEG'S OWN TIMEOUT, NOT ONE NUMBER FOR ALL EIGHT. A 150-minute macOS install must not be
     # bounded by a default chosen for a 70-minute Windows stage, and a job-wide override would make

@@ -216,3 +216,85 @@ func keyOf(line string) (string, bool) {
 	}
 	return k, true
 }
+
+// `matrix` DOES NOT EXIST IN A JOB-LEVEL `if:`, AND USING IT MAKES THE WORKFLOW UNDISPATCHABLE.
+//
+// FIVE RUNS WERE CREATED WITH ZERO JOBS AND A FAILURE CONCLUSION, and nothing in the repository
+// could see why. The only place the reason appeared was the dispatch API:
+//
+//	HTTP 422: Invalid Argument - failed to parse workflow: (Line: 109, Col: 9): Unrecognized
+//	named-value: 'matrix'. Located at position 133 within expression
+//
+// `matrix` is defined inside `jobs.<id>.steps` and nowhere else, so a job-level condition that
+// reads it makes the WHOLE FILE unparseable: `workflow_dispatch` is refused and every push that
+// touches the file leaves a red run behind.
+//
+// THE RULE IS NARROWER THAN "ANY JOB-LEVEL KEY", AND THAT IS THE FINDING. `timeout-minutes:
+// ${{ matrix.timeout }}` is LEGAL at job level - GitHub resolves `matrix` there - and so is every
+// step's `if:` and `run:`. What is NOT legal is the job's own `if:`, which is evaluated BEFORE the
+// matrix exists; the dispatch error names that expression precisely.
+//
+// A first version of this test refused every `matrix.` reference outside the step list and reported
+// the legal `timeout-minutes` line - a test that is right about a class of bug and wrong about its
+// boundary is worse than a missing one, because it teaches the next reader to ignore it.
+func TestMatrixIsNotUsedInJobLevelConditions(t *testing.T) {
+	files, err := os.ReadDir("../../.github/workflows")
+	if err != nil {
+		t.Skipf("no workflows directory here (%v)", err)
+	}
+	for _, f := range files {
+		if !strings.HasSuffix(f.Name(), ".yml") && !strings.HasSuffix(f.Name(), ".yaml") {
+			continue
+		}
+		body, err := os.ReadFile("../../.github/workflows/" + f.Name())
+		if err != nil {
+			t.Fatal(err)
+		}
+		lines := strings.Split(string(body), "\n")
+
+		// THE REGION THAT MATTERS IS BETWEEN A JOB'S NAME AND ITS `steps:`. Everything after
+		// `steps:` is a step, where `matrix` is legal - including a step's own `if:`, which sits at
+		// the SAME indent as a job key and is why an indent-only rule reported a false positive.
+		inSteps := false
+		for i, line := range lines {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "#") || trimmed == "" {
+				continue
+			}
+			if strings.HasPrefix(trimmed, "steps:") {
+				inSteps = true
+				continue
+			}
+			// A job key at four spaces ends the step list of the previous job.
+			indent := len(line) - len(strings.TrimLeft(line, " "))
+			if indent <= 4 && !strings.HasPrefix(trimmed, "-") {
+				inSteps = false
+			}
+			if inSteps || !strings.HasPrefix(trimmed, "if:") {
+				continue
+			}
+			// A JOB-LEVEL `if:`, which may span lines with `if: |`.
+			block := trimmed
+			for j := i + 1; j < len(lines); j++ {
+				next := lines[j]
+				if strings.TrimSpace(next) == "" {
+					break
+				}
+				nind := len(next) - len(strings.TrimLeft(next, " "))
+				if nind <= indent {
+					break
+				}
+				block += " " + strings.TrimSpace(next)
+			}
+			if !strings.Contains(block, "matrix.") {
+				continue
+			}
+			t.Errorf("%s:%d uses `matrix` in a JOB-LEVEL `if:`:\n\t%s\n"+
+				"`matrix` is resolved only for a job's keys that run after the matrix is built, "+
+				"and the job's own `if:` is evaluated before it. GitHub rejects the WHOLE FILE: "+
+				"`failed to parse workflow: Unrecognized named-value: 'matrix'`, so the workflow "+
+				"cannot be dispatched and every push leaves a red run with zero jobs.",
+				f.Name(), i+1, strings.TrimSpace(block))
+		}
+	}
+}
