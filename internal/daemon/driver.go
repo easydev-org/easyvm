@@ -603,9 +603,15 @@ func (m machineControl) Stop(method string) error {
 	if !running {
 		return nil
 	}
+	killNow := false
 	switch method {
 	case "kill":
+		// A KILL IS A KILL, AND IT MUST NOT WAIT FIRST. The placeholder here only logged, and the
+		// `waitForExit` below then waited the full `shutdownTimeout` for a guest nobody had asked to
+		// power off - five minutes per stage whose file says `shutdown: kill`, which is every
+		// `windows-ssh` and every throwaway overlay here.
 		d.logf("  killing the guest")
+		killNow = true
 	case "ssh":
 		// THE GUEST SHUTS ITSELF DOWN, AND THE FILESYSTEM IT IS ABOUT TO PUBLISH IS CLOSED.
 		//
@@ -636,7 +642,16 @@ func (m machineControl) Stop(method string) error {
 	}
 	// AND THE PROCESS IS WAITED FOR, WHICHEVER PATH ASKED IT TO STOP. A guest that was asked politely
 	// has to actually exit, or the disk is still open when the next step reads it.
-	if err := d.waitForExit(shutdownTimeout); err != nil {
+	//
+	// A KILL SKIPS THE WAIT: there is nothing to be patient with, the process is being taken down
+	// because the file said so or because a graceful request expired.
+	var err error
+	if killNow {
+		err = d.killAndReap()
+	} else {
+		err = d.waitForExit(shutdownTimeout)
+	}
+	if err != nil {
 		return err
 	}
 	d.mu.Lock()
@@ -712,6 +727,25 @@ func (d *Driver) shutdownOverACPI() error {
 	}
 	d.logf("  pressing the power button")
 	return conn.SystemPowerdown()
+}
+
+// killAndReap takes the machine down now and returns once it is gone.
+//
+// IT REAPS THE WAIT, so the next `stop` or `start` does not find a zombie whose exit status nobody
+// collected - and so the disk is closed before the step that publishes it reads the file.
+func (d *Driver) killAndReap() error {
+	d.mu.Lock()
+	proc := d.proc
+	d.mu.Unlock()
+	if proc == nil {
+		return nil
+	}
+	if err := proc.Process.Kill(); err != nil {
+		return fmt.Errorf("kill: %w", err)
+	}
+	_ = proc.Wait()
+	d.logf("  the guest was killed")
+	return nil
 }
 
 // waitForExit waits for qemu to leave, and kills it if it does not.

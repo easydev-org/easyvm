@@ -365,3 +365,56 @@ func TestGuestDoesNotDialUnderTheLock(t *testing.T) {
 			"the full dial timeout")
 	}
 }
+
+// `shutdown: kill` DID NOT KILL ANYTHING - IT LOGGED AND THEN WAITED FIVE MINUTES.
+//
+// The branch was
+//
+//	case "kill":
+//		d.logf("  killing the guest")
+//
+// and control then fell through to `waitForExit(shutdownTimeout)` - which waits for a guest that had
+// never been asked to power off, so it waited the FULL three hundred seconds and only then killed it.
+// Every stage whose file says `shutdown: kill` paid it: `windows-ssh`, and every throwaway overlay.
+//
+// A KILL HAS NOTHING TO BE PATIENT WITH. It is taken down now, and reaped, so the disk is closed before
+// the step that publishes it reads the file.
+func TestKillDoesNotWaitForAGuestNobodyAsked(t *testing.T) {
+	body, err := os.ReadFile("driver.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(body)
+	start := strings.Index(src, "func (m machineControl) Stop(")
+	if start < 0 {
+		t.Fatal("no Stop")
+	}
+	rest := src[start:]
+	if end := strings.Index(rest[1:], "\nfunc "); end > 0 {
+		rest = rest[:end+1]
+	}
+	code := stripGoComments(rest)
+
+	// THE KILL BRANCH MUST SET A FLAG THAT SKIPS THE WAIT.
+	if !strings.Contains(code, "killNow = true") {
+		t.Fatal("the `kill` branch does not record that it is killing, so control falls through to " +
+			"`waitForExit` and waits three hundred seconds for a guest that was never asked to stop")
+	}
+	// AND THE WAIT MUST BE BYPASSED FOR IT.
+	if !strings.Contains(code, "killAndReap()") {
+		t.Fatal("`shutdown: kill` does not reach a kill-and-reap path")
+	}
+	if !strings.Contains(code, "if killNow {") {
+		t.Fatal("the wait is not conditional on the method, so a kill waits it out")
+	}
+
+	// AND `killAndReap` REAPS, because a kill without a wait leaves a zombie holding the disk open.
+	k := src[strings.Index(src, "func (d *Driver) killAndReap("):]
+	if end := strings.Index(k[1:], "\nfunc "); end > 0 {
+		k = k[:end+1]
+	}
+	k = stripGoComments(k)
+	if !strings.Contains(k, "Process.Kill()") || !strings.Contains(k, "proc.Wait()") {
+		t.Fatal("`killAndReap` does not both kill and reap")
+	}
+}
