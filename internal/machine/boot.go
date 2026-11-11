@@ -302,6 +302,35 @@ func (b Boot) StorageArgs() []string {
 	// gets 1, and anything else gets 2 or more so it cannot win.
 	nextIndex := 0
 	nextID := 0
+	// A CD ABOARD A USB BUS, FOR THE ONES THAT ARE NOT THE BOOT MEDIUM.
+	//
+	// q35's IDE CONTROLLER HAS EXACTLY ONE UNIT, AND qemu SAYS SO PLAINLY:
+	//
+	//	-device ide-cd,drive=media1,bootindex=1: Can't create IDE unit 1, bus supports only 1 units
+	//
+	// Measured on windows-install, which attaches THREE CDs - the installer, the answer CD with the
+	// virtio drivers, and the driver CD for the installed system. Only the installer needs to be on a
+	// bus the firmware boots from, so it takes the IDE unit and the others go on USB, which is a bus
+	// with as many ports as there are devices.
+	//
+	// THE XHCI CONTROLLER IS CREATED ONCE, on first use, and it is the same `qemu-xhci,id=xhci` the
+	// macOS branch needs for its recovery disk.
+	xhciAdded := false
+	appendUSBCD := func(path string) {
+		if path == "" {
+			return
+		}
+		if !xhciAdded {
+			args = append(args, "-device", "qemu-xhci,id=xhci")
+			xhciAdded = true
+		}
+		id := fmt.Sprintf("media%d", nextID)
+		nextID++
+		args = append(args,
+			"-drive", fmt.Sprintf("file=%s,media=cdrom,readonly=on,if=none,id=%s", path, id),
+			"-device", fmt.Sprintf("usb-storage,bus=xhci.0,drive=%s", id),
+		)
+	}
 	// `bootindex` IS A DEVICE PROPERTY AND CANNOT GO ON A `-drive`, WHICH IS MEASURED RATHER THAN
 	// ASSUMED - I put it there first and qemu refused to start:
 	//
@@ -335,12 +364,12 @@ func (b Boot) StorageArgs() []string {
 		)
 	}
 
-	// 1. THE INSTALLER, SO THE FIRMWARE BOOTS IT.
+	// 1. THE INSTALLER, SO THE FIRMWARE BOOTS IT - and the ONLY one on the IDE bus.
 	appendMedia(b.ISO)
 
 	// 2. THE ANSWER CD. Windows Setup scans removable media for Autounattend.xml and
 	//    $WinPEDriver$ at its root, which is why the virtio drivers also live here.
-	appendMedia(b.AnswerCD)
+	appendUSBCD(b.AnswerCD)
 
 	// 3. THE TARGET DISK, AT INDEX 0.
 	//
@@ -359,7 +388,7 @@ func (b Boot) StorageArgs() []string {
 	)
 
 	// 4. THE DRIVER CD, FOR THE SYSTEM THAT WILL RUN ON THIS DISK.
-	appendMedia(b.DriverCD)
+	appendUSBCD(b.DriverCD)
 	return args
 }
 

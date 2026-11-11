@@ -687,3 +687,50 @@ func TestBootindexIsOnADeviceNotADrive(t *testing.T) {
 		}
 	}
 }
+
+// q35's IDE CONTROLLER HAS EXACTLY ONE UNIT, AND windows-install ATTACHES THREE CDs.
+//
+//	qemu-system-x86_64: -device ide-cd,drive=media1,bootindex=1:
+//	Can't create IDE unit 1, bus supports only 1 units
+//
+// MEASURED ON windows-install, WHICH IS THE ONLY STAGE WITH ALL THREE: the installer, the answer CD
+// carrying the virtio drivers, and a driver CD for the installed system. Only the INSTALLER has to be
+// on a bus the firmware boots from.
+//
+// SO THE INSTALLER TAKES THE ONE IDE UNIT and the rest go on USB - a bus with as many ports as there
+// are devices, and the same `qemu-xhci` the macOS branch already creates for its recovery disk.
+func TestAtMostOneMediumIsOnTheIDEBus(t *testing.T) {
+	disk, iso, answer, driver, _, _, _, _ := fixture(t)
+	b := Boot{OS: Windows, ISO: iso, AnswerCD: answer, DriverCD: driver, Disk: disk}
+	if err := b.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	args := b.StorageArgs()
+	joined := strings.Join(args, " ")
+
+	ide := strings.Count(joined, "ide-cd")
+	if ide > 1 {
+		t.Fatalf("%d devices on the IDE bus and q35 supports ONE; qemu refuses with \"Can't create "+
+			"IDE unit 1\" and then exits before its QMP socket exists:\n%s", ide, joined)
+	}
+	// AND THE ONE THAT IS THERE IS THE INSTALLER, because the firmware has to boot it.
+	if !strings.Contains(joined, "ide-cd,drive=media0,bootindex=0") {
+		t.Fatalf("the installer is not the single IDE device, so it may not be bootable:\n%s", joined)
+	}
+	// AND THE OTHER TWO ARE ON USB, attached to a controller that exists.
+	if strings.Count(joined, "usb-storage,bus=xhci.0") != 2 {
+		t.Fatalf("the answer and driver CDs are not both on USB:\n%s", joined)
+	}
+	if strings.Count(joined, "qemu-xhci,id=xhci") != 1 {
+		t.Fatalf("the xhci controller is created %d times; `usb-storage,bus=xhci.0` names a bus "+
+			"that does not exist unless something creates it, and two controllers would collide on "+
+			"the id:\n%s", strings.Count(joined, "qemu-xhci,id=xhci"), joined)
+	}
+	// AND THE XHCI COMES FIRST, because qemu resolves `bus=xhci.0` as it parses.
+	xhci := strings.Index(joined, "qemu-xhci,id=xhci")
+	usb := strings.Index(joined, "usb-storage,bus=xhci.0")
+	if xhci < 0 || usb < xhci {
+		t.Fatalf("a `usb-storage` names `bus=xhci.0` before the controller is defined, which qemu "+
+			"refuses while parsing:\n%s", joined)
+	}
+}
