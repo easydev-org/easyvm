@@ -73,7 +73,76 @@ type manifest struct {
 // size; the file is renamed only when the byte count matches the manifest's. That is the same rule
 // `lib/compress.py` applies to its output - a truncated file with the FINAL name is one a publish
 // step would push.
+// Pull fetches the artifact, RESUMING AND RETRYING a broken transfer.
+//
+// A 20 GiB BLOB OVER A CONTAINER PROXY GETS ITS STREAM CUT, and a single attempt turns that into a
+// failed stage ten minutes in:
+//
+//	copying the blob: stream error: stream ID 1; PROTOCOL_ERROR; received from peer
+//
+// Measured on run 43050175134's macos-dev leg, which pulled for ten minutes and then reported it.
+// The file was left as `disk.qcow2.part` - the design already anticipated resume, and the NEXT run
+// would have continued from there, but a run does not get a next one.
+//
+// So the RETRY IS HERE RATHER THAN IN EVERY CALLER, and it is bounded: `attempts` transfers, each
+// resuming from the part file. Only TRANSPORT failures are retried - a 404 or a manifest this build
+// cannot read is a fact about the artifact and repeating it costs minutes to learn nothing.
 func Pull(ctx context.Context, a Artifact, dest string, log func(string)) error {
+	const attempts = 4
+	var lastErr error
+	for attempt := 1; attempt <= attempts; attempt++ {
+		err := pullOnce(ctx, a, dest, log)
+		if err == nil {
+			return nil
+		}
+		if !retryable(err) {
+			return err
+		}
+		lastErr = err
+		if attempt < attempts {
+			// THE RESUME IS THE POINT: the next attempt continues from `dest.part`, so a transfer
+			// that got 18 of 20 GiB keeps those 18.
+			log(fmt.Sprintf("  transfer interrupted (%v); resuming, attempt %d of %d",
+				err, attempt+1, attempts))
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(time.Duration(attempt) * 5 * time.Second):
+			}
+		}
+	}
+	return fmt.Errorf("%s: gave up after %d attempts; the last failure was %w", a.rel(), attempts,
+		lastErr)
+}
+
+// retryable says whether a transfer failed for a reason a second attempt could fix.
+//
+// A TRANSPORT ERROR IS ONE THING; A MISSING ARTIFACT IS ANOTHER. Retrying a 404, a bad manifest or a
+// multi-layer artifact spends minutes to reach the same message.
+func retryable(err error) bool {
+	msg := err.Error()
+	for _, permanent := range []string{
+		"is not in the registry (404)", "the layer has no digest", "has no layers",
+		"layers; this build expects one", "is not JSON", "manifest for",
+	} {
+		if strings.Contains(msg, permanent) {
+			return false
+		}
+	}
+	for _, transient := range []string{
+		"stream error", "PROTOCOL_ERROR", "connection reset", "unexpected EOF", "broken pipe",
+		"i/o timeout", "TLS handshake timeout", "server closed", "EOF",
+	} {
+		if strings.Contains(msg, transient) {
+			return true
+		}
+	}
+	// A NETWORK ERROR WITH NO RECOGNISED TEXT is still worth one more attempt: the alternative is
+	// failing a twenty-minute pull because a proxy restarted.
+	return !strings.Contains(msg, "HTTP 4")
+}
+
+func pullOnce(ctx context.Context, a Artifact, dest string, log func(string)) error {
 	reg := a.Registry
 	if reg == "" {
 		reg = DefaultRegistry
