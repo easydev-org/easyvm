@@ -143,3 +143,53 @@ func TestTheAgentMSIIsUnderGuestAgent(t *testing.T) {
 		t.Fatal("the vioserial driver was not extracted; the agent's device has no driver")
 	}
 }
+
+// APPLE'S OWN GUEST AGENT DOES NOT LOAD UNDER QEMU, SO THE macOS AGENT IS A DIFFERENT BINARY.
+//
+// `fetch: guest_agent` with `family: macos` used to answer
+//
+//	fetching the macOS guest agent is not implemented yet; the step that needs it is "the next scp"
+//
+// and the step after it copied `guest-agent/mac-guest-agent` - a path that existed nowhere, because the
+// name was the ISO's shape for Windows applied to a macOS download. `macos-vm-configure` stops at that
+// copy, and `shutdown: guest_agent` on a Mac has nothing behind it.
+//
+// mav2287/mac-guest-agent is a native macOS binary speaking the same protocol over the ISA serial
+// chardev the machine model gives a Mac - which is why `qga.go` has that device branch at all.
+func TestTheMacGuestAgentIsImplemented(t *testing.T) {
+	body, err := os.ReadFile("asset.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(body)
+	i := strings.Index(src, "case GuestAgentMacOS:")
+	if i < 0 {
+		t.Fatal("no GuestAgentMacOS case")
+	}
+	rest := src[i:]
+	if end := strings.Index(rest[1:], "\n	case "); end > 0 {
+		rest = rest[:end+1]
+	}
+	if strings.Contains(rest, "not implemented") {
+		t.Fatal("`fetch: guest_agent` for macOS is still unimplemented, so a macOS vm-configure " +
+			"stops at the copy that needs it")
+	}
+	if !strings.Contains(rest, "fetchMacGuestAgent") {
+		t.Fatal("the macOS case does not reach its own fetcher")
+	}
+
+	// AND THE FETCHER MAKES IT EXECUTABLE, because a copy into the guest without the bit fails there
+	// with a permission error that reads as a broken download.
+	agent, err := os.ReadFile("macagent.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(agent), "0o755") {
+		t.Fatal("the macOS agent is not chmod 0755, so the copy into the guest is not executable")
+	}
+	// AND A TRUNCATED DOWNLOAD IS REFUSED. No hash is published for this release, so size is the only
+	// integrity check available - and a truncated binary fails at launch, inside the guest.
+	if !strings.Contains(string(agent), "macGuestAgentMinBytes") {
+		t.Fatal("the macOS agent's download has no size floor, so a truncated asset is copied in")
+	}
+}

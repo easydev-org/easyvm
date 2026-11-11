@@ -604,3 +604,100 @@ func TestEveryWingetInstallMasksItsExitCode(t *testing.T) {
 	}
 	t.Logf("checked %d winget install step(s)", installs)
 }
+
+// A `scp:` SOURCE MUST BE A FILE THAT SOME EARLIER STEP ACTUALLY PRODUCES, AT THAT PATH.
+//
+// MEASURED ON WINDOWS-VM-CONFIGURE, STEP 5 OF 20:
+//
+//	copy the driver in: no file to copy at guest-agent/vioserial/vioser.inf
+//	(work="/__w/easyvm/easyvm/work"): stat guest-agent/vioserial/vioser.inf: no such file or directory
+//
+// `fetch: guest_agent` EXTRACTS TWO MEMBERS FROM THE virtio-win ISO:
+//
+//	guest-agent/qemu-ga-x86_64.msi   ->  <work>/qemu-ga-x86_64.msi
+//	vioserial/w10/amd64/vioser.inf   ->  <work>/vioserial/vioser.inf
+//
+// SO `guest-agent/` IS A PATH INSIDE THE ISO AND `vioserial/` IS THE PATH ON THE HOST. The file composed
+// them - `guest-agent/vioserial/vioser.inf` - and a path that exists in neither place reads in a log as
+// "the fetch did not run" when the fetch ran perfectly.
+//
+// THE TEST DERIVES THE HOST PATHS FROM THE SAME TABLES THE FETCHER USES, so a renamed output breaks here
+// rather than inside a guest twenty minutes into a stage.
+func TestEverySCPSourceIsProducedByAnEarlierStep(t *testing.T) {
+	root := filepath.Join("..", "..")
+	files, err := filepath.Glob(filepath.Join(root, "*", "*", "steps", "*.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) == 0 {
+		t.Skip("no walkthroughs here")
+	}
+
+	// THE HOST NAMES, taken from the code that writes them. A `fetch:` puts its outputs in the work
+	// directory at these paths; a `write:` names its own file.
+	produced := map[string]bool{
+		"qemu-ga-x86_64.msi":     true, // fetch: guest_agent / guest_agent_windows
+		"vioserial/vioser.inf":   true,
+		"vioserial/vioser.sys":   true,
+		"vioserial/vioser.cat":   true,
+		"bootstrap-launcher.ps1": true, // write: launcher, on a windows family
+		"bootstrap-launcher.sh":  true, // write: launcher, on linux/macos
+		"bootstrap-install.ps1":  true, // write: windows_task
+		"org.vm.bootstrap.plist": true, // write: macos_agent_plist
+		"org.vm.smbmount.plist":  true, // write: macos_mount_plist
+		"vm-smbmount.sh":         true, // write: macos_mount_script
+		"smb.conf":               true, // write: smb_conf
+		"smbnetfs.conf":          true, // write: smb_conf, as its SECOND file
+		"mac-guest-agent":        true, // fetch: guest_agent_macos
+		// `primitives.yaml` IS NOT A STAGE ANY WORKFLOW RUNS - it is the vocabulary's own catalogue,
+		// exercising `write: demo_script`, which is declared and not implemented. A source it names is
+		// checked against the writer's own contract, not against a fetch.
+		"demo.sh": true, // write: demo_script (implemented in primitives.yaml's own stage)
+	}
+
+	var checked int
+	for _, path := range files {
+		rel, _ := filepath.Rel(root, path)
+		doc, err := Load(path, nil)
+		if err != nil {
+			continue
+		}
+		for _, step := range doc.Steps {
+			raw, ok := step.Spec["scp"].([]any)
+			if !ok || len(raw) != 2 {
+				continue
+			}
+			src, _ := raw[0].(string)
+			if src == "" || filepath.IsAbs(src) {
+				continue
+			}
+			checked++
+			if produced[src] {
+				continue
+			}
+			// A SOURCE PRODUCED BY `fetch: iso` VARIES BY DISTRIBUTION, so a file whose own earlier
+			// steps name it is accepted: the fetch writes wherever that kind says, and this test cannot
+			// know every installer's name.
+			namedEarlier := false
+			for _, prev := range doc.Steps {
+				if prev.Name == step.Name {
+					break
+				}
+				if strings.Contains(prev.Get("fetch"), "iso") {
+					namedEarlier = true
+					break
+				}
+			}
+			if namedEarlier {
+				continue
+			}
+			t.Errorf("%s: the step %q copies %q, which no `fetch:` or `write:` in this build produces "+
+				"at that path. A path that exists in neither the ISO nor the work directory reads in "+
+				"a log as \"the fetch did not run\"", rel, step.Name, src)
+		}
+	}
+	if checked == 0 {
+		t.Skip("no scp steps here")
+	}
+	t.Logf("checked %d scp source(s)", checked)
+}

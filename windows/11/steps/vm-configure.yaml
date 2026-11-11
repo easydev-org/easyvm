@@ -154,22 +154,22 @@ steps:
     timeout: 1200
 
   - name: copy the driver in
-    scp: ["guest-agent/vioserial/vioser.inf", "C:/Users/{{ user }}/vioser.inf"]
+    scp: ["vioserial/vioser.inf", "C:/Users/{{ user }}/vioser.inf"]
     requires: [ssh]
     timeout: 300
 
   - name: copy the driver's payload in
-    scp: ["guest-agent/vioserial/vioser.sys", "C:/Users/{{ user }}/vioser.sys"]
+    scp: ["vioserial/vioser.sys", "C:/Users/{{ user }}/vioser.sys"]
     requires: [ssh]
     timeout: 300
 
   - name: copy the driver's catalogue in
-    scp: ["guest-agent/vioserial/vioser.cat", "C:/Users/{{ user }}/vioser.cat"]
+    scp: ["vioserial/vioser.cat", "C:/Users/{{ user }}/vioser.cat"]
     requires: [ssh]
     timeout: 300
 
   - name: copy the agent installer in
-    scp: ["guest-agent/qemu-ga-x86_64.msi", "C:/Users/{{ user }}/qemu-ga-x86_64.msi"]
+    scp: ["qemu-ga-x86_64.msi", "C:/Users/{{ user }}/qemu-ga-x86_64.msi"]
     requires: [ssh]
     timeout: 600
 

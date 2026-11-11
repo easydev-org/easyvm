@@ -126,7 +126,7 @@ steps:
     timeout: 900
 
   - name: copy the agent into the guest
-    scp: ["guest-agent/mac-guest-agent", "/tmp/mac-guest-agent"]
+    scp: ["mac-guest-agent", "/tmp/mac-guest-agent"]
     requires: [ssh]
     timeout: 300
 
@@ -222,15 +222,15 @@ steps:
     timeout: 300
 
   - name: copy the login agent plist in
-    scp: ["bootstrap.plist", "/tmp/bootstrap.plist"]
+    scp: ["org.vm.bootstrap.plist", "/tmp/bootstrap.plist"]
     timeout: 300
 
   - name: copy the mount daemon in
-    scp: ["smbmount.sh", "/tmp/smbmount.sh"]
+    scp: ["vm-smbmount.sh", "/tmp/smbmount.sh"]
     timeout: 300
 
   - name: copy the mount daemon plist in
-    scp: ["smbmount.plist", "/tmp/smbmount.plist"]
+    scp: ["org.vm.smbmount.plist", "/tmp/smbmount.plist"]
     timeout: 300
 
   # THE ONE STEP THAT RUNS AS ROOT, AND ALL IT DOES IS PUT THE FILES WHERE launchd LOOKS.

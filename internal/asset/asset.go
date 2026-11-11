@@ -118,8 +118,18 @@ func Fetch(spec Spec) (Result, error) {
 	case GuestAgentWindows:
 		return fetchWindowsAgent(work)
 	case GuestAgentMacOS:
-		return Result{}, fmt.Errorf("fetching the macOS guest agent is not implemented yet; the "+
-			"step that needs it is %q", "the next scp in the file")
+		// APPLE'S OWN AGENT DOES NOT LOAD UNDER QEMU, so a native one is used.
+		//
+		// `mav2287/mac-guest-agent` is a release binary that talks the same QMP-style guest-agent
+		// protocol over a serial chardev. Measured in the Python implementation: Apple's
+		// `qemu-ga` build expects an ISA serial port and the flow here gives it one
+		// (`-chardev socket,...,id=qga0 -device isa-serial,chardev=qga0`), which is why the machine
+		// model carries that branch at all.
+		//
+		// THE ASSET IS A SINGLE EXECUTABLE, NOT AN ARCHIVE, so it is downloaded and chmod 0755 - a
+		// copy into the guest that is not executable fails at `chmod` inside the guest with a
+		// permission error that reads as a broken download.
+		return fetchMacGuestAgent(spec)
 	case Xcode:
 		// THE ONE APPLE ASSET THAT CANNOT COME FROM APPLE. See internal/asset/xcode.go: the
 		// developer portal answers an unauthenticated request with a redirect to /unauthorized, so
