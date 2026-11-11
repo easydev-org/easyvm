@@ -331,7 +331,15 @@ jobs:
           # THIS IS QEMU'S OWN HANDSHAKE: `-accel kvm -nodefaults -display none` with no disk starts
           # the accelerator, opens the device, and exits because there is nothing to boot. A container
           # that cannot use KVM fails here in two seconds with qemu's own words.
-          qemu-system-x86_64 -machine q35,accel=kvm -accel kvm -nodefaults -display none -S \
+          # ONE SPELLING OF THE ACCELERATOR, NOT TWO. `-machine q35,accel=kvm` AND `-accel kvm` ARE
+          # MUTUALLY EXCLUSIVE and qemu refuses the pair:
+          #
+          #	The -accel and "-machine accel=" options are incompatible
+          #
+          # - which is what the first version of this probe did, so it reported "QEMU REFUSED
+          # accel=kvm" on a runner whose KVM was never asked. `-accel kvm` alone is enough: qemu then
+          # starts the accelerator and opens the device.
+          qemu-system-x86_64 -accel kvm -nodefaults -display none -S \
             -monitor none -serial none 2>&1 &
           QPID=$!
           sleep 2
