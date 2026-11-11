@@ -162,7 +162,7 @@ func applyNAT() error {
 
 	// A CHAIN OF OUR OWN, so `Down` can remove exactly what `Up` added. Rules added directly to
 	// POSTROUTING accumulate one per run and there is no way to tell ours from anybody else's.
-	if _, err := run("iptables", "-t", "nat", "-N", forwardChain); err != nil && !alreadyExists(err) {
+	if out, err := run("iptables", "-t", "nat", "-N", forwardChain); err != nil && !alreadyExists(out) {
 		return fmt.Errorf("creating the %s chain: %w", forwardChain, err)
 	}
 	_, _ = run("iptables", "-t", "nat", "-F", forwardChain)

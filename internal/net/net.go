@@ -117,9 +117,9 @@ func Up(sshPort int, forwards []int) error {
 	}
 
 	// THE BRIDGE. `ip link add` fails if it exists, which is the normal case on a second run.
-	if _, err := run("ip", "link", "add", "dev", BridgeName, "type", "bridge"); err != nil {
-		if !alreadyExists(err) {
-			return fmt.Errorf("creating %s: %w", BridgeName, err)
+	if out, err := run("ip", "link", "add", "dev", BridgeName, "type", "bridge"); err != nil {
+		if !alreadyExists(out) {
+			return fmt.Errorf("creating %s: %v (%s)", BridgeName, err, firstLine(out))
 		}
 	}
 	for _, step := range [][]string{
@@ -129,7 +129,7 @@ func Up(sshPort int, forwards []int) error {
 	} {
 		// EACH IS ALLOWED TO SAY "already there": `address add` on an interface that has it, and
 		// `link set` on one already up, both exit non-zero on some kernels.
-		if out, err := run("ip", step...); err != nil && !alreadyExists(err) {
+		if out, err := run("ip", step...); err != nil && !alreadyExists(out) {
 			return fmt.Errorf("ip %s: %v (%s)", strings.Join(step, " "), err, firstLine(out))
 		}
 	}
@@ -140,7 +140,7 @@ func Up(sshPort int, forwards []int) error {
 	// THE TAP. `user` is what lets qemu open it as an unprivileged owner of the device, which is
 	// why the container does not need to run qemu as root.
 	if out, err := run("ip", "tuntap", "add", "dev", TapName, "mode", "tap", "user",
-		strconv.Itoa(os.Getuid())); err != nil && !alreadyExists(err) {
+		strconv.Itoa(os.Getuid())); err != nil && !alreadyExists(out) {
 		return fmt.Errorf("ip tuntap add: %v (%s)", err, firstLine(out))
 	}
 	for _, step := range [][]string{
@@ -188,15 +188,18 @@ func run(name string, args ...string) (string, error) {
 
 // alreadyExists reports whether a creation failed because the thing was already there.
 //
-// THE MESSAGE IS THE ONLY WAY TO KNOW, because `ip` and `iptables` both use exit 2 for everything.
-// Matching text is not satisfying; the alternative is an idempotent operation that is not
-// idempotent, which is worse.
-func alreadyExists(err error) bool {
-	if err == nil {
-		return false
-	}
+// IT TAKES THE COMMAND'S OUTPUT, NOT ITS ERROR, AND THAT WAS A REAL BUG. `ip` and `iptables` both
+// exit 2 for every kind of failure and put the reason on stderr, so the error value is always
+// exactly `exit status 2` - it never contains "File exists". This function was written against
+// `err.Error()`, which means it ALWAYS RETURNED FALSE and every "idempotent" call in this package
+// was not: a second `Up` would fail on the existing bridge, and the log would say
+// `creating br-easyvm: exit status 2`, naming neither the device nor the reason.
+//
+// The message is still the only way to tell the cases apart - exit 2 is all `ip` says otherwise -
+// so the text is what is matched, from the place the text actually is.
+func alreadyExists(output string) bool {
 	for _, needle := range []string{"File exists", "already exists", "RTNETLINK answers: File exists"} {
-		if strings.Contains(err.Error(), needle) {
+		if strings.Contains(output, needle) {
 			return true
 		}
 	}

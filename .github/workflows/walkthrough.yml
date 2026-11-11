@@ -1,36 +1,40 @@
 name: walkthrough
 
-# Replicate a Windows 11 stage against easyvm itself.
+# Replicate the Windows 11 stage against easyvm itself, on the image this repository builds.
 #
 # THE POINT IS NOT "THE BINARY STARTS". It is that the YAML file in this repository drives a real
-# machine through a real stage: an installed disk is booted, reached over ssh, changed, published.
-# A stage that only compiles proves nothing about that.
+# machine through a real stage: a published disk is booted, reached over ssh, changed, and
+# published again.
 #
-# EVERY DISK IS PULLED, NOT BAKED. Baking Windows takes 45 to 90 minutes and is not what this
-# repository tests - the disks already exist in ghcr, published by easydiskbake, and the question
-# here is whether easyvm can drive them. `easyvm pull` fetches one; `easyvm run` starts it.
+# THE JOB RUNS INSIDE THE IMAGE (`container:`), NOT IN A `docker run` IT STARTS.
 #
-# THE MACHINE IS A CONTAINER AND THE COMMANDS ARE CLIENTS. `easyvm serve` owns qemu, the QMP socket
-# and the console, and every `run`/`status`/`stop` is a request to it over a unix socket - so the
-# machine has one owner for the whole stage, and a stage that fails leaves something `status` can
-# still describe. The container gets the two devices the network requires: --device /dev/net/tun
-# and --cap-add NET_ADMIN. Without them the daemon refuses to start rather than falling back to
-# qemu's user-mode network, which cannot work here - the SMB server binds 172.30.0.1 on the host
-# side of the tap.
+# That is not a style choice, it is the difference between working and not. `docker run` gives a
+# container ITS OWN network namespace, where /proc/sys/net is mounted read-only and
+#
+#     sysctl -w net.ipv4.ip_forward=1
+#
+# fails with "Read-only file system" - measured on run 43016361709, which is where this workflow
+# failed first. A GitHub Actions `container:` job shares the runner's network namespace, so the
+# sysctl is one the kernel will accept, which is how the Python implementation has always done it.
+#
+# THE NETWORK NEEDS THREE THINGS AND ALL THREE ARE ASSERTED BEFORE A GUEST STARTS:
+#
+#     --device /dev/net/tun    the tap the guest's NIC is attached to
+#     --cap-add NET_ADMIN      creating the tap, the bridge and the iptables rules
+#     --device /dev/kvm        hardware virtualisation; without it qemu runs interpreted and a
+#                              60-minute stage becomes a 6-hour one
+#
+# The program refuses to fall back to qemu's user-mode network (`-netdev user`), because the host's
+# smbd binds 172.30.0.1 on the bridge address and a user-mode guest cannot route to it.
 #
 # WHY THERE IS NO macOS JOB YET, AND IT IS NOT AN OVERSIGHT.
 #
-# A macOS guest boots through OpenCore, which is a pflash ROM plus a variable store plus a FAT boot
-# image - all built on the host from the recovery image, because Apple's APFS driver is extracted
-# out of it. `internal/machine.Boot.Validate` refuses a macOS boot without those three files, and
-# this build has no step that produces them: `internal/asset` returns "not implemented" for every
-# macOS asset. Adding a job that boots a macOS disk would therefore fail at its first step with
-# "OpenCore's firmware ROM is missing" - a true message, forty minutes after the pull, about a
-# capability rather than about a machine.
-#
-# So the Windows stage is proven first, and the macOS job arrives with the step that builds
-# OpenCore. The YAML for it is already in the tree and already loads; what is missing is host work,
-# not a walkthrough.
+# A macOS guest boots through OpenCore - a pflash ROM, a variable store and a FAT boot image, all
+# built on the host from the recovery image because Apple's APFS driver is extracted out of it - and
+# machine.Boot.Validate refuses a macOS boot without those three files. This build has no step that
+# produces them: internal/asset returns "not implemented" for every macOS asset. A macOS job would
+# therefore fail at its first step, forty minutes after the pull, with a true message about a
+# missing capability. The YAML is in the tree and already loads; what is missing is host work.
 
 on:
   workflow_dispatch:
@@ -42,106 +46,83 @@ on:
       windows_ssh_from:
         description: "Windows: the disk to start from"
         default: "windows11-ssh"
-      # WHERE THE DISKS COME FROM. A separate input because the artifact repository is a different
-      # repository from this one, and a rename must not silently pull from the wrong place.
       disks_repository:
         description: "the ghcr repository that holds the disks"
         default: "easydev-org/easydiskbake"
       timeout_minutes:
         description: "how long the stage may run"
-        default: "60"
+        default: "70"
 
 concurrency:
   group: walkthrough
   cancel-in-progress: false
 
-env:
-  # THE IMAGE THIS REPOSITORY BUILDS, which is also the environment every stage runs in: qemu 11.1,
-  # OVMF, samba, dnsmasq, ffmpeg, tesseract, qemu-img and the easyvm binary.
-  IMAGE: ghcr.io/${{ github.repository }}:latest
-
 jobs:
-  # ===========================================================================
-  # WINDOWS 11 - boot the published disk and drive it over ssh.
-  #
-  # windows/11/steps/ssh.yaml does: take the input disk, boot it, wait for the desktop, turn on
-  # sshd, prove the build and the account, configure the machine, publish, stop. The steps that
-  # need the answer file and the driver CD belong to the INSTALL stage, which is not run here -
-  # this disk is already installed, so its boot is a disk boot with no media attached.
-  # ===========================================================================
   windows:
     if: inputs.windows_run
     runs-on: ubuntu-24.04
-    timeout-minutes: ${{ fromJSON(inputs.timeout_minutes || '60') }}
+    timeout-minutes: ${{ fromJSON(inputs.timeout_minutes || '70') }}
+    container:
+      image: ghcr.io/${{ github.repository }}:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+      options: --device /dev/kvm --device /dev/net/tun --cap-add NET_ADMIN
     permissions:
       contents: read
       packages: read
     steps:
       - uses: actions/checkout@v4
 
-      - name: log in to ghcr
-        # THE DISK IS IN A DIFFERENT REPOSITORY'S PACKAGES, so the pull needs a token that can read
-        # it. `docker login` is for the image below; `easyvm pull` takes the same token from
-        # GITHUB_TOKEN, which is passed into the container by name and never written to disk.
-        run: |
-          set -euo pipefail
-          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
-
       - name: prepare
-        # THE TWO DEVICES THE NETWORK REQUIRES, ASSERTED BEFORE ANYTHING PULLS. A runner without
-        # /dev/kvm or /dev/net/tun produces a qemu that crawls or a daemon that refuses, and the
-        # refusal is right - but the message is clearer here than forty minutes later.
+        # THE THREE THINGS THE NETWORK AND THE GUEST NEED, ASSERTED BEFORE ANYTHING IS PULLED.
+        # A runner without /dev/kvm or /dev/net/tun produces a qemu that crawls or a daemon that
+        # refuses; the refusal is right, but this says which one and stops in two seconds.
         run: |
           set -euo pipefail
           test -e /dev/kvm || { echo "=== NO /dev/kvm ==="; exit 1; }
           test -e /dev/net/tun || { echo "=== NO /dev/net/tun ==="; exit 1; }
           ls -l /dev/kvm /dev/net/tun
-          mkdir -p work
+          id
+          # THE IMAGE ITSELF IS PART OF THE ENVIRONMENT, so what it carries is checked here rather
+          # than discovered by a step that fails for an unrelated reason.
+          easyvm versions
+          qemu-img --version | head -1
+          mkdir -p "$GITHUB_WORKSPACE/work"
 
       - name: pull the disk
         # THE DISK ARRIVES BEFORE THE MACHINE STARTS, so a pull failure is one step with one
         # message rather than a boot that waits out its timeout on a file that is not there.
+        #
+        # `easyvm pull`, NOT a shell-out: it resumes a partial transfer, it asks for one tag and
+        # does not search, and the image carries no `oras` or `crane` to be a different version.
         run: |
           set -euo pipefail
-          # NO --entrypoint: the image's entrypoint IS easyvm, which is what a caller should be
-          # able to assume. A step that spelled the path would keep working after the entrypoint
-          # regressed, and the regression is exactly what run 43014353957 cost.
-          docker run --rm \
-            -e GITHUB_TOKEN="${{ secrets.GITHUB_TOKEN }}" \
-            -v "$PWD/work:/work" \
-            "${{ env.IMAGE }}" \
-            pull --tag "${{ inputs.windows_ssh_from || 'windows11-ssh' }}" \
-                 --repository "${{ inputs.disks_repository }}" \
-                 --dest "/work/disk.qcow2"
-          ls -l work/
+          easyvm pull --tag "${{ inputs.windows_ssh_from || 'windows11-ssh' }}" \
+                      --repository "${{ inputs.disks_repository }}" \
+                      --dest $GITHUB_WORKSPACE/work/disk.qcow2
+          ls -l "$GITHUB_WORKSPACE/work/"
+          qemu-img check $GITHUB_WORKSPACE/work/disk.qcow2 || true
 
       - name: start the daemon
-        # ONE CONTAINER OWNS THE MACHINE FOR THE WHOLE STAGE. It runs detached because `run`
-        # returns immediately - the daemon drives the file, the client says where it is - and a
-        # detached daemon means a stage that hangs still has a `status` to read.
+        # ONE PROCESS OWNS THE MACHINE FOR THE WHOLE STAGE. It is started in the background because
+        # `easyvm run` is a CLIENT: it sends a request and returns, and the daemon drives the file.
+        # That is what makes a hung stage diagnosable - `status` still answers.
+        #
+        # THE READY LINE IS THE CONTRACT, not the socket file: a file that exists is not a daemon
+        # that answers. The output is CAPTURED FIRST and searched with `case`: `| grep -q` closes
+        # the pipe on its first match, the writer takes SIGPIPE, and `set -o pipefail` turns that
+        # into exit 141 for a check that SUCCEEDED. That has happened twice here already.
         run: |
           set -euo pipefail
-          docker run -d --name easyvm \
-            --device /dev/kvm \
-            --device /dev/net/tun \
-            --cap-add NET_ADMIN \
-            -v "$PWD/work:/work" \
-            -v "$PWD:/src:ro" \
-            -p 6080:6080 \
-            "${{ env.IMAGE }}" \
-            serve --work /work --novnc-port 6080
-
-          # THE READY LINE IS THE CONTRACT, not the socket file: a file that exists is not a daemon
-          # that answers. The output is CAPTURED FIRST and searched second - `docker logs ... |
-          # grep -q` closes the pipe on its first match, the writer takes SIGPIPE, and `set -o
-          # pipefail` turns that into exit 141 for a check that SUCCEEDED. That has already
-          # happened twice in this repository.
+          easyvm serve --work "$GITHUB_WORKSPACE/work" --novnc-port 6080 > $GITHUB_WORKSPACE/work/daemon.log 2>&1 &
+          echo $! > $GITHUB_WORKSPACE/work/daemon.pid
           for i in $(seq 1 30); do
-            logs=$(docker logs easyvm 2>&1 || true)
+            logs=$(cat $GITHUB_WORKSPACE/work/daemon.log || true)
             case "$logs" in *"listening on"*) break ;; esac
             sleep 1
           done
-          logs=$(docker logs easyvm 2>&1 || true)
+          logs=$(cat $GITHUB_WORKSPACE/work/daemon.log || true)
           printf '%s\n' "$logs"
           case "$logs" in
             *"listening on"*) echo "the daemon is up" ;;
@@ -154,57 +135,74 @@ jobs:
         # YAML: the same file must be runnable against any copy of the disk.
         run: |
           set -euo pipefail
-          docker exec easyvm easyvm run \
-            /src/windows/11/steps/ssh.yaml \
-            --work /work \
-            --boot-disk /work/disk.qcow2 \
-            --out /work/windows11-ssh.qcow2 \
-            --password admin
+          easyvm run "$GITHUB_WORKSPACE/windows/11/steps/ssh.yaml" \
+            --work "$GITHUB_WORKSPACE/work" \
+            --boot-disk $GITHUB_WORKSPACE/work/disk.qcow2 \
+            --out $GITHUB_WORKSPACE/work/windows11-ssh.qcow2 \
+            --password admin || {
+              echo "=== THE DAEMON REFUSED THE RUN ==="
+              cat $GITHUB_WORKSPACE/work/daemon.log
+              exit 1
+            }
 
       - name: follow it
         # SIXTY SECONDS AT A TIME, AND THE STATUS EACH TIME. A stage that reports nothing for forty
         # minutes is a stage whose failure cannot be placed; `status` is one line and it is already
-        # the fact a reader wants. The state is matched with `case` rather than `| grep -q`, for
-        # the SIGPIPE reason above.
+        # the fact a reader wants. Matched with `case`, for the SIGPIPE reason above.
         run: |
           set -euo pipefail
-          deadline=$((SECONDS + 60 * 60))
+          deadline=$((SECONDS + 60 * 62))
           while [ $SECONDS -lt $deadline ]; do
-            state=$(docker exec easyvm easyvm status --work /work 2>&1 || true)
-            printf '%s\n' "$state"
+            state=$(easyvm status --work "$GITHUB_WORKSPACE/work" 2>&1 || true)
+            printf '[%s] %s\n' "$(date +%H:%M:%S)" "$state"
             case "$state" in
               *"status: finished"*)
                 echo "=== THE WALKTHROUGH FINISHED ==="
-                docker logs --tail 200 easyvm 2>&1
                 exit 0 ;;
               *"status: failed"*)
                 echo "=== THE WALKTHROUGH FAILED ==="
-                docker logs --tail 400 easyvm 2>&1
+                cat $GITHUB_WORKSPACE/work/daemon.log
                 exit 1 ;;
             esac
             sleep 60
           done
-          echo "=== THE WALKTHROUGH DID NOT FINISH IN AN HOUR ==="
-          docker logs --tail 400 easyvm 2>&1
+          echo "=== THE WALKTHROUGH DID NOT FINISH IN TIME ==="
+          cat $GITHUB_WORKSPACE/work/daemon.log
           exit 1
 
       - name: what it produced
         if: always()
         run: |
-          set -euo pipefail
-          docker logs easyvm > work/daemon.log 2>&1 || true
-          ls -l work/ || true
+          set -uo pipefail
+          ls -l "$GITHUB_WORKSPACE/work/" || true
+          # THE DISK IS THE THING THE STAGE EXISTS TO PROVE, so its size is the first number a
+          # reader wants - and the last frame is what a failure is diagnosed from.
+          for f in "$GITHUB_WORKSPACE"/work/*.qcow2; do
+            [ -e "$f" ] || continue
+            printf '%s: %s MiB\n' "$f" "$(( $(stat -c %s "$f") >> 20 ))"
+          done
 
-      - name: stop the container
+      - name: stop the daemon
         if: always()
         run: |
-          docker stop easyvm || true
-          docker rm easyvm || true
+          set -uo pipefail
+          if [ -f $GITHUB_WORKSPACE/work/daemon.pid ]; then
+            pid=$(cat $GITHUB_WORKSPACE/work/daemon.pid)
+            kill "$pid" 2>/dev/null || true
+            # A DAEMON THAT DOES NOT EXIT IS HOLDING /dev/kvm. One `easyvm stop` is the polite
+            # way; SIGKILL follows only if it is still there.
+            easyvm stop --work "$GITHUB_WORKSPACE/work" 2>/dev/null || true
+            sleep 5
+            kill -9 "$pid" 2>/dev/null || true
+          fi
+          pgrep -a qemu-system-x86_64 || true
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: windows11-walkthrough
+          # RELATIVE TO THE WORKSPACE, because a `container:` job copies the workspace in and out
+          # and an absolute path outside it is not collected.
           path: |
             work/daemon.log
             work/*.mp4

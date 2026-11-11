@@ -108,27 +108,30 @@ func TestSSHIsAlwaysForwarded(t *testing.T) {
 // alreadyExists IS THE ONLY WAY TO MAKE `ip` AND `iptables` IDEMPOTENT, because both use exit 2 for
 // everything. It is text matching, so it is tested against the exact strings it must recognise and
 // one it must not.
+//
+// AND IT TAKES THE OUTPUT, NOT THE ERROR - which is the part that was wrong. `run()` returns
+// (output, err) and `err.Error()` for a command that exited 2 is exactly `exit status 2`, so a
+// version of this function that read the error could never match anything and every "idempotent"
+// call silently was not. The test passes the OUTPUT, because that is where `ip` puts its reason.
 func TestAlreadyExistsRecognisesTheRealMessages(t *testing.T) {
-	for _, msg := range []string{
+	for _, out := range []string{
 		"RTNETLINK answers: File exists",
 		"Error: Device \"qemubr0\" already exists.",
 		"iptables: Chain already exists.",
 	} {
-		if !alreadyExists(errors.New(msg)) {
-			t.Fatalf("%q must be recognised as 'already there'; without it a second run fails", msg)
+		if !alreadyExists(out) {
+			t.Fatalf("%q must be recognised as 'already there'; without it a second run fails", out)
 		}
 	}
-	for _, msg := range []string{
+	for _, out := range []string{
 		"RTNETLINK answers: Operation not permitted",
 		"RTNETLINK answers: No such device",
+		"",
 	} {
-		if alreadyExists(errors.New(msg)) {
+		if alreadyExists(out) {
 			t.Fatalf("%q must NOT be treated as 'already there'; that would hide a real failure",
-				msg)
+				out)
 		}
-	}
-	if alreadyExists(nil) {
-		t.Fatal("nil is not 'already exists'")
 	}
 }
 
