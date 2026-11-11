@@ -1,0 +1,51 @@
+name: zorin
+
+# # ZORIN, ONE STAGE: its `ssh.yaml`.
+#
+# THAT IS THE STAGE THAT PROVES THE MACHINE - the disk boots, the guest reaches a desktop, sshd
+# answers, and the bootstrap chain can be checked - without paying for an install that is 20 to 40
+# minutes of clicking through a wizard.
+#
+# ITS TAG IS `linux-zorin-ssh`, NOT THE `zorin-ssh` SHAPE WINDOWS AND MACOS USE. Discovered rather
+# than assumed: a wrong tag is a 404 at pull time that reads like a registry problem.
+#
+# THE NAME IS THE DISTRIBUTION, AND THAT IS THE POINT OF THE SPLIT.
+#
+# `concurrency:` IS PER WORKFLOW, so dispatching `ubuntu` cannot cancel `ghostbsd` or `windows`. A single
+# file holding every stage meant DISPATCHING A LINUX FIX CANCELLED A RUNNING WINDOWS INSTALL - measured,
+# forty minutes of one thrown away. The group exists to stop two runs fighting over one machine, and a
+# matrix leg is not one machine: every leg gets its own runner.
+#
+# AND THE MECHANISM IS NOT COPIED. The container options, the device probes, the pull, the daemon and
+# the follow loop live once in `stage.yml`, called with `workflow_call`. easydiskbake's 26 workflows
+# repeat the same container stanza 23 times; that is the duplication this avoids.
+
+on:
+  workflow_dispatch:
+    inputs:
+      disks_repository:
+        description: "the ghcr repository that holds the disks"
+        default: "easydev-org/easydiskbake"
+
+concurrency:
+  group: zorin
+  cancel-in-progress: true
+
+jobs:
+  stages:
+    uses: ./.github/workflows/stage.yml
+    secrets: inherit
+    with:
+      group: zorin
+      disks_repository: ${{ inputs.disks_repository }}
+      # THE LEGS, AS JSON. `fromJSON` in the called workflow turns this back into a matrix.
+      stages: |
+        [
+          {
+            "name": "linux-zorin-ssh",
+            "file": "linux/zorin/steps/ssh.yaml",
+            "pull": "linux-zorin-ssh",
+            "out": "linux-zorin-ssh.qcow2",
+            "timeout": 60
+          }
+        ]

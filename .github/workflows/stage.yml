@@ -38,14 +38,12 @@ on:
         type: string
         default: "easydev-org/easydiskbake"
 
-# STILL `cancel-in-progress: true`, BUT NOW SCOPED TO ONE OPERATING SYSTEM.
+# NO WORKFLOW-LEVEL `concurrency` HERE. THE CALLER OWNS THE RUN.
 #
-# Within one OS a newer run IS a better measurement: the alternative is a stale run reporting failures
-# the current commit already fixed, while the new one waits. Across operating systems that is false,
-# and a group per OS is what makes the difference expressible.
-concurrency:
-  group: ${{ inputs.group }}
-  cancel-in-progress: true
+# A reusable workflow is part of its caller's run, and declaring `concurrency` inside it makes GitHub
+# reject the reference - the symptom is a run with ZERO JOBS and no log line, which is what run
+# 43069605983 showed. The group belongs to the file a person dispatches, and each operating system's
+# file already declares its own.
 
 jobs:
   stage:

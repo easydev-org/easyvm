@@ -380,8 +380,24 @@ func TestEachOperatingSystemHasItsOwnGroupAndOneSharedMechanism(t *testing.T) {
 		}
 		groups[group] = name
 	}
-	if len(groups) < 4 {
-		t.Fatalf("only %d operating systems have their own group (%v); this repository migrates "+
-			"windows, macos, linux and bsd", len(groups), groups)
+	// ONE WORKFLOW PER DISTRIBUTION AND PER OPERATING SYSTEM, WHICH IS THE NAME A READER LOOKS FOR.
+	//
+	// easydiskbake names its workflows after the distribution - `ubuntu.yml`, `ghostbsd-mate.yml` - and
+	// a single `linux.yml` holding twelve of them undoes the property that makes the split worth
+	// anything: `concurrency:` is per workflow, so dispatching `ubuntu` must not touch `ghostbsd`.
+	if len(groups) < 15 {
+		t.Fatalf("only %d stage workflows have their own group (%v); this repository migrates "+
+			"windows, macos, twelve Linux distributions and one BSD, each with its own name",
+			len(groups), groups)
+	}
+	// AND NONE OF THEM IS AN UMBRELLA NAME. `linux` and `bsd` are groups of distributions, not
+	// distributions: a file called `linux` would hold twelve stages under one concurrency group, which
+	// is the arrangement this replaced.
+	for _, umbrella := range []string{"linux.yml", "bsd.yml", "walkthrough.yml"} {
+		if _, err := os.Stat(dir + "/" + umbrella); err == nil {
+			t.Errorf(".github/workflows/%s exists. A workflow is named after what it runs - a "+
+				"distribution or an operating system - so that dispatching one cannot cancel another, "+
+				"and so that a failed run's name says which guest broke", umbrella)
+		}
 	}
 }
