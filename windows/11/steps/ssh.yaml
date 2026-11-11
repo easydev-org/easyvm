@@ -291,13 +291,41 @@ steps:
     ssh: powershell -Command "$m = (powercfg /query SCHEME_CURRENT SUB_VIDEO VIDEOIDLE 2>$null | Select-String 'Current AC Power Setting').ToString().Split(':')[-1].Trim(); $s = (powercfg /query SCHEME_CURRENT SUB_SLEEP STANDBYIDLE 2>$null | Select-String 'Current AC Power Setting').ToString().Split(':')[-1].Trim(); 'MONITOR=' + $m + ' STANDBY=' + $s + ' HIBER=' + (Test-Path C:\hiberfil.sys)"
     timeout: 180
 
+  # 180 SECONDS, NOT 60, AND THE NUMBER IS MEASURED RATHER THAN GENEROUS.
+  #
+  # Every step in this file that starts PowerShell costs 40 to 55 seconds on this guest before the
+  # command runs at all: run 43029981060 timed "open powershell" at about a minute, then
+  # `prove sshd is automatic` at about a minute, then this one FAILED at `1m0s` - three different
+  # commands in a row landing on the edge of the same budget. The cost is PowerShell's start, not
+  # the command, which is why `prove the power settings took` already had 180 above.
+  #
+  # A TIMEOUT THAT IS TOO TIGHT DOES NOT REPORT "SLOW", IT REPORTS THE COMMAND. The message was
+  #
+  #     the command did not finish in 1m0s (it was: powershell -Command "(Get-NetTCPConnection
+  #     -State Listen -LocalPort 22 | ...)")
+  #
+  # which reads like a broken cmdlet and was a budget the guest cannot meet.
   - name: prove sshd is automatic
     ssh: powershell -Command "(Get-Service sshd).StartupType"
-    timeout: 60
+    timeout: 180
 
+  # 180 SECONDS, NOT 60, AND THE NUMBER IS MEASURED RATHER THAN GENEROUS.
+  #
+  # Every step in this file that starts PowerShell costs 40 to 55 seconds on this guest before the
+  # command runs at all: run 43029981060 timed "open powershell" at about a minute, then
+  # `prove sshd is automatic` at about a minute, then this one FAILED at `1m0s` - three different
+  # commands in a row landing on the edge of the same budget. The cost is PowerShell's start, not
+  # the command, which is why `prove the power settings took` already had 180 above.
+  #
+  # A TIMEOUT THAT IS TOO TIGHT DOES NOT REPORT "SLOW", IT REPORTS THE COMMAND. The message was
+  #
+  #     the command did not finish in 1m0s (it was: powershell -Command "(Get-NetTCPConnection
+  #     -State Listen -LocalPort 22 | ...)")
+  #
+  # which reads like a broken cmdlet and was a budget the guest cannot meet.
   - name: prove sshd is listening
     ssh: powershell -Command "(Get-NetTCPConnection -State Listen -LocalPort 22 | Select-Object -First 1).LocalPort"
-    timeout: 60
+    timeout: 180
 
   - name: prove the account can log in
     ssh: whoami
