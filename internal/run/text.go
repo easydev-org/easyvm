@@ -443,16 +443,50 @@ func (e *Executor) doAtButton(s walk.Step) error {
 	cx, cy, left, top, right, bottom, ok := screen.FindFill(img,
 		screen.Region{X0: r[0], Y0: r[1], X1: r[2], Y1: r[3]})
 	if !ok {
-		// NO BUTTON IS A STOP, NOT A GUESS. A disabled footer cannot be pressed, and the step before
-		// this one must select whatever enables it - so returning success here would hide a pane
-		// that never became pressable.
+		// `at_fallback:` IS A MEASURED COORDINATE FOR WHEN THE COLOUR IS NOT THERE.
+		//
+		// GhostBSD's installer icon is found by its teal disc, and that driver falls back to the
+		// measured row when the colour does not match - so it behaves exactly as the fixed constant
+		// did rather than pressing nothing at all. A control that CAN be missing is different from
+		// a footer that cannot: a disabled footer means a step above failed, while an icon can be
+		// hidden by a wallpaper change and still be in the same place.
+		if pair, ok := s.Spec["at_fallback"].([]any); ok && len(pair) == 2 {
+			fx, okX := toFloat(pair[0])
+			fy, okY := toFloat(pair[1])
+			if okX && okY {
+				e.Driver.Log(fmt.Sprintf("  no fill in [%d,%d %d,%d]; using the measured "+
+					"fallback (%d,%d)", r[0], r[1], r[2], r[3], int(fx), int(fy)))
+				if v, isDouble := s.Spec["double"].(bool); isDouble && v {
+					if err := e.Driver.DoubleClick(int(fx), int(fy)); err != nil {
+						return fail(s.Name, "%v", err)
+					}
+				} else if err := e.Driver.Click(int(fx), int(fy)); err != nil {
+					return fail(s.Name, "%v", err)
+				}
+				return e.settle(s)
+			}
+		}
+		// NO CONTROL AND NO FALLBACK IS A STOP, NOT A GUESS. A disabled footer cannot be pressed,
+		// and the step before this one must select whatever enables it - so returning success here
+		// would hide a pane that never became pressable.
 		return failWithScreen(s.Name, e.Driver,
-			"no footer button in [%d,%d %d,%d]: the dominant fill there is too small to be a "+
-				"control, or there is none. A step before this one was meant to enable it",
+			"no control fill in [%d,%d %d,%d], and no `at_fallback:` to use instead: the "+
+				"dominant colour there is too small to be a control, or there is none",
 			r[0], r[1], r[2], r[3])
 	}
-	e.Driver.Log(fmt.Sprintf("  the footer button spans x=%d..%d y=%d..%d; pressing (%d,%d)",
+	e.Driver.Log(fmt.Sprintf("  the control spans x=%d..%d y=%d..%d; pressing (%d,%d)",
 		left, right, top, bottom, cx, cy))
+	// `double: true` MAKES IT A DOUBLE-CLICK, because some controls only open on one - a desktop icon
+	// in particular, and the gap between the two clicks is what makes it a double-click rather than
+	// two clicks.
+	if v, ok := s.Spec["double"]; ok {
+		if dbl, isBool := v.(bool); isBool && dbl {
+			if err := e.Driver.DoubleClick(cx, cy); err != nil {
+				return fail(s.Name, "double-click (%d, %d): %v", cx, cy, err)
+			}
+			return e.settle(s)
+		}
+	}
 	if err := e.Driver.Click(cx, cy); err != nil {
 		return fail(s.Name, "click (%d, %d): %v", cx, cy, err)
 	}
@@ -595,4 +629,46 @@ func shorten(s string, n int) string {
 		return s
 	}
 	return s[:n] + "..."
+}
+
+// --- a host-side log, for a step that witnesses rather than judges ---------------------
+
+// doHostLog prints the tail of a host-side log, when this build has one to print.
+//
+// IT IS FOR A STEP WHOSE ONLY JOB IS TO SAY WHAT THE SERVER SAW, and whose ABSENCE of output is
+// information: GhostBSD's smbd log sits AFTER the mount touched the share and BEFORE the proof, so it
+// runs even when the proof is about to fail - which is the only time its output is worth anything.
+//
+// WHEN THERE IS NO SUCH LOG THIS SAYS SO RATHER THAN PRETENDING. `smbd` is not started by this build
+// yet: `internal/net` does tap, bridge, dnsmasq and iptables, and the SMB server a `share_serve:`
+// step would start is not implemented. A step that reported success with nothing to show would be
+// worse than one that names the gap, because the file's own comment says the log exists to explain a
+// failure - and an empty log explanation reads as "the server logged nothing".
+func (e *Executor) doHostLog(s walk.Step) error {
+	name := s.Get("host_log")
+	if name == "" {
+		return fail(s.Name, "`host_log:` must name what to print: smbd")
+	}
+	switch name {
+	case "smbd":
+		path := "/tmp/easydiskbake-smbd.log"
+		body, err := os.ReadFile(path)
+		if err != nil {
+			// NOT A FAILURE: this step is `optional` in the file that uses it, and the honest
+			// statement is that there is no server log because nothing started a server.
+			e.Driver.Log(fmt.Sprintf("  no smbd log at %s (%v)", path, err))
+			e.Driver.Log("  this build does not start an SMB server yet - `share_serve:` is not " +
+				"implemented - so there is no server side to read")
+			return nil
+		}
+		lines := strings.Split(strings.TrimRight(string(body), "\n"), "\n")
+		if len(lines) > 60 {
+			lines = lines[len(lines)-60:]
+		}
+		for _, l := range lines {
+			e.Driver.Log("  " + shorten(strings.TrimRight(l, "\r"), 200))
+		}
+		return nil
+	}
+	return fail(s.Name, "`host_log: %s` is not a log this build prints; the one it knows is smbd", name)
 }

@@ -239,3 +239,46 @@ func TestEveryBootHasADiskBeforeIt(t *testing.T) {
 		}
 	}
 }
+
+// EVERY WALKTHROUGH IN THE TREE MUST LOAD, WITH NO `python:` STEP LEFT.
+//
+// THE MIGRATION'S COMPLETENESS IS A FILE QUESTION, AND IT IS THE ONLY PART OF IT THAT CAN BE ANSWERED
+// WITHOUT A CI RUN. The constraint for this port is Go and YAML only: a `python:` step names a module
+// in the distribution's own directory, and the Go build has no way to run it - so a file containing
+// one is a file that cannot run at all, whatever a CI job says.
+//
+// IT FOUND FIVE, AND THEN THREE MORE: after the thirteen `bootstrap_files:launcher` steps became
+// `write: launcher`, ghostbsd still had `panes:install_icon`, `wait_for_live_desktop` and
+// `bootstrap_files:smbd_log`. Each needed a different answer, and none of them was "leave it".
+func TestEveryWalkthroughLoads(t *testing.T) {
+	root := filepath.Join("..", "..")
+	var files []string
+	patterns := []string{
+		filepath.Join(root, "windows", "*", "steps", "*.yaml"),
+		filepath.Join(root, "macos", "*", "steps", "*.yaml"),
+		filepath.Join(root, "linux", "*", "steps", "*.yaml"),
+		filepath.Join(root, "bsd", "*", "steps", "*.yaml"),
+	}
+	for _, pat := range patterns {
+		matches, err := filepath.Glob(pat)
+		if err != nil {
+			t.Fatal(err)
+		}
+		files = append(files, matches...)
+	}
+	if len(files) == 0 {
+		t.Skip("no walkthroughs here")
+	}
+
+	for _, path := range files {
+		rel, _ := filepath.Rel(root, path)
+		if _, err := Load(path, nil); err != nil {
+			t.Errorf("%s does not load: %v", rel, err)
+		}
+	}
+	// AND THE COUNT IS AN ASSERTION, so a tree that lost files cannot pass by having fewer to check.
+	if len(files) < 50 {
+		t.Errorf("only %d walkthroughs found; the tree this port migrated has 52. A glob that "+
+			"stopped matching is a green test about nothing", len(files))
+	}
+}

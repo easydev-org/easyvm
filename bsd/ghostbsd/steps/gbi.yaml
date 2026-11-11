@@ -15,10 +15,7 @@
 #                            is a sequence and not a set of "press Next" rules.
 #
 #     the boot/desktop wait  whether the live session is up is a question with many right
-#                            answers (MATE's panel, the installer's own window, a black frame
-#                            while X starts). It is a `python:` step, because a set of `until`
-#                            words would be an opinion about one session rather than a fact
-#                            about the mechanism.
+#                            answers - and it is TWO of them, which is what `until_any:` is for.
 
 name: ghostbsd gbi
 resolution: [1920, 1080]
@@ -32,10 +29,21 @@ vars:
     default: admin
 
 steps:
-  # THE LIVE SESSION. See the module docstring: this is a measured exception, not a `until`.
+  # THE LIVE SESSION HAS TWO RIGHT ANSWERS, AND THE DRIVER'S OWN MEASUREMENT SAYS SO:
+  #
+  #     the desktop comes up BEFORE its panel does
+  #     the installer's own window can appear BEFORE the panel does when the autostart wins
+  #     a frame taken too early is a black rectangle that reads as an empty screen
+  #
+  # so a single word would pass on two of those three. The two states this waits for are the
+  # INSTALLER'S WINDOW - which says `Install` and `GhostBSD` somewhere on it - and MATE's PANEL,
+  # whose `Applications` menu appears nowhere else. Either one means the session is up.
   - name: wait for the live desktop
-    python: ghostbsd_steps:wait_for_live_desktop
+    until_any:
+      - [install, ghostbsd]
+      - [applications]
     timeout: 1800
+    poll: 10
 
   # 1. WELCOME -> KEYBOARD. English is preselected.
   - name: welcome

@@ -177,6 +177,13 @@ var Keys = map[string]Key{
 		Summary: "[x0, y0, x1, y1] - click the centre of the coloured fill inside this region. " +
 			"The ONE lookup this repository allows, for a control whose position moves per pane " +
 			"and whose fill is the only one of its kind in that strip"},
+	"host_log": {Name: "host_log", Kind: KindString,
+		Summary: "print the tail of a HOST-side log - a witness step, not a judge. `smbd` is the " +
+			"one this build knows, and it says when there is no such log rather than pretending"},
+	"at_fallback": {Name: "at_fallback", Kind: KindPair,
+		Summary: "[x, y] - with `at_button`: the measured position to click when the fill is not " +
+			"found. For a control that CAN be missing (an icon behind a wallpaper change) rather " +
+			"than one that cannot (a footer button whose absence means a step above failed)"},
 	"at_window": {Name: "at_window", Kind: KindPair,
 		Summary: "[x, dy] - click x at dy pixels below the window's top edge, for a dialog whose " +
 			"vertical position depends on what is above it"},

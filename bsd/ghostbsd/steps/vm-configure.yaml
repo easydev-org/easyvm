@@ -291,8 +291,11 @@ steps:
   #
   # So the files are WRITTEN ON THE HOST (`python:`), COPIED IN (`scp:`), and only the mount itself
   # is a command - which is the one thing about this that is like the other twelve.
+  # `write: smb_conf` RATHER THAN `python: bootstrap_files:smbnetfs_conf`: both files are host-side
+  # text and `internal/bootstrap` writes them. The keywords are not guesses - see its comment for the
+  # four this parser accepts and the two errors that cost fifteen runs.
   - name: write the smb client's configuration
-    python: bootstrap_files:smbnetfs_conf
+    write: smb_conf
     timeout: 60
 
   - name: copy smb.conf in
@@ -375,7 +378,7 @@ steps:
   #
   # `optional: true`: it is a witness, not a judge.
   - name: print the server's account of the session
-    python: bootstrap_files:smbd_log
+    host_log: smbd
     optional: true
     timeout: 60
 

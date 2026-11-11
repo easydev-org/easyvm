@@ -632,6 +632,19 @@ func (e *Executor) doWrite(s walk.Step) error {
 	case "macos_mount_plist":
 		body, name = bootstrap.MacOSMountPlist("/usr/local/bin/vm-smbmount.sh"),
 			"org.vm.smbmount.plist"
+	case "smb_conf":
+		// TWO FILES, AND `scp:` TAKES THEM ONE AT A TIME - so this kind writes both and reports the
+		// second, which is the one whose name the next `scp:` uses twice.
+		body, name = bootstrap.SMBConf(), "smb.conf"
+		second := bootstrap.SMBNetfsConf(opts.Host)
+		secondPath := filepath.Join(e.Work, "smbnetfs.conf")
+		if err := os.MkdirAll(e.Work, 0o755); err != nil {
+			return fail(s.Name, "%v", err)
+		}
+		if err := os.WriteFile(secondPath, []byte(second), 0o644); err != nil {
+			return fail(s.Name, "writing smbnetfs.conf: %v", err)
+		}
+		e.Driver.Log(fmt.Sprintf("  wrote %s as well (%d bytes)", secondPath, len(second)))
 	case "windows_task":
 		body, name = bootstrap.WindowsTaskScript(
 			"C:/Users/"+e.userForPaths()+"/bootstrap-launcher.ps1"), "bootstrap-install.ps1"

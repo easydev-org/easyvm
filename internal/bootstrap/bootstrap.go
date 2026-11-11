@@ -342,3 +342,53 @@ func WindowsTaskScript(launcherPath string) string {
 	// not in the administrators group.
 	return strings.Join(lines, "\n") + "\n"
 }
+
+// SMBConf and SMBNetfsConf are the two files smbnetfs insists on, for a `scp:` to copy in.
+//
+// WHY THEY ARE FILES AND NOT `-o`: FUSE refuses an option it does not know and smbnetfs never sees
+// it - `fuse: unknown option 'smb_server=172.30.0.1'`, measured. And smbnetfs says what it wants:
+//
+//	This directory should contain at least two files: smb.conf and smbnetfs.conf.
+//
+// smb.conf IS DELIBERATELY MINIMAL: it is libsmbclient's own configuration and this guest is given
+// one server on one bridge. Everything that matters is in smbnetfs.conf.
+func SMBConf() string {
+	return "[global]\n" +
+		"   workgroup = WORKGROUP\n" +
+		"   client min protocol = SMB2\n" +
+		"   client max protocol = SMB3\n"
+}
+
+// SMBNetfsConf is the file whose four keywords are the whole of smbnetfs's parser.
+//
+// FIFTEEN RUNS WENT INTO `Invalid input line : auth`, AND THE REASON IS IN ITS SOURCE RATHER THAN IN
+// A GUESS: after the simple `key value` options, `reconfigure_read_config_file()` accepts exactly
+//
+//	auth [computer[/share]] [domain_or_workgroup/]user password     2-3 fields
+//	host computer_name [parent_group=...] [visible=...]
+//	group group_name
+//	link link_name [link_contents]
+//
+// and anything else is `Invalid input line : <the whole line>`. Two consequences, and they were the
+// two errors:
+//
+//	`smb_server=` IS NOT AMONG THEM AND NEVER WAS. There is no such keyword; the server is named by
+//	`host`, which is also what stops this build browsing the network.
+//
+//	`auth guest` IS ONE FIELD, AND `reconfigure_parse_auth_option` RETURNS 0 FOR `count < 2` - a
+//	bare user name is a malformed line, not a passwordless login. The password is a REQUIRED field
+//	and an empty one is written as `""`.
+//
+// QUOTES ARE STRIPPED, NOT KEPT: `reconfigure_split_line` has a QUOTED mode that ends at the matching
+// quote and stores the characters between them, which is how `""` becomes an empty field.
+//
+// AND `visible=true` IS NOT COSMETIC - IT IS WHY NOTHING APPEARED. A host entry without it is
+// mounted but not shown, so the mount point lists nothing while its link count says one subdirectory
+// exists.
+func SMBNetfsConf(host string) string {
+	if host == "" {
+		host = "172.30.0.1"
+	}
+	return "auth \"guest\" \"\"\n" +
+		"host " + host + " visible=true\n"
+}

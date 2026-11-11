@@ -52,8 +52,23 @@ steps:
   # =======================================================================================
   # 1. THE INSTALLER, FROM THE DESKTOP ICON - FOUND BY ITS OWN PIXELS
   # =======================================================================================
+  # THE ICON IS FOUND BY ITS TEAL DISC, AND THE FALLBACK IS KEPT BECAUSE IT IS THE RIGHT SHAPE.
+  #
+  # The driver this replaces scans `COLUMN = (30, 160)` between rows 40 and 420 for the disc's teal -
+  # r<110, g>95, b>95, g>r+30, b>r+25 - then groups the matching rows into bands and takes the
+  # SHORTEST band's centre, because the icon's disc is the small one. `at_button:` searches for a
+  # saturated fill in a region and takes the dominant colour's centre, which is the same measurement
+  # with the band-grouping done by colour rather than by row runs.
+  #
+  # `at_fallback: [88, 240]` IS THE MEASURED ROW THIS DRIVER ITSELF FALLS BACK TO (`INSTALL_ICON_ROWS
+  # = (240, 340)`, x fixed at 88). It exists so a frame whose teal does not match - a different
+  # wallpaper, a theme - behaves exactly as the old fixed constant did rather than pressing nothing.
+  #
+  # `double: true` because a desktop icon opens on a double-click.
   - name: install ghostbsd
-    python: panes:install_icon
+    at_button: [30, 40, 160, 420]
+    at_fallback: [88, 240]
+    double: true
     settle: 25
 
   # =======================================================================================
