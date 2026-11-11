@@ -407,6 +407,58 @@ func (e *Executor) doAtWindow(s walk.Step) error {
 	return e.settle(s)
 }
 
+// --- a control found by its fill -------------------------------------------------------
+
+// doAtButton clicks the centre of the dominant coloured fill inside a region.
+//
+// THIS IS THE ONE LOOKUP THIS REPOSITORY ALLOWS, AND IT IS THE ONE ITS OWN RULE NAMES AS THE
+// EXCEPTION. Pop!_OS' installer footer button moves with every pane - measured at y=790, 810, 798,
+// 810 for four consecutive panes - because the card SHRINKS AND GROWS as the pane changes. A single
+// constant is wrong on most of them, and the failure is worse than silent: a press ten pixels below
+// the button lands on wallpaper, nothing advances, and the NEXT step's clicks were aimed at a pane
+// that never appeared. Four runs were lost that way (42525650794, 42526614298, 42529279468,
+// 42531166731), each ending with the disk at 0 MiB.
+//
+// IT IS SAFE HERE FOR THE REASON THE CAPACITY CHECK IN setup.yaml IS SAFE: the instruction is not
+// "go to this position", it is "press the button in this pane's footer" - and the footer button is
+// the only rounded fill of its kind in that box. Prose cannot be talked into being a button; a
+// coloured fill in a measured strip can.
+//
+// THE LABEL IS NOT READ. tesseract reads these 14-px labels unreliably - `Select` came back as
+// nothing at all on two panes - while the fill is 84x34 px of one colour.
+func (e *Executor) doAtButton(s walk.Step) error {
+	r, ok := rectOf(s, "at_button")
+	if !ok {
+		return fail(s.Name, "`at_button:` must be a region [x0, y0, x1, y1] to search for the "+
+			"control's fill")
+	}
+	f, err := e.Driver.Frame()
+	if err != nil {
+		return fail(s.Name, "%v", err)
+	}
+	img, err := screen.Load(f.Path())
+	if err != nil {
+		return fail(s.Name, "%v", err)
+	}
+	cx, cy, left, top, right, bottom, ok := screen.FindFill(img,
+		screen.Region{X0: r[0], Y0: r[1], X1: r[2], Y1: r[3]})
+	if !ok {
+		// NO BUTTON IS A STOP, NOT A GUESS. A disabled footer cannot be pressed, and the step before
+		// this one must select whatever enables it - so returning success here would hide a pane
+		// that never became pressable.
+		return failWithScreen(s.Name, e.Driver,
+			"no footer button in [%d,%d %d,%d]: the dominant fill there is too small to be a "+
+				"control, or there is none. A step before this one was meant to enable it",
+			r[0], r[1], r[2], r[3])
+	}
+	e.Driver.Log(fmt.Sprintf("  the footer button spans x=%d..%d y=%d..%d; pressing (%d,%d)",
+		left, right, top, bottom, cx, cy))
+	if err := e.Driver.Click(cx, cy); err != nil {
+		return fail(s.Name, "click (%d, %d): %v", cx, cy, err)
+	}
+	return e.settle(s)
+}
+
 // --- the console, which is not the screen ----------------------------------------------
 
 // ConsolePath is where qemu writes the guest's serial output.

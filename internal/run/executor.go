@@ -184,6 +184,8 @@ func (e *Executor) runOne(s walk.Step) error {
 		return e.doUntil(s)
 	case s.Has("expect_any") || s.Has("expect"):
 		return e.doExpectAny(s)
+	case hasKey(s, "at_button"):
+		return e.doAtButton(s)
 	case s.Has("at_window"):
 		return e.doAtWindow(s)
 	case s.Has("wait_for"):

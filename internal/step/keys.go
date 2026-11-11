@@ -173,6 +173,10 @@ var Keys = map[string]Key{
 	"double": {Name: "double", Kind: KindPair,
 		Summary: "double-click [x, y]; separate from `at` because the gap between the two " +
 			"clicks is what makes it a double-click"},
+	"at_button": {Name: "at_button", Kind: KindRect,
+		Summary: "[x0, y0, x1, y1] - click the centre of the coloured fill inside this region. " +
+			"The ONE lookup this repository allows, for a control whose position moves per pane " +
+			"and whose fill is the only one of its kind in that strip"},
 	"at_window": {Name: "at_window", Kind: KindPair,
 		Summary: "[x, dy] - click x at dy pixels below the window's top edge, for a dialog whose " +
 			"vertical position depends on what is above it"},

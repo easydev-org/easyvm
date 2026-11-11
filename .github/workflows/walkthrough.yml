@@ -128,9 +128,20 @@ jobs:
       contents: read
       packages: read
     strategy:
-      # ONE LEG AT A TIME. A 128 GiB macOS install and a Windows stage on the same runner would
-      # compete for the disk and for /dev/kvm, and a failure would be attributable to neither.
-      max-parallel: 1
+      # EVERY LEG AT ONCE, AND THAT IS CORRECT RATHER THAN GREEDY.
+      #
+      # EACH MATRIX LEG GETS ITS OWN RUNNER. A workflow matrix is not several jobs on one machine;
+      # it is one job per combination, each on a fresh VM with its own /dev/kvm, its own disk and its
+      # own container. So the reason I gave for `max-parallel: 1` - "a macOS install and a Windows
+      # stage would compete for /dev/kvm" - described a machine that never exists.
+      #
+      # WHAT IT COST: eight legs at the slowest leg's worst case instead of one. The first real run
+      # serialised them, so `macos-setup` - the leg with no CI evidence at all - was still `queued`
+      # behind seven others after forty minutes.
+      #
+      # `fail-fast: false` STAYS, and it is the opposite of `max-parallel`: one leg's failure must
+      # not cancel the other seven, because they are different stages of different systems and the
+      # whole point of the matrix is to learn which ones work.
       fail-fast: false
       matrix:
         include:

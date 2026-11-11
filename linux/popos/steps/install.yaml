@@ -62,17 +62,30 @@ steps:
   # THE LATER PANES ARE TALLER. The window grows once a list is not the whole page, so
   # `Erase and Install` and the account panes really are at y=817 - see the steps below. This
   # is the same lesson as cachyos' three footer heights, and the numbers are per pane.
+  # `at_button:` RATHER THAN `python: footer:press_footer`.
+  #
+  # THE BUTTON MOVES WITH EVERY PANE, WHICH IS WHY A CONSTANT DOES NOT WORK HERE. That driver's own
+  # measurements: y=790 on Select a Language, y=810 on Keyboard Layout and Install, y=798 on Select a
+  # drive, y=810 on Create User Account - the card SHRINKS AND GROWS as the pane changes. A press ten
+  # pixels below the button lands on wallpaper, nothing advances, and the NEXT step's clicks are
+  # aimed at a pane that never appeared. Four runs were lost that way, each ending at disk 0 MiB.
+  #
+  # `[1240, 755, 1430, 845]` IS THAT DRIVER'S OWN FOOTER BOX, not a guess: every pane measured has
+  # its button inside it, and no other control of that size is drawn there. The fill's colour says
+  # which button it is - green for forward, salmon for `Erase and Install`, grey while disabled - and
+  # the search accepts all three, because the first version accepted only green and grey and then
+  # reported "NO FOOTER BUTTON" on the pane whose button was plainly on screen in salmon.
   - name: select a language
-    python: footer:press_footer
+    at_button: [1240, 755, 1430, 845]
     settle: 21
   - name: language variants
-    python: footer:press_footer
+    at_button: [1240, 755, 1430, 845]
     settle: 21
   - name: keyboard layout
-    python: footer:press_footer
+    at_button: [1240, 755, 1430, 845]
     settle: 21
   - name: keyboard variants
-    python: footer:press_footer
+    at_button: [1240, 755, 1430, 845]
     settle: 21
 
   # =======================================================================================
@@ -87,7 +100,7 @@ steps:
     settle: 8
 
   - name: install
-    python: footer:press_footer
+    at_button: [1240, 755, 1430, 845]
     settle: 21
 
   # =======================================================================================
@@ -111,7 +124,7 @@ steps:
   # `Erase and Install` is enabled by that selection. The locator finds it: on this pane its
   # grey fill is at y=805..828, and once the card is selected it turns green in place.
   - name: erase and install
-    python: footer:press_footer
+    at_button: [1240, 755, 1430, 845]
     settle: 44
 
   # =======================================================================================
@@ -132,29 +145,93 @@ steps:
   # TYPE with no clearing, which is a different action from the generic helper - see
   # steps/panes.py.
   #
-  # The step carries the account so the extension types what every other bake here uses.
-  - name: account name
-    python: panes:fill_account_name
+  # THE PANE MUST BE UP BEFORE A KEY IS SENT, SO ITS OWN WORDS GATE THE TYPING.
+  #
+  # `Full Name` and `User Name` appear on this pane and nowhere else in the installer, which makes
+  # them a fair thing to wait for - and the wait decides WHEN to type, not where.
+  - name: wait for the account pane
+    until: [Full, Name, User]
+    timeout: 90
+    poll: 2
+
+  # `VM User` AND NOT `vmuser`, AND THAT IS THE WHOLE OF THIS PANE.
+  #
+  # pop-os-installer DERIVES the login name from the display name by lowercasing it and removing
+  # spaces, and it REFUSES TO ADVANCE WHEN THE TWO ARE THE SAME after that normalisation. So every
+  # single-word display is refused:
+  #
+  #     vmuser  -> derives vmuser  same -> footer DISABLED
+  #     Vmuser  -> derives vmuser  same -> footer DISABLED
+  #     VMUSER  -> derives vmuser  same -> footer DISABLED
+  #
+  # and a display WITH A SPACE derives the space-stripped form, which is a different string:
+  #
+  #     VM User -> derives vmuser  different -> ENABLED
+  #
+  # Measured on the real pane, one variable at a time, with both entries read from their own pixels
+  # and the footer judged by its green fill. `docker` cannot be obtained from this installer at all.
+  - name: type the display name
+    at: [1188, 494]
+    type: "VM User"
+    type_gap: 0.09
+    settle: 2
+
+  # THE FOCUS-OUT IS WHAT ENABLES THE FOOTER. A GTK entry validates on focus-out, and nothing moved
+  # the focus after the last character until this was added - run 42502695338 sat with Next grey for
+  # forty-two minutes.
+  #
+  # NOTHING TYPES INTO USER NAME: the derived value is already right, and typing over it replaces it
+  # with an equal one, which the pane then refuses.
+  - name: leave the field so it validates
+    key: tab
     settle: 2
 
   - name: create user account
-    python: footer:press_footer
+    at_button: [1240, 755, 1430, 845]
     settle: 22
 
   # =======================================================================================
   # 5. THE ACCOUNT, PANE TWO: THE PASSWORD TWICE
   # =======================================================================================
   #
-  # Also `python:`, for the same measured reason plus one more: ESC FIRST, ALWAYS. If a click
-  # has already landed on the artwork picker, a GTK file chooser is up over the installer and
-  # every later keystroke goes into ITS search box - the frame that proved it read `adminadmin`
-  # in the chooser's field.
-  - name: account password
-    python: panes:fill_account_password
+  # THE PANE'S OWN WORD GATES THE TYPING, for the reason run 42535359047 shows: the click meant to
+  # leave the account-name pane was still settling, so the account pane came back with a name typed
+  # into Full Name, the password boxes received nothing, and the step then reported SUCCESS because
+  # all it checked for was a file chooser. `Choose Account Password` appears nowhere else.
+  - name: wait for the password pane
+    until_any:
+      - [Choose, Account, Password]
+      - [Account, Password]
+    timeout: 90
+    poll: 2
+
+  # ESC FIRST, ALWAYS. If a click has already landed on the artwork picker, a GTK file chooser is up
+  # over the installer and every later keystroke goes into ITS search box - the frame that proved it
+  # read `adminadmin` in the chooser's field.
+  - name: dismiss anything a stray click opened
+    key: esc
+    settle: 2
+
+  # THE X IS 1350, NOT 1188, AND THAT IS A MEASURED DEFECT FIXED. The artwork picker's avatar circle
+  # is at (1190,405) with a radius of about 40 px and the entry is a long box starting at x=970, so a
+  # press at x=1188 is directly BELOW that circle - and the presses meant for the entry kept landing
+  # on the picker. Run 42525650794's frame at 21:38:45 is a `Choose Icon` chooser.
+  - name: type the password
+    at: [1350, 447]
+    type: "{{ password }}"
+    type_gap: 0.09
+    settle: 2
+
+  # THE INSTALLER DRAWS THE TWO ENTRIES 96 PIXELS APART, from the focused entry's ring at y=432..463
+  # whose centre is 447.
+  - name: confirm the password
+    at: [1350, 543]
+    type: "{{ password }}"
+    type_gap: 0.09
     settle: 2
 
   - name: account password next
-    python: footer:press_footer
+    at_button: [1240, 755, 1430, 845]
     settle: 25
 
   # =======================================================================================

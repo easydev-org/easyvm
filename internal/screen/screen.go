@@ -501,3 +501,151 @@ func Changed(before, after [64]float64) bool {
 	}
 	return diff/float64(len(before)) > 2.0
 }
+
+// --- finding a control by the colour of its fill ---------------------------------------
+
+// Region is a rectangle of the frame, in frame pixels.
+type Region struct{ X0, Y0, X1, Y1 int }
+
+// Fill is what a control's body looks like, and the test is deliberately about SATURATION rather
+// than a specific colour.
+//
+// THREE FILLS HAVE BEEN MEASURED ON THE ONE CONTROL THIS EXISTS FOR, and the third is the one that
+// cost a driver:
+//
+//	green   (144,206,176)   Select / Next, enabled
+//	grey    (137,137,137)   the same controls while disabled
+//	salmon  (231,143,143)   `Erase and Install`, which is DESTRUCTIVE and is drawn in the warning
+//	                        colour rather than the confirm one
+//
+// The first version of this test accepted only green and grey, so the moment the drive card was
+// selected - the only thing that makes `Erase and Install` available - the locator reported "NO
+// FOOTER BUTTON ON THIS PANE" on a pane whose button was plainly on screen in salmon.
+//
+// SO THE TEST IS: far enough from grey to be a coloured fill, OR a light grey. The card behind it
+// is (48,48,48), so a mid-grey at 137 is a button and a near-white at 240 is label text.
+func Fill(r, g, b uint8) bool {
+	if r > 200 && absDiff(r, g) < 12 && absDiff(r, b) < 12 {
+		return false // white label text, not a fill
+	}
+	hi, lo := maxOf(r, g, b), minOf(r, g, b)
+	if hi-lo > 50 && hi > 120 {
+		return true // green, salmon - any saturated fill
+	}
+	return r > 110 && r < 185 && absDiff(r, g) < 10 && absDiff(r, b) < 10 // the disabled grey
+}
+
+// FindFill returns the centre of the dominant fill inside a region, and the extent it covered.
+//
+// THE DOMINANT COLOUR'S OWN EXTENT IS THE BUTTON, NOT THE BOUNDING BOX OF EVERY BUTTON-LIKE PIXEL.
+// A raw bounding box also catches the wallpaper and the title bar, which is what made the Python
+// version report a 190x63 box around an 84x34 button. Counting per quantised colour first, then
+// taking the most common one's extent, is what makes the centre land on the control.
+//
+// A REGION WITH TOO FEW FILL PIXELS HAS NO BUTTON. 600 is well below an 84x34 fill (~2800 px) and
+// well above the anti-aliasing speckle that a wallpaper border produces - and the caller needs
+// `ok` to be false rather than a plausible-looking centre, because pressing wallpaper is worse than
+// reporting that the step could not find its target.
+func FindFill(img image.Image, r Region) (cx, cy int, left, top, right, bottom int, ok bool) {
+	b := img.Bounds()
+	x0, y0 := clampTo(b.Min.X, b.Dx(), r.X0), clampTo(b.Min.Y, b.Dy(), r.Y0)
+	x1, y1 := clampTo(b.Min.X, b.Dx(), r.X1), clampTo(b.Min.Y, b.Dy(), r.Y1)
+	if x1 <= x0 || y1 <= y0 {
+		return 0, 0, 0, 0, 0, 0, false
+	}
+
+	// Quantise to 8 levels per channel so a gradient does not split one button into two colours.
+	type key struct{ r, g, b uint8 }
+	counts := map[key]int{}
+	for y := y0; y < y1; y++ {
+		for x := x0; x < x1; x++ {
+			cr, cg, cb, _ := img.At(x, y).RGBA()
+			r8, g8, b8 := uint8(cr>>8), uint8(cg>>8), uint8(cb>>8)
+			if !Fill(r8, g8, b8) {
+				continue
+			}
+			counts[key{r8 / 8 * 8, g8 / 8 * 8, b8 / 8 * 8}]++
+		}
+	}
+	if len(counts) == 0 {
+		return 0, 0, 0, 0, 0, 0, false
+	}
+	var dominant key
+	best := -1
+	for k, n := range counts {
+		if n > best {
+			dominant, best = k, n
+		}
+	}
+	if best < 600 {
+		return 0, 0, 0, 0, 0, 0, false
+	}
+
+	// The extent OF THAT COLOUR, which is the button's own rectangle.
+	left, top, right, bottom = x1, y1, -1, -1
+	for y := y0; y < y1; y++ {
+		for x := x0; x < x1; x++ {
+			cr, cg, cb, _ := img.At(x, y).RGBA()
+			r8, g8, b8 := uint8(cr>>8), uint8(cg>>8), uint8(cb>>8)
+			if !Fill(r8, g8, b8) {
+				continue
+			}
+			if (key{r8 / 8 * 8, g8 / 8 * 8, b8 / 8 * 8}) != dominant {
+				continue
+			}
+			if x < left {
+				left = x
+			}
+			if x > right {
+				right = x
+			}
+			if y < top {
+				top = y
+			}
+			if y > bottom {
+				bottom = y
+			}
+		}
+	}
+	if right < left || bottom < top {
+		return 0, 0, 0, 0, 0, 0, false
+	}
+	return (left + right) / 2, (top + bottom) / 2, left, top, right, bottom, true
+}
+
+func absDiff(a, b uint8) int {
+	if a > b {
+		return int(a) - int(b)
+	}
+	return int(b) - int(a)
+}
+
+func maxOf(v ...uint8) uint8 {
+	m := v[0]
+	for _, x := range v[1:] {
+		if x > m {
+			m = x
+		}
+	}
+	return m
+}
+
+func minOf(v ...uint8) uint8 {
+	m := v[0]
+	for _, x := range v[1:] {
+		if x < m {
+			m = x
+		}
+	}
+	return m
+}
+
+func clampTo(min, size, v int) int {
+	if v < min {
+		return min
+	}
+	if v > min+size {
+		return min + size
+	}
+	return v
+}
