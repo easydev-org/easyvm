@@ -138,9 +138,26 @@ func TestTheAgentMSIIsUnderGuestAgent(t *testing.T) {
 	if fi.Size() < 5<<20 {
 		t.Fatalf("the agent MSI is %d bytes, which is not a 11 MB MSI", fi.Size())
 	}
-	// AND THE DRIVER CAME OUT TOO, because the agent's device needs it.
-	if len(res.Extra) == 0 {
-		t.Fatal("the vioserial driver was not extracted; the agent's device has no driver")
+	// AND THE WHOLE DRIVER CAME OUT, WHICH IS THREE FILES AND NOT ONE.
+	//
+	// `vioser.inf` DECLARES THE DEVICE; `vioser.sys` IS THE DRIVER AND `vioser.cat` IS WHAT LETS
+	// WINDOWS ACCEPT ITS SIGNATURE. Extracting only the .inf left `pnputil /add-driver` failing inside
+	// the guest about a catalogue, which reads as a signature problem rather than a missing file.
+	// Measured on windows-vm-configure step 6 of 20: `no file to copy at vioserial/vioser.sys`.
+	if len(res.Extra) != 3 {
+		t.Fatalf("the vioserial driver is %d file(s); it is inf, sys and cat", len(res.Extra))
+	}
+	for _, want := range []string{"vioser.inf", "vioser.sys", "vioser.cat"} {
+		found := false
+		for _, p := range res.Extra {
+			if filepath.Base(p) == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("%s was not extracted; the driver is incomplete and the guest cannot bind the "+
+				"device (got %v)", want, res.Extra)
+		}
 	}
 }
 

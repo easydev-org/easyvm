@@ -519,7 +519,13 @@ func fetchWindowsAgent(work string) (Result, error) {
 		dest   string
 	}{
 		{"guest-agent/qemu-ga-x86_64.msi", filepath.Join(work, "qemu-ga-x86_64.msi")},
+		// THE WHOLE DRIVER, NOT JUST ITS .inf. A SYS file is what binds the device and a CAT file is
+		// what lets Windows accept the signature; the .inf alone declares a device whose driver is
+		// nowhere, and `pnputil /add-driver` then fails inside the guest with a message about the
+		// catalogue rather than about the missing file.
 		{"vioserial/w10/amd64/vioser.inf", filepath.Join(work, "vioserial", "vioser.inf")},
+		{"vioserial/w10/amd64/vioser.sys", filepath.Join(work, "vioserial", "vioser.sys")},
+		{"vioserial/w10/amd64/vioser.cat", filepath.Join(work, "vioserial", "vioser.cat")},
 	} {
 		if err := os.MkdirAll(filepath.Dir(item.dest), 0o755); err != nil {
 			return Result{}, err
