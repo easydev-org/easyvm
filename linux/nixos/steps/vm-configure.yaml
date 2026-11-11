@@ -266,21 +266,31 @@ steps:
   # that it is writable - a read-only mount answers `ls` happily.
   - name: prove the share is readable and writable
     ssh: |
-      set -e
-      mount | grep ' on ' | grep shared
-      ls -la ~/shared | head -20
-      # THE FILE'S CONTENT IS A FIXED WORD, NOT THE MACHINE'S NAME.
+      # NO `set -e` ON THE FIRST LINE, BECAUSE THE FIRST LINE IS A QUESTION.
       #
-      # It was `written-by-$(hostname)`, and that made this proof depend on a fact the step above
-      # does not control: on NixOS the kernel keeps answering its boot-time name until the next
-      # boot (a rebuild writes /etc/hostname through the store and never re-runs `hostname`), so
-      # run 4eb9322 wrote `written-by-nixos` while `--static` was correct - and this step, which
-      # is about the SHARE, failed for a reason that had nothing to do with it.
+      # This began with `mount | grep ' on ' | grep shared` under `set -e`, so a mount whose line does
+      # not contain the literal word `shared` killed the step before its paragraph of diagnostics -
+      # and the log showed only `-> 1`:
       #
-      # What has to be proven here is that a file written on the guest is readable back through
-      # the mount. The word in it only has to come back unchanged.
+      #	=== serve the host share
+      #	  share: /github/home/shared served on 172.30.0.1:445
+      #	=== mount the host share
+      #	  share: the guest mounted //172.30.0.1/shared at ~/shared
+      #	=== prove the share is readable and writable  -> 1
+      #
+      # THE MOUNT SUCCEEDED AND THE PROOF WAS BLIND. `mount` shows the DEVICE as
+      # `//172.30.0.1/shared`, so `grep shared` matches that - but it also shows the mount POINT, and
+      # on a guest that resolves `~` differently the two need not agree. Printing both, and failing
+      # only on the round trip, is what makes the next failure name its cause.
+      echo "--- what is mounted ---"
+      mount | grep -i 'cifs\|smb' || echo "(no cifs/smb line in mount output)"
+      echo "--- the mount point ---"
+      ls -la ~/shared || echo "(~/shared is not readable)"
+      echo "--- the round trip ---"
       printf 'written-by-the-guest\n' > ~/shared/from-guest.txt
-      test "$(cat ~/shared/from-guest.txt)" = "written-by-the-guest"
+      got=$(cat ~/shared/from-guest.txt)
+      echo "read back: $got"
+      test "$got" = "written-by-the-guest"
       echo "round trip ok"
     timeout: 120
 

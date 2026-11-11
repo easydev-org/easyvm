@@ -140,8 +140,16 @@ func (d *Driver) MountShare(family string) error {
 		"ls -la ~/shared | head -5",
 	}, " && ")
 	res, err := client.Run("sh -c "+shellQuote(cmd), 120*time.Second)
+	// THE GUEST'S OWN WORDS ARE LOGGED EITHER WAY. A mount that reported success and a share that
+	// lists nothing are different facts, and the `ls` in the command above is the only place the
+	// second is visible - throwing it away is what made the next step's `-> 1` unexplainable.
+	if out := strings.TrimSpace(res.Combined()); out != "" {
+		for _, line := range strings.Split(out, "\n") {
+			d.logf("  share: " + line)
+		}
+	}
 	if err != nil {
-		return fmt.Errorf("mounting the share in the guest: %w (%s)", err, firstLineOf(res.Combined()))
+		return fmt.Errorf("mounting the share in the guest: %w", err)
 	}
 	d.logf("  share: the guest mounted //172.30.0.1/shared at ~/shared")
 	return nil
