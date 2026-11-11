@@ -110,10 +110,23 @@ func Up(sshPort int, forwards []int) error {
 		return err
 	}
 
-	// FORWARDING FIRST. Every rule below depends on it, and `sysctl` is the only way to set it
-	// without writing /proc by hand.
-	if _, err := run("sysctl", "-w", "net.ipv4.ip_forward=1"); err != nil {
-		return fmt.Errorf("net.ipv4.ip_forward: %w", err)
+	// FORWARDING FIRST, BECAUSE EVERY RULE BELOW ASSUMES IT - AND IT IS READ BEFORE IT IS WRITTEN.
+	//
+	// `ip_forward` IS PER NETWORK NAMESPACE. If this process is in a namespace that already
+	// forwards - the host's, which is what a CI job container usually gets - there is nothing to
+	// set, and attempting the write is what produced, three runs in a row,
+	//
+	//	boot the disk: boot: net.ipv4.ip_forward: exit status 1
+	//
+	// a message that named neither the setting's current value nor the reason. /proc/sys is
+	// mounted read-only in most containers, so a write fails even where the value is already
+	// right; reading first is the difference between "this must be changed" and "this is fine".
+	//
+	// THE PYTHON IMPLEMENTATION NEVER FOUND THIS because lib/net.py runs
+	// `sysctl -w net.ipv4.ip_forward=1` through `_sh()`, whose `check` defaults to False - the
+	// return code is discarded. It was never failing; it was never asking.
+	if err := ensureIPForward(); err != nil {
+		return err
 	}
 
 	// THE BRIDGE. `ip link add` fails if it exists, which is the normal case on a second run.
@@ -161,6 +174,40 @@ func Up(sshPort int, forwards []int) error {
 		return err
 	}
 	return applyForwards(sshPort, forwards)
+}
+
+// ipForwardPath is the kernel's own answer to "is forwarding on", per namespace.
+const ipForwardPath = "/proc/sys/net/ipv4/ip_forward"
+
+// ensureIPForward turns on IPv4 forwarding, or explains why it could not.
+//
+// IT READS FIRST. A namespace that already forwards needs nothing, and the write would fail
+// anyway in a container whose /proc/sys is read-only - which is most of them, including GitHub
+// Actions' job containers. So "already 1" is success, not a skipped check.
+func ensureIPForward() error {
+	if cur, err := os.ReadFile(ipForwardPath); err == nil {
+		if strings.TrimSpace(string(cur)) == "1" {
+			return nil
+		}
+	}
+
+	// NOT ALREADY ON, SO IT HAS TO BE WRITTEN. `sysctl -w` is used rather than writing /proc
+	// directly because it also applies the change if the kernel accepts it through its own
+	// interface, and it fails with a sentence when it does not.
+	out, err := run("sysctl", "-w", "net.ipv4.ip_forward=1")
+	if err != nil {
+		now, readErr := os.ReadFile(ipForwardPath)
+		state := "unreadable"
+		if readErr == nil {
+			state = strings.TrimSpace(string(now))
+		}
+		return fmt.Errorf("net.ipv4.ip_forward is %s and could not be set: %v (%s). Forwarding "+
+			"is what lets the guest reach anything outside its tap - without it a DHCP lease "+
+			"arrives and every later connection times out. In a container this is /proc/sys/net "+
+			"being read-only, not a missing capability: the namespace has to be created with "+
+			"`--sysctl net.ipv4.ip_forward=1`, or be the host's", state, err, firstLine(out))
+	}
+	return nil
 }
 
 // Down removes what Up created, and is safe on a partially-created network.

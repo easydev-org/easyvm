@@ -163,3 +163,71 @@ func TestDHCPConfigCarriesTheLoadBearingLines(t *testing.T) {
 		t.Fatalf("the lease file must be this package's own; got:\n%s", conf)
 	}
 }
+
+// FORWARDING IS READ BEFORE IT IS WRITTEN, AND "ALREADY ON" IS SUCCESS.
+//
+// /proc/sys/net/ipv4/ip_forward IS READ-ONLY IN MOST CONTAINERS - including this one, right now:
+//
+//	$ cat /proc/sys/net/ipv4/ip_forward
+//	1
+//	$ test -w /proc/sys/net/ipv4/ip_forward && echo yes || echo no
+//	no (read-only)
+//
+// So `sysctl -w net.ipv4.ip_forward=1` FAILS while the setting it wants is ALREADY TRUE. Treating
+// that as an error is what stopped three runs at "boot the disk" with
+//
+//	boot: net.ipv4.ip_forward: exit status 1
+//
+// - a message that named neither the current value nor the reason, for a condition that was fine.
+//
+// THE PYTHON IMPLEMENTATION NEVER HIT THIS because lib/net.py's `_sh()` defaults to check=False
+// and discards the return code. It was not working around the failure; it was not looking. This
+// reads the value, which is the check that was actually wanted.
+func TestIPForwardIsReadBeforeItIsWritten(t *testing.T) {
+	body, err := os.ReadFile("net.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(body)
+
+	// THE READ COMES FIRST IN THE FUNCTION, not after the write as a verification.
+	readAt := strings.Index(src, "os.ReadFile(ipForwardPath)")
+	writeAt := strings.Index(src, `run("sysctl", "-w", "net.ipv4.ip_forward=1")`)
+	if readAt < 0 {
+		t.Fatal("ensureIPForward does not read /proc/sys/net/ipv4/ip_forward; a write-only " +
+			"approach fails in a container whose /proc/sys is read-only even when the value is " +
+			"already correct")
+	}
+	if writeAt < 0 {
+		t.Fatal("ensureIPForward never writes the setting; a namespace that does NOT forward " +
+			"has to be turned on")
+	}
+	if readAt > writeAt {
+		t.Fatal("the value is written before it is read, so an already-correct namespace still " +
+			"attempts a write that a read-only /proc/sys refuses")
+	}
+
+	// AND "1" IS ACCEPTED AS DONE, with no write attempted.
+	if !strings.Contains(src, `strings.TrimSpace(string(cur)) == "1"`) {
+		t.Fatal(`ensureIPForward does not treat "1" as already done; that is the exact value ` +
+			"the container starts with, and refusing to accept it is what failed three runs")
+	}
+}
+
+// AND THE FAILURE, WHEN IT IS REAL, NAMES THE CURRENT VALUE AND THE REASON.
+//
+// `exit status 1` is what three runs reported, and it is indistinguishable from a missing binary,
+// a permission problem and a read-only mount. The message has to say which.
+func TestIPForwardFailureExplainsItself(t *testing.T) {
+	body, err := os.ReadFile("net.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(body)
+	for _, want := range []string{"is %s and could not be set", "--sysctl net.ipv4.ip_forward=1"} {
+		if !strings.Contains(src, want) {
+			t.Fatalf("the failure message should contain %q: it must name the current value and "+
+				"the way to get a namespace that forwards", want)
+		}
+	}
+}
