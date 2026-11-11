@@ -280,9 +280,15 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 	if err != nil {
 		return err
 	}
-	// THE ACCELERATOR IS CHECKED BEFORE THE MACHINE IS BUILT, because there is no fallback to fall
-	// back to: `-accel kvm` is in the command line below, and a guest on TCG is a guest that either
-	// times out or deadlocks.
+	// THE ACCELERATOR IS CHECKED BEFORE THE MACHINE IS BUILT, AND ITS ABSENCE IS A REFUSAL RATHER
+	// THAN A SILENT DOWNGRADE - WITH ONE NAMED EXCEPTION.
+	//
+	// `-accel kvm` is in the command line below. On TCG a macOS guest cannot get `+invtsc` and
+	// deadlocks at HANDOFF TO XNU, and every other guest runs fifty times slower - so a machine
+	// without KVM is not a machine this build should start a guest on.
+	//
+	// THE EXCEPTION IS A GUEST THAT CANNOT BOOT AT ALL ON KVM: none here. The check is unconditional
+	// on purpose - a fallback would be the silent downgrade this whole change is about.
 	if err := machine.CheckKVM(); err != nil {
 		return err
 	}

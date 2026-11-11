@@ -321,9 +321,31 @@ jobs:
           #
           # A shell can open a device with `exec` and `/dev/zero`'s own trick: `: < /dev/kvm` opens
           # it for reading and fails loudly if the open is refused.
-          : < /dev/kvm || { echo "=== /dev/kvm CANNOT BE OPENED (qemu would fall back to TCG) ==="; exit 1; }
           : < /dev/net/tun || { echo "=== /dev/net/tun CANNOT BE OPENED ==="; exit 1; }
-          echo "/dev/kvm and /dev/net/tun are openable"
+          # AND THE ACCELERATOR IS TESTED, NOT ASSUMED.
+          #
+          # A NODE THAT EXISTS IS NOT A DEVICE THAT WORKS: on run 43063744565 `test -e /dev/kvm`
+          # passed while qemu ran on TCG, which is pure software emulation - fifty times slower, and
+          # unable to give macOS the `+invtsc` flag whose absence deadlocks it at HANDOFF TO XNU.
+          #
+          # THIS IS QEMU'S OWN HANDSHAKE: `-accel kvm -nodefaults -display none` with no disk starts
+          # the accelerator, opens the device, and exits because there is nothing to boot. A container
+          # that cannot use KVM fails here in two seconds with qemu's own words.
+          qemu-system-x86_64 -machine q35,accel=kvm -accel kvm -nodefaults -display none -S \
+            -monitor none -serial none 2>&1 &
+          QPID=$!
+          sleep 2
+          if kill -0 "$QPID" 2>/dev/null; then
+            echo "=== KVM STARTED (qemu accepted accel=kvm) ==="
+            kill "$QPID" 2>/dev/null || true
+            wait "$QPID" 2>/dev/null || true
+          else
+            wait "$QPID" 2>/dev/null || true
+            echo "=== QEMU REFUSED accel=kvm - THIS CONTAINER CANNOT ACCELERATE A GUEST ==="
+            echo "  every leg would run on TCG: fifty times slower, and macOS deadlocks"
+            exit 1
+          fi
+          easyvm versions
           easyvm versions
           qemu-img --version | head -1
           # THE HOST-SIDE TOOLS THE FILES USE. Named here so a missing one is this step rather than
