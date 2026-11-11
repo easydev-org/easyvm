@@ -506,30 +506,37 @@ func TestNoFindstrSwitchIsSpelledWithADash(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, path := range files {
-			body, err := os.ReadFile(path)
+			rel, _ := filepath.Rel(root, path)
+			// THE BODIES, NOT THE FILE. Comments in this project QUOTE the failing command on purpose -
+			// that is how a reader learns what went wrong - so a check over raw text reports the
+			// EXPLANATION as the defect. Measured: this test went red on the paragraph that documents
+			// the `-C:` bug it exists to prevent.
+			doc, err := Load(path, nil)
 			if err != nil {
 				continue
 			}
-			text := string(body)
-			if !strings.Contains(text, "findstr") {
-				continue
-			}
-			checked++
-			rel, _ := filepath.Rel(root, path)
-			// THE BAD FORMS. `/C:` is correct and is not matched here; `-C:`, `-R`, `-I`, `-V` and the
-			// rest all are.
-			for _, bad := range []string{"findstr -C:", "findstr -R ", "findstr -I ", "findstr -V ",
-				"findstr -S ", "findstr -N", "findstr -L"} {
-				if strings.Contains(text, bad) {
-					t.Errorf("%s uses %q. findstr takes FORWARD-SLASH switches; a dash makes the "+
-						"switch part of the search string, so the filter can never match and the step "+
-						"reports `the command exited 1` as if the guest were wrong", rel, bad)
+			for _, step := range doc.Steps {
+				body := step.Get("ssh") + "\n" + step.Get("run") + "\n" + step.Get("script")
+				if !strings.Contains(body, "findstr") {
+					continue
+				}
+				checked++
+				// THE BAD FORMS. `/C:` is correct and is not matched here; `-C:`, `-R`, `-I`, `-V` and
+				// the rest all are.
+				for _, bad := range []string{"findstr -C:", "findstr -R ", "findstr -I ", "findstr -V ",
+					"findstr -S ", "findstr -N", "findstr -L"} {
+					if strings.Contains(body, bad) {
+						t.Errorf("%s: the step %q uses %q. findstr takes FORWARD-SLASH switches; a "+
+							"dash makes the switch part of the search string, so the filter can never "+
+							"match and the step reports `the command exited 1` as if the guest were "+
+							"wrong", rel, step.Name, bad)
+					}
 				}
 			}
 		}
 	}
 	if checked == 0 {
-		t.Log("no walkthrough uses findstr; nothing to check")
+		t.Log("no walkthrough step uses findstr; nothing to check")
 	}
 }
 
