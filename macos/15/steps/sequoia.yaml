@@ -371,12 +371,50 @@ steps:
   # "Sign In to Your Apple Account" is the pane's title and appears nowhere else, so the match
   # is those words. This is the same rule every driver here states: match the title strip, not
   # a phrase in the body.
+  # LEAVING THIS PANE WAS A `python:` FUNCTION AND DID NOT NEED TO BE.
+  #
+  # What it does is four actions in a row, and the file that recorded the measurements stated why
+  # they are in that order:
+  #
+  #     click Set Up Later   settle 2
+  #     key   Return         settle 3     the sheet's default button needs it
+  #     click sheet Skip     settle 2     only if the sheet is up
+  #     key   Return         settle 2     Skip focused it, so Return fires it
+  #
+  # THE LAST TWO ARE UNCONDITIONAL, AND THAT IS MEASURED, NOT LAZY: "the sheet only exists if the
+  # click worked. When the pane has already gone, this coordinate is empty space on the next pane -
+  # harmless - and when the sheet is up it is its Skip button."
+  #
+  # THE VERDICT IS THE SCREEN BELOW, not "I clicked". Returning success from the click is how a pane
+  # is answered three times in a row and then reported STUCK.
   - name: sign in to apple account
     when: [sign, in, to, your, apple, account]
     region: [300, 420, 1620, 460]
     region_at: [1920, 1080]
     scale: 2
-    apple_account: skip
+    do:
+      # THE "Set Up Later" LINK. (620, 811) on a 1920x1080 guest.
+      - at: [620, 811]
+        settle: 2
+      # THE SHEET'S DEFAULT BUTTON, which the link raises.
+      - key: ret
+        settle: 3
+      # THE SHEET'S Skip, IF THERE IS ONE. Empty space when the pane has already gone.
+      - at: [1026, 634]
+        settle: 2
+      # Skip FOCUSED IT, so Return fires it.
+      - key: ret
+        settle: 2
+
+  # AND THE PANE MUST BE GONE. A loose check reports success while the wizard is still here: the
+  # account pane's own body says "used to log in to your Apple Account", so the title is the test
+  # and the body is not.
+  - name: the apple account pane is gone
+    expect_any:
+      - [update, automatically]
+      - [choose, a, look]
+      - [welcome, to, mac]
+    timeout: 60
 
   # UPDATE MAC AUTOMATICALLY. On 15 this is another footer click. On 26 it greys Continue, spins
   # and never advances, and the only exit is a system_reset - see the file header. It is

@@ -560,25 +560,6 @@ func (e *Executor) doWaitFor(s walk.Step) error {
 	return failWithScreen(s.Name, e.Driver, "no login window within %s", timeout)
 }
 
-// doSelectDisk picks the target disk by capacity rather than by row.
-//
-// BY CAPACITY BECAUSE THE ROW ORDER IS NOT OURS. The installer enumerates disks as it finds them,
-// and a run whose disk appears second on one boot and first on the next would erase the wrong thing.
-func (e *Executor) doSelectDisk(s walk.Step) error {
-	if how := s.Get("select_disk"); how != "by_capacity" {
-		return fail(s.Name, "`select_disk:` knows by_capacity only; got %q", how)
-	}
-	return notImplemented(s, "select_disk:by_capacity")
-}
-
-// doAppleAccount leaves the Apple Account pane.
-func (e *Executor) doAppleAccount(s walk.Step) error {
-	if act := s.Get("apple_account"); act != "skip" {
-		return fail(s.Name, "`apple_account:` knows skip only; got %q", act)
-	}
-	return notImplemented(s, "apple_account:skip")
-}
-
 // doCopyIn copies a fetched asset into the guest.
 //
 // SFTP, NOT `scp`: the remote path is the guest's, and `scp` hands its argument to the remote shell -

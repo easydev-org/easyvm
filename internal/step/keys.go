@@ -294,18 +294,17 @@ var Keys = map[string]Key{
 		Summary: "write one of the login/bootstrap files on the HOST, for the scp: after it. " +
 			"Kinds: launcher, macos_agent_plist, macos_mount_script, macos_mount_plist, " +
 			"windows_task"},
+	"repeat_until": {Name: "repeat_until", Kind: KindMapping,
+		Summary: "run `actions:` and then read the screen, up to `attempts:` times, stopping " +
+			"when `until_any:` matches. This is the loop the vocabulary was missing: the two " +
+			"primitives it replaces (choose a disk by capacity, leave the Apple Account pane) " +
+			"were loops and decisions hidden in Go, where a reader of the file cannot see them"},
 	"dismiss": {Name: "dismiss", Kind: KindString,
 		Summary: "click away the overlays a first login puts up - post_login is the Keyboard " +
 			"Setup Assistant and its neighbours, which swallow the next keystroke"},
 	"wait_for": {Name: "wait_for", Kind: KindString,
 		Summary: "wait for a control with no readable title; login_window is the password field, " +
 			"twelve pixels tall, read from a crop at 6x"},
-	"select_disk": {Name: "select_disk", Kind: KindString,
-		Summary: "pick the target disk in an installer's disk list; by_capacity chooses by size " +
-			"because the row order depends on what the installer enumerated"},
-	"apple_account": {Name: "apple_account", Kind: KindString,
-		Summary: "leave the Apple Account pane; skip is the only action, and the way to leave it " +
-			"differs between macOS 15 and 26"},
 	"copy_in": {Name: "copy_in", Kind: KindString,
 		Summary: "copy a fetched asset into the guest over sftp; xcode and dev_packages are the " +
 			"two names the macOS dev stage uses"},

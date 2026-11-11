@@ -35,9 +35,19 @@ package walk
 //
 // STATUS, STATED PLAINLY:
 //
-//	loaded        28 of 54 walkthroughs   (the 26 that fail are all and only `python:` steps)
-//	vocabulary    85 keys, complete       (no unknown-key failure in any of the 54)
-//	step engines  ~10 of 85 implemented   (load, validate, substitute, test; the rest to come)
+//	DONE           the Windows and macOS files, which is what this repository ships - 10 of 10
+//	               load, and none of them names a `python:` step any more
+//	LEFT           the Linux, BSD and Android files still in the other repository, and the
+//	               `not implemented` branches named at the end of this comment
+//
+// THE TABLE BELOW IS KEPT AS A RECORD OF WHAT EACH EXTENSION WAS, because that is the question a
+// reader has when comparing the two implementations - not because any of them is still pending.
+//
+// THREE KEYS STILL REACH A `not implemented` BRANCH, and that is deliberate rather than unfinished
+// in the same sense: `copy_in` needs a fetched asset, and the two asset kinds it names (Xcode,
+// packages) are large transfers that have not been written. A step that reaches one says
+// "not implemented", which is distinct from a failure - the reader needs to know whether the guest
+// did not do it or this build cannot ask.
 
 // Extension is one `python:` reference found in the real files, and what it should become.
 type Extension struct {
@@ -84,13 +94,17 @@ var Extensions = []Extension{
 		Why: "waits for the login window, which has no readable title - only the password " +
 			"field's placeholder, twelve pixels tall, so this reads a crop at 6x."},
 	{Ref: "setup_panes:select_target_disk", Files: 1,
-		Becomes: "select_disk: {by: capacity}",
-		Why: "picks the target disk in Disk Utility by its size rather than by row number, " +
-			"because the row order depends on what the installer enumerated."},
+		Becomes: "repeat_until: {number_between: [60, 200], actions: [{key: up}]}",
+		Why: "IT BECAME A LOOP, NOT A PRIMITIVE, AND THAT WAS A CORRECTION. What it does is press " +
+			"Up, read the detail pane's capacity and stop when the number is in a range - a loop " +
+			"and a decision, both of which were hidden in Go. `repeat_until:` is that loop, and the " +
+			"range is now a line in the file where a reader can see it."},
 	{Ref: "sequoia_panes:apple_account", Files: 1,
-		Becomes: "apple_account: {action: skip}",
-		Why: "the Apple Account pane differs between macOS 15 and 26 - a menu on one, a text " +
-			"link on the other - and this is where that release check lives."},
+		Becomes: "a pane with a `do:` list of four actions, then an expect_any: verdict",
+		Why: "IT WAS NEVER A PRIMITIVE. The function's own comment gives the four actions and " +
+			"their timings, and says why the last two are unconditional: the sheet only exists if " +
+			"the click worked, and the same coordinate is empty space once the pane has gone. That " +
+			"is a `do:` list, and hiding it hid the timings."},
 	{Ref: "macos_dev_asset:*", Files: 4,
 		Becomes: "fetch: {asset: xcode|packages}, copy: {asset: ...}",
 		Why: "Xcode is 2.7 GiB from archive.org with a SHA-1 check, copied in and expanded. Host " +

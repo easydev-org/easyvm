@@ -149,8 +149,41 @@ steps:
   # is not "go here" - it is "erase the disk of this size". A coordinate cannot say that. If
   # no disk in range is found the run STOPS, because erasing the wrong one installs macOS into
   # the recovery volume and the failure does not surface for fifty minutes.
+  # CHOOSING IS A MEASUREMENT, ERASING IS A SWEEP, AND A READER CAN SEE WHICH IS WHICH.
+  #
+  # THIS WAS A `select_disk: by_capacity` PRIMITIVE, and it was a mistake to make it one: what it
+  # actually does is press Up, read the detail pane's capacity, and stop when the number is in a
+  # range. That is a LOOP and a DECISION, and both of them were hidden in Go where nobody reading
+  # this file could see them.
+  #
+  # THE DETAIL PANE IS THE ONLY PLACE THE ANSWER IS A NUMBER. The sidebar shows rows, not sizes,
+  # and the highlighted row is whatever the last Up landed on - which is a runtime state, not a
+  # property of the disk. Two runs with identical clicks selected different disks, and one erased
+  # the 268 MB boot image and installed macOS into it for fifty minutes.
+  #
+  # THE CROP IS THE TABLE, NOT A ROW RANGE. (690, 480, 1500, 700) covers the heading, the capacity
+  # badge and every row for a table that starts anywhere in that band. An earlier crop started at
+  # y=540, measured on a disk whose table began at 545; on a 128 GiB disk the table starts higher
+  # and the crop held four lines of properties and not one number (run 41991176099).
+  #
+  # 4x AND NOT 3x: at 3x the decimal point is lost and "268.4 MB" reads as "2684 MB".
+  #
+  # 60..200 GB IS A DECISION AND IT BELONGS HERE. The recovery volume is 2.88 GB and a disk is 128
+  # GiB; the range is what separates them, and erasing the wrong one does not fail for fifty
+  # minutes.
   - name: choose the target disk by capacity
-    select_disk: by_capacity
+    repeat_until:
+      attempts: 8
+      settle: 3
+      until_any:
+        - number_between: [60, 200]
+          unit: gb
+      actions:
+        - key: up
+          settle: 3
+    region: [690, 480, 1500, 700]
+    region_at: [1920, 1080]
+    scale: 4
 
   # =======================================================================================
   # 2b. ERASE: ONE CLICK, THEN NAME THE VOLUME, CONFIRM, DONE

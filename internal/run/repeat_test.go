@@ -1,0 +1,176 @@
+package run
+
+import (
+	"testing"
+
+	"github.com/easydev-org/easyvm/internal/walk"
+)
+
+// THE NUMBER CONDITION IS THE ONE PLACE THIS REPOSITORY DOES ARITHMETIC ON A SCREEN, so it is
+// tested against the readings that actually happened rather than against invented ones.
+//
+// THE TWO NUMBERS BELOW ARE FROM THE PYTHON IMPLEMENTATION'S OWN NOTES:
+//
+//	Apple Inc. VirtIO Block Media   268.4 MB     <- the boot image, which must NEVER be selected
+//	...                             137.44 GB     <- a correctly selected target
+//
+// Erasing the boot image installs macOS into it and does not fail for fifty minutes - so a
+// condition that accepted "268.4 MB" as a candidate would be the most expensive bug in the stage.
+func TestCapacitiesReadsUnits(t *testing.T) {
+	cases := []struct {
+		reading string
+		want    []float64
+		why     string
+	}{
+		{"Capacity: 137.44 GB", []float64{137.44}, "a target disk"},
+		{"main 268.4 MB total", []float64{268.4 / 1024}, "a boot image, converted to GB"},
+		{"2.88 GB", []float64{2.88}, "the recovery volume"},
+		{"nothing readable here", nil, "a pane that has not painted yet"},
+		{"1.5 GB and 128.00 GB", []float64{1.5, 128.0}, "several capacities on one pane"},
+	}
+	for _, tc := range cases {
+		got := capacities(wordsOf2(tc.reading))
+		if len(got) != len(tc.want) {
+			t.Fatalf("%q: read %v, want %v (%s)", tc.reading, got, tc.want, tc.why)
+		}
+		for i := range got {
+			if diff := got[i] - tc.want[i]; diff > 0.001 || diff < -0.001 {
+				t.Fatalf("%q: read %v, want %v (%s)", tc.reading, got, tc.want, tc.why)
+			}
+		}
+	}
+}
+
+func wordsOf2(s string) []string {
+	// a reading is already a list of words; splitting on spaces is what readScreen produces
+	var out []string
+	field := ""
+	for _, r := range s {
+		if r == ' ' || r == '\t' || r == '\n' {
+			if field != "" {
+				out = append(out, field)
+				field = ""
+			}
+			continue
+		}
+		field += string(r)
+	}
+	if field != "" {
+		out = append(out, field)
+	}
+	return out
+}
+
+// THE RANGE IS THE DECISION, AND IT IS WHAT SEPARATES A DISK FROM A RECOVERY VOLUME.
+//
+// A 128 GiB disk is in 60..200; the 2.88 GB recovery volume and a 268 MB boot image are not. That is
+// the whole content of the step, and it is now readable in the file instead of being a constant in
+// Go.
+func TestTheRangeTellsADiskFromARecoveryVolume(t *testing.T) {
+	inRange := [2]float64{60, 200}
+
+	for _, tc := range []struct {
+		reading string
+		want    bool
+		why     string
+	}{
+		{"Capacity: 137.44 GB", true, "a target disk"},
+		{"Capacity: 128.00 GB", true, "another target size"},
+		{"2.88 GB", false, "the recovery volume"},
+		{"main 268.4 MB", false, "a boot image - selecting this installs macOS into it"},
+		{"", false, "an unreadable pane"},
+	} {
+		cond := condition{NumberBetween: &inRange, Unit: "gb"}
+		got, _ := cond.matches(wordsOf2(tc.reading), capacities(wordsOf2(tc.reading)))
+		if got != tc.want {
+			t.Fatalf("%q matched=%v, want %v (%s)", tc.reading, got, tc.want, tc.why)
+		}
+	}
+}
+
+// A WORDS CONDITION IS SATISFIED BY PUNCTUATION-STRIPPED MATCHING, because the same claim is spelled
+// differently by different panes. The Python implementation lost a stage to "Remote Login: On"
+// against a matcher for the three separate words.
+func TestWordsConditionsIgnorePunctuation(t *testing.T) {
+	cond := condition{Words: []string{"remote", "login", "on"}}
+	got, _ := cond.matches(wordsOf2("Remote Login: On"), nil)
+	if !got {
+		t.Fatal("a words condition must match through punctuation; the pane writes a colon and " +
+			"the file writes three words")
+	}
+
+	cond = condition{Words: []string{"disk", "utility"}}
+	if ok, _ := cond.matches(wordsOf2("Disk Utility"), nil); !ok {
+		t.Fatal("case must not matter")
+	}
+	if ok, _ := cond.matches(wordsOf2("Macintosh HD"), nil); ok {
+		t.Fatal("unrelated words must not match")
+	}
+}
+
+// THE LARGEST READING IS A CANDIDATE, BUT ANY READING IN RANGE IS A MATCH.
+//
+// A detail pane shows the device and its partitions, so the disk itself is the largest number - but
+// what makes this correct is the RANGE, not the ordering. A loop that only looked at the largest
+// would miss a pane whose device row has not painted yet.
+func TestAnyReadingInRangeMatches(t *testing.T) {
+	inRange := [2]float64{60, 200}
+	cond := condition{NumberBetween: &inRange, Unit: "gb"}
+	ok, why := cond.matches(nil, []float64{2.88, 128.0})
+	if !ok {
+		t.Fatalf("128 GB among a recovery volume must match; got %q", why)
+	}
+}
+
+// A LOOP WITH NO STOP CONDITION MUST BE REFUSED BEFORE ITS FIRST ACTION.
+//
+// Eight presses of Up is eight clicks into a screen nobody measured, and the Python implementation's
+// note says why that matters: erasing the wrong disk installs macOS into the recovery volume and the
+// failure does not surface for fifty minutes.
+func TestALoopWithoutAConditionIsRefused(t *testing.T) {
+	ex := &Executor{Work: t.TempDir()}
+	_, err := ex.parseRepeatUntil(stepWith(t, map[string]any{
+		"repeat_until": map[string]any{
+			"actions": []any{map[string]any{"key": "up"}},
+		},
+	}))
+	if err == nil {
+		t.Fatal("a loop with no until_any must be refused")
+	}
+}
+
+// AND AN UNKNOWN KEY IN AN ACTION IS REFUSED HERE, not after eight presses.
+func TestAnActionWithATypoIsRefused(t *testing.T) {
+	ex := &Executor{Work: t.TempDir()}
+	_, err := ex.parseRepeatUntil(stepWith(t, map[string]any{
+		"repeat_until": map[string]any{
+			"actions":   []any{map[string]any{"pess": "up"}},
+			"until_any": []any{map[string]any{"words": []any{"done"}}},
+		},
+	}))
+	if err == nil {
+		t.Fatal("an action with an unknown key must be refused before the loop runs")
+	}
+}
+
+// THE ATTEMPT CEILING EXISTS, because a loop that can press a key a hundred times is one that will.
+func TestTheAttemptCeilingIsEnforced(t *testing.T) {
+	ex := &Executor{Work: t.TempDir()}
+	_, err := ex.parseRepeatUntil(stepWith(t, map[string]any{
+		"repeat_until": map[string]any{
+			"attempts":  500,
+			"actions":   []any{map[string]any{"key": "up"}},
+			"until_any": []any{map[string]any{"words": []any{"done"}}},
+		},
+	}))
+	if err == nil {
+		t.Fatal("an attempt count over the ceiling must be refused")
+	}
+}
+
+// stepWith builds a Step for the parser tests.
+func stepWith(t *testing.T, spec map[string]any) walk.Step {
+	t.Helper()
+	spec["name"] = "probe"
+	return walk.Step{Index: 1, Name: "probe", Spec: spec}
+}

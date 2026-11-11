@@ -143,6 +143,8 @@ func (e *Executor) runOne(s walk.Step) error {
 		return e.doRequireSSH(s)
 	case s.Has("ssh"):
 		return e.doSSH(s)
+	case s.Has("repeat_until"):
+		return e.doRepeatUntil(s)
 	case s.Has("unless"):
 		if err := e.doUnless(s); err != nil {
 			return err
@@ -158,10 +160,6 @@ func (e *Executor) runOne(s walk.Step) error {
 		return e.doDismiss(s)
 	case s.Has("wait_for"):
 		return e.doWaitFor(s)
-	case s.Has("select_disk"):
-		return e.doSelectDisk(s)
-	case s.Has("apple_account"):
-		return e.doAppleAccount(s)
 	case s.Has("copy_in"):
 		return e.doCopyIn(s)
 	case s.Has("screenshot"):
