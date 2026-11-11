@@ -280,17 +280,21 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 	if err != nil {
 		return err
 	}
-	// THE ACCELERATOR IS CHECKED BEFORE THE MACHINE IS BUILT, AND ITS ABSENCE IS A REFUSAL RATHER
-	// THAN A SILENT DOWNGRADE - WITH ONE NAMED EXCEPTION.
+	// THE ACCELERATOR IS NAMED IN THE COMMAND LINE, AND QEMU IS THE AUTHORITY ON IT.
 	//
-	// `-accel kvm` is in the command line below. On TCG a macOS guest cannot get `+invtsc` and
-	// deadlocks at HANDOFF TO XNU, and every other guest runs fifty times slower - so a machine
-	// without KVM is not a machine this build should start a guest on.
+	// `-accel kvm` IS IN THE ARGUMENTS BELOW, which makes qemu refuse to start rather than silently
+	// choose TCG - the silent choice is what put every macOS leg on software emulation, where
+	// `+invtsc` cannot be provided and the guest deadlocks at HANDOFF TO XNU.
 	//
-	// THE EXCEPTION IS A GUEST THAT CANNOT BOOT AT ALL ON KVM: none here. The check is unconditional
-	// on purpose - a fallback would be the silent downgrade this whole change is about.
+	// `CheckKVM()` IS DIAGNOSIS, NOT A GATE. It was a gate for one run, and its `KVM_GET_API_VERSION`
+	// call passed a pointer where the ioctl takes no argument - so it reported "invalid argument" on a
+	// machine whose qemu had just accepted `-accel kvm`. A CHECK THAT CAN REFUSE A GUEST QEMU WOULD
+	// HAVE STARTED IS WORSE THAN NO CHECK: the authority is the program that has to work.
+	//
+	// So a failure here is a LOG LINE - it tells a reader why a boot was slow or why qemu exited -
+	// and the boot proceeds to qemu, whose own message is the verdict.
 	if err := machine.CheckKVM(); err != nil {
-		return err
+		d.logf("  " + err.Error())
 	}
 	opts, err := machine.CommonOptions{CPUs: spec.CPUs, MemMB: spec.MemMB, SSHPort: d.port}.
 		Normalise()

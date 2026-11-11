@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"syscall"
-	"unsafe"
 )
 
 // KVMGetAPIVersion is the ioctl that asks the KVM device what API it speaks.
@@ -49,9 +48,16 @@ func CheckKVM() error {
 
 	// THE IOCTL IS THE REAL QUESTION. A device that opens and refuses its ioctl is a container whose
 	// cgroup allows the node and not the operation.
-	var version uint32
-	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, f.Fd(), kvmGetAPIVersion,
-		uintptr(unsafe.Pointer(&version)))
+	//
+	// KVM_GET_API_VERSION TAKES NO ARGUMENT AND RETURNS THE VERSION AS ITS RESULT, which is a
+	// different calling convention from the ioctls that write through a pointer - and passing a
+	// pointer here produced
+	//
+	//	/dev/kvm opened but KVM_GET_API_VERSION failed: invalid argument
+	//
+	// on a run where qemu's own `-accel kvm` had just started successfully. The ioctl rejected the
+	// third argument, not the device: EINVAL is what a no-argument ioctl says when given one.
+	version, _, errno := syscall.Syscall(syscall.SYS_IOCTL, f.Fd(), kvmGetAPIVersion, 0)
 	if errno != 0 {
 		return fmt.Errorf("%s opened but KVM_GET_API_VERSION failed: %w. Something opened the node "+
 			"but the kernel module is not answering - nested virtualisation disabled on the host is "+

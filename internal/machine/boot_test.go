@@ -457,8 +457,15 @@ func TestTheAcceleratorIsInTheCommandLine(t *testing.T) {
 			"flag whose absence deadlocks it at HANDOFF TO XNU")
 	}
 	if !strings.Contains(src, "machine.CheckKVM()") {
-		t.Fatal("CheckKVM exists and nothing calls it, so a container without a usable /dev/kvm " +
-			"finds out from qemu's exit code instead of from a sentence about the device")
+		t.Fatal("CheckKVM exists and nothing calls it, so a reader gets no sentence about /dev/kvm " +
+			"when a boot is slow or qemu exits")
+	}
+	// AND IT MUST NOT BE A GATE. A check that can refuse a guest qemu would have started is worse than
+	// none: `KVM_GET_API_VERSION` passed a pointer where the ioctl takes no argument and reported
+	// "invalid argument" on a machine whose qemu had just accepted `-accel kvm`.
+	if strings.Contains(src, "if err := machine.CheckKVM(); err != nil {\n\t\treturn err") {
+		t.Fatal("CheckKVM is a gate again. Qemu is the authority on whether it can start: `-accel kvm` " +
+			"makes it refuse loudly, and this check must only explain")
 	}
 }
 
