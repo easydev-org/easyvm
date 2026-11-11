@@ -78,6 +78,19 @@ steps:
   # this file's variables, substituted into the template. A placeholder left behind is refused by
   # name rather than handed to Setup: run 42280638394's predecessor spent nine minutes on "Enter a
   # product key" because one substitution was missing while the template used it.
+  # THE DISK THE INSTALL WRITES TO, CREATED EMPTY.
+  #
+  # 128G AND NOT A VARIABLE: every coordinate in this file was measured on the disk the job actually
+  # bakes, and the answer file's DiskID refers to the disk Setup sees at index 0. A different size
+  # is a different machine for the purposes of those two facts.
+  #
+  # IT IS THE FIRST STEP BECAUSE `boot:` REFUSES TO START WITHOUT A TARGET: "booting needs a target
+  # disk: a `disk:` step must come first, or pass --boot-disk" - which is exactly what run
+  # 43044525517 reported after the answer CD had been built and the installer named.
+  - name: create the empty disk
+    disk: disk.qcow2
+    disk_gb: 128
+
   - name: build the answer CD
     fetch: answer_iso
     template: windows/11/answer/Autounattend.xml

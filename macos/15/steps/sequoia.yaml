@@ -110,6 +110,15 @@ vars:
     from: args.shutdown
     default: ssh
 
+# THIS STAGE'S DISK COMES FROM THE CALLER, AND THAT IS NOW IN THE FILE RATHER THAN IN THE WORKFLOW.
+#
+# `boot_disk: from_caller` says the `--boot-disk` flag supplies it, because an earlier stage made it.
+# Without the declaration a file that continues from another stage is indistinguishable from one that
+# forgot to create a disk: `boot:` refuses with "booting needs a target disk", and it refuses AFTER
+# every host-side step above it has run - run 43044525517 spent three minutes building an answer CD
+# and resolving a 7.7 GiB installer before the boot said no.
+boot_disk: from_caller
+
 steps:
   # =========================================================================
   # THE MACHINE, BEFORE THE FIRST PANE - AND THE THREE STEPS AFTER THE LAST

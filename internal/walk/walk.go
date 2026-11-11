@@ -31,6 +31,14 @@ type File struct {
 	// because a port conflict is a fact about the runner while the file describes the guest.
 	SSHPort int
 	SSHUser string
+	// BootDiskFromCaller says this file's disk arrives as --boot-disk.
+	//
+	// IT EXISTS SO A FILE CAN SAY WHERE ITS DISK COMES FROM. A stage that continues from another
+	// stage's output has no `disk:` step - the disk is the run's input - and without a way to say
+	// so, "this file boots with no disk above it" is indistinguishable from a file that forgot to
+	// create one. That distinction cost run 43044525517 three minutes: the answer CD was built and
+	// the installer named before `boot:` refused.
+	BootDiskFromCaller bool
 	// Notes is the file's prose header, echoed into the log. It is where the measurements behind
 	// the numbers in a file are written down, and a reader looking at a failed CI run needs them.
 	Notes string
@@ -153,6 +161,9 @@ func Load(path string, overrides map[string]string) (*File, error) {
 	f.SSHPort = 2222
 	if p, ok := toInt(doc["ssh_port"]); ok && p > 0 {
 		f.SSHPort = p
+	}
+	if v, ok := doc["boot_disk"].(string); ok && strings.TrimSpace(v) == "from_caller" {
+		f.BootDiskFromCaller = true
 	}
 	f.SSHUser, _ = doc["ssh_user"].(string)
 	if f.SSHUser == "" {
@@ -364,6 +375,9 @@ var documentKeys = map[string]string{
 	"ends_region_scale": "enlargement for that crop",
 	"pane_limit":        "how many times one pane may be answered before it is reported rather than clicked",
 	"stuck_after":       "seconds of nothing matching before a pane walk reports STUCK",
+	"boot_disk": "the disk comes from the caller's --boot-disk rather than from a `disk:` step. " +
+		"A file that says this is one whose disk was made by an earlier stage - every macOS " +
+		"stage after setup, and the Windows stages after the bake",
 }
 
 func validateDocument(doc map[string]any) error {

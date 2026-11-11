@@ -177,3 +177,65 @@ func toFloat(v any) (float64, bool) {
 	}
 	return 0, false
 }
+
+// EVERY `boot:` MUST HAVE A DISK BEFORE IT, OR `--boot-disk` SUPPLIED BY THE CALLER.
+//
+// `internal/machine.Boot.Validate` refuses a boot with no target, and the message is good:
+//
+//	booting needs a target disk: a `disk:` step must come first, or pass --boot-disk
+//
+// BUT IT ARRIVES AFTER EVERY HOST-SIDE STEP HAS RUN, which for the two install stages means after
+// the answer CD is built and after a 7.7 GiB installer is resolved. Run 43044525517 spent three
+// minutes on exactly that: `build the answer CD` passed, `name the installer` passed, and then
+// `boot the installer` refused because no step had created the disk.
+//
+// THE RULE IS STRUCTURAL AND CHEAP TO CHECK: a boot step's file must either create the disk above it
+// (`disk_gb:`), name an existing one (`disk:`), or DECLARE that its disk arrives as `--boot-disk`
+// with a top-level `boot_disk: from_caller`. The declaration exists because six of the nine files
+// genuinely continue from another stage's output - and without it, "boots with no disk above it" is
+// indistinguishable from the file that forgot to create one.
+func TestEveryBootHasADiskBeforeIt(t *testing.T) {
+	root := filepath.Join("..", "..")
+	var files []string
+	for _, dir := range []string{"windows/11/steps", "macos/15/steps"} {
+		entries, err := os.ReadDir(filepath.Join(root, dir))
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if strings.HasSuffix(e.Name(), ".yaml") {
+				files = append(files, filepath.Join(root, dir, e.Name()))
+			}
+		}
+	}
+	if len(files) == 0 {
+		t.Skip("no walkthroughs here")
+	}
+
+	for _, path := range files {
+		f, err := Load(path, nil)
+		if err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		if f.BootDiskFromCaller {
+			continue
+		}
+		var sawDisk bool
+		for _, s := range f.Steps {
+			// A DISK STEP IS EITHER `disk_gb:` (creates one) OR `disk:` (names one).
+			if s.Has("disk_gb") || s.Has("disk") {
+				sawDisk = true
+			}
+			if !s.Has("boot") {
+				continue
+			}
+			if sawDisk {
+				continue
+			}
+			t.Errorf("%s: step %q boots with no disk above it. A `disk:` step names an existing "+
+				"image and `disk_gb:` creates one; without either, the boot refuses with "+
+				"\"booting needs a target disk\" - AFTER every host-side step before it has run, "+
+				"which is minutes of work for a structural mistake", filepath.Base(path), s.Name)
+		}
+	}
+}
