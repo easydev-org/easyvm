@@ -47,5 +47,19 @@ jobs:
             "pull": "linux-fedora-workstation-ssh",
             "out": "linux-fedora-workstation-ssh.qcow2",
             "timeout": 60
+          },
+          {
+            "name": "linux-fedora-workstation-install",
+            "file": "linux/fedora-workstation/steps/install.yaml",
+            "pull": "",
+            "out": "linux-fedora-workstation.qcow2",
+            "timeout": 90
+          },
+          {
+            "name": "linux-fedora-workstation-vm",
+            "file": "linux/fedora-workstation/steps/vm-configure.yaml",
+            "pull": "linux-fedora-workstation-vm",
+            "out": "linux-fedora-workstation-vm.qcow2",
+            "timeout": 60
           }
         ]

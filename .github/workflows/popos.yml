@@ -47,5 +47,19 @@ jobs:
             "pull": "linux-popos-ssh",
             "out": "linux-popos-ssh.qcow2",
             "timeout": 60
+          },
+          {
+            "name": "linux-popos-install",
+            "file": "linux/popos/steps/install.yaml",
+            "pull": "",
+            "out": "linux-popos.qcow2",
+            "timeout": 90
+          },
+          {
+            "name": "linux-popos-vm",
+            "file": "linux/popos/steps/vm-configure.yaml",
+            "pull": "linux-popos-vm",
+            "out": "linux-popos-vm.qcow2",
+            "timeout": 60
           }
         ]

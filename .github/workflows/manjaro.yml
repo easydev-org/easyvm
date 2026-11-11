@@ -47,5 +47,19 @@ jobs:
             "pull": "linux-manjaro-ssh",
             "out": "linux-manjaro-ssh.qcow2",
             "timeout": 60
+          },
+          {
+            "name": "linux-manjaro-install",
+            "file": "linux/manjaro/steps/install.yaml",
+            "pull": "",
+            "out": "linux-manjaro.qcow2",
+            "timeout": 90
+          },
+          {
+            "name": "linux-manjaro-vm",
+            "file": "linux/manjaro/steps/vm-configure.yaml",
+            "pull": "linux-manjaro-vm",
+            "out": "linux-manjaro-vm.qcow2",
+            "timeout": 60
           }
         ]

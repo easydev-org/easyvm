@@ -47,5 +47,19 @@ jobs:
             "pull": "linux-kubuntu-ssh",
             "out": "linux-kubuntu-ssh.qcow2",
             "timeout": 60
+          },
+          {
+            "name": "linux-kubuntu-install",
+            "file": "linux/kubuntu/steps/install.yaml",
+            "pull": "",
+            "out": "linux-kubuntu.qcow2",
+            "timeout": 90
+          },
+          {
+            "name": "linux-kubuntu-vm",
+            "file": "linux/kubuntu/steps/vm-configure.yaml",
+            "pull": "linux-kubuntu-vm",
+            "out": "linux-kubuntu-vm.qcow2",
+            "timeout": 60
           }
         ]

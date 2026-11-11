@@ -44,5 +44,19 @@ jobs:
             "pull": "bsd-ghostbsd-mate-ssh",
             "out": "bsd-ghostbsd-ssh.qcow2",
             "timeout": 60
+          },
+          {
+            "name": "bsd-ghostbsd-install",
+            "file": "bsd/ghostbsd/steps/gbi.yaml",
+            "pull": "",
+            "out": "bsd-ghostbsd.qcow2",
+            "timeout": 90
+          },
+          {
+            "name": "bsd-ghostbsd-vm",
+            "file": "bsd/ghostbsd/steps/vm-configure.yaml",
+            "pull": "bsd-ghostbsd-mate-vm",
+            "out": "bsd-ghostbsd-vm.qcow2",
+            "timeout": 60
           }
         ]

@@ -47,5 +47,19 @@ jobs:
             "pull": "linux-opensuse-tumbleweed-ssh",
             "out": "linux-opensuse-tumbleweed-ssh.qcow2",
             "timeout": 60
+          },
+          {
+            "name": "linux-opensuse-tumbleweed-install",
+            "file": "linux/opensuse-tumbleweed/steps/install.yaml",
+            "pull": "",
+            "out": "linux-opensuse-tumbleweed.qcow2",
+            "timeout": 90
+          },
+          {
+            "name": "linux-opensuse-tumbleweed-vm",
+            "file": "linux/opensuse-tumbleweed/steps/vm-configure.yaml",
+            "pull": "linux-opensuse-tumbleweed-vm",
+            "out": "linux-opensuse-tumbleweed-vm.qcow2",
+            "timeout": 60
           }
         ]

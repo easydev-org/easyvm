@@ -47,5 +47,19 @@ jobs:
             "pull": "linux-ubuntu-ssh",
             "out": "linux-ubuntu-ssh.qcow2",
             "timeout": 60
+          },
+          {
+            "name": "linux-ubuntu-install",
+            "file": "linux/ubuntu/steps/install.yaml",
+            "pull": "",
+            "out": "linux-ubuntu.qcow2",
+            "timeout": 90
+          },
+          {
+            "name": "linux-ubuntu-vm",
+            "file": "linux/ubuntu/steps/vm-configure.yaml",
+            "pull": "linux-ubuntu-vm",
+            "out": "linux-ubuntu-vm.qcow2",
+            "timeout": 60
           }
         ]

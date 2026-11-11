@@ -47,5 +47,19 @@ jobs:
             "pull": "linux-mx-ssh",
             "out": "linux-mx-ssh.qcow2",
             "timeout": 60
+          },
+          {
+            "name": "linux-mx-install",
+            "file": "linux/mx/steps/install.yaml",
+            "pull": "",
+            "out": "linux-mx.qcow2",
+            "timeout": 90
+          },
+          {
+            "name": "linux-mx-vm",
+            "file": "linux/mx/steps/vm-configure.yaml",
+            "pull": "linux-mx-vm",
+            "out": "linux-mx-vm.qcow2",
+            "timeout": 60
           }
         ]

@@ -47,5 +47,19 @@ jobs:
             "pull": "linux-mint-ssh",
             "out": "linux-mint-ssh.qcow2",
             "timeout": 60
+          },
+          {
+            "name": "linux-mint-install",
+            "file": "linux/mint/steps/install.yaml",
+            "pull": "",
+            "out": "linux-mint.qcow2",
+            "timeout": 90
+          },
+          {
+            "name": "linux-mint-vm",
+            "file": "linux/mint/steps/vm-configure.yaml",
+            "pull": "linux-mint-vm",
+            "out": "linux-mint-vm.qcow2",
+            "timeout": 60
           }
         ]
