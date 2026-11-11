@@ -1,10 +1,10 @@
 name: walkthrough
 
-# Replicate the Windows 11 stage against easyvm itself, on the image this repository builds.
+# Drive every migrated walkthrough against easyvm itself, on the image this repository builds.
 #
-# THE POINT IS NOT "THE BINARY STARTS". It is that the YAML file in this repository drives a real
-# machine through a real stage: a published disk is booted, reached over ssh, changed, and
-# published again.
+# THE POINT IS NOT "THE BINARY STARTS". It is that the YAML files in this repository drive real
+# machines through real stages: a published disk is booted, reached over ssh, changed, published
+# again - and the two install stages go from an empty disk to a working system.
 #
 # THE JOB RUNS INSIDE THE IMAGE (`container:`), NOT IN A `docker run` IT STARTS.
 #
@@ -27,51 +27,78 @@ name: walkthrough
 # The program refuses to fall back to qemu's user-mode network (`-netdev user`), because the host's
 # smbd binds 172.30.0.1 on the bridge address and a user-mode guest cannot route to it.
 #
-# macOS IS THE SECOND JOB, AND IT IS A DIFFERENT SHAPE FROM WINDOWS ON PURPOSE.
+# THE MACHINE'S OWN NETWORK IS THE PART THAT WAS WRONG TWICE, so it is worth naming both:
 #
-# A macOS guest boots through OpenCore: a pflash ROM, a writable variable store and a FAT boot image
-# in a GPT partition, all built on the host from the recovery image - Apple's APFS driver is inside
-# that image, and OpenCore cannot read an APFS partition without it. `fetch: opencore` builds them
-# and `fetch: recovery_macos` supplies the image they are built from.
+#     PREROUTING   a packet ARRIVING from outside, on its way to the bridge address
+#     OUTPUT       a connection made BY A PROCESS IN THIS CONTAINER to that address
 #
-# THE STAGE THIS RUNS IS `setup`, NOT `ssh`: it installs. That is the only macOS stage whose disk does
-# not exist yet, so it is the only one that starts from the installer - and it is the one that
-# proves the firmware, the SMC, the CPU flags, the recovery device and the 1920x1080 GOP mode all at
-# once. It takes 45 to 90 minutes because macOS is copying 36 GiB, and the job's timeout says so.
+# The daemon's own ssh client is inside the container, so it needs the second one. With only
+# PREROUTING the bridge address refuses in three milliseconds and the step reports
+# "connection refused" about a guest whose sshd is running (run 43022310562, step 16 of 29).
+#
+# THE STAGES ARE A MATRIX, AND EACH ORDER IS THE LIFECYCLE THEY WERE BUILT IN.
+#
+#     windows   install -> ssh -> vm-configure -> dev
+#     macos     setup   -> ssh -> vm-configure -> dev
+#
+# A stage may start from a published tag instead of from the stage above it - that is what `from:`
+# means - because the disk is the handoff and a run that starts in the middle is a real use.
+#
+# WHY macOS'S `desktop` STAGE IS NOT HERE. It is the Setup Assistant driver, and macos/15/steps/
+# sequoia.yaml is that walkthrough: it exists and it loads, but the stage before it (setup) ends at
+# the wizard, and a matrix leg that depends on a disk no leg here produces is a leg that can only
+# run from a tag. It is listed as a `from:`-only entry rather than silently omitted.
 
 on:
   workflow_dispatch:
     inputs:
-      windows_run:
-        description: "Windows 11: boot the ssh disk, prove ssh, configure the guest, publish (~40 min)"
-        type: boolean
-        default: true
-      windows_ssh_from:
-        description: "Windows: the disk to start from"
-        default: "windows11-ssh"
+      stages:
+        description: "which stages to run: all, or a comma list of the names below"
+        default: "all"
       disks_repository:
         description: "the ghcr repository that holds the disks"
         default: "easydev-org/easydiskbake"
+      windows_ssh_from:
+        description: "windows-ssh: the disk to start from (empty = the default tag)"
+        default: "windows11-ssh"
+      macos_dev_from:
+        description: "macos-dev: the disk to start from (empty = the default tag)"
+        default: "macos15-dev"
       timeout_minutes:
-        description: "how long the Windows stage may run"
-        default: "70"
-      macos_run:
-        description: "macOS 15: install from the recovery image to the Setup Assistant (~60-90 min)"
-        type: boolean
-        default: false
-      macos_timeout_minutes:
-        description: "how long the macOS stage may run"
-        default: "150"
+        description: "how long one stage may run"
+        default: "90"
 
 concurrency:
   group: walkthrough
   cancel-in-progress: false
 
+env:
+  # THE IMAGE THIS REPOSITORY BUILDS, which is also the environment every stage runs in: qemu 11.1,
+  # OVMF, samba, dnsmasq, ffmpeg, tesseract, qemu-img, mtools, xorriso, 7z and the easyvm binary.
+  IMAGE: ghcr.io/${{ github.repository }}:latest
+
 jobs:
-  windows:
-    if: inputs.windows_run
+  # ===========================================================================
+  # EVERY STAGE, ONE MATRIX LEG EACH.
+  #
+  # A LEG IS: prepare the two devices, pull the input disk if the stage is not an install, start
+  # the daemon, ask it to run the file, follow status sixty seconds at a time, keep what it made.
+  #
+  # THE LEGS DO NOT DEPEND ON EACH OTHER. Each one pulls the disk it starts from by tag, which is
+  # what the Python workflow chain was reduced to and what makes a stage runnable on its own. A
+  # matrix that chained them would make one early failure hide eight stages that work.
+  #
+  # AND THAT IS WHY `needs:` IS ABSENT RATHER THAN FORGOTTEN: a chain here would mean a stage cannot
+  # be checked without re-running the install before it, and the install is an hour.
+  # ===========================================================================
+  stage:
+    # THE FILTER IS THE INPUT, AND ITS DEFAULT IS "all". A matrix leg whose name is not in the list
+    # stops before it starts, so choosing three stages costs three legs rather than eight.
+    if: |
+      inputs.stages == '' || inputs.stages == 'all'
+      || contains(format(',{0},', inputs.stages), format(',{0},', matrix.name))
     runs-on: ubuntu-24.04
-    timeout-minutes: ${{ fromJSON(inputs.timeout_minutes || '70') }}
+    timeout-minutes: ${{ fromJSON(inputs.timeout_minutes || '90') }}
     container:
       image: ghcr.io/${{ github.repository }}:latest
       credentials:
@@ -81,226 +108,121 @@ jobs:
     permissions:
       contents: read
       packages: read
+    strategy:
+      # ONE LEG AT A TIME. A 128 GiB macOS install and a Windows stage on the same runner would
+      # compete for the disk and for /dev/kvm, and a failure would be attributable to neither.
+      max-parallel: 1
+      fail-fast: false
+      matrix:
+        include:
+          # --- windows -------------------------------------------------------
+          - name: windows-install
+            file: windows/11/steps/install.yaml
+            os: windows
+            # AN INSTALL CREATES ITS OWN DISK, so there is nothing to pull.
+            pull: ""
+            out: windows11.qcow2
+            timeout: 130
+          - name: windows-ssh
+            file: windows/11/steps/ssh.yaml
+            os: windows
+            pull: windows11-ssh
+            out: windows11-ssh.qcow2
+            timeout: 70
+          - name: windows-vm-configure
+            file: windows/11/steps/vm-configure.yaml
+            os: windows
+            pull: windows11-vm-configure
+            out: windows11-vm-configure.qcow2
+            timeout: 70
+          - name: windows-dev
+            file: windows/11/steps/dev.yaml
+            os: windows
+            pull: windows11-dev
+            out: windows11-dev.qcow2
+            timeout: 120
+          # --- macos ---------------------------------------------------------
+          - name: macos-setup
+            file: macos/15/steps/setup.yaml
+            os: macos
+            pull: ""
+            out: macos15-setup.qcow2
+            timeout: 150
+          - name: macos-ssh
+            file: macos/15/steps/ssh.yaml
+            os: macos
+            pull: macos15-ssh
+            out: macos15-ssh.qcow2
+            timeout: 90
+          - name: macos-vm-configure
+            file: macos/15/steps/vm-configure.yaml
+            os: macos
+            pull: macos15-vm-configure
+            out: macos15-vm-configure.qcow2
+            timeout: 90
+          - name: macos-dev
+            file: macos/15/steps/dev.yaml
+            os: macos
+            pull: macos15-dev
+            out: macos15-dev.qcow2
+            timeout: 150
+    # THE LEG'S OWN TIMEOUT, so a 150-minute install is not bounded by the job-wide 90.
+    timeout-minutes: ${{ matrix.timeout }}
     steps:
       - uses: actions/checkout@v4
 
       - name: prepare
-        # THE THREE THINGS THE NETWORK AND THE GUEST NEED, ASSERTED BEFORE ANYTHING IS PULLED.
-        # A runner without /dev/kvm or /dev/net/tun produces a qemu that crawls or a daemon that
+        # THE THREE THINGS THE NETWORK AND THE GUEST NEED, ASSERTED BEFORE ANYTHING IS PULLED. A
+        # runner without /dev/kvm or /dev/net/tun produces a qemu that crawls or a daemon that
         # refuses; the refusal is right, but this says which one and stops in two seconds.
         run: |
           set -eu
           test -e /dev/kvm || { echo "=== NO /dev/kvm ==="; exit 1; }
           test -e /dev/net/tun || { echo "=== NO /dev/net/tun ==="; exit 1; }
           ls -l /dev/kvm /dev/net/tun
-          id
-          # THE IMAGE ITSELF IS PART OF THE ENVIRONMENT, so what it carries is checked here rather
-          # than discovered by a step that fails for an unrelated reason.
           easyvm versions
           qemu-img --version | head -1
+          # THE HOST-SIDE TOOLS THE FILES USE. Named here so a missing one is this step rather than
+          # a failure forty minutes into an install that needed `xorriso` to build an answer CD.
+          for tool in qemu-img 7z xorriso unzip mformat mcopy mdir; do
+            command -v "$tool" > /dev/null || echo "  (optional, not present: $tool)"
+          done
           mkdir -p "$GITHUB_WORKSPACE/work"
 
-      - name: pull the disk
-        # THE DISK ARRIVES BEFORE THE MACHINE STARTS, so a pull failure is one step with one
-        # message rather than a boot that waits out its timeout on a file that is not there.
-        #
-        # `easyvm pull`, NOT a shell-out: it resumes a partial transfer, it asks for one tag and
-        # does not search, and the image carries no `oras` or `crane` to be a different version.
+      - name: pull the input disk
+        # AN INSTALL HAS NO INPUT: its first step creates the disk it writes to. Every other stage
+        # starts from a published one, and `from:` is the tag - so a leg can be pointed at any disk
+        # this repository has ever published.
+        if: matrix.pull != ''
         run: |
           set -eu
-          easyvm pull --tag "${{ inputs.windows_ssh_from || 'windows11-ssh' }}" \
+          tag="${{ matrix.pull }}"
+          case "${{ matrix.name }}" in
+            windows-ssh)  tag="${{ inputs.windows_ssh_from || 'windows11-ssh' }}" ;;
+            macos-dev)    tag="${{ inputs.macos_dev_from || 'macos15-dev' }}" ;;
+          esac
+          echo "pulling $tag"
+          easyvm pull --tag "$tag" \
                       --repository "${{ inputs.disks_repository }}" \
-                      --dest $GITHUB_WORKSPACE/work/disk.qcow2
+                      --dest "$GITHUB_WORKSPACE/work/disk.qcow2"
           ls -l "$GITHUB_WORKSPACE/work/"
-          qemu-img check $GITHUB_WORKSPACE/work/disk.qcow2 || true
+          # A TRUNCATED ARTIFACT IS ONE LINE HERE RATHER THAN A BOOT TIMEOUT. `qemu-img check` reads
+          # the image's own metadata, so a resume that ended early says so by name.
+          qemu-img check "$GITHUB_WORKSPACE/work/disk.qcow2" || true
 
       - name: start the daemon
-        # ONE PROCESS OWNS THE MACHINE FOR THE WHOLE STAGE. It is started in the background because
+        # ONE PROCESS OWNS THE MACHINE FOR THE WHOLE STAGE. It runs in the background because
         # `easyvm run` is a CLIENT: it sends a request and returns, and the daemon drives the file.
         # That is what makes a hung stage diagnosable - `status` still answers.
-        #
-        # THE READY LINE IS THE CONTRACT, not the socket file: a file that exists is not a daemon
-        # that answers. The output is CAPTURED FIRST and searched with `case`: `| grep -q` closes
-        # the pipe on its first match, the writer takes SIGPIPE, and `set -o pipefail` turns that
-        # into exit 141 for a check that SUCCEEDED. That has happened twice here already.
-        run: |
-          set -eu
-          easyvm serve --work "$GITHUB_WORKSPACE/work" --novnc-port 6080 > $GITHUB_WORKSPACE/work/daemon.log 2>&1 &
-          echo $! > $GITHUB_WORKSPACE/work/daemon.pid
-          for i in $(seq 1 30); do
-            logs=$(cat $GITHUB_WORKSPACE/work/daemon.log || true)
-            case "$logs" in *"listening on"*) break ;; esac
-            sleep 1
-          done
-          logs=$(cat $GITHUB_WORKSPACE/work/daemon.log || true)
-          printf '%s\n' "$logs"
-          case "$logs" in
-            *"listening on"*) echo "the daemon is up" ;;
-            *) echo "=== THE DAEMON DID NOT COME UP ==="; exit 1 ;;
-          esac
-
-      - name: ask for the run
-        # THE FILE IS THE ARGUMENT. `--boot-disk` names what to start and `--out` where a
-        # `compress:` writes - both are facts about the job, which is why they are flags and not
-        # YAML: the same file must be runnable against any copy of the disk.
-        run: |
-          set -eu
-          easyvm run "$GITHUB_WORKSPACE/windows/11/steps/ssh.yaml" \
-            --work "$GITHUB_WORKSPACE/work" \
-            --boot-disk $GITHUB_WORKSPACE/work/disk.qcow2 \
-            --out $GITHUB_WORKSPACE/work/windows11-ssh.qcow2 \
-            --password admin || {
-              echo "=== THE DAEMON REFUSED THE RUN ==="
-              cat $GITHUB_WORKSPACE/work/daemon.log
-              exit 1
-            }
-
-      - name: follow it
-        # SIXTY SECONDS AT A TIME, AND THE STATUS EACH TIME. A stage that reports nothing for forty
-        # minutes is a stage whose failure cannot be placed; `status` is one line and it is already
-        # the fact a reader wants. Matched with `case`, for the SIGPIPE reason above.
-        #
-        # POSIX SH ONLY, BECAUSE A `container:` JOB RUNS STEPS WITH /bin/sh, NOT BASH. The first
-        # version of this loop counted with `$SECONDS`, which bash defines and dash does not:
-        #
-        #     /__w/_temp/xxx.sh: 3: SECONDS: parameter not set
-        #
-        # - so the step died on its third line, having already reported nothing, while the daemon
-        # it was watching was up and starting a guest (run 43018660638). The loop counts its own
-        # iterations instead: sixty sleeps of sixty seconds, which is the same hour and needs no
-        # shell feature beyond arithmetic.
-        #
-        # AND IT IS WRITTEN TO THE STEP SUMMARY AS WELL AS STDOUT, BECAUSE STDOUT IS BUFFERED.
-        # That is not tidiness: this step runs for forty minutes, and GitHub only replays a step's
-        # output once the step is OVER. Run 43022310562 sat in `follow it` for nineteen minutes
-        # with nothing visible, and the difference between "the desktop appeared and it is now
-        # installing OpenSSH" and "the desktop never appeared and it is about to time out" was not
-        # obtainable from the job page at all - which is the same problem this loop exists to
-        # solve, one level up. `$GITHUB_STEP_SUMMARY` is re-read as it is written.
-        run: |
-          set -eu
-          summary=${GITHUB_STEP_SUMMARY:-/dev/null}
-          printf '| time | state |\n|---|---|\n' >> "$summary"
-          rounds=0
-          while [ "$rounds" -lt 62 ]; do
-            rounds=$((rounds + 1))
-            state=$(easyvm status --work "$GITHUB_WORKSPACE/work" 2>&1 || true)
-            printf '[%s] %s\n' "$(date +%H:%M:%S)" "$state"
-            # One table row per minute, with the newlines flattened so the table stays a table.
-            one_line=$(printf '%s' "$state" | tr '\n' ' ' | tr -s ' ')
-            printf '| %s | %s |\n' "$(date +%H:%M:%S)" "$one_line" >> "$summary"
-            case "$state" in
-              *"status: finished"*)
-                echo "=== THE WALKTHROUGH FINISHED ==="
-                exit 0 ;;
-              *"status: failed"*)
-                echo "=== THE WALKTHROUGH FAILED ==="
-                cat $GITHUB_WORKSPACE/work/daemon.log
-                exit 1 ;;
-            esac
-            if [ "$rounds" -lt 62 ]; then sleep 60; fi
-          done
-          echo "=== THE WALKTHROUGH DID NOT FINISH IN TIME ==="
-          cat $GITHUB_WORKSPACE/work/daemon.log
-          exit 1
-
-      - name: what it produced
-        if: always()
-        run: |
-          set -u
-          ls -l "$GITHUB_WORKSPACE/work/" || true
-          # THE DISK IS THE THING THE STAGE EXISTS TO PROVE, so its size is the first number a
-          # reader wants - and the last frame is what a failure is diagnosed from.
-          for f in "$GITHUB_WORKSPACE"/work/*.qcow2; do
-            [ -e "$f" ] || continue
-            printf '%s: %s MiB\n' "$f" "$(( $(stat -c %s "$f") >> 20 ))"
-          done
-
-      - name: stop the daemon
-        if: always()
-        run: |
-          set -u
-          if [ -f $GITHUB_WORKSPACE/work/daemon.pid ]; then
-            pid=$(cat $GITHUB_WORKSPACE/work/daemon.pid)
-            kill "$pid" 2>/dev/null || true
-            # A DAEMON THAT DOES NOT EXIT IS HOLDING /dev/kvm. One `easyvm stop` is the polite
-            # way; SIGKILL follows only if it is still there.
-            easyvm stop --work "$GITHUB_WORKSPACE/work" 2>/dev/null || true
-            sleep 5
-            kill -9 "$pid" 2>/dev/null || true
-          fi
-          pgrep -a qemu-system-x86_64 || true
-
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: windows11-walkthrough
-          # RELATIVE TO THE WORKSPACE, because a `container:` job copies the workspace in and out
-          # and an absolute path outside it is not collected.
-          path: |
-            work/daemon.log
-            work/*.mp4
-            work/*.qcow2
-          if-no-files-found: warn
-          retention-days: 7
-
-  # ===========================================================================
-  # macOS 15 - install from the recovery image and stop at the Setup Assistant.
-  #
-  # THIS IS THE STAGE THAT PROVES THE FIRMWARE. Everything a macOS guest needs that a Windows
-  # guest does not is decided here: OpenCore as a pflash pair, the boot image in a GPT partition
-  # at bootindex 0, the Apple SMC with its key, twenty CPU flags of which `+invtsc` is the one that
-  # deadlocks when missing, vmware-svga rather than -vga, and the recovery image as removable media
-  # because macOS installs FROM USB.
-  #
-  # IT STARTS FROM AN EMPTY DISK AND INSTALLS, which is why it takes an hour: macOS copies about
-  # 36 GiB, takes an APFS snapshot, discards its staging volume and switches root. `discard=unmap`
-  # is OFF for exactly that reason (run 42009463444 wrote 36774 MiB, dropped to 19761 and froze at
-  # "About 48 minutes remaining"), and internal/machine turns it off from the presence of
-  # `recovery:` alone.
-  # ===========================================================================
-  macos:
-    if: inputs.macos_run
-    runs-on: ubuntu-24.04
-    timeout-minutes: ${{ fromJSON(inputs.macos_timeout_minutes || '150') }}
-    container:
-      image: ghcr.io/${{ github.repository }}:latest
-      credentials:
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-      options: --device /dev/kvm --device /dev/net/tun --cap-add NET_ADMIN
-    permissions:
-      contents: read
-      packages: read
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: prepare
-        # THE SAME THREE DEVICES WINDOWS NEEDS, ASSERTED THE SAME WAY. A runner without /dev/kvm
-        # would make a 45-minute install into a six-hour one, and the timeout would report it as a
-        # slow disk rather than as a missing device.
-        run: |
-          set -eu
-          test -e /dev/kvm || { echo "=== NO /dev/kvm ==="; exit 1; }
-          test -e /dev/net/tun || { echo "=== NO /dev/net/tun ==="; exit 1; }
-          ls -l /dev/kvm /dev/net/tun
-          easyvm versions
-          # THE TOOLS THIS STAGE ACTUALLY USES, present in the image and named here so a missing
-          # one is this step rather than a failure forty minutes in.
-          for tool in qemu-img 7z mformat mcopy mdir xorriso unzip; do
-            command -v "$tool" > /dev/null || { echo "=== $tool IS MISSING ==="; exit 1; }
-          done
-          mkdir -p "$GITHUB_WORKSPACE/work"
-
-      - name: start the daemon
-        # NO DISK IS PULLED, BECAUSE THIS STAGE INSTALLS. The disk is created empty by the file's
-        # own first step, and the two inputs that ARE fetched - the recovery image and the OpenCore
-        # build - are named by the file, so they are fetched by the run rather than by this job.
         run: |
           set -eu
           easyvm serve --work "$GITHUB_WORKSPACE/work" --novnc-port 6080 \
             > "$GITHUB_WORKSPACE/work/daemon.log" 2>&1 &
           echo $! > "$GITHUB_WORKSPACE/work/daemon.pid"
+          # THE READY LINE IS THE CONTRACT, not the socket file: a file that exists is not a daemon
+          # that answers. The output is CAPTURED FIRST and matched with `case`, because
+          # `| grep -q` closes the pipe on its first match, the writer takes SIGPIPE, and
+          # `set -o pipefail` turns that into exit 141 for a check that SUCCEEDED.
           for i in $(seq 1 30); do
             logs=$(cat "$GITHUB_WORKSPACE/work/daemon.log" || true)
             case "$logs" in *"listening on"*) break ;; esac
@@ -314,12 +236,27 @@ jobs:
           esac
 
       - name: ask for the run
+        # THE FILE IS THE ARGUMENT. `--boot-disk` names what to start and `--out` where a
+        # `compress:` writes - both are facts about the job, so they are flags and not YAML: the
+        # same file must be runnable against any copy of the disk.
+        #
+        # `--shutdown=kill` IS FOR THE STAGES THAT OWN NOTHING. An install's disk is throwaway
+        # until `compress:` reads it, and a macOS stage that is handed an overlay must not spend
+        # five minutes asking the guest to power down - macOS answers the power button with a
+        # dialog nobody clicks.
         run: |
           set -eu
-          easyvm run "$GITHUB_WORKSPACE/macos/15/steps/setup.yaml" \
+          disk_args=""
+          if [ -f "$GITHUB_WORKSPACE/work/disk.qcow2" ]; then
+            disk_args="--boot-disk $GITHUB_WORKSPACE/work/disk.qcow2"
+          fi
+          # shellcheck disable=SC2086
+          easyvm run "$GITHUB_WORKSPACE/${{ matrix.file }}" \
             --work "$GITHUB_WORKSPACE/work" \
-            --out "$GITHUB_WORKSPACE/work/macos15-setup.qcow2" \
-            --password admin || {
+            $disk_args \
+            --out "$GITHUB_WORKSPACE/work/${{ matrix.out }}" \
+            --password admin \
+            || {
               echo "=== THE DAEMON REFUSED THE RUN ==="
               cat "$GITHUB_WORKSPACE/work/daemon.log"
               exit 1
@@ -327,14 +264,15 @@ jobs:
 
       - name: follow it
         # SIXTY SECONDS AT A TIME, TO THE STEP SUMMARY AS WELL AS STDOUT - a step that runs for an
-        # hour is a step whose stdout is invisible until it ends, and "which step is it on" is the
-        # one question an in-progress install has.
+        # hour has invisible stdout until it ends, and "which step is it on" is the one question an
+        # in-progress stage has. Matched with `case`, for the SIGPIPE reason above.
         run: |
           set -eu
           summary=${GITHUB_STEP_SUMMARY:-/dev/null}
           printf '| time | state |\n|---|---|\n' >> "$summary"
           rounds=0
-          while [ "$rounds" -lt 140 ]; do
+          limit=$(( ${{ matrix.timeout }} + 5 ))
+          while [ "$rounds" -lt "$limit" ]; do
             rounds=$((rounds + 1))
             state=$(easyvm status --work "$GITHUB_WORKSPACE/work" 2>&1 || true)
             printf '[%s] %s\n' "$(date +%H:%M:%S)" "$state"
@@ -349,7 +287,7 @@ jobs:
                 cat "$GITHUB_WORKSPACE/work/daemon.log"
                 exit 1 ;;
             esac
-            if [ "$rounds" -lt 140 ]; then sleep 60; fi
+            if [ "$rounds" -lt "$limit" ]; then sleep 60; fi
           done
           echo "=== THE WALKTHROUGH DID NOT FINISH IN TIME ==="
           cat "$GITHUB_WORKSPACE/work/daemon.log"
@@ -381,7 +319,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: macos15-setup-walkthrough
+          name: ${{ matrix.name }}
           path: |
             work/daemon.log
             work/*.mp4
