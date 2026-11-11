@@ -348,3 +348,50 @@ func TestASmallESPIsRefused(t *testing.T) {
 		t.Fatalf("the refusal must say it is about cluster count; got %v", err)
 	}
 }
+
+// A MACOS BUILD WITHOUT A RECOVERY IMAGE IS REFUSED BEFORE ANY DOWNLOAD, AND NAMING THE DRIVER.
+//
+// IT IS NOT OPTIONAL AND ITS ABSENCE IS SILENT AT THE END. The APFS driver is extracted from that
+// image; a boot image without one is started by the firmware and cannot read the system the
+// installer just wrote. EnableJumpstart=true does not help - it HOOKS a driver the firmware is
+// expected to have, and OVMF has none - so the symptom is an installation that completes and a
+// picker listing only Reset NVRAM and Toggle SIP, with nothing in any log.
+//
+// THE ORDER OF THE CHECK IS THE POINT: the four pinned assets are about 20 MB of download, so a
+// caller that forgot to name the recovery image has to be told in a second rather than after the
+// transfer. `Build` used to skip the APFS step when the image was empty, which made the one case
+// that must never happen indistinguishable from a normal build.
+func TestABuildWithoutRecoveryIsRefusedBeforeDownloading(t *testing.T) {
+	dir := t.TempDir()
+	_, err := Build(Spec{Release: "15", Work: dir}, func(string) {})
+	if err == nil {
+		t.Fatal("a macOS build with no recovery image must be refused: Apple's APFS driver comes " +
+			"out of it, and without one the guest installs a system it cannot boot")
+	}
+	for _, want := range []string{"APFS", "apfs.efi"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("the refusal should name %q; got %v", want, err)
+		}
+	}
+	// AND NOTHING WAS DOWNLOADED. A partial asset in the work directory means the refusal came
+	// after a transfer rather than before it.
+	entries, readErr := os.ReadDir(dir)
+	if readErr == nil {
+		for _, e := range entries {
+			t.Fatalf("the refusal left %q in the work directory, so it happened after a "+
+				"download rather than before one", e.Name())
+		}
+	}
+}
+
+// AND A NAMED BUT ABSENT IMAGE IS REFUSED TOO, so a mistyped path does not become a build.
+func TestAMissingRecoveryPathIsRefused(t *testing.T) {
+	_, err := Build(Spec{Release: "15", Work: t.TempDir(),
+		Recovery: filepath.Join(t.TempDir(), "absent.dmg")}, func(string) {})
+	if err == nil {
+		t.Fatal("a recovery path that does not exist must be refused")
+	}
+	if !strings.Contains(err.Error(), "recovery image") {
+		t.Fatalf("the refusal must say what is missing; got %v", err)
+	}
+}

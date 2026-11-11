@@ -165,6 +165,25 @@ func Build(spec Spec, log func(string)) (Result, error) {
 	if spec.Model == "" {
 		spec.Model = "iMacPro1,1"
 	}
+	// THE RECOVERY IMAGE IS REFUSED HERE, BEFORE ANYTHING IS DOWNLOADED.
+	//
+	// IT IS NOT OPTIONAL, AND ITS ABSENCE IS SILENT AT THE END: the APFS driver is extracted from
+	// that image, and a build without one produces a boot image the firmware starts and that cannot
+	// read the system it installed. EnableJumpstart=true does not help - it HOOKS a driver the
+	// firmware is expected to have, and OVMF has none - so the symptom is an installation that
+	// completes and a picker listing only Reset NVRAM and Toggle SIP, with nothing in any log.
+	//
+	// Checked FIRST because the four assets are 20 MB of download: a caller that forgot to name the
+	// recovery image should be told that in a second, not after the transfer and a build.
+	if spec.Recovery == "" {
+		return Result{}, fmt.Errorf("no recovery image: it is the installer AND the only source of "+
+			"Apple's APFS driver (%s), which OpenCore cannot read an APFS partition without. A "+
+			"macOS guest built without it installs a system it cannot boot", apfsDriverPath)
+	}
+	if _, err := os.Stat(spec.Recovery); err != nil {
+		return Result{}, fmt.Errorf("no recovery image at %s: %w. It is an input to this build, "+
+			"not just to the boot: %s comes out of it", spec.Recovery, err, apfsDriverPath)
+	}
 	if err := os.MkdirAll(spec.Work, 0o755); err != nil {
 		return Result{}, err
 	}
@@ -211,12 +230,14 @@ func Build(spec Spec, log func(string)) (Result, error) {
 	}
 
 	// APFS AFTER THE CONFIG AND BEFORE THE BOOT IMAGE, and both halves of that order matter:
-	// install_apfs_driver() REGISTERS a driver in config.plist, so the config has to exist; and the
-	// driver has to be inside the image, so the image cannot exist yet.
-	if spec.Recovery != "" {
-		if err := InstallAPFSDriver(merged, spec.Recovery, spec.Work, log); err != nil {
-			return Result{}, err
-		}
+	// InstallAPFSDriver REGISTERS a driver in config.plist, so the config has to exist; and the
+	// driver has to be INSIDE the image, so the image cannot exist yet.
+	//
+	// UNCONDITIONAL NOW. It used to be wrapped in `if spec.Recovery != ""`, which made the one case
+	// that must never happen - a boot image with no APFS driver - indistinguishable from a normal
+	// build. The emptiness is refused at the top of this function.
+	if err := InstallAPFSDriver(merged, spec.Recovery, spec.Work, log); err != nil {
+		return Result{}, err
 	}
 
 	boot := filepath.Join(spec.Work, "boot.img")
