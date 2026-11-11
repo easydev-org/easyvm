@@ -332,9 +332,22 @@ steps:
   #     -State Listen -LocalPort 22 | ...)")
   #
   # which reads like a broken cmdlet and was a budget the guest cannot meet.
+  # `netstat`, NOT `Get-NetTCPConnection`, AND THE MEASUREMENT IS THE REASON.
+  #
+  # `Get-NetTCPConnection` ENUMERATES THE WHOLE TCP TABLE through the IP Helper service, and on this
+  # guest it does not finish in THREE MINUTES: run 43052807693 timed it at `3m0s` with a 180-second
+  # budget, after `Get-Service sshd` in the step above had answered in about two. So PowerShell starts
+  # fine and this cmdlet is the problem, not the guest's speed.
+  #
+  # `netstat -an` IS THE NATIVE TOOL for the same fact and answers from the kernel's own snapshot. It
+  # prints every socket, so the step greps for the listening line rather than parsing output.
+  #
+  # AND IT PROVES SOMETHING SLIGHTLY STRONGER THAN THE CMDLET DID: the cmdlet asked the local TCP
+  # table, while `netstat -an` shows the address the socket is bound to - so a sshd listening only on
+  # a loopback interface no longer reads as healthy.
   - name: prove sshd is listening
-    ssh: powershell -Command "(Get-NetTCPConnection -State Listen -LocalPort 22 | Select-Object -First 1).LocalPort"
-    timeout: 180
+    ssh: cmd /c 'netstat -an | findstr ":22 " | findstr LISTENING'
+    timeout: 90
 
   - name: prove the account can log in
     ssh: whoami
@@ -342,9 +355,16 @@ steps:
 
   # THE DISK'S OWN VERSION, because the next stage's toolchain has to match it and a Windows
   # build number is the only thing that says which SDKs will install here.
+  # 180 SECONDS FOR A ONE-LINE PowerShell COMMAND, AND THE REASON IS THE SAME AS THE TWO ABOVE:
+  # the command costs 40 to 55 seconds to START on this guest before it runs at all. A 60-second
+  # budget is a coin toss, and a timeout reports the COMMAND rather than the cost - which is how the
+  # `Get-NetTCPConnection` step looked like a broken cmdlet when it was a budget.
+  #
+  # `[System.Environment]::OSVersion` IS A PROPERTY READ, not a cmdlet call, so it is the cheapest
+  # PowerShell this file can ask. Even so, the floor is the interpreter's start.
   - name: prove the build
     ssh: powershell -Command "[System.Environment]::OSVersion.Version.ToString()"
-    timeout: 60
+    timeout: 180
 
   # AND CLOSED HERE, so the file ends at the stage's last step rather than wherever the process
   # exited. `record: false` finalises through the same encoder and is a no-op when nothing is
