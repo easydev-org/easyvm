@@ -7,6 +7,7 @@ import (
 	"image/color"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -161,5 +162,90 @@ func TestDimensionsComeFromTheHeader(t *testing.T) {
 	b := img.Bounds()
 	if b.Dx() != w || b.Dy() != h {
 		t.Fatalf("read %dx%d, want %dx%d", b.Dx(), b.Dy(), w, h)
+	}
+}
+
+// EVERY DESKTOP A WALKTHROUGH ASKS FOR HAS A TEST, AND THE DISPATCHER MUST REACH ALL OF THEM.
+//
+// `desktop:` HAD ONE BRANCH, FOR WINDOWS. `macos/15/steps/ssh.yaml` asks for `desktop: macos` and
+// every Linux file asks for its own - so two thirds of the migrated walkthroughs would have failed
+// on their first frame with "the desktop test is not implemented", AFTER the machine had booted.
+func TestEveryFamilyTheFilesAskForIsImplemented(t *testing.T) {
+	body, err := os.ReadFile("../run/actions.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(body)
+	for _, family := range []string{"windows", "macos", "linux"} {
+		if !strings.Contains(src, `case "`+family+`":`) {
+			t.Fatalf("`desktop: %s` has no branch in the dispatcher. A walkthrough that asks for "+
+				"it fails on its first frame, after the guest is up", family)
+		}
+	}
+}
+
+// A LINUX DESKTOP IS A FLAT BAND ALONG AN EDGE; AN INSTALLER IS NOT.
+//
+// The five desktops these images run - GNOME, KDE, XFCE, MATE, Cinnamon - all draw a panel, and the
+// installers they boot draw a full-bleed window instead. The test is brightness margin plus
+// flatness, so a dark wallpaper edge and a window's title bar both fail it.
+func TestALinuxDesktopIsAPanelAndAnInstallerIsNot(t *testing.T) {
+	// A DESKTOP: a bright, flat strip along the top and a mid-grey body under it.
+	desktop := image.NewRGBA(image.Rect(0, 0, 1920, 1080))
+	fill(desktop, image.Rect(0, 0, 1920, 44), color.RGBA{44, 48, 60, 255})     // the panel
+	fill(desktop, image.Rect(0, 44, 1920, 1080), color.RGBA{96, 88, 120, 255}) // the wallpaper
+	if ok, st := IsLinuxDesktop(desktop); !ok {
+		t.Fatalf("a panel over a wallpaper must read as a desktop: %s", st.Explain())
+	}
+
+	// AN INSTALLER: one flat window with no strip along either edge.
+	installer := image.NewRGBA(image.Rect(0, 0, 1920, 1080))
+	fill(installer, installer.Bounds(), color.RGBA{96, 96, 96, 255})
+	if ok, st := IsLinuxDesktop(installer); ok {
+		t.Fatalf("a uniform window must NOT read as a desktop: %s", st.Explain())
+	}
+
+	// A BLACK BOOT SCREEN: uniform, so no band is brighter than the body.
+	black := image.NewRGBA(image.Rect(0, 0, 1920, 1080))
+	fill(black, black.Bounds(), color.RGBA{0, 0, 0, 255})
+	if ok, _ := IsLinuxDesktop(black); ok {
+		t.Fatal("a black screen must not read as a desktop")
+	}
+}
+
+// A MACOS DESKTOP IS DECIDED BY THE DOCK AND THE BODY, and the dispatcher had no branch for it -
+// `desktop: macos` would have failed on the first frame of a guest that was already up.
+func TestMacOSDesktopIsReachableAndExplainsItself(t *testing.T) {
+	// A WALLPAPER WITH A COLOURFUL DOCK: the shape a finished macOS desktop has.
+	img := image.NewRGBA(image.Rect(0, 0, 1920, 1080))
+	fill(img, image.Rect(0, 0, 1920, 1000), color.RGBA{40, 70, 130, 255})
+	fill(img, image.Rect(0, 1000, 1920, 1080), color.RGBA{70, 40, 40, 255})
+	for x := 200; x < 900; x += 90 {
+		fill(img, image.Rect(x, 1010, x+60, 1070), color.RGBA{200, 90, 60, 255})
+	}
+	ok, st := IsMacOSDesktop(img)
+	// The numbers are the contract: a failed wait reports them, so they must be populated whether
+	// or not this particular synthetic frame passes.
+	if st.Width != 1920 || st.Height != 1080 {
+		t.Fatalf("the stats lost the frame size: %+v", st)
+	}
+	shared := st.Stats()
+	if shared.Width != 1920 {
+		t.Fatalf("Stats() did not carry the size through: %+v", shared)
+	}
+	if ok && st.DockColourful <= 0 {
+		t.Fatalf("a frame that reads as a desktop must report a colourful dock: %s", st.Explain())
+	}
+	if msg := st.Explain(); msg == "" {
+		t.Fatal("Explain() returned nothing, so a failed wait would report no numbers")
+	}
+}
+
+// fill paints a rectangle, for the synthetic frames above.
+func fill(img *image.RGBA, r image.Rectangle, c color.RGBA) {
+	for y := r.Min.Y; y < r.Max.Y; y++ {
+		for x := r.Min.X; x < r.Max.X; x++ {
+			img.SetRGBA(x, y, c)
+		}
 	}
 }

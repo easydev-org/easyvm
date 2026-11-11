@@ -248,8 +248,8 @@ const (
 	MinDesktopBody = 120.0
 )
 
-// macOSStats are the numbers the Dock test decides on.
-type macOSStats struct {
+// MacOSStats are the numbers the Dock test decides on.
+type MacOSStats struct {
 	Width, Height int
 	DockSpread    float64
 	DockColourful float64
@@ -262,7 +262,7 @@ type macOSStats struct {
 // distinguishes a lit lock screen from a dark boot: both have no Dock, and one of them is a machine
 // that has finished. Saying which it was is the difference between "wait longer" and "look at the
 // password".
-func IsMacOSDesktop(img image.Image) (bool, macOSStats) {
+func IsMacOSDesktop(img image.Image) (bool, MacOSStats) {
 	b := img.Bounds()
 	w, h := b.Dx(), b.Dy()
 
@@ -292,7 +292,7 @@ func IsMacOSDesktop(img image.Image) (bool, macOSStats) {
 			}
 		}
 	}
-	stats := macOSStats{Width: w, Height: h}
+	stats := MacOSStats{Width: w, Height: h}
 	if count > 0 {
 		mean := total / float64(count)
 		variance := totalSq/float64(count) - mean*mean
@@ -311,7 +311,7 @@ func IsMacOSDesktop(img image.Image) (bool, macOSStats) {
 }
 
 // Explain is the log line for a macOS desktop answer.
-func (s macOSStats) Explain() string {
+func (s MacOSStats) Explain() string {
 	why := ""
 	switch {
 	case s.BodyMean < MinDesktopBody:
@@ -648,4 +648,117 @@ func clampTo(min, size, v int) int {
 		return min + size
 	}
 	return v
+}
+
+// Stats converts the macOS numbers into the shared shape a `desktop:` step logs.
+func (m MacOSStats) Stats() Stats {
+	return Stats{
+		Width: m.Width, Height: m.Height,
+		BottomVar:  m.DockSpread,
+		BottomSat:  m.DockColourful,
+		BottomMean: [3]float64{m.BodyMean, m.BodyMean, m.BodyMean},
+	}
+}
+
+// IsLinuxDesktop reports whether a frame shows a desktop panel.
+//
+// A LINUX DESKTOP IS A PANEL AND AN INSTALLER IS NOT, and that is the whole test. GNOME, KDE, XFCE,
+// MATE and Cinnamon all draw a solid strip along one edge - a top bar with a clock, or a bottom dock
+// with launchers - while the installers these images boot (Ubiquity, Calamares, Anaconda, the MX and
+// Mint wizards) draw either a full-bleed window or a bordered card with nothing along the edge.
+//
+// THE MEASUREMENT IS A WIDE FLAT BAND, on either edge, that is BRIGHTER than the body and holds that
+// brightness across most of the width. A window's title bar fails it because it does not reach the
+// screen edge; a black boot screen fails it because the band is not brighter than the body.
+func IsLinuxDesktop(img image.Image) (bool, Stats) {
+	b := img.Bounds()
+	w, h := b.Dx(), b.Dy()
+	st := Stats{Width: w, Height: h}
+	if w == 0 || h == 0 {
+		return false, st
+	}
+
+	body, bodySat := bandStats(img, w, h, 0.35, 0.65)
+	bodyMean := sum(body) / 3.0
+	st.TopMean = body
+	st.BottomMean = body
+
+	// THE TWO EDGES A PANEL IS DRAWN ON. 4% of the height is 43 px at 1080 - a panel is 24 to 48.
+	for _, edge := range []struct {
+		lo, hi float64
+		top    bool
+	}{
+		{0.00, 0.045, true},
+		{0.955, 1.00, false},
+	} {
+		band, bandSat := bandStats(img, w, h, edge.lo, edge.hi)
+		mean := sum(band) / 3.0
+		// A PANEL IS FLAT: its own variance is small, because it is one colour along its whole
+		// width. Wallpaper along an edge is not.
+		spread := bandSpread(img, w, h, edge.lo, edge.hi)
+		if edge.top {
+			st.TopVar, st.TopSat = spread, bandSat
+		} else {
+			st.BottomVar, st.BottomSat = spread, bandSat
+		}
+
+		// A PANEL IS FLAT AND DIFFERENT FROM THE BODY, IN EITHER DIRECTION.
+		//
+		// THE DIRECTION IS NOT PART OF THE TEST, and assuming it was is a mistake this test caught:
+		// a dark theme draws a nearly-black bar over a mid-grey wallpaper, and a light theme the
+		// reverse. What separates a panel from the wallpaper beside it is that it is ONE COLOUR
+		// across the full width and that its brightness DIFFERS from the body under it.
+		//
+		// The flatness is what rejects a photograph (a wallpaper's edge has its own variation), and
+		// the difference is what rejects a uniform window - an installer is one colour top to bottom.
+		margin := mean - bodyMean
+		if margin < 0 {
+			margin = -margin
+		}
+		if margin > 18 && spread < 42 && bandSat > 0.05 {
+			st.BrightnessDrop = margin
+			return true, st
+		}
+	}
+	st.BrightnessDrop = 0
+	_ = bodySat
+	return false, st
+}
+
+// bandSpread is the mean absolute deviation inside a band, which is what "flat" means here.
+func bandSpread(img image.Image, w, h int, from, to float64) float64 {
+	b := img.Bounds()
+	y0 := b.Min.Y + int(float64(h)*from)
+	y1 := b.Min.Y + int(float64(h)*to)
+	if y1 <= y0 {
+		y1 = y0 + 1
+	}
+	if y1 > b.Max.Y {
+		y1 = b.Max.Y
+	}
+	var total, count float64
+	for y := y0; y < y1; y++ {
+		for x := b.Min.X; x < b.Max.X; x += 4 {
+			r, g, bl, _ := img.At(x, y).RGBA()
+			total += float64((r>>8 + g>>8 + bl>>8) / 3)
+			count++
+		}
+	}
+	if count == 0 {
+		return 0
+	}
+	mean := total / count
+	var dev float64
+	for y := y0; y < y1; y++ {
+		for x := b.Min.X; x < b.Max.X; x += 4 {
+			r, g, bl, _ := img.At(x, y).RGBA()
+			v := float64((r>>8 + g>>8 + bl>>8) / 3)
+			if v > mean {
+				dev += v - mean
+			} else {
+				dev += mean - v
+			}
+		}
+	}
+	return dev / count
 }

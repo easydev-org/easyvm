@@ -325,8 +325,22 @@ func (e *Executor) doDesktop(s walk.Step) error {
 		switch family {
 		case "windows":
 			ok, lastStats = screen.IsWindowsDesktop(img)
+		case "macos":
+			// A MACOS DESKTOP IS DECIDED BY THE DOCK AND THE BODY, not by words: there is no text
+			// on it to read. `internal/screen.IsMacOSDesktop` has been implemented and tested since
+			// the port began; the dispatcher simply had no branch for it, so `desktop: macos` in
+			// macos/15/steps/ssh.yaml would have failed on the first frame.
+			var mac screen.MacOSStats
+			ok, mac = screen.IsMacOSDesktop(img)
+			lastStats = mac.Stats()
+		case "linux":
+			// A LINUX DESKTOP IS A PANEL: a strip of colour along an edge that the installer under
+			// it does not draw. The same measurement serves every distribution here because they all
+			// run a panel - GNOME, KDE, XFCE, MATE, Cinnamon - and the installers they boot do not.
+			ok, lastStats = screen.IsLinuxDesktop(img)
 		default:
-			return fail(s.Name, "the %q desktop test is not implemented in this build", family)
+			return fail(s.Name, "the %q desktop test is not implemented in this build; the three "+
+				"are windows, macos and linux", family)
 		}
 		if ok {
 			e.Driver.Log(fmt.Sprintf("  a desktop is on screen (%s); %s",
