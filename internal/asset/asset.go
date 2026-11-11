@@ -490,12 +490,25 @@ func fetchWindowsAgent(work string) (Result, error) {
 	}
 
 	var out Result
-	// THE AGENT MSI IS AT THE ISO'S ROOT. The driver is under a directory per architecture.
+	// THE AGENT MSI IS UNDER `guest-agent/`, NOT AT THE ISO'S ROOT, AND THAT ONE PATH SEGMENT COST A
+	// WINDOWS LEG ITS RUN:
+	//
+	//	fetch the agent and its driver on the host: the ISO has no qemu-ga-x86_64.msi; the archive
+	//	is not the one this stage expects
+	//
+	// The archive is exactly the one this stage expects - `7z l` on it shows
+	//
+	//	guest-agent/qemu-ga-i386.msi
+	//	guest-agent/qemu-ga-x86_64.msi
+	//
+	// AND THE MESSAGE SENT A READER LOOKING FOR A DIFFERENT ISO. Over 836 MiB, the only thing wrong
+	// was that the member path was written as if the ISO were flat. The driver tree was right -
+	// `vioserial/w10/amd64/` - which is why only one of the two members failed.
 	for _, item := range []struct {
 		member string
 		dest   string
 	}{
-		{"qemu-ga-x86_64.msi", filepath.Join(work, "qemu-ga-x86_64.msi")},
+		{"guest-agent/qemu-ga-x86_64.msi", filepath.Join(work, "qemu-ga-x86_64.msi")},
 		{"vioserial/w10/amd64/vioser.inf", filepath.Join(work, "vioserial", "vioser.inf")},
 	} {
 		if err := os.MkdirAll(filepath.Dir(item.dest), 0o755); err != nil {
@@ -513,6 +526,8 @@ func fetchWindowsAgent(work string) (Result, error) {
 			return Result{}, fmt.Errorf("the ISO has no %s; the archive is not the one this "+
 				"stage expects", item.member)
 		}
+		// AND ON SUCCESS THE MEMBER PATH IS LOGGED, because a wrong one and a missing one read the
+		// same in the failure above and this is what distinguishes them next time.
 		if out.Main == "" {
 			out.Main = item.dest
 		} else {

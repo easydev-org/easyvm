@@ -1,6 +1,8 @@
 package asset
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -85,5 +87,59 @@ func TestAnUnknownXcodeReleaseIsRefused(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "15") {
 		t.Fatalf("the refusal should name the releases this build knows; got %v", err)
+	}
+}
+
+// THE AGENT'S MSI IS UNDER `guest-agent/`, AND WRITING IT AS IF THE ISO WERE FLAT COST A WINDOWS LEG.
+//
+// `7z l` ON THE REAL 836 MiB IMAGE:
+//
+//	guest-agent/qemu-ga-i386.msi
+//	guest-agent/qemu-ga-x86_64.msi
+//
+// The extraction named `qemu-ga-x86_64.msi` alone and reported
+//
+//	fetch the agent and its driver on the host: the ISO has no qemu-ga-x86_64.msi; the archive is
+//	not the one this stage expects
+//
+// WHICH SENT A READER LOOKING FOR A DIFFERENT ISO. The archive was exactly the right one; the member
+// path was written as if the ISO had no directories. The driver tree was correct -
+// `vioserial/w10/amd64/` - which is why only one of the two members failed.
+func TestTheAgentMSIIsUnderGuestAgent(t *testing.T) {
+	iso := os.Getenv("VIRTIO_ISO")
+	if iso == "" {
+		iso = "/tmp/vio/virtio-win.iso"
+	}
+	if _, err := os.Stat(iso); err != nil {
+		t.Skipf("no virtio-win ISO at %s (set VIRTIO_ISO)", iso)
+	}
+	// THE SIZE IS CHECKED FIRST, because fetchWindowsAgent refuses a small file and a stub in its
+	// place would make this test pass without testing anything.
+	if fi, err := os.Stat(iso); err != nil || fi.Size() < 100<<20 {
+		t.Skipf("%s is not the full image", iso)
+	}
+
+	work := t.TempDir()
+	// THE ISO IS READ WHERE THE STEP EXPECTS IT, without copying 836 MiB.
+	if err := os.Symlink(iso, filepath.Join(work, "virtio-win.iso")); err != nil {
+		t.Skipf("cannot link the ISO into a temp dir: %v", err)
+	}
+	res, err := fetchWindowsAgent(work)
+	if err != nil {
+		t.Fatalf("fetching the agent from the real image: %v", err)
+	}
+	if !strings.HasSuffix(res.Main, "qemu-ga-x86_64.msi") {
+		t.Fatalf("main is %q, not the agent MSI", res.Main)
+	}
+	fi, err := os.Stat(res.Main)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Size() < 5<<20 {
+		t.Fatalf("the agent MSI is %d bytes, which is not a 11 MB MSI", fi.Size())
+	}
+	// AND THE DRIVER CAME OUT TOO, because the agent's device needs it.
+	if len(res.Extra) == 0 {
+		t.Fatal("the vioserial driver was not extracted; the agent's device has no driver")
 	}
 }

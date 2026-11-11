@@ -166,6 +166,58 @@ steps:
   # THE SEARCH IS THE ONE windows/11/probe.ps1 ALREADY USES for `pwsh`, for the same reason: a
   # product installed five seconds ago is not in this session's PATH, but it is in the machine's
   # (and in the user's, which is where winget lives).
+  # WINGET'S SOURCE INDEX IS NOT READY WHEN THE DESKTOP IS, AND THAT IS A SEPARATE WAIT.
+  #
+  # A desktop appears when OOBE and the first logon finish; `winget` then still has to sync its
+  # source the first time it runs, which is a download of a few tens of megabytes. Asking for a
+  # package before that finishes returns
+  #
+  #	the script exited 2316632107
+  #
+  # WHICH IS 0x8A15002B - APPINSTALLER_CLI_ERROR_NO_APPLICATIONS_FOUND. The message says the PACKAGE
+  # does not exist; the state is that winget has no index yet, and the difference decides whether a
+  # reader checks the package id (which is right) or the machine (which is not).
+  #
+  # SO THE INDEX IS WAITED FOR BY ASKING WINGET ITSELF, in a loop that retries the query rather than a
+  # fixed sleep: a runner that is fast reaches it in seconds and a slow one is not cut off.
+  - name: wait for winget to have an index
+    script: |
+      $winget = $null
+      $dirs = @()
+      foreach ($scope in @('Machine', 'User')) {
+        try { $dirs += ([Environment]::GetEnvironmentVariable('Path', $scope) -split ';') } catch { }
+      }
+      $dirs += @("$env:LOCALAPPDATA\Microsoft\WindowsApps", "$env:ProgramFiles\WindowsApps")
+      foreach ($d in $dirs) {
+        if (-not $d) { continue }
+        $cand = Join-Path $d 'winget.exe'
+        if (Test-Path $cand) { $winget = $cand; break }
+      }
+      if (-not $winget) {
+        # A WINDOWS 11 GUEST MAY NOT SHIP winget AT ALL, so its absence is reported rather than waited
+        # on - the step after this one needs a different install path entirely.
+        Write-Output 'WINGET_NOT_FOUND'
+        exit 1
+      }
+      # THE QUERY IS THE READINESS TEST: `winget search` answers from the index, so a successful
+      # search is the index existing.
+      $deadline = (Get-Date).AddMinutes(10)
+      do {
+        $out = & $winget search --id Microsoft.VisualStudio.2022.BuildTools --exact `
+          --accept-source-agreements --disable-interactivity 2>&1 | Out-String
+        if ($LASTEXITCODE -eq 0 -and $out -match 'BuildTools') {
+          Write-Output 'WINGET_READY'
+          exit 0
+        }
+        Write-Output ('waiting for the winget index: ' + ($out -replace "`r?`n", ' ').Trim())
+        Start-Sleep -Seconds 15
+      } while ((Get-Date) -lt $deadline)
+      Write-Output 'WINGET_INDEX_NEVER_READY'
+      exit 1
+    script_shell: powershell
+    script_name: wait-winget.ps1
+    timeout: 900
+
   - name: install the build tools
     script: |
       # WINGET IS AN ALIAS UNDER %LOCALAPPDATA%\Microsoft\WindowsApps AND IS NOT ON THE MACHINE
