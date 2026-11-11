@@ -345,8 +345,26 @@ steps:
   # AND IT PROVES SOMETHING SLIGHTLY STRONGER THAN THE CMDLET DID: the cmdlet asked the local TCP
   # table, while `netstat -an` shows the address the socket is bound to - so a sshd listening only on
   # a loopback interface no longer reads as healthy.
+  # ONE `findstr`, NOT TWO PIPED, AND `-C` FOR "THIS LINE CONTAINS".
+  #
+  # The first version was `netstat -an | findstr ":22 " | findstr LISTENING` and it exited 1:
+  #
+  #	error: prove sshd is listening: the command exited 1
+  #
+  # - which is findstr's "no line matched", not a broken tool. Piping one findstr into another re-runs
+  # the regex engine on the FIRST filter's output, and `netstat -an` pads its address column with
+  # spaces, so the bare `":22 "` pattern is fragile against the exact column width that build prints.
+  #
+  # `-C` TAKES A LITERAL STRING, so no escaping question arises, and the two filters are ordered
+  # LISTENING-then-:22 rather than the other way round: `netstat -ano` prints a remote endpoint for
+  # every established connection, and `:22` alone would match a CLIENT socket to somebody else's sshd.
+  #
+  # AND THIS STEP RUNS OVER THE CONNECTION IT IS PROVING. `ssh:` succeeded, which means a TCP session
+  # to 22 was accepted and authenticated; what this adds is that the socket is in LISTEN state and on
+  # port 22, rather than the session having been handed to something else. It is evidence about the
+  # GUEST'S CONFIGURATION, not about reachability - reachability is already established.
   - name: prove sshd is listening
-    ssh: cmd /c 'netstat -an | findstr ":22 " | findstr LISTENING'
+    ssh: cmd /c 'netstat -ano | findstr -C:"LISTENING" | findstr -C:":22"'
     timeout: 90
 
   - name: prove the account can log in
