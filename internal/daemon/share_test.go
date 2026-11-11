@@ -134,3 +134,67 @@ func TestTheGuestMountUsesSudoWithoutATerminal(t *testing.T) {
 			"succeeds and the function reports a mount that never happened")
 	}
 }
+
+// THE THREE GRACEFUL SHUTDOWNS WERE ALL `not implemented`, AND ONE OF THEM COST A STAGE ITS LAST STEP.
+//
+// Measured on ubuntu's vm leg, which had done EVERYTHING it exists to do:
+//
+//	=== write the launcher
+//	=== copy the launcher in
+//	=== install the launcher
+//	=== prove the launcher is installed
+//	=== stop the machine
+//	  error: stop the machine: shutdown method "ssh" is not implemented in this build; `kill` is
+//
+// `shutdown: ssh` IS WHAT EVERY LINUX AND BSD vm-configure FILE NAMES, so thirteen stages were one step
+// from green and none of them could get there.
+//
+// AND `kill` IS NOT A SUBSTITUTE: the disk that stage publishes IS the artifact, and a killed guest
+// leaves a filesystem that replays a journal on the next boot - which reads in the next stage's log as
+// a slow boot rather than as a torn disk.
+func TestTheThreeGracefulShutdownsAreImplemented(t *testing.T) {
+	body, err := os.ReadFile("driver.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(body)
+	start := strings.Index(src, "func (m machineControl) Stop(")
+	if start < 0 {
+		t.Fatal("no Stop")
+	}
+	rest := src[start:]
+	if end := strings.Index(rest[1:], "\nfunc "); end > 0 {
+		rest = rest[:end+1]
+	}
+	for _, method := range []string{"ssh", "guest_agent", "acpi"} {
+		if !strings.Contains(rest, `case "`+method+`"`) {
+			t.Errorf("`shutdown: %s` has no branch, so a stage naming it fails on its last step", method)
+		}
+	}
+	// AND NONE OF THEM SILENTLY FALLS BACK TO A KILL. A shutdown that reported success after killing
+	// is the failure the Python implementation removed a whole fallback chain to stop making.
+	if !strings.Contains(rest, "shutdownOverSSH") || !strings.Contains(rest, "shutdownOverAgent") ||
+		!strings.Contains(rest, "shutdownOverACPI") {
+		t.Fatal("a shutdown method does not reach its own implementation")
+	}
+	// AND THE WAIT EXISTS, because a guest that was asked politely has to actually exit before the
+	// next step reads its disk.
+	if !strings.Contains(rest, "waitForExit") {
+		t.Fatal("no wait after the request; the next step would read a disk qemu still holds")
+	}
+}
+
+// AND THE AGENT'S SHUTDOWN READS ITS ANSWER, because "sent" and "accepted" are different.
+func TestTheAgentShutdownReadsItsAnswer(t *testing.T) {
+	body, err := os.ReadFile("qga.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(body)
+	for _, want := range []string{"guest-shutdown", `json:"error"`, "isEOF"} {
+		if !strings.Contains(src, want) {
+			t.Fatalf("the agent shutdown is missing %q; a request that is written and not answered "+
+				"reports a shutdown that never started", want)
+		}
+	}
+}

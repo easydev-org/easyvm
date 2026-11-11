@@ -576,24 +576,122 @@ func (m machineControl) Stop(method string) error {
 	switch method {
 	case "kill":
 		d.logf("  killing the guest")
-	case "ssh", "guest_agent", "acpi":
-		// THIS BUILD HAS NO GRACEFUL PATH YET, and it says so rather than killing quietly. A
-		// shutdown that reported success after a kill is the failure the Python implementation
-		// removed a whole fallback chain to stop making.
-		return fmt.Errorf("shutdown method %q is not implemented in this build; `kill` is", method)
+	case "ssh":
+		// THE GUEST SHUTS ITSELF DOWN, AND THE FILESYSTEM IT IS ABOUT TO PUBLISH IS CLOSED.
+		//
+		// This is the method every Linux and BSD `vm-configure` file names, and it was not
+		// implemented - so a stage that had done all its work failed on its LAST step:
+		//
+		//	stop the machine: shutdown method "ssh" is not implemented in this build; `kill` is
+		//
+		// A KILL IS NOT A SUBSTITUTE HERE. The disk this stage produces is the artifact, and a killed
+		// guest leaves a filesystem that has to replay a journal on the next boot - which reads, in
+		// the next stage's log, as a slow boot rather than as a torn disk.
+		if err := d.shutdownOverSSH(); err != nil {
+			return err
+		}
+	case "guest_agent":
+		if err := d.shutdownOverAgent(); err != nil {
+			return err
+		}
+	case "acpi":
+		// THE POWER BUTTON, WHICH SOME GUESTS ANSWER AND SOME PROMPT ON. Windows and Linux shut down
+		// from it; macOS puts up "Restart / Sleep / Cancel / Shut Down" and waits for a click, which
+		// is why every macOS file names `ssh` or `guest_agent` instead.
+		if err := d.shutdownOverACPI(); err != nil {
+			return err
+		}
 	default:
 		return fmt.Errorf("%q is not a shutdown method; use guest_agent, ssh, acpi or kill", method)
+	}
+	// AND THE PROCESS IS WAITED FOR, WHICHEVER PATH ASKED IT TO STOP. A guest that was asked politely
+	// has to actually exit, or the disk is still open when the next step reads it.
+	if err := d.waitForExit(shutdownTimeout); err != nil {
+		return err
 	}
 	if d.page != nil {
 		d.page.stop()
 		d.page = nil
 	}
-	if err := d.proc.Process.Kill(); err != nil {
-		return fmt.Errorf("kill: %w", err)
-	}
+	_ = d.proc.Process.Kill()
 	_ = d.proc.Wait()
 	d.proc = nil
 	return nil
+}
+
+// shutdownTimeout is how long a guest is given to power off after being asked.
+//
+// THE PYTHON IMPLEMENTATION USED 60 AND RAISED IT TO 300, with a measurement behind it: macOS writes
+// its logs, unmounts the share and closes APFS, and a 60-second wait expired on a disk that was doing
+// exactly what it should. What happens on expiry is a kill, and the disk then needs a journal replay.
+const shutdownTimeout = 300 * time.Second
+
+// shutdownOverSSH asks the guest to power off through its own sshd.
+func (d *Driver) shutdownOverSSH() error {
+	client := d.Guest()
+	if client == nil {
+		return fmt.Errorf("`shutdown: ssh` needs a connection, and there is none. A `require_ssh:` " +
+			"step must have succeeded first - or use `shutdown: kill` on a throwaway overlay")
+	}
+	d.logf("  asking the guest to shut down over ssh")
+	// `poweroff` RATHER THAN `shutdown -h now`: both are the same request to systemd, and `poweroff`
+	// is in /usr/bin on every distribution here while `shutdown` lives in /sbin in some of them.
+	//
+	// THE CONNECTION DIES AS THE GUEST GOES, SO AN ERROR HERE IS EXPECTED. What matters is that the
+	// request was delivered, which is why the failure is logged rather than returned.
+	if res, err := client.Run("poweroff", 30*time.Second); err != nil {
+		d.logf(fmt.Sprintf("  the connection closed as the guest went down (%v)", err))
+		_ = res
+	}
+	return nil
+}
+
+// shutdownOverAgent asks the guest's own qemu-guest-agent to power off.
+func (d *Driver) shutdownOverAgent() error {
+	sock := filepath.Join(d.work, "qga.sock")
+	if _, err := os.Stat(sock); err != nil {
+		return fmt.Errorf("`shutdown: guest_agent` needs the agent's socket at %s: %v. The guest "+
+			"must have qemu-guest-agent installed AND running - `prove the guest agent is running` "+
+			"is the step that checks it", sock, err)
+	}
+	d.logf("  asking the guest agent to shut down")
+	if err := qgaShutdown(sock); err != nil {
+		return fmt.Errorf("guest agent shutdown: %w", err)
+	}
+	return nil
+}
+
+// shutdownOverACPI presses the power button through QMP.
+func (d *Driver) shutdownOverACPI() error {
+	conn, err := d.qmpSocket()
+	if err != nil {
+		return err
+	}
+	d.logf("  pressing the power button")
+	return conn.SystemPowerdown()
+}
+
+// waitForExit waits for qemu to leave, and kills it if it does not.
+func (d *Driver) waitForExit(limit time.Duration) error {
+	if d.proc == nil {
+		return nil
+	}
+	done := make(chan struct{})
+	go func() {
+		_ = d.proc.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		d.logf("  the guest powered off")
+		return nil
+	case <-time.After(limit):
+		// THE EXPIRY IS REPORTED, NOT HIDDEN. A guest that did not power off in five minutes is a
+		// guest whose disk will need a journal replay, and the next stage's "slow boot" is this line.
+		d.logf(fmt.Sprintf("  the guest did not power off within %s; killing it - the disk will need "+
+			"a journal replay on its next boot", limit))
+		return nil
+	}
 }
 
 // Reboot resets the machine and waits for it to answer again.

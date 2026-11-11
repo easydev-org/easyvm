@@ -429,3 +429,12 @@ func qcodeByName(name string) (raw.KeyValueQcode, error) {
 func (c *Conn) Reset() error {
 	return c.raw.SystemReset()
 }
+
+// SystemPowerdown presses the guest's ACPI power button.
+//
+// IT IS A REQUEST, NOT A GUARANTEE. Windows and Linux shut down from it; macOS puts up a dialog and
+// waits for a click nobody makes, which is why every macOS walkthrough names `shutdown: ssh` or
+// `shutdown: guest_agent` instead.
+func (c *Conn) SystemPowerdown() error {
+	return c.raw.SystemPowerdown()
+}
