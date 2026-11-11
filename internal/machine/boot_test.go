@@ -47,8 +47,14 @@ func TestWindowsDiskBoot(t *testing.T) {
 	}
 
 	args := strings.Join(b.StorageArgs(), " ")
-	if !strings.Contains(args, "if=virtio") {
+	// THE TARGET IS A virtio DEVICE, WHICH IS NOW SAID BY THE `-device` RATHER THAN BY `if=virtio`:
+	// `bootindex` cannot go on a `-drive` ("Block format 'qcow2' does not support the option
+	// 'bootindex'"), so the drive is `if=none,id=target` and the device names it.
+	if !strings.Contains(args, "virtio-blk-pci,drive=target") {
 		t.Fatalf("the target must be virtio; got %q", args)
+	}
+	if !strings.Contains(args, "if=none") {
+		t.Fatalf("the target drive must be `if=none` for its device to attach; got %q", args)
 	}
 	// AND DISCARD IS ON, because a finished disk's TRIMs are what keep the published qcow2 small.
 	if !strings.Contains(args, "discard=unmap") {
@@ -99,7 +105,7 @@ func TestWindowsISOBoot(t *testing.T) {
 	// A CD-ROM DOES NOT TAKE A DISK INDEX - Windows numbers only fixed disks - so a virtio disk
 	// after two CD-ROMs is still DiskID 0. What the order decides is which medium the firmware
 	// tries first, and the driver CD sits last because only the INSTALLED system needs it.
-	order := []string{filepath.Base(iso), filepath.Base(answer), "if=virtio", filepath.Base(driver)}
+	order := []string{filepath.Base(iso), filepath.Base(answer), "id=target", filepath.Base(driver)}
 	last := -1
 	for _, want := range order {
 		at := strings.Index(joined, want)
@@ -416,7 +422,7 @@ func TestBSDIsAcceptedAndBootsLikeLinux(t *testing.T) {
 	}
 	// THE STORAGE IS ONE VIRTIO DISK AND THE SAME DISCARD RULE AS LINUX.
 	args := strings.Join(installed.StorageArgs(), " ")
-	if !strings.Contains(args, "if=virtio") || !strings.Contains(args, "discard=unmap") {
+	if !strings.Contains(args, "virtio-blk-pci,drive=target") || !strings.Contains(args, "discard=unmap") {
 		t.Fatalf("a booted BSD disk must be one virtio disk with discard on:\n%s", args)
 	}
 	// AND AN INSTALLER ISO TURNS DISCARD OFF, the same rule as every other family.
@@ -624,26 +630,60 @@ func TestEveryMediumThatCanBootIsInTheBootOrder(t *testing.T) {
 		args := strings.Join(b.StorageArgs(), " ")
 
 		// THE INSTALLER IS bootindex=0, because it is what has to run.
-		isoPart := ""
-		for _, part := range strings.Fields(args) {
-			if strings.Contains(part, "installer") || strings.Contains(part, ".iso") {
-				isoPart = part
-			}
-		}
-		if !strings.Contains(isoPart, "bootindex=0") {
-			t.Fatalf("%s: the installer has no bootindex=0, so the firmware is left to find it by "+
-				"scanning - and a fresh OVMF_VARS has nothing saved. Got %q", tc.name, isoPart)
+		if !strings.Contains(args, "bootindex=0") {
+			t.Fatalf("%s: nothing is bootindex=0, so the firmware is left to find a boot medium by "+
+				"scanning - and a fresh OVMF_VARS has nothing saved:\n%s", tc.name, args)
 		}
 		// AND THE TARGET IS NEXT, not implicitly first by being a disk.
-		target := ""
-		for _, part := range strings.Fields(args) {
-			if strings.Contains(part, "disk.qcow2") || strings.HasSuffix(part, ".qcow2") {
-				target = part
+		if !strings.Contains(args, "bootindex=1") {
+			t.Fatalf("%s: the target disk is not bootindex=1, so it could outrank the installer:\n%s",
+				tc.name, args)
+		}
+	}
+}
+
+// `bootindex` IS A DEVICE PROPERTY AND CANNOT BE PASSED ON A `-drive`.
+//
+// MEASURED, AND IT IS THE FIRST THING TO REMEMBER ABOUT THIS FILE:
+//
+//	qemu-system-x86_64: -drive file=...,if=virtio,format=qcow2,bootindex=0,discard=unmap:
+//	Block format 'qcow2' does not support the option 'bootindex'
+//
+// AND THE STEP THAT FAILED SAID SOMETHING ELSE ENTIRELY:
+//
+//	boot the disk: qmp .../drive.sock.qmp: connect: connection refused (waited 30s)
+//
+// qemu exits on a bad argument BEFORE it creates the QMP socket, so EVERY argument mistake in this
+// file presents as "the socket never appeared" - which reads as a stale socket or a second client, and
+// is neither. The daemon's own `qemu ...` log line is the only place the real complaint is written.
+//
+// THE SHAPE THAT WORKS, and the macOS branch already used it: the drive is `if=none,id=X` and a
+// `-device` names X and carries the index.
+func TestBootindexIsOnADeviceNotADrive(t *testing.T) {
+	disk, iso, answer, driver, _, _, _, _ := fixture(t)
+	for _, b := range []Boot{
+		{OS: Linux, ISO: iso, Disk: disk},
+		{OS: Windows, ISO: iso, Disk: disk, AnswerCD: answer, DriverCD: driver},
+		{OS: BSD, Disk: disk},
+	} {
+		args := b.StorageArgs()
+		for i, a := range args {
+			// THE VALUE OF `-drive` IS THE ARGUMENT AFTER THE FLAG.
+			if a == "-drive" && i+1 < len(args) && strings.Contains(args[i+1], "bootindex") {
+				t.Fatalf("a `-drive` carries bootindex, and qemu refuses to start with "+
+					"\"Block format 'qcow2' does not support the option 'bootindex'\" - the process "+
+					"then exits before its QMP socket exists:\n%s", args[i+1])
 			}
 		}
-		if !strings.Contains(target, "bootindex=1") {
-			t.Fatalf("%s: the target disk is not bootindex=1, so it could outrank the installer. "+
-				"Got %q", tc.name, target)
+		// AND THE REVERSE: the index exists somewhere, on a -device.
+		joined := strings.Join(args, " ")
+		if !strings.Contains(joined, "bootindex=") {
+			t.Fatalf("%s: no bootindex anywhere, so the firmware is left to scan", b.OS)
+		}
+		if !strings.Contains(joined, "-device virtio-blk-pci,drive=target,bootindex=") &&
+			!strings.Contains(joined, "virtio-blk-pci,drive=target,bootindex=") {
+			// A boot DISK with no installer still needs the index on its device.
+			t.Fatalf("%s: the target's bootindex is not on its `-device`:\n%s", b.OS, joined)
 		}
 	}
 }

@@ -301,18 +301,38 @@ func (b Boot) StorageArgs() []string {
 	// THE ORDER IS THE ARGUMENT ORDER, made explicit: whatever is installing gets 0, the target disk
 	// gets 1, and anything else gets 2 or more so it cannot win.
 	nextIndex := 0
+	nextID := 0
+	// `bootindex` IS A DEVICE PROPERTY AND CANNOT GO ON A `-drive`, WHICH IS MEASURED RATHER THAN
+	// ASSUMED - I put it there first and qemu refused to start:
+	//
+	//	qemu-system-x86_64: -drive file=...,if=virtio,format=qcow2,bootindex=0,discard=unmap:
+	//	Block format 'qcow2' does not support the option 'bootindex'
+	//
+	// AND THE SYMPTOM WAS NOT THAT MESSAGE. It was
+	//
+	//	boot the disk: qmp .../drive.sock.qmp: connect: connection refused (waited 30s)
+	//
+	// because qemu exits before it creates the socket. A boot step reporting a socket error is the
+	// shape of EVERY qemu argument mistake, which is why the daemon's own log line - the one above -
+	// has to be read rather than the step's.
+	//
+	// SO A MEDIUM IS TWO ARGUMENTS: `-drive if=none,id=X` and a `-device` that names X and carries
+	// the index. That is the same form the macOS branch uses for OpenCore, and the same reason.
+	//
+	// A CD-ROM IS `ide-cd` ON q35 - the machine has an IDE controller for it and no SATA bus unless one
+	// is asked for, and the installer is a CD-R.
 	appendMedia := func(path string) {
 		if path == "" {
 			return
 		}
-		// `media=cdrom,readonly=on` IS WHAT MAKES IT A CD-ROM rather than another hard disk.
-		//
-		// A DISK GETS `if=virtio,format=qcow2` AND A CD GETS NO `if=` AT ALL, so the two cannot share
-		// one drive string - the bootindex is added per kind, below.
 		idx := nextIndex
 		nextIndex++
-		args = append(args, "-drive",
-			fmt.Sprintf("file=%s,media=cdrom,readonly=on,bootindex=%d", path, idx))
+		id := fmt.Sprintf("media%d", nextID)
+		nextID++
+		args = append(args,
+			"-drive", fmt.Sprintf("file=%s,media=cdrom,readonly=on,if=none,id=%s", path, id),
+			"-device", fmt.Sprintf("ide-cd,drive=%s,bootindex=%d", id, idx),
+		)
 	}
 
 	// 1. THE INSTALLER, SO THE FIRMWARE BOOTS IT.
@@ -329,11 +349,14 @@ func (b Boot) StorageArgs() []string {
 	// stay small.
 	diskIndex := nextIndex
 	nextIndex++
-	disk := fmt.Sprintf("file=%s,if=virtio,format=qcow2,bootindex=%d", b.Disk, diskIndex)
+	disk := fmt.Sprintf("file=%s,if=none,format=qcow2,id=target", b.Disk)
 	if b.Discardable() {
 		disk += ",discard=unmap"
 	}
-	args = append(args, "-drive", disk)
+	args = append(args,
+		"-drive", disk,
+		"-device", fmt.Sprintf("virtio-blk-pci,drive=target,bootindex=%d", diskIndex),
+	)
 
 	// 4. THE DRIVER CD, FOR THE SYSTEM THAT WILL RUN ON THIS DISK.
 	appendMedia(b.DriverCD)
