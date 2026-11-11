@@ -300,7 +300,19 @@ func (e *Executor) createDisk(s walk.Step) error {
 // --- the screen -----------------------------------------------------------------------
 
 func (e *Executor) doDesktop(s walk.Step) error {
-	family := s.Get("desktop_family")
+	// `desktop: X` NAMES THE FAMILY ITSELF, AND READING ONLY `os:` MADE EVERY ONE OF THEM WINDOWS.
+	//
+	// Measured on ubuntu's install leg, whose fourth step is `desktop: linux`:
+	//
+	//	wait for the live desktop: no windows desktop within 15m0s; drop=+17.8 ... on a 1920x1080 frame
+	//
+	// IT WAITED FIFTEEN MINUTES FOR A WINDOWS DESKTOP ON A UBUNTU GUEST, because `desktop_family` and
+	// `os:` were both empty and the fallback is `windows`. The value of the key is the family, and
+	// every file here writes `desktop: windows|macos|linux` - so reading it is the whole job.
+	family := s.Get("desktop")
+	if family == "" {
+		family = s.Get("desktop_family")
+	}
 	if family == "" {
 		family = s.Get("os")
 	}

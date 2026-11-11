@@ -430,3 +430,39 @@ func TestSCPLooksInTheWorkDirectory(t *testing.T) {
 			"rather than as a file that no step produced")
 	}
 }
+
+// `desktop: linux` NAMES THE FAMILY, AND READING ONLY `os:` MADE EVERY ONE OF THEM WINDOWS.
+//
+// MEASURED ON UBUNTU'S INSTALL LEG, WHOSE FOURTH STEP IS `desktop: linux`:
+//
+//	wait for the live desktop: no windows desktop within 15m0s; drop=+17.8 (need 15) ratio=0.0x
+//	(need 2) sat=-0.57 (need 0.10) on a 1920x1080 frame
+//
+// Fifteen minutes spent looking for a WINDOWS DESKTOP on an Ubuntu guest. The family came from
+// `desktop_family` then `os:`, both empty on that step, and the fallback is `windows` - so the key's
+// OWN VALUE was never read.
+func TestDesktopTakesItsFamilyFromItsOwnValue(t *testing.T) {
+	body, err := os.ReadFile("actions.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(body)
+	start := strings.Index(src, "func (e *Executor) doDesktop(")
+	if start < 0 {
+		t.Fatal("no doDesktop")
+	}
+	rest := src[start:]
+	if end := strings.Index(rest[1:], "\nfunc "); end > 0 {
+		rest = rest[:end+1]
+	}
+	if !strings.Contains(rest, `s.Get("desktop")`) {
+		t.Fatal("`desktop:` reads its family from other keys and not from its own value, so " +
+			"`desktop: linux` is treated as `windows`")
+	}
+	// AND THE VALUE COMES FIRST, before the older spellings.
+	own := strings.Index(rest, `s.Get("desktop")`)
+	fam := strings.Index(rest, `s.Get("desktop_family")`)
+	if fam >= 0 && fam < own {
+		t.Fatal("`desktop_family` is read before `desktop`, so a step with both gets the wrong one")
+	}
+}
