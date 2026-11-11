@@ -79,6 +79,27 @@ steps:
   # THE ARRIVAL CHECK IS SSHD, NOT A DESKTOP. The stage before this one already proved the disk
   # reaches a desktop and answers ssh; what this stage needs is the service, and a TCP banner is
   # a better answer than a picture.
+  # SSHD ANSWERS LONG BEFORE WINDOWS IS READY, AND THE FIRST SCRIPT DIES ON THAT GAP.
+  #
+  # Measured on run 43071461673's windows-dev leg:
+  #
+  #	=== wait for sshd
+  #	  ssh answers on port 2222 after 33s
+  #	=== install the build tools
+  #	  script install-buildtools.ps1 (powershell) -> 2316632107
+  #
+  # THIRTY-THREE SECONDS IS SSHD STARTING, NOT WINDOWS FINISHING. `winget` resolves its sources, the
+  # AppX machinery and the user profile lazily, and a script that runs before them fails with an
+  # exit code that is not a Windows error number at all - 2316632107 is 0x8A1700EB, which is what a
+  # PowerShell host reports when it was torn down mid-run.
+  #
+  # SO THE DESKTOP IS THE GATE, the same one windows/11/steps/ssh.yaml uses: a desktop is on screen
+  # when OOBE and the first logon have finished, and that is when the tools this stage installs become
+  # available. Waiting for a PORT is waiting for the smallest thing that can be true.
+  - name: wait for the desktop
+    desktop: windows
+    timeout: 900
+
   - name: wait for sshd
     require_ssh: true
     ssh_probe: echo ok

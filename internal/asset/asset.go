@@ -437,13 +437,24 @@ func fetchWindowsAgent(work string) (Result, error) {
 	}
 
 	isoPath := filepath.Join(work, "virtio-win.iso")
+	// THE ISO IS PULLED WHEN IT IS NOT THERE, and it used to be a caller's problem:
+	//
+	//	error: fetch the agent and its driver on the host: no virtio-win ISO at .../virtio-win.iso
+	//	       (need one of at least 100 MiB ...). Fetch it into .../work first
+	//
+	// - a sentence that tells a CI job to do something it has no step for. The ISO is in this
+	// repository's own package, `iso-virtio-win`, and `fetchVirtioWin` already knows how to pull it
+	// with resume. The agent's MSI and the vioserial driver come out of THAT ISO, so the two kinds
+	// of `fetch:` share one file.
+	//
 	// A PREVIOUS RUN'S ISO IS REUSED: it is 700 MiB and the network is the slow part. The file's
 	// presence is not proof it is intact, so its size is checked against a floor rather than
 	// trusted - a truncated ISO extracts a truncated file.
 	if fi, err := os.Stat(isoPath); err != nil || fi.Size() < 100<<20 {
-		return Result{}, fmt.Errorf("no virtio-win ISO at %s (need one of at least 100 MiB; a "+
-			"truncated ISO extracts a truncated driver and the guest fails at the device rather "+
-			"than here). Fetch it into %s first", isoPath, work)
+		if _, err := fetchVirtioWin(work); err != nil {
+			return Result{}, fmt.Errorf("the virtio-win ISO is not here and could not be fetched: %w. "+
+				"The agent's MSI and its vioserial driver both come out of that one image", err)
+		}
 	}
 
 	sevenZip, err := exec.LookPath("7z")
