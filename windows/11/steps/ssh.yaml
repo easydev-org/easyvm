@@ -345,7 +345,7 @@ steps:
   # AND IT PROVES SOMETHING SLIGHTLY STRONGER THAN THE CMDLET DID: the cmdlet asked the local TCP
   # table, while `netstat -an` shows the address the socket is bound to - so a sshd listening only on
   # a loopback interface no longer reads as healthy.
-  # ONE `findstr`, NOT TWO PIPED, AND `-C` FOR "THIS LINE CONTAINS".
+  # ONE `findstr`, NOT TWO PIPED, AND `/C:` FOR "THIS LINE CONTAINS" - WITH A FORWARD SLASH.
   #
   # The first version was `netstat -an | findstr ":22 " | findstr LISTENING` and it exited 1:
   #
@@ -363,9 +363,37 @@ steps:
   # to 22 was accepted and authenticated; what this adds is that the socket is in LISTEN state and on
   # port 22, rather than the session having been handed to something else. It is evidence about the
   # GUEST'S CONFIGURATION, not about reachability - reachability is already established.
+  #
+  # AND THE SWITCH IS `/C:`, NOT `-C:`, WHICH IS WHY THIS STEP EXITED 1 TWICE. findstr spells it with a
+  # forward slash, and a DASH IS NOT ACCEPTED AS A SWITCH - so `-C:"LISTENING"` searched for the nine
+  # literal characters `-C:LISTENING`, which appear nowhere in `netstat` output:
+  #
+  #	error:   prove sshd is listening: the command exited 1
+  #	answered 23 step(s)                                   <- step 24 of 29, twice, identically
+  #
+  # THE COMMENT ABOVE BLAMED "no line matched" AND REORDERED THE TWO FILTERS, which could not help: a
+  # pattern that can never match does not start matching when it is applied second. `findstr /?` lists
+  # `/C:string` and no dash form; cmd's own complaint for a bad switch ("FINDSTR: Bad command line") is
+  # swallowed by the pipeline, because what a pipeline returns is the LAST command's status.
+  #
+  # SO THE PORT IS MATCHED AS A FIELD RATHER THAN AS TEXT. `netstat -ano` prints
+  #
+  #	TCP    0.0.0.0:22    0.0.0.0:0    LISTENING    1234
+  #
+  # and `:22` alone is ALSO true of a listener on 2222. `:22 ` WITH THE TRAILING SPACE is the port as a
+  # FIELD, because `netstat` pads its columns - so 2222 cannot match, and a client socket to somebody's
+  # sshd cannot either: the LISTENING filter ran first and removed every established connection.
+  #
+  # IT IS STILL ONE NATIVE CALL answering from the kernel's snapshot, which is why `netstat` was chosen
+  # over `Get-NetTCPConnection` in the first place: that cmdlet does not finish in three minutes here.
+  #
+  # AND THE BUDGET IS 180 SECONDS, not 90, for the reason this file already measured twice: cmd and
+  # `netstat` are cheap, but the CALL arrives over the ssh session this step is proving, and 90 was the
+  # edge the previous two steps were already standing on.
   - name: prove sshd is listening
-    ssh: cmd /c 'netstat -ano | findstr -C:"LISTENING" | findstr -C:":22"'
-    timeout: 90
+    ssh: cmd /c 'netstat -ano | findstr /C:"LISTENING" | findstr /C:":22 "'
+
+    timeout: 180
 
   - name: prove the account can log in
     ssh: whoami

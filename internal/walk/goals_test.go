@@ -479,3 +479,56 @@ func TestTheLinuxSSHFilesStillInstallAndEnableSSHD(t *testing.T) {
 		}
 	}
 }
+
+// `findstr -C:` IS NOT A THING, AND IT COST THIS PROJECT STEP 24 OF 29, TWICE.
+//
+// findstr spells its literal-string option `/C:`. A DASH IS NOT ACCEPTED AS A SWITCH, so `-C:"LOOKING"`
+// is a search for the literal characters `-C:LOOKING` - a pattern that can never match what the command
+// was piped from. The step then reports
+//
+//	error:   prove sshd is listening: the command exited 1
+//	answered 23 step(s)
+//
+// and the note above it blamed "no line matched" and REORDERED THE TWO FILTERS, which cannot help: a
+// pattern that never matches does not start matching when it is applied second.
+//
+// THE COMMENT IS NOT THE DEFENCE. This test reads every walkthrough for a `findstr` whose switch is
+// spelled with a dash, because the mistake looks correct in prose and reads correctly in a diff.
+func TestNoFindstrSwitchIsSpelledWithADash(t *testing.T) {
+	root := filepath.Join("..", "..")
+	var checked int
+	for _, pattern := range []string{
+		filepath.Join(root, "*", "*", "steps", "*.yaml"),
+		filepath.Join(root, "*", "steps", "*.yaml"),
+	} {
+		files, err := filepath.Glob(pattern)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, path := range files {
+			body, err := os.ReadFile(path)
+			if err != nil {
+				continue
+			}
+			text := string(body)
+			if !strings.Contains(text, "findstr") {
+				continue
+			}
+			checked++
+			rel, _ := filepath.Rel(root, path)
+			// THE BAD FORMS. `/C:` is correct and is not matched here; `-C:`, `-R`, `-I`, `-V` and the
+			// rest all are.
+			for _, bad := range []string{"findstr -C:", "findstr -R ", "findstr -I ", "findstr -V ",
+				"findstr -S ", "findstr -N", "findstr -L"} {
+				if strings.Contains(text, bad) {
+					t.Errorf("%s uses %q. findstr takes FORWARD-SLASH switches; a dash makes the "+
+						"switch part of the search string, so the filter can never match and the step "+
+						"reports `the command exited 1` as if the guest were wrong", rel, bad)
+				}
+			}
+		}
+	}
+	if checked == 0 {
+		t.Log("no walkthrough uses findstr; nothing to check")
+	}
+}
