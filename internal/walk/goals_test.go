@@ -532,3 +532,75 @@ func TestNoFindstrSwitchIsSpelledWithADash(t *testing.T) {
 		t.Log("no walkthrough uses findstr; nothing to check")
 	}
 }
+
+// EVERY `winget install` IN THIS PROJECT MUST READ ITS EXIT CODE THE SAME WAY, BECAUSE THE WRONG WAY
+// LOOKS CORRECT AND CANNOT WORK.
+//
+// `$LASTEXITCODE` IN POWERSHELL IS AN int32 CARRYING AN HRESULT. winget's "already installed, nothing
+// to upgrade" is 0x8A15002B, which arrives as -1978335189; -1978335189 & 0xFF is 0x2B, 43, the number a
+// POSIX shell reports and the number `lib/steps.py` logs. So `$rc -eq 43` NEVER MATCHES - it did not,
+// three attempts in a row - and `exit $LASTEXITCODE` reports an installed package as a failure:
+//
+//	script install-buildtools.ps1 (powershell) -> 2316632107
+//	Found an existing package already installed. Trying to upgrade the installed package...
+//	No available upgrade found.
+//
+// 2316632107 IS ALSO 0x8A15002B. THE MESSAGE SAYS THE PACKAGE IS MISSING AND IT IS PRESENT, which is
+// why this cost several runs of guessing at the index, at the package id, and at the desktop gate.
+//
+// ONE STEP LACKED THE MASK while the six after it had it, so the rule lived in six places and its
+// duplicate did not. This test requires it in ALL of them.
+func TestEveryWingetInstallMasksItsExitCode(t *testing.T) {
+	root := filepath.Join("..", "..")
+	files, err := filepath.Glob(filepath.Join(root, "windows", "*", "steps", "*.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) == 0 {
+		t.Skip("no Windows walkthroughs here")
+	}
+	var installs int
+	for _, path := range files {
+		rel, _ := filepath.Rel(root, path)
+		// PARSED, NOT SLICED. A text split on `- name:` picks up the file's own header comment and the
+		// step AFTER the one that matched, and both reported failures that were not there.
+		doc, err := Load(path, nil)
+		if err != nil {
+			continue // TestEveryWalkthroughLoads reports it
+		}
+		for _, step := range doc.Steps {
+			body := step.Get("script") + step.Get("run") + step.Get("type")
+			if !strings.Contains(body, "winget install") {
+				continue
+			}
+			installs++
+			// THE MASK, WHICHEVER FORM THE STEP USES. A `script:` step can BRANCH on it; a `type:`
+			// step can only PRINT it, because what a keyboard types into a PowerShell window has no
+			// exit status to check - so `-band 0xFF` is the requirement in both cases and means
+			// "reported the low byte" in the second.
+			if !strings.Contains(body, "-band 0xFF") {
+				t.Errorf("%s: the step %q runs `winget install` without masking the exit status. "+
+					"`$LASTEXITCODE` carries an HRESULT, so 0x8A15002B - \"already installed, nothing "+
+					"to upgrade\" - arrives as -1978335189 and never equals 43; the step then reports "+
+					"an installed package as a failure", rel, step.Name)
+			}
+			// AND A TYPED STEP CANNOT DECIDE, SO IT MUST AT LEAST SAY. `$LASTEXITCODE` read two
+			// statements later is the wrong value - that cost dev.yaml a step - so the report is on
+			// the same line, joined by `;`.
+			if strings.HasPrefix(body, "winget install") && !strings.Contains(body, "WINGET_LOW=") {
+				t.Errorf("%s: the step %q types `winget install` and never prints the exit status. "+
+					"A typed command has no status to check, so the screen is the only place the "+
+					"outcome exists, and without it the next failure is a bare timeout", rel, step.Name)
+			}
+			if strings.Contains(body, "exit $LASTEXITCODE") {
+				t.Errorf("%s: the step %q ends with a bare `exit $LASTEXITCODE`, which passes "+
+					"APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE to the runner as a failure",
+					rel, step.Name)
+			}
+		}
+	}
+	if installs == 0 {
+		t.Skip("no `winget install` steps here")
+	}
+	t.Logf("checked %d winget install step(s)", installs)
+}

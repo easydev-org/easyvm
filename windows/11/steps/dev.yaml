@@ -174,9 +174,11 @@ steps:
   #
   #	the script exited 2316632107
   #
-  # WHICH IS 0x8A15002B - APPINSTALLER_CLI_ERROR_NO_APPLICATIONS_FOUND. The message says the PACKAGE
-  # does not exist; the state is that winget has no index yet, and the difference decides whether a
-  # reader checks the package id (which is right) or the machine (which is not).
+  # WHICH IS 0x8A15002B - APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE, not "no such package". The
+  # index wait below was added for the other reading of that code, and the code came back unchanged
+  # after the index WAS ready, which is what settled it: the package is installed and there is nothing
+  # to upgrade to. The wait is still right to have - asking winget anything before its first sync fails
+  # for a genuine reason - but it was never the cause of this number.
   #
   # SO THE INDEX IS WAITED FOR BY ASKING WINGET ITSELF, in a loop that retries the query rather than a
   # fixed sleep: a runner that is fast reaches it in seconds and a slow one is not cut off.
@@ -257,8 +259,46 @@ steps:
       # a first-run agreement prompt from waiting for a console that does not exist.
       & $winget install --id Microsoft.VisualStudio.2022.BuildTools --exact --source winget `
         --scope machine --version 17.14.44 --accept-source-agreements --disable-interactivity `
-        --override "--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
-      exit $LASTEXITCODE
+        --override "--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended" `
+        # THE EXIT CODE IS READ ON THE LINE IMMEDIATELY AFTER THE NATIVE CALL. `$LASTEXITCODE`
+      # belongs to the last native command, and a version of this step read it after a twenty-line
+      # comment block and printed nothing at all.
+      $rc = $LASTEXITCODE
+      Write-Output ("WINGET_EXIT=" + $rc)
+
+      # "ALREADY INSTALLED" IS A SUCCESS, IN THE SAME RULE THE SIX STEPS BELOW ALREADY USE.
+      #
+      # Measured on windows-dev, step 5 of 18, and it is the only install step that lacked this:
+      #
+      #     wait for winget to have an index -> 0, WINGET_READY
+      #     install the build tools -> 2316632107
+      #     Found an existing package already installed. Trying to upgrade the installed package...
+      #     No available upgrade found.
+      #     No newer package versions are available from the configured sources.
+      #
+      # 2316632107 IS 0x8A15002B, WHICH IS NOT "NO SUCH PACKAGE" - IT IS
+      # APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE: the package is present and there is nothing to
+      # upgrade to. The disk this stage starts from already has the build tools, so `winget install`
+      # takes its upgrade path and reports that there is nothing to do.
+      #
+      # AN EARLIER FIX GUESSED THE INDEX WAS NOT SYNCED and added a wait for `winget search` to answer.
+      # IT NOW ANSWERS - `WINGET_READY` - AND THE SAME CODE CAME BACK, which is what makes this the
+      # explanation rather than another hypothesis: the index was never the problem.
+      #
+      # THE MASK IS THE RULE. `$LASTEXITCODE` is an int32 carrying an HRESULT: -1978335189 & 0xFF is
+      # 0x2B, 43, which is the number a POSIX shell reports and the number `lib/steps.py` logs as
+      # `-> 43`. Comparing `$rc -eq 43` never matched, three attempts in a row, on the other steps.
+      $low = $rc -band 0xFF
+      if ($low -eq 43) {
+        Write-Output 'ALREADY_PRESENT (winget 0x8A15002B: no upgrade applicable)'
+        exit 0
+      }
+      if ($rc -ne 0) {
+        Write-Output ("WINGET_INSTALL_FAILED " + $rc)
+        exit $rc
+      }
+      Write-Output 'BUILD_TOOLS_INSTALLED'
+      exit 0
     script_shell: powershell
     script_name: install-buildtools.ps1
     timeout: 3600

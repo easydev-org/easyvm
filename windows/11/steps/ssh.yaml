@@ -198,8 +198,18 @@ steps:
     key: ret
     settle: 3
 
+  #
+  # THE EXIT CODE IS READ BACK, AND MASKED, BECAUSE "ALREADY INSTALLED" IS SUCCESS AND WINGET CALLS IT
+  # A FAILURE. `$LASTEXITCODE` in PowerShell is an int32 carrying an HRESULT: winget's
+  # APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE is 0x8A15002B, which arrives as -1978335189, and
+  # `-1978335189 & 0xFF` is 0x2B, 43. THE DISK THIS STAGE STARTS FROM MAY ALREADY HAVE OpenSSH, and
+  # `winget install` then takes its upgrade path and reports that there is nothing to upgrade to.
+  #
+  # ONE LINE, BECAUSE THE KEYBOARD TYPES IT. `;` joins the install and the report, and the report is
+  # what tells the next step's post-mortem whether the package was installed, already present, or
+  # refused - the three cases that a `wait for sshd` timeout cannot distinguish.
   - name: install openssh
-    type: winget install --id Microsoft.OpenSSH.Preview --exact --source winget --accept-source-agreements --accept-package-agreements --disable-interactivity
+    type: 'winget install --id Microsoft.OpenSSH.Preview --exact --source winget --accept-source-agreements --accept-package-agreements --disable-interactivity; ''WINGET_EXIT='' + $LASTEXITCODE; ''WINGET_LOW='' + ($LASTEXITCODE -band 0xFF)'
     type_gap: 0.15
     settle: 2
   - name: run the install

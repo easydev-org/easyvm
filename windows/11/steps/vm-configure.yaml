@@ -85,11 +85,10 @@ steps:
   # THE DESKTOP FIRST, BECAUSE SSHD ANSWERS LONG BEFORE WINDOWS IS READY.
   #
   # Measured on windows-dev in the same batch: `ssh answers on port 2222 after 33s`, and the very
-  # first script died with 2316632107, which is 0x8A15002B - APPINSTALLER_CLI_ERROR_NO_APPLICATIONS_
-  # FOUND, winget saying its index has nothing by that name. THE INDEX IS DOWNLOADED THE FIRST TIME
-  # WINGET RUNS, tens of seconds after the desktop appears, so the message named the PACKAGE while the
-  # state was the MACHINE. `dev.yaml` now waits for `winget search` to answer before asking it for
-  # anything; this stage does not use winget and needs no such wait.
+  # first script died with 2316632107, which is 0x8A15002B - APPINSTALLER_CLI_ERROR_UPDATE_NOT_
+  # APPLICABLE, winget saying the package is present and there is nothing to upgrade to. It reads like
+  # "no such package" and means "nothing to do": the disk already has the tool. `dev.yaml` masks the
+  # exit status to its low byte and treats 43 as success; this stage does not use winget.
   #
   # A DESKTOP IS THE HONEST GATE: it is on screen when OOBE and the first logon have finished.
   - name: wait for the desktop
