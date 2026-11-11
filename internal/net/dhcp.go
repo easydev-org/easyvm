@@ -202,17 +202,59 @@ func applyNAT() error {
 // the guest directly, so a port is published by rewriting its destination. That is also why
 // `ssh 172.30.0.1:2222` reaches the guest's 22 without qemu being involved.
 //
-// THE CHAIN IS OURS, AND IT IS ENTERED FROM PREROUTING. A rule added to PREROUTING directly cannot
-// be removed without matching its exact spec, and the Python implementation had four of them.
+// THE CHAIN IS OURS, AND IT IS ENTERED FROM TWO PLACES - WHICH IS THE WHOLE POINT.
+//
+//	PREROUTING   a packet ARRIVING from outside, on its way to the bridge address
+//	OUTPUT       a connection made BY A PROCESS IN THIS CONTAINER to the bridge address
+//
+// AND THE SECOND ONE IS NOT OPTIONAL HERE, BECAUSE EVERY CLIENT IN THIS PROGRAM IS INSIDE THE
+// CONTAINER. The daemon's own ssh client dials 172.30.0.1:2222, which is an OUTPUT packet;
+// PREROUTING never sees it. Without the OUTPUT jump the SYN is delivered to the bridge interface
+// itself, nothing listens on port 2222 there, and the kernel answers
+//
+//	dial tcp 172.30.0.1:2222: connect: connection refused
+//
+// in three milliseconds - which is exactly what run 43022310562 reported after the whole Windows
+// stage had worked: the desktop was up in 3m43s, OpenSSH was installed, sshd was configured, and
+// the step that connects to it was refused by the container's own stack.
 func applyForwards(sshPort int, extra []int) error {
 	ports := buildForwardTable(sshPort, extra)
 
 	spec := fmt.Sprintf("%s/%d", BridgeIP, Prefix)
+
+	// ENTER FROM OUTSIDE. This is the case a published port exists for: something outside the
+	// container connects to the bridge address.
 	if _, err := run("iptables", "-t", "nat", "-C", "PREROUTING", "-d", spec,
 		"-j", forwardChain); err != nil {
 		if _, err := run("iptables", "-t", "nat", "-A", "PREROUTING", "-d", spec,
 			"-j", forwardChain); err != nil {
 			return fmt.Errorf("entering %s from PREROUTING: %w", forwardChain, err)
+		}
+	}
+
+	// AND ENTER FROM THIS CONTAINER'S OWN PROCESSES.
+	//
+	// `-p tcp` AND THE BRIDGE ADDRESS ARE BOTH LOAD-BEARING, and the Python implementation paid
+	// for each separately:
+	//
+	//	no address   the rule also caught probes to 127.0.0.1:2222 and DNAT'd them to the guest.
+	//	             DNAT rewrites the DESTINATION and leaves the SOURCE alone, so the guest saw a
+	//	             SYN from 127.0.0.1 and replied to what is, on the guest, its OWN loopback. The
+	//	             reply never arrived and nothing reset the connection, so the probe sat on its
+	//	             connect timeout - ten minutes, on a disk that was fine (run 42188488710):
+	//
+	//	                 172.30.0.1:2222  -> refused in 3ms   (reply came back; the link is fine)
+	//	                 127.0.0.1:2222   -> timed out at 4s   (reply went to the guest's loopback)
+	//
+	// So the match is the bridge address, which is what every client in this program dials.
+	if _, err := run("iptables", "-t", "nat", "-C", "OUTPUT", "-d", spec,
+		"-p", "tcp", "-j", forwardChain); err != nil {
+		if out, err := run("iptables", "-t", "nat", "-A", "OUTPUT", "-d", spec,
+			"-p", "tcp", "-j", forwardChain); err != nil {
+			return fmt.Errorf("entering %s from OUTPUT: %v (%s). Without this rule a client "+
+				"INSIDE this container - the ssh client included - is refused by the bridge "+
+				"address, because that connection never passes PREROUTING",
+				forwardChain, err, firstLine(out))
 		}
 	}
 

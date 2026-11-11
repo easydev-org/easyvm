@@ -1,0 +1,388 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Windows 11 unattended answer file.
+
+  Structure is Microsoft's, not dockur's: the four passes below are read by setup
+  itself in this order, and each one is a different program (setup.exe, then
+  specialize, then oobeSystem). There is no driver anywhere in this file, which is
+  the whole point of the Windows bake - see ../README.md.
+
+  What is deliberately NOT here:
+    - Product key. A retail key would be embedded, and an eval ISO installs without
+      one. Adding /ipk with a placeholder breaks setup rather than helping it.
+    - Lives without the LabConfig bypass. It has them, and the reason is below: the
+      firmware is UEFI but not Secure Boot, which is a different thing and one the
+      installer checks for.
+    - Anything dockur-specific (OEM wallpaper, dockur URLs, Z: drive mapping to a
+      samba host). This bakes a sandbox disk, not a desktop-for-Docker product.
+
+  The two placeholders substituted by iso.sh:
+    __WINDOWS_IMAGE_INDEX__   which image in install.wim to install
+    __COMPUTER_NAME__         the name the guest gets
+-->
+<unattend xmlns="urn:schemas-microsoft-com:unattend"
+          xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+
+  <!-- ============================ windowsPE ============================ -->
+  <!-- Runs in WinPE before anything is written. This is where the disk is
+       partitioned and the image is chosen. -->
+  <settings pass="windowsPE">
+
+    <component name="Microsoft-Windows-International-Core-WinPE"
+               processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35"
+               language="neutral" versionScope="nonSxS">
+      <SetupUILanguage>
+        <UILanguage>en-US</UILanguage>
+      </SetupUILanguage>
+      <InputLocale>0409:00000409</InputLocale>
+      <SystemLocale>en-US</SystemLocale>
+      <UILanguage>en-US</UILanguage>
+      <UserLocale>en-US</UserLocale>
+    </component>
+
+    <component name="Microsoft-Windows-Setup"
+               processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35"
+               language="neutral" versionScope="nonSxS">
+
+      <!-- Disk 0 is the virtio disk in lib/vm.sh's argument order: the ISO is a
+           cdrom, virtio-win is a cdrom, and the qcow2 is the only hard disk. -->
+      <DiskConfiguration>
+        <WillShowUI>OnError</WillShowUI>
+        <Disk wcm:action="add">
+          <DiskID>0</DiskID>
+          <WillWipeDisk>true</WillWipeDisk>
+          <CreatePartitions>
+            <!-- ESP. 260 MB rather than 100: Windows 11's recovery and the
+                 winre.wim that setup stages need the larger one, and a 100 MB
+                 ESP fails late with a misleading error. -->
+            <CreatePartition wcm:action="add">
+              <Order>1</Order>
+              <Type>EFI</Type>
+              <Size>260</Size>
+            </CreatePartition>
+            <!-- MSR -->
+            <CreatePartition wcm:action="add">
+              <Order>2</Order>
+              <Type>MSR</Type>
+              <Size>16</Size>
+            </CreatePartition>
+            <!-- Windows -->
+            <CreatePartition wcm:action="add">
+              <Order>3</Order>
+              <Type>Primary</Type>
+              <Extend>true</Extend>
+            </CreatePartition>
+          </CreatePartitions>
+          <ModifyPartitions>
+            <ModifyPartition wcm:action="add">
+              <Order>1</Order>
+              <PartitionID>1</PartitionID>
+              <Label>System</Label>
+              <Format>FAT32</Format>
+            </ModifyPartition>
+            <ModifyPartition wcm:action="add">
+              <Order>2</Order>
+              <PartitionID>2</PartitionID>
+            </ModifyPartition>
+            <ModifyPartition wcm:action="add">
+              <Order>3</Order>
+              <PartitionID>3</PartitionID>
+              <Label>Windows</Label>
+              <Letter>C</Letter>
+              <Format>NTFS</Format>
+            </ModifyPartition>
+          </ModifyPartitions>
+        </Disk>
+      </DiskConfiguration>
+
+      <ImageInstall>
+        <OSImage>
+          <InstallFrom>
+            <MetaData wcm:action="add">
+              <Key>/IMAGE/INDEX</Key>
+              <Value>__WINDOWS_IMAGE_INDEX__</Value>
+            </MetaData>
+          </InstallFrom>
+          <InstallTo>
+            <DiskID>0</DiskID>
+            <PartitionID>3</PartitionID>
+          </InstallTo>
+          <WillShowUI>OnError</WillShowUI>
+        </OSImage>
+      </ImageInstall>
+
+      <!-- THE PRODUCT KEY IS NOT OPTIONAL, EVEN THOUGH NOTHING GETS ACTIVATED.
+
+           Without a <ProductKey> here, setup stops at "Enter a product key" and waits
+           - which is exactly what the first complete run did for nine minutes: 131
+           identical frames of that page, and the screen check correctly kept saying
+           "not a desktop yet".
+
+           This is the generic install key for Windows 11 Pro. It selects the edition
+           during setup and does not activate anything; the guest runs unactivated,
+           which is what a sandbox needs and what dockur/windows uses for the same
+           reason. It is published by Microsoft for exactly this: installing without a
+           retail key so the edition can be chosen from the image.
+
+           I removed this once, on the reasoning that an ISO without an answer file
+           installs without a key. That is true of an interactive install and false of
+           an unattended one: the pass is incomplete without it, so setup falls back to
+           asking. -->
+      <UserData>
+        <AcceptEula>true</AcceptEula>
+        <FullName>easydiskbake</FullName>
+        <Organization>easydev-org</Organization>
+        <ProductKey>
+          <Key>VK7JG-NPHTM-C97JM-9MPGT-3V66T</Key>
+          <WillShowUI>Never</WillShowUI>
+        </ProductKey>
+      </UserData>
+
+      <!-- WHY THESE FOUR BYPASSES ARE HERE, HAVING ONCE BEEN LEFT OUT
+
+           The reasoning for omitting them was "the VM has a real TPM 2.0 and real
+           UEFI, so the checks pass". The first half is true and the second is not
+           relevant: Windows 11 checks for SECURE BOOT, and plain UEFI is not that.
+
+           OVMF_CODE_4M.fd is firmware without Microsoft's Secure Boot keys. Booting it
+           gives a guest where TPM is present, UEFI is present, and Secure Boot reports
+           disabled - so setup stops with "The PC must support Secure Boot". That is the
+           dialog the second full run sat on: a purple background and a white panel
+           with four lines of text.
+
+           The alternative is OVMF_CODE_4M.secboot.fd plus OVMF_VARS_4M.ms.fd, which is
+           more faithful and has a longer list of ways to go wrong (a vars template
+           that does not match the code file leaves the guest unbootable, and the
+           failure looks like a corrupt disk). dockur/windows takes the same route as
+           this file for the same reason.
+
+           These run in windowsPE, before the edition is chosen, which is why they work
+           here and not in a later pass. -->
+      <RunSynchronous>
+        <!-- TPM check. NO TPM IS ATTACHED BY DEFAULT and this is what makes that work.
+             dockur/windows installs and runs Windows 11 the same way; its own install.sh
+             says the secure/TPM path exists only for an install that was aborted, since
+             that one has no answer file to bypass with. -->
+        <RunSynchronousCommand wcm:action="add">
+          <Order>1</Order>
+          <Path>reg.exe add "HKLM\SYSTEM\Setup\LabConfig" /v BypassTPMCheck /t REG_DWORD /d 1 /f</Path>
+          <Description>Do not stop on the TPM check</Description>
+        </RunSynchronousCommand>
+        <!-- THE ONE THAT MATTERS: the firmware has no Secure Boot keys. -->
+        <RunSynchronousCommand wcm:action="add">
+          <Order>2</Order>
+          <Path>reg.exe add "HKLM\SYSTEM\Setup\LabConfig" /v BypassSecureBootCheck /t REG_DWORD /d 1 /f</Path>
+          <Description>Do not stop on the Secure Boot check</Description>
+        </RunSynchronousCommand>
+        <!-- RAM. 8 GiB is configured, above the 4 GiB floor, but a smaller bake would
+             otherwise fail on a check nobody was looking at. -->
+        <RunSynchronousCommand wcm:action="add">
+          <Order>3</Order>
+          <Path>reg.exe add "HKLM\SYSTEM\Setup\LabConfig" /v BypassRAMCheck /t REG_DWORD /d 1 /f</Path>
+          <Description>Do not stop on the RAM check</Description>
+        </RunSynchronousCommand>
+        <!-- Upgrades from unsupported CPUs. The guest CPU is `-cpu host`, so this is
+             relevant only on a host whose model Windows does not list. -->
+        <RunSynchronousCommand wcm:action="add">
+          <Order>4</Order>
+          <Path>reg.exe add "HKLM\SYSTEM\Setup\MoSetup" /v AllowUpgradesWithUnsupportedTPMOrCPU /t REG_DWORD /d 1 /f</Path>
+          <Description>Allow an unlisted CPU model</Description>
+        </RunSynchronousCommand>
+      </RunSynchronous>
+    </component>
+  </settings>
+
+  <!-- =========================== offlineServicing =========================== -->
+  <!--
+    UAC IS OFF, AND THE STAGES AFTER THIS ONE DEPEND ON IT.
+
+    An ssh session gets a filtered token: the account is in Administrators, but the session
+    runs with standard rights and any elevation request raises a UAC prompt. There is no
+    desktop behind an ssh connection, so that prompt is a dialog nobody can click - the
+    installer waits, the step times out, and the log says nothing about a window.
+
+    Two things in windows/11/steps/dev.yaml would hit exactly that:
+
+        OpenJS.NodeJS.LTS   Scope: machine only, ElevationRequirement: elevatesSelf
+                            - "elevatesSelf" means the MSI asks for a prompt when it is not
+                            already elevated, which is a hang over ssh
+        Python.Python.3.13  installed at machine scope, which writes under Program Files
+
+    With EnableLUA=false there is no filtered token at all, so the session is genuinely
+    elevated and no prompt is ever raised.
+
+    REMOVING THIS LINE BREAKS THE DEV STAGE, not the install - which is the worst shape for a
+    dependency to have, because nothing here would fail and the failure lands an hour later in
+    a stage that looks unrelated.
+  -->
+  <settings pass="offlineServicing">
+    <component name="Microsoft-Windows-LUA-Settings"
+               processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35"
+               language="neutral" versionScope="nonSxS">
+      <EnableLUA>false</EnableLUA>
+    </component>
+  </settings>
+
+  <!-- ============================== specialize ============================== -->
+  <!-- First boot of the installed system, before OOBE. The account and the
+       machine name are set here. -->
+  <settings pass="specialize">
+
+    <component name="Microsoft-Windows-Shell-Setup"
+               processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35"
+               language="neutral" versionScope="nonSxS">
+      <ComputerName>__COMPUTER_NAME__</ComputerName>
+      <TimeZone>UTC</TimeZone>
+      <RegisteredOwner>easydiskbake</RegisteredOwner>
+      <RegisteredOrganization>easydev-org</RegisteredOrganization>
+    </component>
+
+    <component name="Microsoft-Windows-Security-SPP-UX"
+               processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35"
+               language="neutral" versionScope="nonSxS">
+      <SkipAutoActivation>true</SkipAutoActivation>
+    </component>
+
+    <component name="Microsoft-Windows-Deployment"
+               processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35"
+               language="neutral" versionScope="nonSxS">
+      <RunSynchronous>
+        <!-- RDP on. A baked sandbox is reached over the network or not at all,
+             and this is the one setting that cannot be applied after the fact
+             without a running guest. -->
+        <RunSynchronousCommand wcm:action="add">
+          <Order>1</Order>
+          <Path>reg.exe add "HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server" /v fDenyTSConnections /t REG_DWORD /d 0 /f</Path>
+          <Description>Enable Remote Desktop</Description>
+        </RunSynchronousCommand>
+        <!-- The firewall must let 3389 through, and the built-in rule group is
+             the only way to do it without enumerating rules. -->
+        <RunSynchronousCommand wcm:action="add">
+          <Order>2</Order>
+          <Path>netsh.exe advfirewall firewall set rule group="remote desktop" new enable=Yes</Path>
+          <Description>Open the RDP firewall group</Description>
+        </RunSynchronousCommand>
+        <!-- QEMU's serial port is a plain 16550 at COM1. Telling the guest to
+             use it is what makes the arrival check in bake.sh possible: without
+             this, Windows has the device but no console attached to it. -->
+        <RunSynchronousCommand wcm:action="add">
+          <Order>3</Order>
+          <Path>reg.exe add "HKLM\SYSTEM\CurrentControlSet\Enum\Root\PORTS\0000" /v ConfigFlags /t REG_DWORD /d 0 /f</Path>
+          <Description>Make COM1 usable as a serial console</Description>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>4</Order>
+          <Path>bcdedit.exe /set {default} bootstatuspolicy IgnoreAllFailures</Path>
+          <Description>Do not enter recovery after an unclean shutdown</Description>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>5</Order>
+          <Path>bcdedit.exe /timeout 0</Path>
+          <Description>Do not wait at the boot menu</Description>
+        </RunSynchronousCommand>
+      </RunSynchronous>
+    </component>
+  </settings>
+
+  <!-- ============================= oobeSystem ============================== -->
+  <settings pass="oobeSystem">
+
+    <component name="Microsoft-Windows-International-Core"
+               processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35"
+               language="neutral" versionScope="nonSxS">
+      <InputLocale>0409:00000409</InputLocale>
+      <SystemLocale>en-US</SystemLocale>
+      <UILanguage>en-US</UILanguage>
+      <UserLocale>en-US</UserLocale>
+    </component>
+
+    <component name="Microsoft-Windows-Shell-Setup"
+               processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35"
+               language="neutral" versionScope="nonSxS">
+
+      <!-- THE LOCAL ACCOUNT.
+           A Microsoft account is not possible and not wanted: OOBE without
+           network would block, and the disk is a sandbox rather than a user's
+           machine. The password is fixed because it is a throwaway VM; the
+           workflow passes it through so it is visible in one place.
+
+           THE NAME IS A PLACEHOLDER FOR THE SAME REASON THE PASSWORD IS. It is
+           baked into the disk, so every later stage has to be told it - sshd
+           admits it, `C:/Users/<name>` is where the launcher and the task
+           registration go, and `schtasks` runs the launcher from there. A literal
+           here would mean the answer file and the four stage scripts each spell
+           the account out, and the one that disagrees fails at a login prompt
+           three stages later. windows/11/bake.py substitutes it from
+           WINDOWS_ADMIN_USER, default `vmuser`. -->
+      <UserAccounts>
+        <LocalAccounts>
+          <LocalAccount wcm:action="add">
+            <Name>__ADMIN_USER__</Name>
+            <DisplayName>__ADMIN_USER__</DisplayName>
+            <Group>Administrators</Group>
+            <Password>
+              <Value>__ADMIN_PASSWORD__</Value>
+              <PlainText>true</PlainText>
+            </Password>
+          </LocalAccount>
+        </LocalAccounts>
+      </UserAccounts>
+
+      <AutoLogon>
+        <Enabled>true</Enabled>
+        <Username>__ADMIN_USER__</Username>
+        <Password>
+          <Value>__ADMIN_PASSWORD__</Value>
+          <PlainText>true</PlainText>
+        </Password>
+        <!-- SIXTY-FIVE THOUSAND, NOT ONE.
+             LogonCount=1 logs the account in once and then STOPS. The bake uses that
+             single logon, so every later stage - ssh, devtools, launch-windows - starts
+             at the lock screen instead of a desktop, and lib/desktop.py cannot tell a
+             lock screen from a failure: its test is a light band on top and a busier one
+             below, which is a taskbar, and a lock screen is one full-bleed wallpaper.
+
+             dockur/windows writes 65432 here, and that number is why its golden disk
+             comes back to a desktop every time. Ours said 1. -->
+        <LogonCount>65432</LogonCount>
+      </AutoLogon>
+
+      <Display>
+        <ColorDepth>32</ColorDepth>
+        <HorizontalResolution>1920</HorizontalResolution>
+        <VerticalResolution>1080</VerticalResolution>
+      </Display>
+
+      <!-- Every OOBE pane that can be skipped is skipped. A pane that appears is
+           a pane that waits for a human, and the bake has none. -->
+      <OOBE>
+        <HideEULAPage>true</HideEULAPage>
+        <HideLocalAccountScreen>true</HideLocalAccountScreen>
+        <HideOEMRegistrationScreen>true</HideOEMRegistrationScreen>
+        <HideOnlineAccountScreens>true</HideOnlineAccountScreens>
+        <HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>
+        <NetworkLocation>Work</NetworkLocation>
+        <ProtectYourPC>3</ProtectYourPC>
+        <SkipMachineOOBE>true</SkipMachineOOBE>
+        <SkipUserOOBE>true</SkipUserOOBE>
+      </OOBE>
+
+      <!-- No FirstLogonCommands and no $OEM$ scripts.
+
+           This answer file is the whole guest-side contract: setup reads it and
+           nothing else runs inside the guest. Everything a post-install script
+           would have done is either already configured above (RDP, the account,
+           the OOBE skips) or is verified from the host:
+
+             which edition   lib/wim.py reads install.wim before boot
+             did it finish   port 3389, which only listens after OOBE completes
+
+           The alternative - staging SetupComplete.cmd under
+           $OEM$\$$\Setup\Scripts\ - is what dockur does, and it is a reasonable
+           design; it is not used here because a guest that stages no script has
+           one fewer way to fail, and the two things it would have verified are
+           cheaper to see from outside. -->
+    </component>
+  </settings>
+
+</unattend>

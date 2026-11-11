@@ -211,6 +211,13 @@ var Keys = map[string]Key{
 			"withholds it from the answered count"},
 	"expect_any": {Name: "expect_any", Kind: KindWordSets,
 		Summary: "a list of word-sets, any one of which passes"},
+	"until_console": {Name: "until_console", Kind: KindString,
+		Summary: "wait for text in the guest's SERIAL output - the firmware's own words, which " +
+			"a screenshot cannot see. A Windows install ISO prints its boot prompt there and " +
+			"waits five seconds for a key"},
+	"blind_after": {Name: "blind_after", Kind: KindInt,
+		Summary: "with until_console: go on after this many seconds whether or not the text " +
+			"appeared, for media that boot with no prompt at all"},
 	"until": {Name: "until", Kind: KindWords,
 		Summary: "words that end a wait loop"},
 	"until_any": {Name: "until_any", Kind: KindWordSets,
@@ -326,7 +333,10 @@ var Keys = map[string]Key{
 			"the vocabulary itself"},
 	"fetch": {Name: "fetch", Kind: KindString,
 		Summary: "download or extract a host-side asset: guest_agent_windows, guest_agent_macos, " +
-			"xcode, packages"},
+			"xcode, packages, windows_iso, virtio_win, answer_iso"},
+	"template": {Name: "template", Kind: KindString,
+		Summary: "with `fetch: answer_iso`: the answer file to substitute into. It is a path in " +
+			"the repository because the placeholders are the file's vocabulary, not a download"},
 
 	// --- extensions ---------------------------------------------------------------------
 	"python": {Name: "python", Kind: KindString,

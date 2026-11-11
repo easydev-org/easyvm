@@ -343,6 +343,24 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 		"-m", fmt.Sprint(opts.MemMB),
 		"-vga", boot.VGA(opts.VGA),
 		"-display", "none",
+		// THE CONSOLE GOES TO A FILE, BECAUSE ONE STEP HAS TO READ IT.
+		//
+		// A Windows install ISO does not boot by itself. The El Torito boot image prints
+		//
+		//	Press any key to boot from CD or DVD...
+		//
+		// and waits about five seconds; nothing pressing it means the firmware falls through to
+		// PXE and the run ends with four thousand bytes of firmware output and no Windows. That
+		// prompt is in the boot sector, before setup.exe runs, so no answer-file setting can
+		// suppress it - the only way past it is a keypress, and the only way to know when is the
+		// console.
+		//
+		// OVMF's own marker comes first and is what the Python implementation actually keys on:
+		// `UEFI QEMU ... DVD-ROM` appears seconds before the prompt and in every UEFI boot.
+		//
+		// `-serial file:` rather than a chardev socket: the reader is a step that polls a file,
+		// and a socket would need its own owner.
+		"-serial", "file:" + filepath.Join(d.work, "console.log"),
 	}
 	// THE GUEST'S OWN DEVICES, IN THE ORDER THE GUEST READS THEM. This is where the three-way split
 	// between a Windows disk boot, a Windows ISO boot and a macOS boot lives - all of it in

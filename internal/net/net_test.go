@@ -231,3 +231,91 @@ func TestIPForwardFailureExplainsItself(t *testing.T) {
 		}
 	}
 }
+
+// THE FORWARD CHAIN IS ENTERED FROM PREROUTING **AND** FROM OUTPUT.
+//
+// THIS IS THE DIFFERENCE BETWEEN THE WHOLE STAGE PASSING AND IT FAILING AT ITS LAST SSH STEP.
+// Run 43022310562 did everything: the desktop appeared in 3m43s, OpenSSH was installed, sshd was
+// configured. Then:
+//
+//	wait for sshd: nothing accepted ssh on 172.30.0.1:2222 within 10m0s:
+//	  dial tcp 172.30.0.1:2222: connect: connection refused
+//
+// `connection refused` in three milliseconds, not a timeout: the SYN reached the bridge interface
+// itself and nothing was listening there. PREROUTING only sees packets ARRIVING from outside; a
+// connection made BY A PROCESS IN THE CONTAINER to the bridge address is an OUTPUT packet and never
+// passes it. The daemon's own ssh client is that process.
+//
+// AND THE OUTPUT JUMP MUST MATCH THE BRIDGE ADDRESS. An unscoped `-A OUTPUT -p tcp -j VM_FWD` also
+// catches a probe to 127.0.0.1:2222 and DNATs it to the guest; DNAT rewrites the destination and
+// leaves the source, so the guest replies to its own loopback and the probe sits out its timeout
+// instead of being refused (run 42188488710, and the Python implementation's note above that rule).
+func TestForwardsAreEnteredFromBothDirections(t *testing.T) {
+	body, err := os.ReadFile("dhcp.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(body)
+
+	// BOTH JUMPS PRESENT, in applyForwards.
+	need := []string{
+		`"PREROUTING", "-d", spec`,
+		`"OUTPUT", "-d", spec`,
+	}
+	for _, want := range need {
+		if !strings.Contains(src, want) {
+			t.Fatalf("applyForwards does not enter the chain via %s. PREROUTING alone refuses "+
+				"every connection made FROM INSIDE the container, which is every ssh the daemon "+
+				"itself makes", want)
+		}
+	}
+
+	// AND THE OUTPUT JUMP IS SCOPED TO TCP AND TO THE BRIDGE ADDRESS, which is the pair that
+	// keeps 127.0.0.1:2222 working.
+	if !strings.Contains(src, `"-p", "tcp", "-j", forwardChain`) {
+		t.Fatal("the OUTPUT jump is not scoped with `-p tcp`; without the protocol match it can " +
+			"rewrite traffic that is not a forwarded port")
+	}
+
+	// A FAILING CHAIN INSERT NAMES ITSELF, rather than surfacing as a refused connection ten
+	// minutes later in a step that has nothing to do with iptables.
+	if !strings.Contains(src, "entering %s from OUTPUT") {
+		t.Fatal("a failure to add the OUTPUT jump must name the chain; otherwise it appears as " +
+			"a refused ssh in a later step")
+	}
+}
+
+// AND Un DOES NOT DELETE A CHAIN IT IS STILL REFERENCING.
+//
+// `iptables -X` REFUSES a chain that a jump still points at, so flushing and deleting it before
+// removing the jumps leaves a dangling reference - which fails silently in Down() and accumulates
+// one per run. The jumps have to go first, both of them.
+func TestDownRemovesTheJumpsBeforeTheChain(t *testing.T) {
+	body, err := os.ReadFile("net.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(body)
+	downAt := strings.Index(src, "func Down()")
+	if downAt < 0 {
+		t.Fatal("no Down()")
+	}
+	down := src[downAt:]
+
+	jumpAt := strings.Index(down, `"-D"`)
+	flushAt := strings.Index(down, `"-F", forwardChain`)
+	if jumpAt < 0 {
+		t.Fatal("Down() never deletes the jumps, so `iptables -X` keeps failing on a chain that " +
+			"is still referenced")
+	}
+	if flushAt < 0 || jumpAt > flushAt {
+		t.Fatal("Down() flushes the chain BEFORE deleting the jumps that reference it; -X then " +
+			"fails and the reference is left behind")
+	}
+	// BOTH JUMPS, since applyForwards adds both.
+	for _, want := range []string{"PREROUTING", "OUTPUT"} {
+		if !strings.Contains(down[:flushAt], want) {
+			t.Fatalf("Down() does not remove the %s jump; the other one is left dangling", want)
+		}
+	}
+}

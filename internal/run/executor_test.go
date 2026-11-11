@@ -213,7 +213,14 @@ func TestEveryClaimedKeyIsHandled(t *testing.T) {
 		// A BRANCH THAT WOULD WAIT FOR A GUEST MUST NOT WAIT IN A TEST. The probe values are
 		// shaped so each step refuses or returns at once; where a key's only behaviour is "wait",
 		// the timeout is set to a hair so the branch is still reached.
-		if key == "require_ssh" || key == "desktop" {
+		//
+		// `until_console` BELONGS ON THIS LIST AND WAS MISSING, so it waited out its own 180-second
+		// default and the whole package's test run timed out at ninety seconds. The list is the
+		// thing that has to grow when a waiting key is added, which is why it sits here rather than
+		// being derived: derived-from-nothing would never have caught it either.
+		if key == "require_ssh" || key == "desktop" || key == "until_console" ||
+			key == "until" || key == "until_any" || key == "expect" || key == "expect_any" ||
+			key == "repeat_until" || key == "wait_for" || key == "wait" {
 			steps[0].Spec["timeout"] = 1
 		}
 		_, err := ex.Run(steps)

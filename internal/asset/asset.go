@@ -16,6 +16,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
+
+	"github.com/easydev-org/easyvm/internal/answer"
+	"github.com/easydev-org/easyvm/internal/oci"
 )
 
 // Kind is a file a stage needs on the host before it can copy it in.
@@ -31,6 +35,15 @@ const (
 	Xcode Kind = "xcode"
 	// Packages are the tarballs the macOS dev stage installs.
 	Packages Kind = "packages"
+	// AnswerISO is Windows' answer CD: Autounattend.xml at the root plus the virtio drivers in
+	// $WinPEDriver$. It is an asset like the others - a host-side file a `boot:` names - and it is
+	// produced rather than downloaded, which is the only difference.
+	AnswerISO Kind = "answer_iso"
+	// VirtioWin is the vendor's driver ISO, the input the answer CD's drivers come out of.
+	VirtioWin Kind = "virtio_win"
+	// WindowsISO is the Windows installer image. It is 7.7 GiB and does not live in this
+	// repository; a `fetch:` either finds it already in the work directory or pulls it.
+	WindowsISO Kind = "windows_iso"
 )
 
 // Result is what one fetch produced, so the next step can be compared against it.
@@ -41,12 +54,34 @@ type Result struct {
 	Extra []string
 }
 
-// Fetch produces the asset in work.
+// Spec is what a `fetch:` step says, in the shape the asset layer needs.
+//
+// IT IS A STRUCT RATHER THAN MORE ARGUMENTS because the kinds do not share a shape: an ISO is one
+// download, an answer CD is that ISO's contents rewritten into a new image, and the agent MSI is
+// two files out of the same ISO. A parameter list that tried to serve all three would be mostly
+// empty strings.
+type Spec struct {
+	// Kind is which asset.
+	Kind Kind
+	// Family is the guest's OS, for an asset whose content depends on it.
+	Family string
+	// Work is where the file goes.
+	Work string
+	// Values are the placeholders an answer file needs substituted.
+	Values map[string]string
+	// Template is the answer file to build from, when the kind needs one.
+	Template string
+}
+
+// Fetch produces the asset in spec.Work.
 //
 // A MISSING TOOL IS AN ERROR, NOT A FALLBACK. `7z` extracts the virtio-win ISO because that file is
 // an ISO9660 image with a Joliet tree, and reading it by hand is how a stage ends up copying a
 // truncated filename. If 7z is absent the build is wrong and this says so.
-func Fetch(kind Kind, family, work string) (Result, error) {
+func Fetch(spec Spec) (Result, error) {
+	kind, work := spec.Kind, spec.Work
+	_ = spec.Family // no kind's content depends on the guest's OS yet; the field stays for one
+	// that will (the macOS agent bundle is per-release).
 	switch kind {
 	case GuestAgentWindows:
 		return fetchWindowsAgent(work)
@@ -59,11 +94,155 @@ func Fetch(kind Kind, family, work string) (Result, error) {
 			"fail inside the guest rather than here")
 	case Packages:
 		return Result{}, fmt.Errorf("fetching the macOS packages is not implemented yet")
+
+	// THE VENDOR'S DRIVER ISO, PULLED FROM THIS REPOSITORY'S OWN PACKAGE.
+	//
+	// It is 700 MiB and the registry still has it, so a previous run's copy is reused - with its
+	// size checked, because a truncated ISO extracts a truncated driver and the guest then fails
+	// at the device rather than here.
+	case VirtioWin:
+		return fetchVirtioWin(work)
+
+	// THE ANSWER CD, BUILT RATHER THAN DOWNLOADED: the template is in the repository and the
+	// drivers are extracted out of the vendor ISO.
+	case AnswerISO:
+		return fetchAnswerISO(spec)
+
+	// THE INSTALLER ITSELF. Named by `iso:` on a boot step; this fetches or finds it.
+	case WindowsISO:
+		return fetchWindowsISO(work)
 	}
 	return Result{}, fmt.Errorf("%q is not an asset this build knows; the kinds are %s",
 		kind, strings.Join([]string{
 			string(GuestAgentWindows), string(GuestAgentMacOS), string(Xcode), string(Packages),
+			string(VirtioWin), string(AnswerISO), string(WindowsISO),
 		}, ", "))
+}
+
+// virtioWinTag is the artifact this repository publishes the vendor ISO under.
+//
+// ONE PACKAGE AND A PREFIXED TAG, which is the convention every artifact here follows: a tag says
+// what kind of thing it is, and there is one place to look.
+const virtioWinTag = "iso-virtio-win"
+
+// virtioWinMinSize is the floor a usable ISO has to clear.
+//
+// THE UPSTREAM ISO IS 836 MiB and a drivers-only repack is 56 MiB. Both are usable for the answer
+// CD's $WinPEDriver$ tree; the repack has no guest-agent directory at all, which is a DIFFERENT
+// question and one this build answers later (vm-configure fetches the agent separately). 40 MiB
+// rejects a truncated file and an HTML error page, and accepts both real shapes.
+const virtioWinMinSize = 40 << 20
+
+// fetchVirtioWin pulls the vendor driver ISO, reusing one that is already there.
+func fetchVirtioWin(work string) (Result, error) {
+	if err := os.MkdirAll(work, 0o755); err != nil {
+		return Result{}, err
+	}
+	dest := filepath.Join(work, "virtio-win.iso")
+	if fi, err := os.Stat(dest); err == nil && fi.Size() >= virtioWinMinSize {
+		return Result{Main: dest}, nil
+	}
+
+	repository := os.Getenv("DISKS_REPOSITORY")
+	if repository == "" {
+		repository = "easydev-org/easydiskbake"
+	}
+	art := oci.Artifact{
+		Repository: strings.ToLower(repository),
+		Tag:        virtioWinTag,
+		Token:      os.Getenv("GITHUB_TOKEN"),
+	}
+	ctx, cancel := oci.WithTimeout(30 * time.Minute)
+	defer cancel()
+	if err := oci.Pull(ctx, art, dest, func(msg string) { _ = msg }); err != nil {
+		return Result{}, fmt.Errorf("pulling %s from %s: %w. Without the driver ISO the answer CD "+
+			"carries no $WinPEDriver$ tree, windowsPE lists no disks, and Setup stops at a dialog "+
+			"nobody clicks", virtioWinTag, repository, err)
+	}
+	fi, err := os.Stat(dest)
+	if err != nil {
+		return Result{}, err
+	}
+	if fi.Size() < virtioWinMinSize {
+		return Result{}, fmt.Errorf("%s is %d MiB, below the %d MiB floor: a truncated ISO "+
+			"extracts a truncated driver", dest, fi.Size()>>20, virtioWinMinSize>>20)
+	}
+	return Result{Main: dest}, nil
+}
+
+// windowsISOTag is the artifact the installer image is published under.
+const windowsISOTag = "iso-windows11"
+
+// windowsISOMinSize is the floor a usable installer image has to clear.
+//
+// THE PINNED IMAGE IS 7736125440 BYTES. The floor is well below it so a later release that is
+// slightly smaller still passes, and well above the size of a truncated download or an error page.
+const windowsISOMinSize = 2000 << 20
+
+// fetchWindowsISO finds or pulls the Windows installer image.
+func fetchWindowsISO(work string) (Result, error) {
+	if err := os.MkdirAll(work, 0o755); err != nil {
+		return Result{}, err
+	}
+	dest := filepath.Join(work, "windows11.iso")
+	if fi, err := os.Stat(dest); err == nil && fi.Size() >= windowsISOMinSize {
+		return Result{Main: dest}, nil
+	}
+
+	repository := os.Getenv("DISKS_REPOSITORY")
+	if repository == "" {
+		repository = "easydev-org/easydiskbake"
+	}
+	art := oci.Artifact{
+		Repository: strings.ToLower(repository),
+		Tag:        windowsISOTag,
+		Token:      os.Getenv("GITHUB_TOKEN"),
+	}
+	ctx, cancel := oci.WithTimeout(60 * time.Minute)
+	defer cancel()
+	if err := oci.Pull(ctx, art, dest, func(msg string) { _ = msg }); err != nil {
+		return Result{}, fmt.Errorf("pulling %s from %s: %w. The installer image is 7.7 GiB and "+
+			"is not in this repository; it must be published under that tag, or placed at %s "+
+			"before the run", windowsISOTag, repository, err, dest)
+	}
+	fi, err := os.Stat(dest)
+	if err != nil {
+		return Result{}, err
+	}
+	if fi.Size() < windowsISOMinSize {
+		return Result{}, fmt.Errorf("%s is %d MiB, below the %d MiB floor: a truncated installer "+
+			"is an ISO that boots to the firmware and stops", dest, fi.Size()>>20,
+			windowsISOMinSize>>20)
+	}
+	return Result{Main: dest}, nil
+}
+
+// fetchAnswerISO builds Windows' answer CD.
+//
+// THE DRIVERS COME OUT OF THE SAME ISO THIS REPOSITORY PUBLISHES, so this either uses one already
+// in the work directory or pulls it - and a failure to get it is a failure to build a CD that can
+// install Windows at all.
+func fetchAnswerISO(spec Spec) (Result, error) {
+	if spec.Template == "" {
+		return Result{}, fmt.Errorf("`fetch: answer_iso` needs a `template:` - the answer file to " +
+			"substitute into")
+	}
+	virtio, err := fetchVirtioWin(spec.Work)
+	if err != nil {
+		return Result{}, err
+	}
+	out := filepath.Join(spec.Work, "answer.iso")
+	err = answer.Build(answer.Spec{
+		Template:  spec.Template,
+		Out:       out,
+		VirtioISO: virtio.Main,
+		Values:    spec.Values,
+		Label:     "ANSWER",
+	}, func(msg string) { _ = msg })
+	if err != nil {
+		return Result{}, err
+	}
+	return Result{Main: out, Extra: []string{virtio.Main}}, nil
 }
 
 // fetchWindowsAgent extracts the agent MSI and the virtio-serial driver from the virtio-win ISO.

@@ -212,14 +212,34 @@ func ensureIPForward() error {
 
 // Down removes what Up created, and is safe on a partially-created network.
 func Down() {
-	// THE FORWARDS AND NAT GO WITH THE BRIDGE, so the rules are not individually undone: an
-	// iptables flush of a chain this package named is enough, and leaving MASERADE rules behind
-	// accumulates one per run.
+	spec := fmt.Sprintf("%s/%d", BridgeIP, Prefix)
+
+	// THE JUMPS GO BEFORE THE CHAIN, OR THE CHAIN CANNOT GO.
+	//
+	// `iptables -X <chain>` REFUSES a chain that is still referenced, so flushing and deleting it
+	// first leaves the jump in PREROUTING pointing at a chain that no longer exists - which fails
+	// silently here and accumulates a dangling rule per run. The Python implementation has the
+	// same three lines in the same order for the same reason.
+	//
+	// BOTH JUMPS, because both are added by applyForwards: PREROUTING for a connection from
+	// outside the container, OUTPUT for one of this container's own processes.
+	for _, where := range [][]string{
+		{"PREROUTING", "-d", spec},
+		{"OUTPUT", "-d", spec, "-p", "tcp"},
+	} {
+		// A JUMP THAT IS NOT THERE IS NOT A FAILURE, and `-D` says so with exit 1.
+		for {
+			if _, err := run("iptables", append([]string{"-t", "nat", "-D"}, append(where,
+				"-j", forwardChain)...)...); err != nil {
+				break
+			}
+		}
+	}
 	_, _ = run("iptables", "-t", "nat", "-F", forwardChain)
 	_, _ = run("iptables", "-t", "nat", "-X", forwardChain)
+
 	_, _ = run("iptables", "-F", "FORWARD")
-	_, _ = run("iptables", "-t", "nat", "-D", "POSTROUTING", "-s",
-		fmt.Sprintf("%s/%d", BridgeIP, Prefix), "-j", "MASQUERADE")
+	_, _ = run("iptables", "-t", "nat", "-D", "POSTROUTING", "-s", spec, "-j", "MASQUERADE")
 	stopDHCP()
 	_, _ = run("ip", "link", "del", "dev", TapName)
 	_, _ = run("ip", "link", "del", "dev", BridgeName)

@@ -33,6 +33,12 @@ type Executor struct {
 
 	// BootDisk is the disk a `boot:` starts when no `disk:` step named one - the --boot-disk flag.
 	BootDisk string
+	// assets is what `fetch:` produced, by kind, so a later step can name a file it did not compute.
+	//
+	// IT EXISTS BECAUSE THE PATHS ARE NOT THE FILE'S BUSINESS. An answer CD's name is decided by
+	// the asset layer; a `boot:` that hard-coded `answer.iso` would be a second place that name
+	// lives, and the two would disagree the first time one moved.
+	assets map[string]string
 	// OnStep is called as each step begins, for a daemon that must answer "where is it now".
 	//
 	// IT IS NOT LOGGING. The log is a stream a human reads; this is the one fact a client needs to
@@ -152,6 +158,8 @@ func (e *Executor) runOne(s walk.Step) error {
 			return err
 		}
 		return e.dispatchRest(s)
+	case s.Has("until_console"):
+		return e.doUntilConsole(s)
 	case s.Has("until") || s.Has("until_any"):
 		return e.doUntil(s)
 	case s.Has("expect_any") || s.Has("expect"):

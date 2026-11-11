@@ -2,6 +2,7 @@ package run
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -404,4 +405,142 @@ func (e *Executor) doAtWindow(s walk.Step) error {
 	e.Driver.Log(fmt.Sprintf("  clicked (%d, %d), %d px below the window top at row %d",
 		x, y, dy, top))
 	return e.settle(s)
+}
+
+// --- the console, which is not the screen ----------------------------------------------
+
+// ConsolePath is where qemu writes the guest's serial output.
+//
+// IT IS A SEPARATE CHANNEL FROM THE SCREEN, and one step needs it: a Windows install ISO prints
+// "Press any key to boot from CD or DVD..." in its boot sector and waits about five seconds. That
+// text is on the SERIAL CONSOLE - the firmware's own output - not on the framebuffer a screenshot
+// reads, and pressing the key at the wrong moment means the firmware falls through to PXE and the
+// run ends with no Windows at all.
+//
+// MUST MATCH THE `-serial file:` THE DRIVER PASSES. A path in two places is a path that will
+// disagree, so it is named once here.
+func ConsolePath(work string) string { return filepath.Join(work, "console.log") }
+
+// doUntilConsole waits for text in the guest's serial output, then reports it.
+//
+// `until_console:` IS `until:` FOR A CHANNEL THAT IS NOT THE SCREEN, and one specific problem needs
+// it. A Windows install ISO prints, in its BOOT SECTOR,
+//
+//	Press any key to boot from CD or DVD...
+//
+// and waits about five seconds for a key; none arrives, so the firmware falls through to PXE and the
+// run ends with four thousand bytes of firmware output and no Windows.
+//
+// WHY THIS IS NOT AN OCR STEP, HAVING CONSIDERED IT. The prompt IS drawn on the framebuffer, so a
+// screenshot could in principle read it - but that is the wrong marker and the wrong timescale:
+//
+//   - THE MARKER THAT WORKS IS THE FIRMWARE'S OWN, and it is not on the screen at all. It is OVMF's
+//     line `UEFI QEMU ... DVD-ROM`, which appears SECONDS BEFORE the prompt and in every UEFI boot.
+//     dockur/windows triggers on exactly it, and the Python implementation's first attempt - waiting
+//     for the visible prompt instead - fell through to PXE: "The prompt is on screen for about five
+//     seconds; by 60 the guest had fallen through to PXE and the run was over."
+//   - FIVE SECONDS IS FEWER OCR ROUNDS THAN KEYS. A screendump plus a tesseract pass is most of a
+//     second, so a five-second window gives four or five attempts at a string that OCR can also
+//     misread ("DUD" for "DVD"). Text matching on a file has no such failure.
+//
+// AND THE KEYPRESS ITSELF IS TIMING-SENSITIVE IN A WAY THAT BOUNDS THE WHOLE APPROACH: the key is
+// ESC rather than Return because a Return left in the queue when Windows reaches its desktop opens
+// the Start menu, and a run that did that "looks like a bake that failed at the end: a desktop, then
+// a screen full of menu". The earlier the press, the safer it is, so the EARLIER marker wins.
+//
+// OCR STILL HAS ITS PLACE IN THIS STAGE, one step later: `until:` on the installer's first pane is
+// how the run confirms it actually reached Setup. That is a question about a screen, which is what
+// OCR is for; this step is a question about a five-second firmware window, which is not.
+func (e *Executor) doUntilConsole(s walk.Step) error {
+	want := s.Get("until_console")
+	if want == "" {
+		return fail(s.Name, "`until_console:` must name the text to wait for")
+	}
+	timeout := seconds(s, "timeout", 180)
+	poll := seconds(s, "poll", 1)
+	// THE BLIND FALLBACK, AND IT IS FROM MEASUREMENT RATHER THAN CAUTION. Some media boot without
+	// any prompt, and some firmwares never emit the marker - so a step that waited for text alone
+	// would wait out its whole budget on a guest that was already at the pane it was waiting for.
+	// dockur keeps the same fallback for the same reason.
+	blindAfter := seconds(s, "blind_after", 0)
+
+	path := ConsolePath(e.Work)
+	e.Driver.Log(fmt.Sprintf("  waiting up to %s for %q in %s", timeout,
+		shorten(want, 60), filepath.Base(path)))
+
+	start := time.Now()
+	var last string
+	for time.Since(start) < timeout {
+		text, err := readTail(path, 256<<10)
+		if err != nil {
+			// A CONSOLE THAT DOES NOT EXIST YET IS NOT A FAILURE: qemu creates the file when it
+			// starts, and a boot step may return before that write lands.
+			if !os.IsNotExist(err) {
+				return fail(s.Name, "%v", err)
+			}
+		} else {
+			last = text
+			if strings.Contains(text, want) {
+				e.Driver.Log(fmt.Sprintf("  saw %q (%s)", shorten(want, 60),
+					time.Since(start).Round(time.Second)))
+				return nil
+			}
+		}
+		if blindAfter > 0 && time.Since(start) >= blindAfter {
+			e.Driver.Log(fmt.Sprintf("  no %q after %s; going on anyway (blind_after)",
+				shorten(want, 60), blindAfter))
+			return nil
+		}
+		time.Sleep(poll)
+	}
+	// THE TAIL IS THE DIAGNOSIS. "never appeared" for a console marker means either the guest never
+	// got that far or the file is not being written, and the last lines distinguish them.
+	return fail(s.Name, "never saw %q in %s within %s; the console ends with:\n%s",
+		shorten(want, 60), path, timeout, lastLines(last, 20))
+}
+
+// readTail reads the end of a file, for output that grows without bound.
+func readTail(path string, limit int64) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		return "", err
+	}
+	start := int64(0)
+	if fi.Size() > limit {
+		start = fi.Size() - limit
+	}
+	if _, err := f.Seek(start, io.SeekStart); err != nil {
+		return "", err
+	}
+	b, err := io.ReadAll(f)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+func lastLines(text string, n int) string {
+	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	if len(lines) == 1 && lines[0] == "" {
+		return "  (the file is empty - qemu has written nothing yet)"
+	}
+	for i, l := range lines {
+		lines[i] = "  " + shorten(strings.TrimRight(l, "\r"), 160)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func shorten(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
 }
