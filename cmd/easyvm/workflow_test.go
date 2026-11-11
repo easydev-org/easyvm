@@ -128,3 +128,91 @@ func TestNoConditionDependsOnAnAbsentDispatchInput(t *testing.T) {
 		}
 	}
 }
+
+// A DUPLICATE KEY IS A WORKFLOW GITHUB REFUSES TO DISPATCH, AND NOTHING LOCAL NOTICED.
+//
+// Measured, on the first attempt to dispatch the new matrix:
+//
+//	could not create workflow dispatch event: HTTP 422: Invalid Argument - failed to parse
+//	workflow: (Line: 178, Col: 5): 'timeout-minutes' is already defined
+//
+// The file was valid YAML - a YAML parser keeps the LAST value for a repeated key without a word -
+// so `python -c 'yaml.safe_load(...)'` printed nothing and every Go test passed. The workflow simply
+// could not be triggered, which is the one failure a test suite should never be able to miss.
+//
+// THE CHECK IS A LINE SCAN RATHER THAN A PARSER, because it has to see both keys and Go has no
+// YAML dependency here. Indentation defines the block: two keys at the same indent inside one
+// mapping are the duplicate GitHub rejects.
+func TestNoDuplicateKeysInWorkflows(t *testing.T) {
+	files, err := os.ReadDir("../../.github/workflows")
+	if err != nil {
+		t.Skipf("no workflows directory here (%v)", err)
+	}
+	for _, f := range files {
+		if !strings.HasSuffix(f.Name(), ".yml") && !strings.HasSuffix(f.Name(), ".yaml") {
+			continue
+		}
+		body, err := os.ReadFile("../../.github/workflows/" + f.Name())
+		if err != nil {
+			t.Fatal(err)
+		}
+		// stack of (indent, keys seen at that indent) for the CURRENT mapping.
+		type level struct {
+			indent int
+			keys   map[string]int // key -> first line
+		}
+		var stack []level
+		for i, raw := range strings.Split(string(body), "\n") {
+			line := strings.TrimRight(raw, " \t\r")
+			trimmed := strings.TrimSpace(line)
+			if trimmed == "" || strings.HasPrefix(trimmed, "#") || trimmed == "---" {
+				continue
+			}
+			if strings.HasPrefix(trimmed, "- ") {
+				// A SEQUENCE ITEM STARTS A NEW MAPPING at its own indent.
+				stack = nil
+				indent := len(line) - len(strings.TrimLeft(line, " "))
+				rest := strings.TrimSpace(strings.TrimPrefix(trimmed, "- "))
+				if k, ok := keyOf(rest); ok {
+					stack = append(stack, level{indent: indent + 2,
+						keys: map[string]int{k: i + 1}})
+				}
+				continue
+			}
+			indent := len(line) - len(strings.TrimLeft(line, " "))
+			k, ok := keyOf(trimmed)
+			if !ok {
+				continue
+			}
+			// POP deeper levels, then find or create the level at this indent.
+			for len(stack) > 0 && stack[len(stack)-1].indent > indent {
+				stack = stack[:len(stack)-1]
+			}
+			if len(stack) == 0 || stack[len(stack)-1].indent < indent {
+				stack = append(stack, level{indent: indent, keys: map[string]int{}})
+			}
+			top := &stack[len(stack)-1]
+			if first, seen := top.keys[k]; seen {
+				t.Errorf("%s:%d repeats the key %q, first defined at line %d. GitHub REFUSES TO "+
+					"PARSE such a workflow - `Invalid Argument ... is already defined` - so it "+
+					"cannot be dispatched at all, and YAML parsers keep the last value silently.",
+					f.Name(), i+1, k, first)
+			}
+			top.keys[k] = i + 1
+		}
+	}
+}
+
+// keyOf returns the mapping key on a line, if it is one.
+func keyOf(line string) (string, bool) {
+	// A key is `name:` with nothing before the colon but the name itself - no space, no quote.
+	idx := strings.Index(line, ":")
+	if idx <= 0 {
+		return "", false
+	}
+	k := line[:idx]
+	if strings.ContainsAny(k, " \t\"'{[(") {
+		return "", false
+	}
+	return k, true
+}

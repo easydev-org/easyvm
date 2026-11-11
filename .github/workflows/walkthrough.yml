@@ -103,10 +103,10 @@ jobs:
       && (inputs.stages == 'all'
           || contains(format(',{0},', inputs.stages), format(',{0},', matrix.name)))
     runs-on: ubuntu-24.04
-    # THE LEG'S OWN TIMEOUT, NOT THE JOB'S. A 150-minute macOS install must not be bounded by a
-    # default chosen for a 70-minute Windows stage; `matrix.timeout` is per leg and this is the
-    # job-wide ceiling above it.
-    timeout-minutes: ${{ fromJSON(inputs.timeout_minutes || '150') }}
+    # THE LEG'S OWN TIMEOUT, NOT ONE NUMBER FOR ALL EIGHT. A 150-minute macOS install must not be
+    # bounded by a default chosen for a 70-minute Windows stage, and a job-wide override would make
+    # the slowest leg the only one that can be given room.
+    timeout-minutes: ${{ matrix.timeout }}
     container:
       image: ghcr.io/${{ github.repository }}:latest
       credentials:
@@ -174,8 +174,6 @@ jobs:
             pull: macos15-dev
             out: macos15-dev.qcow2
             timeout: 150
-    # THE LEG'S OWN TIMEOUT, so a 150-minute install is not bounded by the job-wide 90.
-    timeout-minutes: ${{ matrix.timeout }}
     steps:
       - uses: actions/checkout@v4
 
