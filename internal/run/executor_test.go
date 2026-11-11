@@ -391,3 +391,42 @@ func TestRequireSSHDropsTheCachedConnection(t *testing.T) {
 			"assertion fails silently and nothing is dropped")
 	}
 }
+
+// `scp:` LOOKS FOR ITS FILE WHERE `write:` PUT IT.
+//
+// MEASURED ON MANJARO'S VM LEG:
+//
+//	copy the launcher in: scp bootstrap-launcher.sh -> /tmp/bootstrap-launcher.sh:
+//	open bootstrap-launcher.sh: no such file or directory
+//
+// `write: launcher` WROTE IT - `internal/bootstrap` produces the script and `doWrite` joins the name
+// onto the WORK DIRECTORY - and `doSCP` used the process's own working directory. Two places, one
+// file, and the step that produced it was blamed for the step that looked elsewhere.
+//
+// THE WORK DIRECTORY WINS, with the caller's directory as the fallback: a file run by hand has its
+// inputs beside it, and a file run by the daemon has them in `work`. `disk:` already followed exactly
+// this rule.
+func TestSCPLooksInTheWorkDirectory(t *testing.T) {
+	body, err := os.ReadFile("actions.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(body)
+	start := strings.Index(src, "func (e *Executor) doSCP(")
+	if start < 0 {
+		t.Fatal("no doSCP")
+	}
+	rest := src[start:]
+	if end := strings.Index(rest[1:], "\nfunc "); end > 0 {
+		rest = rest[:end+1]
+	}
+	if !strings.Contains(rest, "filepath.Join(e.Work, local)") {
+		t.Fatal("`scp:` does not resolve a relative path against the work directory, so a file " +
+			"`write:` produced there is reported missing")
+	}
+	// AND A MISSING FILE NAMES THE PLACES IT LOOKED, rather than a bare open(2) message.
+	if !strings.Contains(rest, "no file to copy at") {
+		t.Fatal("a missing source file reports the raw open error, which reads as a failed copy " +
+			"rather than as a file that no step produced")
+	}
+}

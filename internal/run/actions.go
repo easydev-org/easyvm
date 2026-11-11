@@ -438,6 +438,34 @@ func (e *Executor) doSCP(s walk.Step) error {
 	if local == "" || remote == "" {
 		return fail(s.Name, "`scp:` must name both ends")
 	}
+	// A RELATIVE LOCAL PATH IS LOOKED FOR WHERE `write:` PUT IT, WHICH IS THE WORK DIRECTORY.
+	//
+	// Measured on manjaro's vm leg:
+	//
+	//	copy the launcher in: scp bootstrap-launcher.sh -> /tmp/bootstrap-launcher.sh:
+	//	open bootstrap-launcher.sh: no such file or directory
+	//
+	// `write: launcher` WROTE IT and `scp:` could not find it, because the writer joins its name onto
+	// the work directory and the reader used the process's own working directory. The two are
+	// different places and the file was in the first one.
+	//
+	// THE WORK DIRECTORY WINS, and the caller's directory is the fallback - the same rule `disk:`
+	// already follows, for the same reason: a file run by hand has its inputs beside it and a file run
+	// by the daemon has them in `work`.
+	if !filepath.IsAbs(local) {
+		inWork := filepath.Join(e.Work, local)
+		if fileExists(inWork) {
+			local = inWork
+		}
+	}
+	// A MISSING FILE NAMES EVERY PLACE IT WAS LOOKED FOR. The message above said only
+	// `open bootstrap-launcher.sh: no such file or directory`, which reads as "the copy failed"
+	// rather than "the step that should have produced it did not, or produced it elsewhere".
+	if _, statErr := os.Stat(local); statErr != nil {
+		return fail(s.Name, "no file to copy at %s (work=%q): %v. A `scp:` names a file that an "+
+			"earlier `write:` or `fetch:` produced; if that step ran, look at where IT wrote",
+			local, e.Work, statErr)
+	}
 	if err := scpFile(client, local, remote); err != nil {
 		return fail(s.Name, "scp %s -> %s: %v", filepath.Base(local), remote, err)
 	}
