@@ -159,13 +159,26 @@ jobs:
         # it was watching was up and starting a guest (run 43018660638). The loop counts its own
         # iterations instead: sixty sleeps of sixty seconds, which is the same hour and needs no
         # shell feature beyond arithmetic.
+        #
+        # AND IT IS WRITTEN TO THE STEP SUMMARY AS WELL AS STDOUT, BECAUSE STDOUT IS BUFFERED.
+        # That is not tidiness: this step runs for forty minutes, and GitHub only replays a step's
+        # output once the step is OVER. Run 43022310562 sat in `follow it` for nineteen minutes
+        # with nothing visible, and the difference between "the desktop appeared and it is now
+        # installing OpenSSH" and "the desktop never appeared and it is about to time out" was not
+        # obtainable from the job page at all - which is the same problem this loop exists to
+        # solve, one level up. `$GITHUB_STEP_SUMMARY` is re-read as it is written.
         run: |
           set -eu
+          summary=${GITHUB_STEP_SUMMARY:-/dev/null}
+          printf '| time | state |\n|---|---|\n' >> "$summary"
           rounds=0
           while [ "$rounds" -lt 62 ]; do
             rounds=$((rounds + 1))
             state=$(easyvm status --work "$GITHUB_WORKSPACE/work" 2>&1 || true)
             printf '[%s] %s\n' "$(date +%H:%M:%S)" "$state"
+            # One table row per minute, with the newlines flattened so the table stays a table.
+            one_line=$(printf '%s' "$state" | tr '\n' ' ' | tr -s ' ')
+            printf '| %s | %s |\n' "$(date +%H:%M:%S)" "$one_line" >> "$summary"
             case "$state" in
               *"status: finished"*)
                 echo "=== THE WALKTHROUGH FINISHED ==="
