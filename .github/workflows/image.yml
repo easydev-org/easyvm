@@ -140,7 +140,15 @@ jobs:
       - uses: docker/setup-buildx-action@v3
 
       - name: log in to ghcr
-        if: inputs.push != false
+        # IT MUST PUSH ON A PUSH. `inputs.push != false` IS TRUE ONLY WHEN THE INPUT EXISTS, and on
+        # a `push` event it is empty - so `'' != false` was false and every push-to-main build
+        # built, self-checked, and published NOTHING, while the job reported success. Measured on
+        # run 43013438028: `push: false` in build-push-action's own resolved inputs, and
+        # ghcr.io/easydev-org/easyvm:latest still carrying an older commit's binary.
+        #
+        # `github.event_name != 'workflow_dispatch' || inputs.push` says what is meant: a push to
+        # main publishes, and a manual run publishes unless the box was unticked.
+        if: github.event_name != 'workflow_dispatch' || inputs.push
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -164,7 +172,9 @@ jobs:
           context: .
           file: ./Containerfile
           platforms: ${{ inputs.platforms || 'linux/amd64' }}
-          push: ${{ inputs.push != false }}
+          # THE SAME CONDITION AS THE LOGIN ABOVE, and it has to be: a build that pushes without
+          # logging in fails, and one that logs in without pushing is a credential nobody uses.
+          push: ${{ github.event_name != 'workflow_dispatch' || inputs.push }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           # THE SELF-CHECKS IN THE CONTAINERFILE ARE THE PRODUCT OF THIS JOB. They assert qemu,
@@ -180,7 +190,14 @@ jobs:
         # asks the binary inside it to describe itself - which proves the COPY put it where the
         # entrypoint looks, that it is executable, and that the qemu it will drive is the one the
         # Containerfile asserted.
-        if: inputs.platforms == '' || inputs.platforms == 'linux/amd64'
+        # SAME BUG AS THE PUSH CONDITION, ONE MORE TIME: `inputs.platforms` is EMPTY on a `push`
+        # event, so `'' == ''` is true and these ran - which is the opposite of the failure I was
+        # looking for, and worth stating rather than assuming: this one accidentally worked.
+        #
+        # They are kept, and written as the condition that means what is wanted: run unless the
+        # manual form asked for a platform this job cannot execute (an arm64 image cannot be run on
+        # an amd64 runner, so asking is the caller saying "build only").
+        if: github.event_name != 'workflow_dispatch' || inputs.platforms == '' || inputs.platforms == 'linux/amd64'
         run: |
           set -euo pipefail
           docker run --rm --entrypoint /usr/local/bin/easyvm \
@@ -196,7 +213,14 @@ jobs:
         # and the writer takes SIGPIPE; `set -euo pipefail` turns that into exit 141 for a check
         # that SUCCEEDED. Run 43001461321 failed here having already built, pushed and run the
         # image - every other step in the job was green.
-        if: inputs.platforms == '' || inputs.platforms == 'linux/amd64'
+        # SAME BUG AS THE PUSH CONDITION, ONE MORE TIME: `inputs.platforms` is EMPTY on a `push`
+        # event, so `'' == ''` is true and these ran - which is the opposite of the failure I was
+        # looking for, and worth stating rather than assuming: this one accidentally worked.
+        #
+        # They are kept, and written as the condition that means what is wanted: run unless the
+        # manual form asked for a platform this job cannot execute (an arm64 image cannot be run on
+        # an amd64 runner, so asking is the caller saying "build only").
+        if: github.event_name != 'workflow_dispatch' || inputs.platforms == '' || inputs.platforms == 'linux/amd64'
         run: |
           set -euo pipefail
           models=$(docker run --rm --entrypoint qemu-system-x86_64 \

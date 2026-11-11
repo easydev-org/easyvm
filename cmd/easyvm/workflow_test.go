@@ -57,3 +57,54 @@ func TestNoGrepQuietInWorkflows(t *testing.T) {
 		}
 	}
 }
+
+// A STEP THAT IS SILENTLY SKIPPED LOOKS EXACTLY LIKE A STEP THAT PASSED.
+//
+// `if: inputs.push != false` was true only when the input EXISTS, and on a `push` event it is
+// empty - so `” != false` evaluated false, the login and the push were both skipped, and the job
+// reported SUCCESS having published nothing. Measured on run 43013438028: build-push-action's own
+// resolved inputs said `push: false`, and ghcr.io's `latest` tag still carried an older commit's
+// binary. The walkthrough workflow then failed with `easyvm: unknown command "pull"` for a command
+// that is in the repository, which is what a stale image looks like from the outside.
+//
+// THE SHAPE OF THE BUG: `inputs.X != <value>` is a test that degrades to false when the input is
+// absent, and absent is the normal case for every event that is not workflow_dispatch. The
+// condition that means what it says names the event first.
+func TestNoConditionDependsOnAnAbsentDispatchInput(t *testing.T) {
+	files, err := os.ReadDir("../../.github/workflows")
+	if err != nil {
+		t.Skipf("no workflows directory here (%v)", err)
+	}
+	for _, f := range files {
+		if !strings.HasSuffix(f.Name(), ".yml") && !strings.HasSuffix(f.Name(), ".yaml") {
+			continue
+		}
+		path := "../../.github/workflows/" + f.Name()
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i, line := range strings.Split(string(body), "\n") {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "#") {
+				continue
+			}
+			// ANY `inputs.` COMPARISON HAS TO SAY WHICH EVENT IT IS TALKING ABOUT. Without that,
+			// the comparison is against an empty string and the step is skipped on every push.
+			if !strings.Contains(trimmed, "inputs.") {
+				continue
+			}
+			if !strings.Contains(trimmed, "!=") && !strings.Contains(trimmed, "==") {
+				continue
+			}
+			// `${{ }}` inside `with:` is the same expression, so both spellings are checked.
+			if strings.Contains(trimmed, "github.event_name") {
+				continue
+			}
+			t.Errorf("%s:%d compares an `inputs.` value without naming the event:\n\t%s\n"+
+				"A dispatch input is EMPTY on every other event, so `inputs.x != false` is "+
+				"false and the step is skipped - while the job still reports success. Write "+
+				"`github.event_name != 'workflow_dispatch' || inputs.x`.", f.Name(), i+1, trimmed)
+		}
+	}
+}
