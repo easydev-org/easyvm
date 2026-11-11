@@ -49,6 +49,20 @@ vars:
     default: admin
 
 steps:
+  # THE MACHINE IS STARTED HERE, FROM THE LIVEMEDIA THE CALLER PROVIDES.
+  #
+  # `gbi.yaml` INSTALLS GHOSTBSD; this file is its second half - the nine panes of gbi after the
+  # welcome screen. Separate files because the first is a wizard and this is a fixed pane grid, but
+  # they run against ONE machine, so this file boots the same live media rather than making a disk.
+  #
+  # `boot_disk: from_caller` IS WHAT MAKES THAT TRUE: the caller passes `--boot-disk`, which is the
+  # disk `gbi.yaml` created, and the `iso:` names the medium the wizard runs from. A file that
+  # created a second disk here would be installing onto a different machine.
+  - name: boot the installer
+    boot: true
+    os: bsd
+    timeout: 1800
+
   # =======================================================================================
   # 1. THE INSTALLER, FROM THE DESKTOP ICON - FOUND BY ITS OWN PIXELS
   # =======================================================================================

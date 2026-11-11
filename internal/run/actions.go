@@ -116,6 +116,13 @@ func (e *Executor) assetPath(v string) string {
 	// CD's drivers were extracted FROM, and Setup also wants it attached so the INSTALLED system can
 	// pick up network and ballooning - "the same drivers again". Two names for one file, because
 	// the two steps care about different things: one needs the contents, the other needs the device.
+	// `installer_iso` IS THE IMAGE `fetch: linux_iso` RESOLVED. The boot step names the ROLE, and
+	// the asset layer keeps the path - so a file never spells a filename that CI chose.
+	if v == "installer_iso" {
+		if p, ok := e.assets[string(asset.LinuxISO)]; ok {
+			return p
+		}
+	}
 	if v == "driver_iso" {
 		if p, ok := e.assets[string(asset.VirtioWin)]; ok {
 			return p

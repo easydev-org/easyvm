@@ -29,6 +29,29 @@ vars:
     default: admin
 
 steps:
+  # THE MACHINE AND ITS INSTALLER, WHICH USED TO BE THE BAKE SKELETON IN PYTHON.
+  #
+  # THIS FILE IS THE WIZARD STEPS. bsd/ghostbsd/install.py's main() built the machine, attached the
+  # ISO and pressed the desktop icon; its own docstring says install.py "keeps the machine, the OVMF
+  # firmware, the loader step, the frames, the recording and the publish". Reproduced as YAML, that
+  # skeleton has to be in the file.
+  #
+  # 64G BECAUSE THAT IS WHAT THE WORKFLOW PASSED (`--disk-size`), and the wizard's disk pane reads
+  # capacity.
+  - name: create the empty disk
+    disk: disk.qcow2
+    disk_gb: 64
+
+  - name: fetch the installer image
+    fetch: linux_iso
+    release: ghostbsd
+
+  - name: boot the installer
+    boot: true
+    os: bsd
+    iso: installer_iso
+    timeout: 1800
+
   # THE LIVE SESSION HAS TWO RIGHT ANSWERS, AND THE DRIVER'S OWN MEASUREMENT SAYS SO:
   #
   #     the desktop comes up BEFORE its panel does

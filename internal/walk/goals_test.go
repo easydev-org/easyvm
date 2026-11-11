@@ -282,3 +282,83 @@ func TestEveryWalkthroughLoads(t *testing.T) {
 			"stopped matching is a green test about nothing", len(files))
 	}
 }
+
+// A FILE THAT CLICKS OR WAITS MUST START ITS OWN MACHINE.
+//
+// THIS IS THE FAILURE THAT COST THIRTEEN LEGS AND TWO macOS LEGS, and it has ONE shape: a file whose
+// steps act on a guest, and whose `boot:` step does not exist because the Python driver started qemu
+// before running the walkthrough.
+//
+// The two symptoms are different and both were measured on run 43052807693:
+//
+//	`run:`/`key:`/`at:` first   open the terminal: qmp .../drive.sock.qmp: dial unix ...
+//	                            connect: no such file or directory
+//	`require_ssh:` first        wait for sshd: nothing accepted ssh on 172.30.0.1:2222
+//	                            within 15m0s: dial tcp ...: i/o timeout
+//
+// A REFUSED CONNECTION AND A TIMEOUT ARE DIFFERENT DIAGNOSES - the first means the bridge answered
+// and nothing listened, the second means the packet went to a guest that was never started - and
+// neither names the missing step.
+//
+// THE RULE: a file that has no `boot:` must ALSO have no step that needs a guest. A file that only
+// fetches, or only inspects the host, is fine; a file that clicks needs a machine.
+func TestAFileThatNeedsAGuestStartsOne(t *testing.T) {
+	root := filepath.Join("..", "..")
+	var files []string
+	for _, pat := range []string{
+		filepath.Join(root, "windows", "*", "steps", "*.yaml"),
+		filepath.Join(root, "macos", "*", "steps", "*.yaml"),
+		filepath.Join(root, "linux", "*", "steps", "*.yaml"),
+		filepath.Join(root, "bsd", "*", "steps", "*.yaml"),
+	} {
+		matches, err := filepath.Glob(pat)
+		if err != nil {
+			t.Fatal(err)
+		}
+		files = append(files, matches...)
+	}
+	if len(files) == 0 {
+		t.Skip("no walkthroughs here")
+	}
+
+	// A STEP THAT TOUCHES THE GUEST. `fetch:`, `write:` and `disk_gb:` are HOST work and need no
+	// machine; everything here does.
+	needsGuest := map[string]bool{
+		"at": true, "at_button": true, "at_window": true, "at_bottom": true, "double": true,
+		"key": true, "type": true, "run": true, "ssh": true, "scp": true, "script": true,
+		"require_ssh": true, "desktop": true, "until": true, "until_any": true,
+		"until_console": true, "screenshot": true, "share_mount": true, "shutdown": true,
+		"reboot": true, "record": true, "compress": true, "disk_settle": true,
+	}
+
+	for _, path := range files {
+		f, err := Load(path, nil)
+		if err != nil {
+			continue // TestEveryWalkthroughLoads reports the load failure
+		}
+		var boots bool
+		for _, s := range f.Steps {
+			if s.Has("boot") {
+				boots = true
+			}
+		}
+		if boots {
+			continue
+		}
+		for _, s := range f.Steps {
+			for key := range s.Spec {
+				if !needsGuest[key] {
+					continue
+				}
+				rel, _ := filepath.Rel(root, path)
+				t.Errorf("%s: step %q uses %q and the file has NO `boot:` step. In the Python "+
+					"implementation the stage's own script started qemu before running the "+
+					"walkthrough, so the file never said it. Reproduced as YAML, the machine has "+
+					"no owner: the daemon is started, the run is accepted, and the first step "+
+					"that needs a guest reports `drive.sock.qmp: no such file` or an `i/o "+
+					"timeout` - neither of which names the missing step", rel, s.Name, key)
+				break
+			}
+		}
+	}
+}

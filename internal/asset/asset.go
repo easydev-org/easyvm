@@ -51,6 +51,8 @@ const (
 	// OpenCore is the firmware a macOS guest boots through: a boot image, an OVMF code file and a
 	// writable variables copy, all built from four pinned assets.
 	OpenCore Kind = "opencore"
+	// LinuxISO is a distribution's installer image, named by its own `release:`.
+	LinuxISO Kind = "linux_iso"
 )
 
 // Result is what one fetch produced, so the next step can be compared against it.
@@ -130,12 +132,14 @@ func Fetch(spec Spec) (Result, error) {
 		return fetchRecoveryMacOS(spec)
 	case OpenCore:
 		return fetchOpenCore(spec)
+	case LinuxISO:
+		return fetchLinuxISO(spec)
 	}
 	return Result{}, fmt.Errorf("%q is not an asset this build knows; the kinds are %s",
 		kind, strings.Join([]string{
 			string(GuestAgentWindows), string(GuestAgentMacOS), string(Xcode), string(Packages),
 			string(VirtioWin), string(AnswerISO), string(WindowsISO),
-			string(RecoveryMacOS), string(OpenCore),
+			string(RecoveryMacOS), string(OpenCore), string(LinuxISO),
 		}, ", "))
 }
 
@@ -308,6 +312,71 @@ func fetchOpenCore(spec Spec) (Result, error) {
 		Main:  out.Boot,
 		Extra: []string{out.ROM, out.Vars},
 	}, nil
+}
+
+// linuxISOTag is the ghcr tag a Linux installer image would be published under.
+//
+// NONE OF THEM IS PUBLISHED YET, and that is a fact rather than a bug in the lookup: the Python
+// workflow downloaded each ISO from the vendor on every run, because a 3-to-7 GiB image per stage was
+// not worth a package. The tag convention exists so publishing them is a publish and not a code
+// change.
+func linuxISOTag(release string) string { return "iso-" + release }
+
+// fetchLinuxISO finds or pulls a distribution's installer image.
+//
+// THREE SOURCES, IN THIS ORDER, AND THE ORDER IS THE POINT:
+//
+//	1  an image already in the work directory, which is how CI hands one over
+//	2  the ghcr tag `iso-<release>`, if this repository has published it
+//	3  NOTHING. A vendor download here would be a 7 GiB transfer inside a walkthrough step, with the
+//	   stage clock running, and the Python implementation kept that in a separate `fetch_iso.py`
+//	   precisely so it was not part of a walk.
+//
+// A MISSING IMAGE IS A SENTENCE ABOUT THE FILE, not a boot that hangs: `boot: iso: installer_iso`
+// resolves to the path this step records, and Validate reports a missing installer by name.
+func fetchLinuxISO(spec Spec) (Result, error) {
+	if err := os.MkdirAll(spec.Work, 0o755); err != nil {
+		return Result{}, err
+	}
+	release := spec.Release
+	if release == "" {
+		return Result{}, fmt.Errorf("`fetch: linux_iso` needs a `release:` - the distribution's name, " +
+			"which is also the tag its image would be published under")
+	}
+
+	// 1. ALREADY HERE. The workflow puts it in the work directory, and so does a manual run.
+	for _, name := range []string{release + ".iso", "installer.iso"} {
+		path := filepath.Join(spec.Work, name)
+		if fi, err := os.Stat(path); err == nil && fi.Size() > 500<<20 {
+			return Result{Main: path}, nil
+		}
+	}
+
+	// 2. THE PUBLISHED ARTIFACT, IF THERE IS ONE.
+	repository := os.Getenv("DISKS_REPOSITORY")
+	if repository == "" {
+		repository = "easydev-org/easydiskbake"
+	}
+	tag := linuxISOTag(release)
+	dest := filepath.Join(spec.Work, "installer.iso")
+	art := oci.Artifact{
+		Repository: strings.ToLower(repository), Tag: tag, Token: os.Getenv("GITHUB_TOKEN"),
+	}
+	ctx, cancel := oci.WithTimeout(45 * time.Minute)
+	defer cancel()
+	if err := oci.Pull(ctx, art, dest, func(string) {}); err == nil {
+		if fi, err := os.Stat(dest); err == nil && fi.Size() > 500<<20 {
+			return Result{Main: dest}, nil
+		}
+	}
+
+	// 3. NOTHING, SAID CLEARLY. The two ways to fix it are named, because a reader who sees this in a
+	// log needs to know whether to publish the artifact or to place a file.
+	return Result{}, fmt.Errorf("no installer image for %q. Looked for %s and %s in %s, and for the "+
+		"published tag %s/%s. Place the ISO at %s, or publish it as %s - this step does not download "+
+		"from a vendor, because a 3-to-7 GiB transfer inside a walkthrough runs with the stage clock",
+		release, release+".iso", "installer.iso", spec.Work, repository, tag,
+		filepath.Join(spec.Work, "installer.iso"), tag)
 }
 
 // fetchAnswerISO builds Windows' answer CD.

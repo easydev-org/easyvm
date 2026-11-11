@@ -35,6 +35,34 @@ vars:
     default: admin
 
 steps:
+  # THE MACHINE AND ITS INSTALLER, WHICH USED TO BE THE BAKE SKELETON IN PYTHON.
+  #
+  # THIS FILE IS A DECLARATION OF THE WIZARD STEPS AND NOTHING ELSE. Its own header says so:
+  #
+  #     WHAT THIS FILE IS. It is a DECLARATION, not an implementation. The bake skeleton - disk,
+  #     guest, recording, the QMP driver, the walk, ...
+  #
+  # and in the Python implementation lib/install_skeleton.py built the machine, created the disk and
+  # attached the ISO before running these steps. Reproduced as YAML that skeleton has to be IN the
+  # file, or the first `at:` reports `drive.sock.qmp: no such file` on a machine nobody started.
+  #
+  # 64G IS THE WORKFLOW'S OWN `--disk-size 64G`, not a number chosen here: every coordinate in this
+  # directory was measured on a disk that size, and the installer's partitioning pane reads capacity.
+  - name: create the empty disk
+    disk: disk.qcow2
+    disk_gb: 64
+
+  # THE INSTALLER IMAGE, BY THE TAG THIS REPOSITORY PUBLISHES IT UNDER.
+  - name: fetch the installer image
+    fetch: linux_iso
+    release: kubuntu
+
+  - name: boot the installer
+    boot: true
+    os: linux
+    iso: installer_iso
+    timeout: 1800
+
   # =======================================================================================
   # 1. THE LIVE DESKTOP'S OWN INSTALL BUTTON
   # =======================================================================================

@@ -62,6 +62,26 @@ ssh_port: 2222
 boot_disk: from_caller
 
 steps:
+  # THE MACHINE IS STARTED HERE, IN THE FILE.
+  #
+  # THIS FILE'S DISK COMES FROM THE PREVIOUS STAGE - `boot_disk: from_caller` says the caller's
+  # `--boot-disk` supplies it - BUT SOMETHING STILL HAS TO START QEMU, and in the Python
+  # implementation that was the stage's own script (windows/11/vm_configure.py), which built the machine and started
+  # it before running the walkthrough. Leaving it there produced the failure the first CI run of this
+  # leg reported:
+  #
+  #     wait for sshd: nothing accepted ssh on 172.30.0.1:2222 within 15m0s: dial tcp
+  #                    172.30.0.1:2222: i/o timeout
+  #
+  # AN `i/o TIMEOUT` RATHER THAN `connection refused`, and the difference is the diagnosis: a refused
+  # connection means the bridge address answered and nothing was listening, while a timeout means the
+  # packet went to a guest that was never started. Fifteen minutes of a wait loop for a machine that
+  # did not exist.
+  - name: boot the disk
+    boot: true
+    os: windows
+    timeout: 900
+
   - name: wait for sshd
     require_ssh: true
     ssh_probe: echo ok

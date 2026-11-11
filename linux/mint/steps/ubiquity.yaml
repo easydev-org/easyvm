@@ -33,6 +33,18 @@ vars:
     default: admin
 
 steps:
+  # THE MACHINE IS STARTED HERE, ON THE DISK `install.yaml` MADE.
+  #
+  # THIS IS THE SECOND HALF OF MINT'S INSTALL. `install.yaml` creates the disk, boots the live media
+  # and gets to the installer; this file is Ubiquity's seven panes. They run against ONE machine, so
+  # `boot_disk: from_caller` says the caller's `--boot-disk` supplies it - and the file still has to
+  # START it, because in the Python implementation linux/mint/install.py did that before running
+  # either file.
+  - name: boot the installer
+    boot: true
+    os: linux
+    timeout: 1800
+
   # 0. THE SESSION MUST NOT LOCK ITSELF WHILE THE INSTALL RUNS.
   #
   # This is a `run:` step and not a click, because the two mechanisms that blank this screen
