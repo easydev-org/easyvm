@@ -333,23 +333,46 @@ func fetchOpenCore(spec Spec) (Result, error) {
 	}, nil
 }
 
-// linuxISOTag is the ghcr tag a Linux installer image would be published under.
+// LINUX ISO TAGS ARE NOT `iso-<distribution>`, AND THE THREE THAT ARE NOT WOULD HAVE FAILED.
 //
-// NONE OF THEM IS PUBLISHED YET, and that is a fact rather than a bug in the lookup: the Python
-// workflow downloaded each ISO from the vendor on every run, because a 3-to-7 GiB image per stage was
-// not worth a package. The tag convention exists so publishing them is a publish and not a code
-// change.
-func linuxISOTag(release string) string { return "iso-" + release }
+// All thirteen images ARE published - easydiskbake's `artifacts-publish.yml` has been putting them in
+// that package for months - but three carry the vendor's own edition in the tag, because that is what
+// the pinned URL names:
+//
+//	iso-opensuse-tumbleweed-kde    not iso-opensuse-tumbleweed
+//	iso-endeavouros                not iso-endeavour
+//	iso-ghostbsd-mate              not iso-ghostbsd
+//
+// A LOOKUP THAT GUESSED WOULD HAVE TOLD THREE DISTRIBUTIONS THEIR INSTALLER DID NOT EXIST, with a
+// message naming a tag nobody had published and no hint that a differently-named one had been sitting
+// there all along.
+//
+// THE TAGS WERE VERIFIED AGAINST THE REGISTRY before this map was written, which is the only way to
+// know a name rather than infer one.
+var linuxISOAliases = map[string]string{
+	"opensuse-tumbleweed": "opensuse-tumbleweed-kde",
+	"endeavour":           "endeavouros",
+	"ghostbsd":            "ghostbsd-mate",
+}
+
+// linuxISOTag is the ghcr tag a Linux installer image is published under.
+func linuxISOTag(release string) string {
+	if alias, ok := linuxISOAliases[release]; ok {
+		release = alias
+	}
+	return "iso-" + release
+}
 
 // fetchLinuxISO finds or pulls a distribution's installer image.
 //
-// THREE SOURCES, IN THIS ORDER, AND THE ORDER IS THE POINT:
+// TWO SOURCES, IN THIS ORDER:
 //
-//	1  an image already in the work directory, which is how CI hands one over
-//	2  the ghcr tag `iso-<release>`, if this repository has published it
-//	3  NOTHING. A vendor download here would be a 7 GiB transfer inside a walkthrough step, with the
-//	   stage clock running, and the Python implementation kept that in a separate `fetch_iso.py`
-//	   precisely so it was not part of a walk.
+//	1  an image already in the work directory, which is how a manual run hands one over
+//	2  the ghcr tag, which IS published for all thirteen distributions
+//
+// AND NO VENDOR DOWNLOAD. A 3-to-7 GiB transfer inside a walkthrough step runs with the stage clock,
+// which is why the Python implementation kept `fetch_iso.py` separate from the walk. Pulling the
+// published artifact is the same bytes, one registry call, and resumable.
 //
 // A MISSING IMAGE IS A SENTENCE ABOUT THE FILE, not a boot that hangs: `boot: iso: installer_iso`
 // resolves to the path this step records, and Validate reports a missing installer by name.
@@ -389,13 +412,12 @@ func fetchLinuxISO(spec Spec) (Result, error) {
 		}
 	}
 
-	// 3. NOTHING, SAID CLEARLY. The two ways to fix it are named, because a reader who sees this in a
-	// log needs to know whether to publish the artifact or to place a file.
-	return Result{}, fmt.Errorf("no installer image for %q. Looked for %s and %s in %s, and for the "+
-		"published tag %s/%s. Place the ISO at %s, or publish it as %s - this step does not download "+
-		"from a vendor, because a 3-to-7 GiB transfer inside a walkthrough runs with the stage clock",
-		release, release+".iso", "installer.iso", spec.Work, repository, tag,
-		filepath.Join(spec.Work, "installer.iso"), tag)
+	// AND NEITHER SOURCE HAD IT, WHICH IS A SENTENCE ABOUT BOTH.
+	return Result{}, fmt.Errorf("no installer image for %q. Looked for %s.iso and installer.iso in %s, "+
+		"and pulled %s/%s without success. Place the ISO at %s, or check that the tag is the one this "+
+		"repository publishes - the vendor's edition is part of some of them (`opensuse-tumbleweed-kde` "+
+		"rather than `opensuse-tumbleweed`)",
+		release, release, spec.Work, repository, tag, filepath.Join(spec.Work, "installer.iso"))
 }
 
 // fetchAnswerISO builds Windows' answer CD.
