@@ -121,11 +121,14 @@ func Fetch(spec Spec) (Result, error) {
 		return Result{}, fmt.Errorf("fetching the macOS guest agent is not implemented yet; the "+
 			"step that needs it is %q", "the next scp in the file")
 	case Xcode:
-		return Result{}, fmt.Errorf("fetching Xcode is not implemented yet: it is a 2.7 GiB " +
-			"transfer from archive.org with a SHA-1 check, and a half-implemented version would " +
-			"fail inside the guest rather than here")
+		// THE ONE APPLE ASSET THAT CANNOT COME FROM APPLE. See internal/asset/xcode.go: the
+		// developer portal answers an unauthenticated request with a redirect to /unauthorized, so
+		// the file comes from archive.org with the sha1 Apple's own release index publishes.
+		return fetchXcode(spec)
 	case Packages:
-		return Result{}, fmt.Errorf("fetching the macOS packages is not implemented yet")
+		return Result{}, fmt.Errorf("fetching the macOS packages is not implemented yet; the dev " +
+			"stage installs them with `brew`, which needs no host-side fetch - so a file that names " +
+			"this kind is asking for something no other stage does")
 
 	// THE VENDOR'S DRIVER ISO, PULLED FROM THIS REPOSITORY'S OWN PACKAGE.
 	//
