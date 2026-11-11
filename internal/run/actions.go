@@ -396,15 +396,32 @@ func (e *Executor) doCompress(s walk.Step) error {
 		return fail(s.Name, "`compress:` must name the artifact path")
 	}
 	source := e.Driver.Machine()
-	if setter, ok := source.(interface{ Disk() string }); ok {
-		if d := setter.Disk(); d != "" {
-			if err := compressDisk(d, dest, e.Driver.Log); err != nil {
-				return fail(s.Name, "%v", err)
-			}
-			return nil
+	if source == nil {
+		return fail(s.Name, "no machine is known; a `boot:` step must come first")
+	}
+	disk := ""
+	if d, ok := source.(interface{ Disk() string }); ok {
+		disk = d.Disk()
+	}
+	if disk == "" {
+		return fail(s.Name, "no disk is known; a `disk:` step must come first")
+	}
+
+	// `qemu-img convert` READS THE WHOLE BACKING CHAIN AND WRITES ONE FILE, so it is the flatten.
+	// There is no second call for an overlay: what this step publishes is either the disk the run
+	// wrote (an install) or the diff on top of the disk it was given, and convert reads both.
+	if err := compressDisk(disk, dest, e.Driver.Log); err != nil {
+		return fail(s.Name, "%v", err)
+	}
+
+	// AND THE DIFF IS RELEASED AFTER IT HAS BEEN READ. A run that stops here and never releases
+	// leaves a file whose base has never been re-checked, and the check is the guarantee.
+	if rel, ok := source.(interface{ ReleaseDiff() error }); ok {
+		if err := rel.ReleaseDiff(); err != nil {
+			return fail(s.Name, "%v", err)
 		}
 	}
-	return fail(s.Name, "no disk is known; a `disk:` step must come first")
+	return nil
 }
 
 // notImplementedCount reports how many steps a file has that this build cannot run, so `run` can

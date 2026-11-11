@@ -327,6 +327,22 @@ func (b Boot) installing() bool {
 	return b.ISO != ""
 }
 
+// WantsOverlay reports whether this boot should write into a throwaway diff over the disk.
+//
+// AN INSTALL WRITES A NEW SYSTEM TO A DISK THIS RUN CREATED, and there is nothing behind it to
+// protect - so it runs on the disk itself, and `readonly` on a fresh qcow2 would only add a file.
+//
+// EVERY OTHER BOOT OPENS A DISK THAT CAME FROM SOMEWHERE: a published artifact, a working copy
+// another stage made, or a disk the person wants to keep. Those run on a diff, and `compress:`
+// flattens it when the stage publishes. That is what lib/steps.py does with `copy=True`, which is
+// its default, and what windows/11/steps/ssh.yaml's own comment describes:
+//
+//	"`boot:` BUILDS THE OVERLAY, so there is no `disk_overlay:` here any more. It was needed for
+//	 one commit because a file that let `boot:` make the overlay had no way to tell `compress:` to
+//	 flatten it. Now `boot:` records the overlay it made, so the two are the same path: every
+//	 machine runs on a diff, and publishing flattens it."
+func (b Boot) WantsOverlay() bool { return !b.installing() }
+
 // Discardable reports whether `discard=unmap` belongs on the target.
 //
 // TWO ANSWERS, AND BOTH ARE MEASURED: no while an installer is writing (the 17 GiB that vanished),

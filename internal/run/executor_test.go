@@ -22,6 +22,7 @@ type fakeDriver struct {
 	typed    []string
 	started  int
 	boot     *BootSpec
+	released bool
 	stopped  []string
 	frames   int
 	guestNil bool
@@ -67,6 +68,8 @@ func (stubFrame) Size() (int, int) { return 1920, 1080 }
 func (stubFrame) Words() []string  { return nil }
 
 type fakeMachine struct{ d *fakeDriver }
+
+func (m *fakeMachine) ReleaseDiff() error { m.d.released = true; return nil }
 
 func (m *fakeMachine) Boot(spec BootSpec) error {
 	// THE SPEC IS RECORDED, so a test can assert what a `boot:` step asked for without a machine.

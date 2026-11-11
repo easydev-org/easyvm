@@ -13,6 +13,7 @@ import (
 	"github.com/easydev-org/easyvm/internal/keys"
 	"github.com/easydev-org/easyvm/internal/machine"
 	easyvmnet "github.com/easydev-org/easyvm/internal/net"
+	"github.com/easydev-org/easyvm/internal/overlay"
 	"github.com/easydev-org/easyvm/internal/qmp"
 	"github.com/easydev-org/easyvm/internal/run"
 	"github.com/easydev-org/easyvm/internal/screen"
@@ -48,10 +49,16 @@ type Driver struct {
 	qmpConn  *qmp.Conn
 	ssh      *guest.Client
 	diskPath string
-	page     *consoleServer
-	vncPort  int
-	netUp    bool
-	logf     func(string)
+	// diff is the throwaway overlay this run wrote into, when it made one. Its Close is what
+	// proves the base was not written to, so it belongs to the driver rather than to a step.
+	diff *overlay.Overlay
+	// flattenFrom is the diff a `compress:` step must read instead of diskPath - the same file as
+	// diff.Path, kept because the file may already be gone by the time the step asks.
+	flattenFrom string
+	page        *consoleServer
+	vncPort     int
+	netUp       bool
+	logf        func(string)
 }
 
 // NewDriver builds the driver and returns a closer for the caller's defer.
@@ -214,10 +221,50 @@ type machineControl struct{ d *Driver }
 func (m machineControl) SetDisk(path string) { m.d.SetDisk(path) }
 
 // Disk is what a `compress:` step asks for: the file this stage has been writing to.
+//
+// IT IS THE DIFF WHEN THERE IS ONE, and that is the whole point of the field next to it. A stage
+// that ran on an overlay wrote nothing to the disk it was given - the artifact has to be built
+// from the diff, or the published disk is the one the run never touched.
 func (m machineControl) Disk() string {
 	m.d.mu.Lock()
 	defer m.d.mu.Unlock()
+	if m.d.flattenFrom != "" {
+		return m.d.flattenFrom
+	}
 	return m.d.diskPath
+}
+
+// ReleaseDiff deletes the diff and proves the base was not written to.
+//
+// IDEMPOTENT, BECAUSE TWO THINGS CALL IT. `compress:` releases the diff after flattening, and the
+// driver's own shutdown releases it if the walk failed before that step - and a failed walk is
+// exactly when the base has never been re-checked. overlay.Close tolerates a file that is already
+// gone, so the second call verifies without deleting.
+func (m machineControl) ReleaseDiff() error {
+	d := m.d
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.releaseDiffLocked()
+}
+
+func (d *Driver) releaseDiffLocked() error {
+	if d.diff == nil {
+		return nil
+	}
+	written, err := d.diff.Close()
+	if written > 0 {
+		d.logf(fmt.Sprintf("  released the diff (%d MiB written this run)", written>>20))
+	}
+	if err != nil {
+		return err
+	}
+	if d.flattenFrom == d.diff.Path {
+		// The flat has been published or the run is over; either way the path must stop being
+		// handed to a `compress:` step that would then open a file that does not exist.
+		d.flattenFrom = ""
+	}
+	d.diff = nil
+	return nil
 }
 
 // Start launches qemu with the ONE command line every family shares.
@@ -260,6 +307,26 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 	if err != nil {
 		return err
 	}
+
+	// THE DIFF IS MADE BEFORE qemu SEES THE DISK, because what qemu is given IS the diff.
+	//
+	// AN INSTALL WRITES THE DISK ITSELF (see machine.Boot.WantsOverlay): there is nothing behind a
+	// freshly created qcow2 to protect, and a diff would be one more file to flatten. Every other
+	// boot reads through a read-only base - which is what makes it safe for the guest to TRIM, and
+	// what makes `compress:` a flatten rather than a copy.
+	running := spec.Disk
+	if boot.WantsOverlay() {
+		o, err := overlay.Create(spec.Disk, d.work, "run-overlay.qcow2")
+		if err != nil {
+			return err
+		}
+		d.diff = o
+		d.flattenFrom = o.Path
+		running = o.Path
+		d.logf(fmt.Sprintf("  running on a diff over %s (read-only); %s",
+			filepath.Base(o.Base), o.Path))
+	}
+	boot.Disk = running
 
 	qmpPath := filepath.Join(d.work, "drive.sock.qmp")
 	_ = os.Remove(qmpPath)
@@ -458,6 +525,14 @@ func (d *Driver) shutdown() {
 	if d.netUp {
 		easyvmnet.Down()
 		d.netUp = false
+	}
+	// AND THE DIFF IS RELEASED AND ITS BASE VERIFIED, EVEN WHEN THE WALK FAILED.
+	//
+	// `compress:` releases it on the success path. A walk that failed before that step never
+	// re-checks the base - and a failed walk is exactly when "I did not write to it" is most
+	// likely to be false. Close is idempotent, so this is safe after a successful flatten too.
+	if err := d.releaseDiffLocked(); err != nil {
+		d.logf("  " + err.Error())
 	}
 }
 

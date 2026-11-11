@@ -16,6 +16,7 @@
 // SO THE COMMANDS SPLIT IN TWO GROUPS:
 //
 //	without a daemon   check, list, versions    - pure questions about a file or an image
+//	without a daemon   pull                     - fetch a published disk from the registry
 //	with a daemon      serve, run, status, stop, health
 //
 // `check` and `list` are questions with no machine in them: a file's vocabulary and its resolved
@@ -36,6 +37,7 @@ import (
 	"github.com/easydev-org/easyvm/internal/client"
 	"github.com/easydev-org/easyvm/internal/daemon"
 	"github.com/easydev-org/easyvm/internal/machine"
+	"github.com/easydev-org/easyvm/internal/oci"
 	"github.com/easydev-org/easyvm/internal/walk"
 )
 
@@ -53,6 +55,7 @@ The machine has ONE owner: a daemon. This command is a client and sends it reque
   easyvm check   FILE                            validate without any machine at all
   easyvm list    FILE                            one line per step
   easyvm versions                                what this build expects of qemu
+  easyvm pull    --tag TAG [--dest PATH]         fetch a published disk from the registry
 
 run flags:
   --work DIR        the daemon's directory (its socket is here)
@@ -75,6 +78,8 @@ func main() {
 		os.Exit(cmdInspect(os.Args[1], args))
 	case "versions":
 		os.Exit(cmdVersions())
+	case "pull":
+		os.Exit(cmdPull(args))
 	case "serve":
 		os.Exit(cmdServe(args))
 	case "run":
@@ -172,6 +177,86 @@ func cmdVersions() int {
 			fmt.Printf("%-18s (not on PATH)\n", tool)
 		}
 	}
+	return 0
+}
+
+// cmdPull fetches a published disk from the registry.
+//
+// IT IS NOT PART OF `run`, AND THAT IS DELIBERATE. A walkthrough file is a description of what to
+// do to a machine; which disk it starts from is a fact about the JOB, and a file that carried a
+// registry path would make every run of it depend on a package that may have moved. The workflow
+// pulls, then hands the file a `--boot-disk`.
+func cmdPull(args []string) int {
+	fs := flag.NewFlagSet("pull", flag.ContinueOnError)
+	tag := fs.String("tag", "", "the artifact to pull, `repository:tag` or just `tag`")
+	dest := fs.String("dest", "", "where to write the disk; the default is the tag's own name")
+	registry := fs.String("registry", oci.DefaultRegistry, "the registry host")
+	repository := fs.String("repository", "", "owner/repo, lowercased; default is $GITHUB_REPOSITORY")
+	timeout := fs.Duration("timeout", 60*time.Minute, "how long the transfer may take")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *tag == "" && fs.NArg() > 0 {
+		*tag = fs.Arg(0)
+	}
+	if *tag == "" {
+		fmt.Fprintln(os.Stderr, "easyvm pull: --tag is required, for example easyvm/win11:windows11-ssh")
+		return 2
+	}
+
+	var art oci.Artifact
+	if strings.Contains(*tag, ":") || strings.Contains(*tag, "/") {
+		parsed, err := oci.TagFrom(*tag)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "FAILED: %v\n", err)
+			return 1
+		}
+		art = parsed
+	} else {
+		art = oci.Artifact{Tag: *tag}
+	}
+	if *registry != "" {
+		art.Registry = *registry
+	}
+	// THE REPOSITORY IS THE JOB'S, NOT A CONSTANT. ghcr paths are lowercase and
+	// `github.repository` preserves the owner's case, so the lowercased form is what a package
+	// actually lives under - and getting it wrong is a push to a package that does not exist,
+	// with an error that says "denied" rather than "wrong case".
+	if *repository != "" {
+		art.Repository = *repository
+	} else if art.Repository == "" {
+		env := os.Getenv("GITHUB_REPOSITORY")
+		if env == "" {
+			fmt.Fprintln(os.Stderr, "easyvm pull: --repository is required when GITHUB_REPOSITORY "+
+				"is not set")
+			return 2
+		}
+		art.Repository = strings.ToLower(env)
+	}
+	// THE TOKEN IS TAKEN FROM THE ENVIRONMENT WHEN THERE IS ONE, so a private package pulls with
+	// the job's own credential and a public one needs nothing.
+	if art.Token == "" {
+		art.Token = os.Getenv("GITHUB_TOKEN")
+	}
+
+	if *dest == "" {
+		*dest = filepath.Base(art.Tag) + ".qcow2"
+	}
+	ctx, cancel := oci.WithTimeout(*timeout)
+	defer cancel()
+
+	fmt.Printf("[easyvm] pulling %s/%s:%s -> %s\n", art.Registry, art.Repository, art.Tag, *dest)
+	if err := oci.Pull(ctx, art, *dest, func(msg string) { fmt.Println(msg) }); err != nil {
+		fmt.Fprintf(os.Stderr, "FAILED: %v\n", err)
+		return 1
+	}
+	fi, err := os.Stat(*dest)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "FAILED: the pull reported success and %s is not there: %v\n",
+			*dest, err)
+		return 1
+	}
+	fmt.Printf("[easyvm] %s: %d MiB\n", *dest, fi.Size()>>20)
 	return 0
 }
 

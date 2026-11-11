@@ -60,6 +60,14 @@ type Machine interface {
 	Reboot() error
 	// IsRunning reports whether qemu is still there.
 	IsRunning() bool
+	// ReleaseDiff deletes the throwaway diff the machine ran on and proves the base it read
+	// through was not written to. It is idempotent: a run that flattened already released it.
+	//
+	// IT IS SEPARATE FROM Stop BECAUSE THE TWO HAVE DIFFERENT OWNERS. `shutdown:` stops the
+	// machine; `compress:` is the step that reads the diff and then releases it. A `shutdown:`
+	// that deleted the diff first would leave the next step with nothing to flatten - which is
+	// the bug the Python implementation hit on its first real `compress:` run.
+	ReleaseDiff() error
 }
 
 // Outcome is what a step produced.
