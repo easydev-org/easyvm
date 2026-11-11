@@ -122,6 +122,17 @@ RUN set -eux; \
         "qemu-system-x86=${VERSION_QEMU}" \
         "qemu-utils=${VERSION_QEMU}" \
         ovmf \
+        # swtpm IS FROM THE SAME SNAPSHOT AS QEMU, so a TPM protocol version and a qemu that speaks
+        # it are the same generation. It was MISSING from this list when this file was rewritten
+        # from qemux's Dockerfile, and the build's own assertion caught it:
+        #
+        #     #10 0.114 + swtpm --version
+        #     #10 0.114 /bin/sh: 1: swtpm: not found
+        #     ERROR: ... did not complete successfully: exit code: 127
+        #
+        # which is the whole argument for asserting each tool by name at build time rather than
+        # finding out when a Windows guest refuses to start.
+        swtpm \
     ; \
     rm -f /etc/apt/sources.list.d/qemu-snapshot.list /etc/apt/sources.list.d/non-free.list; \
     apt-get clean; \
