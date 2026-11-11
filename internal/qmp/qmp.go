@@ -180,14 +180,68 @@ func ppmSize(path string) (int, int, error) {
 	if err != nil {
 		return 0, 0, err
 	}
-	// P6 has a 3-byte pixel and a header of a few bytes; a file far smaller than its own pixels is
-	// a write that has not finished.
-	want := int64(w*h*3) + 16
+	// P6 HAS A 3-BYTE PIXEL, AND THE HEADER LENGTH IS EXACT RATHER THAN APPROXIMATE.
+	//
+	// This used to require `w*h*3 + 16`, assuming a sixteen-byte header. A P6 header is
+	//
+	//	P6\n<width> <height>\n255\n
+	//
+	// which is FIFTEEN bytes for 640x480 and sixteen for nothing in particular - so a perfect 640x480
+	// frame failed by one byte:
+	//
+	//	frame-000001.ppm: 921615 bytes for a 640x480 frame (needs about 921616);
+	//	the write has not finished
+	//
+	// MEASURED ON THE FIRST MACOS RUN WHOSE GUEST ACTUALLY BOOTED. The frame was complete; the check
+	// was wrong - and it would have failed that exact size on every 640x480 capture, which is the
+	// size a guest draws at while the firmware is still switching modes.
+	//
+	// SO THE HEADER IS COUNTED. The payload begins after the maxval field's terminating newline, and
+	// any byte before that is header. A file shorter than header+pixels is a write in progress; a file
+	// that has exactly that is a finished frame.
+	data := head[:n]
+	hdr := ppmHeaderLen(data)
+	if hdr == 0 {
+		return 0, 0, fmt.Errorf("%s: PPM header does not end in a newline within %d bytes",
+			filepath.Base(path), n)
+	}
+	want := int64(hdr) + int64(w*h*3)
 	if fi.Size() < want {
-		return 0, 0, fmt.Errorf("%s: %d bytes for a %dx%d frame (needs about %d); the write has "+
-			"not finished", filepath.Base(path), fi.Size(), w, h, want)
+		return 0, 0, fmt.Errorf("%s: %d bytes for a %dx%d frame (needs %d: %d header + %d pixels); "+
+			"the write has not finished", filepath.Base(path), fi.Size(), w, h, want, hdr, w*h*3)
 	}
 	return w, h, nil
+}
+
+// ppmHeaderLen returns the offset of a binary PPM's pixel data: one past the maxval line's newline.
+//
+// THE FORMAT IS `P6\n<w> <h>\n<maxval>\n` AND THE FIELDS MAY BE SEPARATED BY ANY WHITESPACE, so the
+// count cannot be a constant. Four whitespace-separated tokens are consumed - magic, width, height,
+// maxval - and the byte after the whitespace that ends the last one is the first pixel.
+func ppmHeaderLen(data []byte) int {
+	tokens := 0
+	for i := 0; i < len(data); i++ {
+		switch data[i] {
+		case ' ', '\t', '\r', '\n':
+			continue
+		default:
+			// A token starts here; walk to its end.
+			for i < len(data) && !isPPMSpace(data[i]) {
+				i++
+			}
+			tokens++
+			if tokens == 4 {
+				// The whitespace that ended the maxval is the header's last byte.
+				return i + 1
+			}
+			i--
+		}
+	}
+	return 0
+}
+
+func isPPMSpace(b byte) bool {
+	return b == ' ' || b == '\t' || b == '\r' || b == '\n'
 }
 
 func firstLine(s string) string {

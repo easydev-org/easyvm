@@ -188,3 +188,63 @@ func TestNamedKeysParse(t *testing.T) {
 		}
 	}
 }
+
+// A COMPLETE 640x480 FRAME MUST NOT BE CALLED TRUNCATED - AND IT WAS, BY ONE BYTE.
+//
+// The check required `w*h*3 + 16`, assuming a sixteen-byte header. A P6 header is
+//
+//	P6\n640 480\n255\n
+//
+// which is FIFTEEN bytes, so a perfect frame of 921615 bytes was rejected:
+//
+//	frame-000001.ppm: 921615 bytes for a 640x480 frame (needs about 921616);
+//	the write has not finished
+//
+// MEASURED ON THE FIRST macOS RUN WHOSE GUEST ACTUALLY BOOTED, on the step after it. The frame was
+// complete and the check was wrong - and it would reject that size on every 640x480 capture, which is
+// what a guest draws while the firmware is still switching modes.
+func TestAPerfectPPMIsNotTruncated(t *testing.T) {
+	for _, c := range []struct{ w, h int }{
+		{640, 480},   // what a guest draws while the firmware switches modes
+		{1280, 800},  // qemu's own default
+		{1920, 1080}, // what every coordinate here was measured at
+	} {
+		dir := t.TempDir()
+		header := "P6\n" + com_itoa(c.w) + " " + com_itoa(c.h) + "\n255\n"
+		body := make([]byte, c.w*c.h*3)
+
+		path := filepath.Join(dir, "frame.ppm")
+		if err := os.WriteFile(path, append([]byte(header), body...), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		w, h, err := ppmSize(path)
+		if err != nil {
+			t.Fatalf("%dx%d: a complete frame was rejected: %v", c.w, c.h, err)
+		}
+		if w != c.w || h != c.h {
+			t.Fatalf("dimensions read as %dx%d, want %dx%d", w, h, c.w, c.h)
+		}
+
+		// AND ONE BYTE SHORT IS STILL TRUNCATED, which is the check's whole job: a capture that lands
+		// mid-write must not be measured.
+		short := filepath.Join(dir, "short.ppm")
+		if err := os.WriteFile(short, append([]byte(header), body[:len(body)-1]...), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := ppmSize(short); err == nil {
+			t.Fatalf("%dx%d: a frame missing its last pixel byte was accepted", c.w, c.h)
+		}
+	}
+}
+
+func com_itoa(v int) string {
+	if v == 0 {
+		return "0"
+	}
+	var b []byte
+	for v > 0 {
+		b = append([]byte{byte('0' + v%10)}, b...)
+		v /= 10
+	}
+	return string(b)
+}
