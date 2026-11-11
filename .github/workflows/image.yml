@@ -191,9 +191,15 @@ jobs:
         # `-cpu host` makes a run unreproducible across runners, and cachyos panicked in its first
         # second because of it. If this image's qemu does not know the model, every walkthrough
         # fails on its first boot.
+        #
+        # NOT `| grep -q`, AND THIS IS THE SECOND TIME. `grep -q` closes the pipe on its first match
+        # and the writer takes SIGPIPE; `set -euo pipefail` turns that into exit 141 for a check
+        # that SUCCEEDED. Run 43001461321 failed here having already built, pushed and run the
+        # image - every other step in the job was green.
         if: inputs.platforms == '' || inputs.platforms == 'linux/amd64'
         run: |
           set -euo pipefail
-          docker run --rm --entrypoint qemu-system-x86_64 \
-            "${{ env.IMAGE }}:latest" -cpu help 2>&1 | grep -q 'Skylake-Client-v4'
+          models=$(docker run --rm --entrypoint qemu-system-x86_64 \
+            "${{ env.IMAGE }}:latest" -cpu help 2>&1)
+          printf '%s\n' "$models" | grep 'Skylake-Client-v4'
           echo "the image knows -cpu Skylake-Client-v4"
