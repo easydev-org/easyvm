@@ -117,10 +117,23 @@ jobs:
         # a `download-artifact` that finds nothing leaves an empty directory and the COPY in the
         # Containerfile then fails with a message about a missing file, which points at the wrong
         # place.
+        #
+        # AND THE EXECUTABLE BIT IS RESTORED BY HAND, because upload-artifact/zIP DOES NOT CARRY IT.
+        # Measured on run 43000474575, the first run where this step existed:
+        #
+        #     === dist/easyvm IS NOT EXECUTABLE ===
+        #     -rw-r--r-- 1 runner runner ... dist/easyvm
+        #
+        # The binary was built with mode 0755 and arrived as 0644. That is not a defect in the
+        # artifact action - a zip has no unix mode to carry - and the check is what caught it,
+        # which is why the check is here rather than an `ls` in the Containerfile.
         run: |
           set -euo pipefail
-          test -x dist/easyvm || { echo "=== dist/easyvm IS NOT EXECUTABLE ==="; ls -l dist/; exit 1; }
-          ./dist/easyvm versions | head -2
+          test -f dist/easyvm || { echo "=== dist/easyvm IS MISSING ==="; ls -l dist/; exit 1; }
+          chmod 0755 dist/easyvm
+          test -x dist/easyvm || { echo "=== dist/easyvm IS STILL NOT EXECUTABLE ==="; ls -l dist/; exit 1; }
+          versions=$(./dist/easyvm versions)
+          printf '%s\n' "$versions"
 
       - uses: docker/setup-qemu-action@v3
 

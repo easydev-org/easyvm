@@ -133,7 +133,11 @@ RUN set -eux; \
 # builder stage in this file would work and would carry the module cache into the build for one
 # static binary; a separate job also means the binary has already passed `go test` before it is
 # anywhere near an image.
-COPY dist/easyvm /usr/local/bin/easyvm
+# THE MODE IS SET HERE AS WELL AS IN THE WORKFLOW, and the duplication is deliberate: a COPY keeps
+# the source mode, and the artifact it comes from is a zip that carries none - so the workflow
+# chmods before the COPY and this line guarantees the result either way. A build that depends on one
+# of the two is a build that breaks when the other changes.
+COPY --chmod=0755 dist/easyvm /usr/local/bin/easyvm
 
 # A BUILD-TIME SELF-CHECK, AND EVERY LINE IS A TOOL THE GO CODE CALLS BY NAME.
 #
