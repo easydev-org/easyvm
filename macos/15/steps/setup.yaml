@@ -121,6 +121,15 @@ steps:
   # IT IS PINNED BY NOTHING, because Apple reissues it on every request - unlike the four OpenCore
   # assets, which carry sha256 values. What is checked is that it is a plausible image rather than a
   # truncated transfer or an HTML error page.
+  # THE DISK THE INSTALL WRITES TO, CREATED EMPTY.
+  #
+  # 128G AND NOT A VARIABLE: macOS's setup assistant picks its target by CAPACITY, and every
+  # coordinate in this directory was measured on the disk the job actually bakes. A different size
+  # moves a window that was measured once.
+  - name: create the empty disk
+    disk: disk.qcow2
+    disk_gb: 128
+
   - name: fetch the recovery image
     fetch: recovery_macos
     release: "15"

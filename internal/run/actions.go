@@ -3,6 +3,7 @@ package run
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -174,6 +175,14 @@ func (e *Executor) doReboot(s walk.Step) error {
 // separate `disk_overlay:` step because letting `boot:` make the overlay had no way to say so. Now
 // it does, so this step only says which file.
 func (e *Executor) doDisk(s walk.Step) error {
+	// A STEP WITH `disk_gb:` CREATES A DISK; one with `disk:` NAMES AN EXISTING ONE.
+	//
+	// THEY ARE DIFFERENT ACTIONS AND THE PRESENCE OF THE KEY SAYS WHICH. A `disk:` step prepares a
+	// copy of a disk that came from somewhere; `disk_gb:` makes the empty 128 GB disk an INSTALL
+	// writes to, which is the first thing stage one needs and nothing else does.
+	if s.Has("disk_gb") {
+		return e.createDisk(s)
+	}
 	v, ok := s.Spec["disk"]
 	if !ok {
 		return fail(s.Name, "`disk:` must name a file")
@@ -213,6 +222,59 @@ func (e *Executor) doDisk(s walk.Step) error {
 	if _, err := os.Stat(path); err != nil {
 		return fail(s.Name, "no disk at %s: %v", path, err)
 	}
+	if setter, ok := e.Driver.Machine().(interface{ SetDisk(string) }); ok {
+		setter.SetDisk(path)
+	}
+	return nil
+}
+
+// createDisk makes an empty qcow2 for an install to write to.
+//
+// THE SIZE IS FIXED AT 128G BY EVERY FILE THAT USES THIS, and it is not a tunable: macOS's setup
+// assistant picks its target by CAPACITY, and every coordinate in macos/15/steps was measured on the
+// disk the workflow actually bakes. A different size moves a window that was measured once.
+func (e *Executor) createDisk(s walk.Step) error {
+	gb := seconds(s, "disk_gb", 128)
+	if gb <= 0 {
+		return fail(s.Name, "`disk_gb:` must be a positive size")
+	}
+	path := s.Get("disk")
+	if path == "" {
+		return fail(s.Name, "a `disk_gb:` step must also name the file it creates: `disk: disk.qcow2`")
+	}
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(e.Work, path)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fail(s.Name, "%v", err)
+	}
+	// A PREVIOUS FILE IS REPLACED, NOT REUSED. Starting from whatever a failed run left is how an
+	// install writes into half a system and reports success - and the step's whole job is "a disk
+	// that does not exist yet".
+	if fileExists(path) {
+		e.Driver.Log(fmt.Sprintf("  removing the disk a previous run left at %s", path))
+		if err := os.Remove(path); err != nil {
+			return fail(s.Name, "%v", err)
+		}
+	}
+
+	qemuImg, err := exec.LookPath("qemu-img")
+	if err != nil {
+		return fail(s.Name, "qemu-img is not installed: %v", err)
+	}
+	e.Driver.Log(fmt.Sprintf("  creating %s, %d GiB", path, gb))
+	// `-f qcow2` AND NO SPARSE SURPRISE: a qcow2 grows as it is written, so a 128G file is a few
+	// hundred KiB until an installer puts something in it.
+	cmd := exec.Command(qemuImg, "create", "-f", "qcow2", path, fmt.Sprintf("%dG", gb))
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fail(s.Name, "qemu-img create: %v (%s)", err, firstLineOf(string(out)))
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		return fail(s.Name, "qemu-img reported success and %s is not there", path)
+	}
+	e.Driver.Log(fmt.Sprintf("  %s: %d KiB (a qcow2 grows as it is written)", filepath.Base(path),
+		fi.Size()>>10))
 	if setter, ok := e.Driver.Machine().(interface{ SetDisk(string) }); ok {
 		setter.SetDisk(path)
 	}
