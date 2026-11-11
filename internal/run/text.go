@@ -722,6 +722,16 @@ func (e *Executor) doRun(s walk.Step) error {
 	// implementation's own note. Each line is typed, Return, then the next: exactly what a person
 	// does at a terminal.
 	lines := strings.Split(strings.ReplaceAll(body, "\r\n", "\n"), "\n")
+	// THE COMMAND IS LOGGED, TRUNCATED, BECAUSE A `run:` THAT TYPED NOTHING AND ONE THAT TYPED THE
+	// WRONG THING LOOK IDENTICAL WITHOUT IT.
+	//
+	// Measured on manjaro's ssh leg: six `run:` steps each completed in under a tenth of a second and
+	// printed nothing at all, so there was no way to tell whether the terminal had received the
+	// command, received an empty line, or never received focus. The Python implementation logged
+	// `typed N character(s)` for `type:` and nothing for `run:`, and that gap cost this run its
+	// diagnosis.
+	e.Driver.Log(fmt.Sprintf("  running %d line(s), %d character(s): %s", len(lines),
+		len([]rune(body)), shorten(strings.ReplaceAll(body, "\n", " ; "), 140)))
 	for i, line := range lines {
 		if strings.TrimSpace(line) == "" {
 			continue
