@@ -1,0 +1,235 @@
+# Manjaro KDE: the live desktop to `All done`, as a sequence.
+#
+#     python3 lib/steps.py linux/manjaro/steps/install.yaml \
+#         --qmp /work/drive.sock.qmp
+#
+# WHAT THIS REPLACES
+#
+# linux/manjaro/install.py's walk_calamares() is 130 lines of measured clicks. Every
+# coordinate and every reason below came from it, and the reasons are the part worth keeping:
+# the Python around them is mostly comment, which is the tell that it was already trying to be
+# a table of contents. The machine start, the recording and the publish stay in install.py -
+# only the walk is here, because that is the part that is data.
+#
+# WHY A SEQUENCE AND NOT PANES
+#
+# Calamares does not skip panes: Welcome, Location, Keyboard, Partitions, Users, Office Suite
+# and Summary arrive in one measured order and Next is in the same place on all of them. A
+# list of clicks is therefore the whole truth, and it is the same shape as
+# macos/15/steps/setup.yaml - see that file for the other shape.
+#
+# A NUMBER AND A WAIT, NOT A READING, AND THE REASON IS TWO RUNS
+#
+# This driver used to decide whether a pane had advanced, twice, and both attempts failed:
+#
+#   a word per pane    `expect="office"` was TRUE ON THE USERS PANE, because its own content
+#                      mentions LibreOffice, so run 42398673800 "advanced" to Office Suite
+#                      while standing on Users and sat there for 908 seconds
+#
+#   the whole OCR text before against after
+#                      prose does not read identically twice, so that is true while standing
+#                      still, and run 42413739470 reported every step from Welcome to the
+#                      confirmation as an advance while it had never left Users
+#
+# So the steps below CLICK AND WAIT. Nothing is read to decide anything. The screen is read
+# afterwards into the log, where it is useful for a post-mortem.
+
+name: manjaro - the Calamares walk
+resolution: [1920, 1080]
+
+vars:
+  user:
+    from: args.user
+    default: vmuser
+  password:
+    from: args.password
+    default: admin
+
+steps:
+  # =======================================================================================
+  # 1. THE INSTALLER, WHICH OPENS FROM MANJARO HELLO
+  # =======================================================================================
+  #
+  # THE DOUBLE-CLICK IS DELIBERATE. The live session draws `Manjaro Hello` while this driver
+  # is arriving, and the first press on an unfocused window is taken as focus. Measured: the
+  # second press is the one that opens the wizard.
+  - name: open the installer
+    double: [960, 760]
+    settle: 35
+    # A LOG LINE, NOT A GATE, AND `optional` IS WHAT MAKES IT ONE. The original driver
+    # retried once and only failed if the wizard was still not up after that; an `expect_any`
+    # that can fail the whole walk would lose that retry. See the next step.
+    optional: true
+    expect_any:
+      - [welcome]
+      - [location]
+
+  # THE RETRY, AND IT IS CONDITIONAL. A second pair of presses is what the driver did when the
+  # wizard had not opened - and it is WRONG when it has, because those presses land inside it.
+  # `unless` is that absence test for a sequence.
+  - name: open the installer (once more, if it did not)
+    unless: [welcome]
+    double: [960, 760]
+    settle: 40
+
+  # =======================================================================================
+  # 2. THE SEVEN CALAMARES PANES. ONE FOOTER POSITION, MEASURED ON ALL OF THEM.
+  # =======================================================================================
+  #
+  # Manjaro's Calamares keeps ONE window size across Welcome, Location, Keyboard,
+  # Partitions, Users, Office Suite and Summary - measured - so one Next coordinate is right
+  # for the whole wizard. (CachyOS' build resizes per pane, which is why its own file repeats
+  # the number.)
+
+  - name: welcome
+    at: [1325, 801]
+    settle: 18
+
+  # THE DEFAULT ZONE IS KEPT. Whatever the installer read from the network at startup stays:
+  # changing it is one more field that can go wrong for no gain, and this bake's job is a disk
+  # that installs, not a particular region.
+  - name: location
+    at: [1325, 801]
+    settle: 18
+
+  - name: keyboard
+    at: [1325, 801]
+    settle: 18
+
+  # PARTITIONS. ON UEFI `Erase disk` IS ALREADY SELECTED and the layout already has its
+  # 300 MiB EFI partition, so this click is a CONFIRMATION - it costs nothing when it is
+  # already set and fixes it when it is not.
+  #
+  # (653, 340) IS THE RADIO BUTTON'S CIRCLE, NOT THE ROW. The old number was (1043, 298),
+  # which is the `Swap (no Hibernate)` dropdown: the click OPENED A LIST instead of choosing
+  # a scheme, the list sat over the footer, the next click went into it, and the wizard never
+  # left Partitions. Every Manjaro run since e08b233 did that, and the frame it left behind
+  # shows an extra 6.37 GiB swap partition - the dropdown's doing.
+  - name: partitions - erase the disk
+    at: [653, 340]
+    settle: 6
+
+  - name: partitions
+    at: [1325, 801]
+    settle: 20
+
+  # =======================================================================================
+  # 3. THE USERS PANE, WHICH HAS TWO PASSWORD PAIRS
+  # =======================================================================================
+  #
+  # `Use the same password for the administrator account` is UNCHECKED by default on Manjaro,
+  # unlike Garuda and CachyOS, so the root password has its own two fields. Filling only the
+  # user's pair leaves Next disabled. Seven fields, all measured on this ISO's own frame.
+  #
+  # `clear: true` is the default and is stated once here: every one of these boxes starts
+  # empty, but a resumed run may not, and emptying a box is harmless when it is already empty.
+  - name: users - full name
+    at: [741, 320]
+    type: "{{ user }}"
+    settle: 2
+  - name: users - login name
+    at: [741, 385]
+    type: "{{ user }}"
+    settle: 2
+  # THE HOST NAME IS LEFT AT THE INSTALLER'S DEFAULT, AND THIS STEP USED TO SET IT.
+  #
+  # It typed the account's name here, which made the machine's name a second copy of the login
+  # and had to be kept in step with it by hand - and after the account was renamed it was the one
+  # place a stale name could hide. The name is now set ONCE, after ssh works, by
+  # `steps/vm-configure.yaml`, which is also the only place that knows the disk is finished.
+  #
+  # WHAT THE INSTALLER PUTS HERE IS ITS OWN DEFAULT (`cachyos`, the live medium's name, or the
+  # machine model). It is replaced a stage later, so nothing reads it.
+  - name: users - password
+    at: [724, 523]
+    type: "{{ password }}"
+    settle: 2
+  - name: users - confirm password
+    at: [944, 523]
+    type: "{{ password }}"
+    settle: 2
+  - name: users - root password
+    at: [741, 650]
+    type: "{{ password }}"
+    settle: 2
+  - name: users - confirm root password
+    at: [944, 650]
+    type: "{{ password }}"
+    settle: 3
+
+  - name: users
+    at: [1325, 801]
+    settle: 20
+
+  # =======================================================================================
+  # 4. OFFICE SUITE: THE ROW, NOT THE HIGHLIGHT
+  # =======================================================================================
+  #
+  # `No Office Suite` IS DRAWN HIGHLIGHTED FROM THE MOMENT THE PANE OPENS, and it is NOT
+  # selected: Next stays disabled until the ROW itself is clicked. This is the fourth instance
+  # of the same trap in this repository - CachyOS's Bootloader and Partitions, Garuda's System
+  # Role, and now this - and the tell is always the same: a footer button greyed out while the
+  # list looks answered.
+  - name: office suite - no office suite
+    at: [700, 288]
+    settle: 6
+
+  # NEXT IS SEVEN PIXELS HIGHER ON THIS PANE. Its help text sits below the list and pushes the
+  # footer up, so the usual y=801 does nothing here - measured twice, because the first
+  # attempt at 801 did nothing at all.
+  - name: office suite
+    at: [1334, 794]
+    settle: 20
+
+  # =======================================================================================
+  # 5. SUMMARY, THEN THE POINT OF NO RETURN AND ITS MODAL
+  # =======================================================================================
+  - name: summary - install
+    at: [1318, 799]
+    settle: 18
+
+  # THE MODAL IS NOT CHECKED FOR. A conditional here is what stopped three Kubuntu runs on a
+  # screen that was correct; the click lands on blank space when no modal is up.
+  - name: the install confirmation's install now
+    at: [1055, 537]
+    settle: 30
+
+  # =======================================================================================
+  # 6. UNTIL IT SAYS SO, AND THIS IS THE SAFE KIND OF READING
+  # =======================================================================================
+  #
+  # Completion is a TERMINAL condition: there is nothing after it to skip, so matching the
+  # words the installer prints at the end cannot miss a pane. That is the difference between
+  # this reading and the ones the header refuses.
+  #
+  # COMPLETION IS THE SENTENCE, NOT THE HEADING. The Finish pane's heading is `All done.` in a
+  # large font and tesseract does not read it - a completed local install OCRs as
+  #
+  #     manjar you may now re: environment. tart now * 3:58 pm * 11/7/26
+  #
+  # with no `all done` anywhere. `you may now` is the body sentence, it is unique to this
+  # pane, and it reads cleanly. The other groups are the translations this image has been seen
+  # to use, because a live session's language depends on what the network said at startup.
+  #
+  # THE KEEP-ALIVE CLICK IS PART OF THE WAIT. An idle desktop raises its lock screen, and a
+  # locked desktop has no installer on it: mint's last frame was a full-window lock screen
+  # while a correct install finished underneath it.
+  - name: the installer finishes
+    until_any:
+      - [all, done]
+      - [you, may, now]
+      - [has, been, installed]
+      - [安装成功]
+      - [已安装在]
+      - [现在重启]
+      - [todo, listo]
+      - [ya, puede]
+      - [reiniciar]
+      - [instalación, completada]
+      - [instalacion, completada]
+    region: [0, 0, 1920, 1080]
+    region_at: [1920, 1080]
+    scale: 1
+    timeout: 3600
+    poll: 20
+    keep_alive: true

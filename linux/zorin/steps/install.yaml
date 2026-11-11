@@ -1,0 +1,190 @@
+# Zorin OS: Ubiquity's panes, as a sequence.
+#
+#     python3 lib/steps.py linux/zorin/steps/install.yaml --qmp /work/drive.sock.qmp
+#
+# WHAT THIS REPLACES
+#
+# linux/zorin/install.py's walk_ubiquity() and start_the_installer(). install.py keeps
+# the machine, the frames, the recording and the publish.
+#
+# NOTHING HERE IS READ TO DECIDE ANYTHING. The screen is read after each step and the reading
+# goes into the log, where it is useful for a post-mortem and dangerous as a decision. The one
+# exception is the launcher retry, and it is an `unless` because a second press is only right
+# when the wizard is NOT up - see that step.
+#
+# THIS WIZARD IS TRANSLATED, AND THAT IS MEASURED, NOT SPECULATION
+#
+# Ubiquity was seen coming up in English and in Estonian on the same ISO, and a test for the
+# word `welcome` fails on a screen that is perfectly correct. One run advanced correctly to a
+# Keyboard pane rendering `Klahvistiku paigutus` and stopped with
+#
+#     === THE WELCOME PANE DID NOT ADVANCE TO KEYBOARD LAYOUT ===
+#
+# A translated wizard is not a broken one, and the coordinate is the same in every language.
+
+name: zorin - the ubiquity walk
+resolution: [1920, 1080]
+
+vars:
+  user:
+    from: args.user
+    default: vmuser
+  password:
+    from: args.password
+    default: admin
+
+steps:
+  # =======================================================================================
+  # 0. THE LAUNCHER, THEN THE SCREEN SAVER - AND THE ORDER IS THE WHOLE OF IT
+  # =======================================================================================
+  #
+  # Measured twice, and the order is the whole of it:
+  #
+  #   * terminal first, launcher second - the terminal window owns the screen, both presses
+  #     land in it, and Ubiquity never starts. Two CI runs and one local run failed exactly
+  #     this way, the frame still reading `Paigaldamine | Tere tulemast | Eesti | ...`;
+  #   * launcher first, terminal second - Ubiquity reaches its Keyboard pane, and the
+  #     terminal opened afterwards sits behind it because Ubiquity raises itself.
+  #
+  # THE LAUNCHER'S LANGUAGE IS WHATEVER THE GEOLOCATION PROBE SAYS - measured, `Welcome` on
+  # one run and `Paigaldamine` (Estonian) on the next, same ISO. Its CARDS DO NOT MOVE, so the
+  # button is at (1223,586) in both, which is why this is a coordinate and not a lookup.
+  #
+  # TWO PRESSES 3 SECONDS APART. One press only focuses the window; the pair, three seconds
+  # apart, is what was measured to start Ubiquity.
+  - name: install zorin os
+    at: [1223, 586]
+    repeat: [2, 3]
+    settle: 40
+
+  # THE RETRY IS CONDITIONAL, AND `unless` IS WHY IT CAN BE. A second pair of presses is what
+  # the driver did when the wizard had not opened - and it is WRONG when the wizard HAS
+  # opened, because those two presses then land inside it. So this step runs only while the
+  # keyboard pane's words are absent.
+  - name: install zorin os (once more, if the wizard is not up)
+    unless: [keyboard]
+    at: [1223, 586]
+    repeat: [2, 3]
+    settle: 40
+    optional: true
+
+  # NOW THE TERMINAL, WITH UBIQUITY ALREADY UP AND OWNING THE SCREEN.
+  #
+  # `setsid` plus full redirection puts the keepalive in its own session with no descriptor on
+  # the pty, so `exit` closes the window with it instead of leaving it in front of the
+  # installer. Alt+F4 was tried and put up the LAUNCHER'S `Quit the installation?` dialog.
+  - name: disable the screen saver and the lock
+    run: "xset s off; xset -dpms; xset s noblank; gsettings set org.gnome.desktop.session idle-delay 0; gsettings set org.gnome.desktop.screensaver lock-enabled false; ( for i in $(seq 1 1080); do xdotool mousemove_relative -- 1 0 2>/dev/null; xdotool mousemove_relative -- -1 0 2>/dev/null; sleep 20; done ) >/dev/null 2>&1 & exit"
+    terminal_wait: 8
+    settle: 10
+
+  # =======================================================================================
+  # 1. THE WELCOME PANE. ITS LANGUAGE LIST IS NOT TOUCHED.
+  # =======================================================================================
+  #
+  # `English` is the default unless the geolocation probe moved it, and picking a row by
+  # coordinate is UNSAFE because the list scrolls to the current entry: measured, `English`
+  # sat at y 516 in a window scrolled to `Estonian` and at y 383 in one scrolled to the top.
+  # Only the footer button is pressed.
+  - name: welcome
+    at: [1361, 764]
+    settle: 15
+
+  # =======================================================================================
+  # 2. KEYBOARD LAYOUT, AND THE PLAIN `English (US)` ROW MUST BE CLICKED
+  # =======================================================================================
+  #
+  # Zorin preselects `English (US) - English (Dvorak)`. That is not cosmetic: every character
+  # this driver types is remapped, and `docker` reached the account form as `erjt.p`, which
+  # the form rejected with `May only contain lower-case letters, digits, hyphens, and
+  # underscores.` Measured on a live session, twice.
+  - name: keyboard - english (us)
+    at: [1106, 402]
+    settle: 4
+
+  - name: keyboard
+    at: [1361, 764]
+    settle: 18
+
+  # `Updates and other software` IS NOT ALWAYS SHOWN, AND THIS WALK DOES NOT WAIT FOR IT.
+  #
+  # Measured twice on this image: the keyboard pane's Continue goes STRAIGHT to `Installation
+  # type`. An earlier version spent a step clicking the footer on the keyboard pane a second
+  # time, which is harmless - the button is gone by then, so the click lands on blank space -
+  # but it made the sequence look like it had a pane that does not exist. There is no step
+  # for it: on the builds that show it this walk would be wrong, and none of them has been
+  # seen here.
+
+  # =======================================================================================
+  # 3. INSTALLATION TYPE. `Erase disk and install Zorin OS` IS ALREADY SELECTED.
+  # =======================================================================================
+  #
+  # Measured: the radio is filled when the pane is first drawn, so the only click it needs is
+  # `Install Now`, which puts up the confirmation.
+  - name: installation type - install now
+    at: [1361, 764]
+    settle: 18
+
+  # =======================================================================================
+  # 4. THE CONFIRMATION, CLICKED WHETHER OR NOT IT WAS READ
+  # =======================================================================================
+  #
+  # A conditional that gates a click is the same mistake as a lookup that chooses one, and
+  # this repository has paid for it four times. The click costs nothing when the dialog is
+  # absent: the point is blank space on the pane underneath.
+  - name: write the changes to disks
+    at: [1293, 673]
+    settle: 20
+
+  # The time zone default is kept: on this cluster it is a US zone, and the requirement is a
+  # disk that installs, not a particular region.
+  - name: where are you
+    at: [1361, 764]
+    settle: 18
+
+  # =======================================================================================
+  # 5. WHO ARE YOU? FIVE FIELDS, EACH LABELLED TO ITS LEFT
+  # =======================================================================================
+  #
+  #     Your name:             (975, 386)
+  #     Your computer's name:  (857, 422)
+  #     Pick a username:       (859, 477)
+  #     Choose a password:     (873, 514)
+  #     Confirm your password: (883, 550)
+  - name: who are you - your name
+    at: [975, 386]
+    type: "{{ user }}"
+    settle: 2
+  # THE COMPUTER-NAME FIELD IS LEFT AT THE INSTALLER'S DEFAULT. It used to be the account's
+  # name - a second copy of the login that had to be kept in step by hand. The machine is named
+  # once, after ssh works, by steps/vm-configure.yaml.
+  - name: who are you - username
+    at: [859, 477]
+    type: "{{ user }}"
+    settle: 2
+  - name: who are you - password
+    at: [873, 514]
+    type: "{{ password }}"
+    settle: 2
+  - name: who are you - confirm password
+    at: [883, 550]
+    type: "{{ password }}"
+    settle: 3
+
+  # =======================================================================================
+  # 6. THE INSTALL, BY THE MEASURED DURATION
+  # =======================================================================================
+  #
+  # The disk is written from here, and this ISO's completion is not a word this walk can
+  # rely on. Forty minutes is the measured thirty with room for a slower runner - the same
+  # number mint uses for the same reason and the same family of installer.
+  #
+  # THE KEEP-ALIVE CLICK IS PART OF THE WAIT: this is a session whose screen saver races the
+  # installer, and the `run` step above is the other half of that defence.
+  - name: who are you
+    at: [1361, 764]
+    settle: 20
+
+  - name: the install runs, as measured
+    wait: 2400
+    keep_alive: true

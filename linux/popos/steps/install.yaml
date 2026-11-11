@@ -1,0 +1,201 @@
+# Pop!_OS: `pop-os-installer`'s panes, as a sequence.
+#
+#     python3 lib/steps.py linux/popos/steps/install.yaml --qmp /work/drive.sock.qmp
+#
+# WHAT THIS REPLACES
+#
+# linux/popos/install.py's walk_installer(). install.py keeps the machine, the frames,
+# the recording and the publish.
+#
+# POP!_OS HAS AN INSTALLER OF ITS OWN - not Calamares, not Ubiquity, not Anaconda. It is a GTK
+# application that OPENS BY ITSELF on the live desktop, and its window is a fixed-size card at
+# (485,155)..(1435,860) with the same footer position on every pane: Next / Select / Erase and
+# Install at (1367,817), Back at (1279,817).
+#
+# TWO THINGS ARE NOT DEFAULTS, AND BOTH COST RUNS
+#
+# 1. `Clean Install` IS A CHOICE. The Install pane offers `Clean Install` and `Custom
+#    (Advanced)` as two cards with NEITHER SELECTED, so the footer button does nothing until
+#    one is clicked.
+#
+# 2. THE FULL NAME IS NOT THE USER NAME. With both fields holding `docker` the footer's `Next`
+#    stays GREY: measured, three presses in a run at 9d4e83a left the pane unchanged. Typing
+#    `VM User` instead makes the installer derive `vmuser` and the button turns green
+#    at once. So the display name is `VM User` and the login is `docker`.
+#
+# AND ONE THAT COST THIS RUN TODAY: A GTK ENTRY VALIDATES ON FOCUS-OUT.
+#
+# Run 42502695338 typed both fields correctly and the footer stayed grey for forty-two
+# minutes, because nothing moved the focus after the last character - the caret was still in
+# User Name. One `Tab` leaves the field, which is the event the pane listens for; it also moves
+# the focus to the footer, so it cannot type into another control.
+
+name: popos - the pop installer walk
+resolution: [1920, 1080]
+
+vars:
+  user:
+    from: args.user
+    default: vmuser
+  password:
+    from: args.password
+    default: admin
+
+steps:
+  # =======================================================================================
+  # 1. THE FOUR PRESELECTED PANES. ONE FOOTER POSITION, MEASURED ON ALL OF THEM.
+  # =======================================================================================
+  #
+  #     Select a Language      English preselected                  Select (1367,790)
+  #     Languages (variants)   United States preselected            Select
+  #     Keyboard Layout        English (US) preselected             Select
+  #     Keyboard (variants)    Default preselected - NOT Dvorak     Select
+  #
+  # y=790, NOT 817, AND THE 27 PIXELS COST A RUN. Measured from run 42526614298's frame at
+  # 21:49:03: the language pane's Select fill spans x=1326..1408, y=775..806, so its centre is
+  # (1367,790). The walk pressed (1367,817) - 27 px BELOW the button - four times, and since
+  # nothing advanced, the next step's `Clean Install` click at (1180,456) landed on the
+  # `German` row of the still-open language list. That opened the German VARIANT submenu, and
+  # the installer then sat on it for the rest of the run: every later click, including the
+  # account and password steps, was aimed at a pane that was never showing.
+  #
+  # THE LATER PANES ARE TALLER. The window grows once a list is not the whole page, so
+  # `Erase and Install` and the account panes really are at y=817 - see the steps below. This
+  # is the same lesson as cachyos' three footer heights, and the numbers are per pane.
+  - name: select a language
+    python: footer:press_footer
+    settle: 21
+  - name: language variants
+    python: footer:press_footer
+    settle: 21
+  - name: keyboard layout
+    python: footer:press_footer
+    settle: 21
+  - name: keyboard variants
+    python: footer:press_footer
+    settle: 21
+
+  # =======================================================================================
+  # 2. THE INSTALL PANE. `Clean Install` IS A CHOICE, NOT THE DEFAULT.
+  # =======================================================================================
+  #
+  # The pane offers two cards with neither selected, so the footer does nothing until one is
+  # clicked. `Clean Install` erases the drive this guest owns (`/dev/vda`, 64.0 GiB) and
+  # installs a fresh copy.
+  - name: clean install
+    at: [1180, 456]
+    settle: 8
+
+  - name: install
+    python: footer:press_footer
+    settle: 21
+
+  # =======================================================================================
+  # 3. SELECT A DRIVE. THE CARD, THEN `Erase and Install`.
+  # =======================================================================================
+  #
+  # THE CARD IS AT (1193,498), NOT A BAR AT y=312. Measured on run 42533083200's frame at
+  # 23:07, which is the pane this step was actually looking at: the drive's card - the icon
+  # plus `Virtio Block Device` and `/dev/vda 64.0 GiB` - has its ink between x=1114..1272,
+  # y=477..519.
+  #
+  # AN EARLIER VERSION USED (1000,312) FROM A DIFFERENT LAYOUT. That frame (run 42529279468)
+  # showed a horizontal grey bar for the drive because the disk was then UNPARTITIONED and the
+  # pane drew a partition strip; on a fresh disk this pane draws a CARD in the middle instead.
+  # Clicking the empty bar selected nothing, `Erase and Install` stayed grey, and the locator
+  # then reported "no footer button" - which is the honest answer and how this was found.
+  - name: select a drive
+    at: [1193, 498]
+    settle: 8
+
+  # `Erase and Install` is enabled by that selection. The locator finds it: on this pane its
+  # grey fill is at y=805..828, and once the card is selected it turns green in place.
+  - name: erase and install
+    python: footer:press_footer
+    settle: 44
+
+  # =======================================================================================
+  # 4. THE ACCOUNT, PANE ONE: FULL NAME AND USER NAME
+  # =======================================================================================
+  #
+  # A `python:` STEP, AND THE RUN THAT MADE IT ONE. Run 42516547644 reached this pane and its
+  # frame at t=150s reads
+  #
+  #     Full Name    docker          <- the DIM PLACEHOLDER, not typed text
+  #     User Name    docker|
+  #     Next                         <- grey
+  #
+  # - the walk had just typed `VM User` into Full Name and nothing landed, because
+  # `type_into` is click, ctrl+a, sixty BackSpaces, then type, and THIS PANE'S ENTRIES SIT
+  # BESIDE THE ARTWORK PICKER: a ctrl+a or a BackSpace that lands on the wrong control
+  # selects the avatar and opens a GTK file chooser over the form. So the pane is CLICK AND
+  # TYPE with no clearing, which is a different action from the generic helper - see
+  # steps/panes.py.
+  #
+  # The step carries the account so the extension types what every other bake here uses.
+  - name: account name
+    python: panes:fill_account_name
+    settle: 2
+
+  - name: create user account
+    python: footer:press_footer
+    settle: 22
+
+  # =======================================================================================
+  # 5. THE ACCOUNT, PANE TWO: THE PASSWORD TWICE
+  # =======================================================================================
+  #
+  # Also `python:`, for the same measured reason plus one more: ESC FIRST, ALWAYS. If a click
+  # has already landed on the artwork picker, a GTK file chooser is up over the installer and
+  # every later keystroke goes into ITS search box - the frame that proved it read `adminadmin`
+  # in the chooser's field.
+  - name: account password
+    python: panes:fill_account_password
+    settle: 2
+
+  - name: account password next
+    python: footer:press_footer
+    settle: 25
+
+  # =======================================================================================
+  # 6. DRIVE ENCRYPTION. THE PANE DEFAULTS TO `Encrypt`.
+  # =======================================================================================
+  #
+  # The three buttons are at their own coordinates, measured on a live pane:
+  #
+  #     Don't Encrypt  (1081, 808)      Set Password  (1213, 808)      Encrypt  (1347, 808)
+  #
+  # An encrypted disk needs a passphrase at boot - one more thing that can fail on a machine
+  # nobody is watching - so `Don't Encrypt` is the press that matters.
+  #
+  # ONE LONG SETTLE, THEN THE PRESS, and the reason is measured: runs 42483315092 and
+  # 42484716882 both pressed this coordinate 40 s after the password pane and the installer
+  # CLOSED. This pane's rows are drawn after its content - the `The password is shorter than
+  # 8 characters` note from the page before is drawn ABOVE the button row and moves it while
+  # the window is still settling. A live session that took a frame first and then pressed
+  # worked on the first try.
+  - name: drive encryption - don't encrypt
+    at: [1081, 808]
+    settle: 35
+
+  # =======================================================================================
+  # 7. THE INSTALL IS WRITTEN, AND THE DISK IS WHAT SAYS SO.
+  # =======================================================================================
+  #
+  # THE PROGRESS PANE SHOWS `Extracting Files (N%)`, AND THE PERCENTAGE IS THE ONLY TEXT ON
+  # IT - so a completed disk must not depend on reading it. But a blind `wait` cannot tell
+  # "written" from "the installer closed early", and run 42516547644 showed exactly that
+  # ambiguity: from 20:12 onwards the screen read only the desktop (seven words, no installer
+  # window at all), which is what BOTH a finished install and a crashed one look like.
+  #
+  # So the finish is `disk_settle`, the same measurement fedora now uses: an install writes
+  # gigabytes into the target qcow2 and a stopped guest writes nothing, so st_blocks is the
+  # thing that can tell slow from stopped. `disk_min_mb: 512` stops an untouched sparse image
+  # looking settled; `disk_settle: 180` covers a qcow2 flush without spending minutes after
+  # the last write. MEASURED: a completed popos disk is 3.58 GiB, so the floor is far below it.
+  - name: the install is written
+    disk_settle: 180
+    disk_min_mb: 512
+    timeout: 3600
+    poll: 20
+    keep_alive: true

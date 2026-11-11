@@ -1,0 +1,203 @@
+# CachyOS KDE: Calamares' eleven panes, as a sequence.
+#
+#     python3 lib/steps.py linux/cachyos/steps/install.yaml --qmp /work/drive.sock.qmp
+#
+# WHAT THIS REPLACES
+#
+# linux/cachyos/install.py's walk_calamares(). Every number and every reason below came
+# from it; install.py keeps the machine, the frames, the recording and the publish.
+#
+# WHY A SEQUENCE, AND NOT A DETECTOR
+#
+# Calamares draws its panes in one measured order and does not skip any, so a list of clicks
+# is the whole truth. And two detectors were tried here and both were worse than none - which
+# is what the original driver's docstring records, and is why the steps below CLICK AND WAIT
+# rather than read:
+#
+#   a word per pane        `expect="boot loader"` - Calamares' panes carry image headings and
+#                          tesseract reads them unevenly; this pane came back as
+#                          `vax grub limine refind refind + ai` while it had advanced
+#                          correctly, and run 42413733562 stopped there
+#
+#   before-against-after   prose does not read identically twice, so `current != before` is
+#                          true while standing still; run 42413739470 reported every step from
+#                          Welcome onwards as an advance while it never left Users
+#
+# THE FOOTER IS NOT IN ONE PLACE, AND THAT IS THE ONE FACT THIS FILE IS REALLY ABOUT:
+#
+#   Welcome                    y 747   the window is at its smallest - no map, no overview
+#   Location .. Users          y 796   the window has grown for the map and stays there
+#   Summary                    y 902   it grew again for the overview text
+#
+# A single constant is wrong by 106 pixels on Summary and by 49 on Welcome.
+
+name: cachyos - the Calamares walk
+resolution: [1920, 1080]
+
+vars:
+  user:
+    from: args.user
+    default: vmuser
+  password:
+    from: args.password
+    default: admin
+
+steps:
+  # =======================================================================================
+  # 1. THE INSTALLER, FROM THE DESKTOP
+  # =======================================================================================
+  #
+  # TWO SEPARATE PRESSES, NOT A DOUBLE-CLICK: this desktop's launcher takes a press to focus
+  # and a second to activate, and `repeat` is exactly that shape - the first at once, the
+  # second after `settle`.
+  - name: open the installer
+    at: [960, 743]
+    repeat: [2, 0.8]
+    settle: 35
+    # A LOG LINE, NOT A GATE, AND `optional` IS WHAT MAKES IT ONE. The original driver retried
+    # once and only failed if the wizard was still not up after that; an `expect_any` that can
+    # fail the whole walk would lose that retry. See the next step.
+    optional: true
+    expect_any:
+      - [welcome]
+      - [location]
+
+  # THE RETRY, AND IT IS CONDITIONAL: a second pair of presses is right only when the wizard
+  # has not opened, because when it has they land inside it.
+  - name: open the installer (once more, if it did not)
+    unless: [welcome]
+    at: [960, 743]
+    repeat: [2, 0.8]
+    settle: 40
+
+  # =======================================================================================
+  # 2. WELCOME, ON ITS OWN FOOTER
+  # =======================================================================================
+  - name: welcome
+    at: [1352, 747]
+    settle: 20
+
+  # =======================================================================================
+  # 3. LOCATION THROUGH USERS, ALL ON y=796
+  # =======================================================================================
+  #
+  # The default location is kept: it is whatever Calamares detected, and the requirement is a
+  # disk that installs, not a particular country.
+  - name: location
+    at: [1352, 796]
+    settle: 20
+
+  # GRUB goes to the disk Calamares chose; no change.
+  - name: keyboard
+    at: [1352, 796]
+    settle: 22
+
+  - name: bootloader
+    at: [1352, 796]
+    settle: 22
+
+  # THE RADIO BUTTON'S CIRCLE, NOT THE ROW. (465,367) is `Erase disk`; the row's text selects
+  # nothing, and 36 px lower is `Manual partitioning`, which produces a disk nobody asked for.
+  - name: partitions - erase the disk
+    at: [465, 367]
+    settle: 10
+
+  - name: partitions
+    at: [1352, 796]
+    settle: 20
+
+  # NO CONFIRMATION IS SHOWN HERE ON THIS ISO - measured, Next goes straight to Desktop. The
+  # press is kept for builds that do ask: on this one it lands on the Desktop pane's blank
+  # space and selects nothing, which is the same shape as the "dismiss it whether or not it is
+  # up" clicks in mx and mint.
+  - name: the erase confirmation's continue (if it is shown)
+    at: [1010, 640]
+    settle: 3
+
+  # The ISO's own profile (Plasma Desktop) is kept, as is the default package set.
+  - name: desktop
+    at: [1352, 796]
+    settle: 22
+
+  - name: packages
+    at: [1352, 796]
+    settle: 25
+
+  # =======================================================================================
+  # 4. THE USERS PANE. FIVE FIELDS, MEASURED ON THIS ISO'S OWN FRAME.
+  # =======================================================================================
+  - name: users - full name
+    at: [516, 348]
+    type: "{{ user }}"
+    settle: 2
+  - name: users - login name
+    at: [516, 413]
+    type: "{{ user }}"
+    settle: 2
+  # THE HOST NAME IS LEFT AT THE INSTALLER'S DEFAULT, AND THIS STEP USED TO SET IT.
+  #
+  # It typed the account's name here, which made the machine's name a second copy of the login
+  # and had to be kept in step with it by hand - and after the account was renamed it was the one
+  # place a stale name could hide. The name is now set ONCE, after ssh works, by
+  # `steps/vm-configure.yaml`, which is also the only place that knows the disk is finished.
+  #
+  # WHAT THE INSTALLER PUTS HERE IS ITS OWN DEFAULT (`cachyos`, the live medium's name, or the
+  # machine model). It is replaced a stage later, so nothing reads it.
+  - name: users - password
+    at: [516, 546]
+    type: "{{ password }}"
+    settle: 2
+  - name: users - confirm password
+    at: [729, 546]
+    type: "{{ password }}"
+    settle: 3
+
+  - name: users
+    at: [1352, 796]
+    settle: 25
+
+  # =======================================================================================
+  # 5. SUMMARY: ITS OWN FOOTER, THEN THE MODAL
+  # =======================================================================================
+  - name: summary - install
+    at: [1365, 902]
+    settle: 18
+
+  - name: the install confirmation's install now
+    at: [1018, 620]
+    settle: 30
+
+  # =======================================================================================
+  # 6. UNTIL IT SAYS SO
+  # =======================================================================================
+  #
+  # Completion is TERMINAL, so reading it cannot miss a pane - which is why this reading is
+  # safe where the per-pane ones were not.
+  #
+  # THE HEADING IS NOT RELIABLE, THE SENTENCE IS: `All done.` is a large font tesseract skips,
+  # and the body under it reads cleanly.
+  #
+  # AND IT IS CHECKED IN EVERY LANGUAGE THE WIZARD ACTUALLY COMES UP IN: on the runners it is
+  # English, and on a machine whose egress reports China it is Simplified Chinese - measured,
+  # a completed install there reads `安装成功！` with `CachyOS 已安装在您的电脑上了。` under
+  # it. A completion test that knew only English would throw that disk away at the timeout.
+  - name: the installer finishes
+    until_any:
+      - [all, done]
+      - [you, may, now]
+      - [reboot, now]
+      - [restart, now]
+      - [安装成功]
+      - [已安装在]
+      - [现在重启]
+      - [todo, listo]
+      - [ya, puede]
+      - [reiniciar]
+      - [instalación, completada]
+      - [instalacion, completada]
+    region: [0, 0, 1920, 1080]
+    region_at: [1920, 1080]
+    scale: 1
+    timeout: 3600
+    poll: 20
+    keep_alive: true

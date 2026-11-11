@@ -1,0 +1,111 @@
+# GhostBSD gbi, 1920x1080. An escape hatch is visible here, and that is the point.
+#
+#     python3 lib/steps.py bsd/ghostbsd/steps/gbi.yaml --qmp /work/drive.sock.qmp
+#
+# THIS FILE EXISTS TO SHOW THE BOUNDARY.
+#
+# gbi is the easiest of all the installers to write as data: nine panes, one footer
+# coordinate, and every answer is the default. If YAML were the answer to everything, this
+# file would be enough to prove it. It is not, and the two steps that are NOT steps are here
+# to say so:
+#
+#     the ZFS disk tick      `Next` is GREY until the checkbox is clicked, and the checkbox is
+#                            not the footer - it is a control that exists on exactly one pane.
+#                            That is still data (an `at`), but it is the reason a walkthrough
+#                            is a sequence and not a set of "press Next" rules.
+#
+#     the boot/desktop wait  whether the live session is up is a question with many right
+#                            answers (MATE's panel, the installer's own window, a black frame
+#                            while X starts). It is a `python:` step, because a set of `until`
+#                            words would be an opinion about one session rather than a fact
+#                            about the mechanism.
+
+name: ghostbsd gbi
+resolution: [1920, 1080]
+
+vars:
+  user:
+    from: args.user
+    default: vmuser
+  password:
+    from: args.password
+    default: admin
+
+steps:
+  # THE LIVE SESSION. See the module docstring: this is a measured exception, not a `until`.
+  - name: wait for the live desktop
+    python: ghostbsd_steps:wait_for_live_desktop
+    timeout: 1800
+
+  # 1. WELCOME -> KEYBOARD. English is preselected.
+  - name: welcome
+    at: &next [1293, 781]
+    settle: 12
+    expect: keyboard
+
+  # 2. KEYBOARD -> TIME ZONE. English (US) is preselected.
+  - name: keyboard
+    at: *next
+    settle: 12
+
+  # 3. TIME ZONE -> INSTALLATION TYPE. America/Adak is preselected; the requirement is a disk
+  #    that boots, not a particular region, and this is the installer's own default.
+  - name: time zone
+    at: *next
+    settle: 12
+
+  # 4. INSTALLATION TYPE -> ZFS. `Full disk configuration` is preselected.
+  - name: installation type
+    at: *next
+    settle: 14
+
+  # 5. THE DISK MUST BE TICKED OR `NEXT` STAYS DISABLED. Measured: the button is grey until
+  #    the checkbox at (592, 495) is clicked. This is the one control in the whole walk that
+  #    is not the footer, which is exactly why it is spelled out rather than folded into a
+  #    "press Next nine times" abstraction.
+  - name: tick the zfs disk
+    at: [592, 495]
+    settle: 5
+
+  - name: zfs configuration
+    at: *next
+    settle: 14
+
+  # 6. BOOT OPTION. `FreeBSD UEFI loader only` is preselected - the right answer on OVMF.
+  - name: boot option
+    at: *next
+    settle: 14
+
+  # 7. USER ADMIN SETUP. Four fields; the installer sets root's password to the same one.
+  - name: real name
+    at: [959, 457]
+    type: "{{ user }}"
+
+  - name: user name
+    at: [959, 503]
+    type: "{{ user }}"
+
+  - name: password
+    at: [959, 595]
+    type: "{{ password }}"
+
+  - name: verify password
+    at: [959, 643]
+    type: "{{ password }}"
+
+  # 8. INSTALL. The same footer button, whose label has changed.
+  - name: install
+    at: *next
+    settle: 25
+
+  # 9. A MEASURED WAIT. The `Installation in progress` pane is a slideshow and a progress
+  #    bar; measuring "is it done" would be a detector, so the duration is the answer.
+  #    MEASURED: from `Install` to the window closing is about 8 minutes on this ISO. Thirty
+  #    is that with room for a slower runner.
+  #
+  #    THE POINTER IS CLICKED INSIDE THE LOOP because MATE blanks its own display when idle -
+  #    the frame goes solid black, which is what a manual session showed after ten minutes -
+  #    and a blanked display reads as an empty screen for every later step.
+  - name: installation runs
+    wait: 1800
+    keep_alive: true

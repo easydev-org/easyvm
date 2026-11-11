@@ -1,0 +1,246 @@
+# MX Linux: minstall's panes, as a sequence with a title wait before each click.
+#
+#     python3 lib/steps.py linux/mx/steps/install.yaml --qmp /work/drive.sock.qmp
+#
+# WHAT THIS REPLACES
+#
+# linux/mx/install.py's walk_minstall(). install.py keeps the machine, the frames, the
+# recording and the publish.
+#
+# MX IS NEITHER CALAMARES NOR UBIQUITY, AND ITS SHAPE IS THE REASON EVERY CLICK HERE IS
+# PRECEDED BY AN `until`
+#
+# minstall asks THREE questions first (terms, installation type, a final confirmation), and
+# then - WHILE THE DISK IS ALREADY BEING WRITTEN - asks the rest one page at a time. The first
+# of those takes about ninety seconds to appear, because the drive is being formatted.
+#
+# THE FIXED SETTLE THAT USED TO BE HERE COST A RUN, AND THIS FILE IS THE CORRECTION
+#
+# Run 42497635410's last frame is the swap page with
+#
+#     Location: admin        Size: 0 MB        Invalid location
+#
+# - the account had been typed into the SWAP PAGE's location field, one page behind where the
+# driver thought it was. The driver pressed `Next` three times on an 18-second settle; all
+# three presses were spent on the confirmation page, and every later step ran one page early.
+#
+# So each page's `Next` is now preceded by an `until` on the TITLE minstall draws in its own
+# sidebar pane. That reading does not choose a coordinate - every click is still a measured
+# number below - it only says WHEN the page that has that coordinate has arrived. It is the
+# same distinction kubuntu's advance() makes, written as two steps because the wait and the
+# click are separate facts here.
+#
+# THE TITLES WERE READ AT 1:1 ON SIX FRAMES AND ALL SIX COME BACK EXACTLY:
+#
+#     General Instructions | Installation Options | Final Review and Confirmation
+#     Create a swap file   | Computer Identity    | Localization Defaults | Default User Login
+
+name: mx - the minstall walk
+resolution: [1920, 1080]
+
+vars:
+  user:
+    from: args.user
+    default: vmuser
+  password:
+    from: args.password
+    default: admin
+
+steps:
+  # =======================================================================================
+  # 1. THE INSTALLER'S OWN SIDEBAR ICON, NOT THE WELCOME WINDOW'S CARD
+  # =======================================================================================
+  #
+  # `MX Welcome` draws a grid of cards and `Install MX Linux` is one of them, but a press at
+  # its centre - measured in CI run 42476000228 - opened `Frequently Asked Questions` in
+  # qpdfview instead: the cards are close together and the press landed one row off. The
+  # desktop's OWN panel icon is a single small target with nothing beside it, at (81,259),
+  # and it opened the installer on the second press.
+  - name: desktop - installer
+    at: [81, 259]
+    repeat: [2, 3]
+    settle: 28
+
+  # =======================================================================================
+  # 2. TERMS -> INSTALLATION TYPE -> CONFIRMATION
+  # =======================================================================================
+  # THE REGION WAS THE LEFT HELP PANEL, SO THE CONDITION WAS ALWAYS TRUE.
+  #
+  # MEASURED ON RUN e242215. Both `until` steps below read (332,248)-(700,285), which is inside
+  # the installer's permanent HELP pane - its first heading is `General Instructions` and it
+  # never changes. The log proves it:
+  #
+  #     10:19:58  wait for the terms page  -> 2 words :: General | Instructions
+  #     10:20:00  terms of use             -> clicked (1482,889) TWO SECONDS after the
+  #                                            installer opened, before the page had drawn
+  #     10:20:14  wait for the installation type page -> 2 words :: General | Instructions
+  #     ... twenty more identical reads ...
+  #
+  # A condition that matches before the pane exists is worse than none: it pressed a button on
+  # a blank window and then waited three minutes on a page that had never advanced.
+  #
+  # THE RIGHT-HAND CONTENT AREA IS THE PAGE. It says `Terms of Use` here and
+  # `Installation Options` next; the help panel says neither.
+  - name: wait for the terms page
+    until: [terms, of, use]
+    region: [690, 225, 1560, 265]
+    region_at: [1920, 1080]
+    scale: 2
+    timeout: 180
+    poll: 6
+
+  - name: terms of use
+    at: [1482, 889]
+    settle: 14
+
+  # THE PANE SAYS `Select Type of Installation`, NOT `Installation Options`.
+  #
+  # MEASURED ON RUN d18429b, which is the run that proved the region fix above: the terms pane
+  # was left, and the content area then read
+  #
+  #     look wait for the installation type page in (690, 225, 1560, 265): 4 words ::
+  #       select | type | of | insta
+  #
+  # every six seconds for its whole timeout. The pane was there and the marker was not.
+  - name: wait for the installation type page
+    until: [select, type, of, installation]
+    region: [690, 225, 1560, 265]
+    region_at: [1920, 1080]
+    scale: 2
+    timeout: 180
+    poll: 6
+
+  # `Regular install using the entire disk` is preselected and the only drive is the guest's
+  # own `vda (64.0 GB)`.
+  - name: installation type
+    at: [1482, 889]
+    settle: 16
+
+  - name: wait for the confirmation page
+    until: [final, review]
+    region: [332, 248, 700, 285]
+    region_at: [1920, 1080]
+    scale: 1
+    timeout: 180
+    poll: 6
+
+  # THIS IS THE POINT OF NO RETURN: `Start` formats the drive, and MX begins writing.
+  - name: installation confirmation - start
+    at: [1478, 889]
+    settle: 25
+
+  # THE MODAL `Start` CAN RAISE, DISMISSED WHETHER OR NOT IT IS READ.
+  #
+  # Frame `mx8` shows it: `Invalid settings found in configuration file ().` with an `OK`,
+  # and while it is up the installer does nothing. (1069,583) is blank space on the
+  # confirmation page when no dialog is up, so the press costs nothing when there is nothing
+  # to dismiss - the same shape as mint's WRITE_CONTINUE.
+  - name: dismiss the invalid settings modal if it is up
+    at: [1069, 583]
+    settle: 4
+
+  # =======================================================================================
+  # 3. THE PAGES THAT COME WHILE THE DISK IS BEING WRITTEN
+  # =======================================================================================
+  #
+  # THE FIRST ONE TAKES ABOUT NINETY SECONDS - the drive is being formatted - and that is the
+  # whole point of the title wait before it.
+  - name: wait for the swap file page
+    until: [create, a, swap, file]
+    region: [332, 248, 700, 285]
+    region_at: [1920, 1080]
+    scale: 1
+    timeout: 240
+    poll: 6
+
+  - name: swap file
+    at: [1482, 889]
+    settle: 18
+
+  - name: wait for the computer identity page
+    until: [computer, identity]
+    region: [332, 248, 700, 285]
+    region_at: [1920, 1080]
+    scale: 1
+    timeout: 240
+    poll: 6
+
+  - name: computer identity
+    at: [1482, 889]
+    settle: 18
+
+  - name: wait for the localization page
+    until: [localization, defaults]
+    region: [332, 248, 700, 285]
+    region_at: [1920, 1080]
+    scale: 1
+    timeout: 240
+    poll: 6
+
+  - name: localization defaults
+    at: [1482, 889]
+    settle: 18
+
+  # =======================================================================================
+  # 4. DEFAULT USER LOGIN. THE THREE BOXES ARE MEASURED, AND THE PAGE IS AWAITED FIRST.
+  # =======================================================================================
+  #
+  # The three entries are the light rectangles at x=879..1541 in the account pane; their rows
+  # are y=330..354, 366..388 and 400..424. The centres below are the middle of each.
+  #
+  # THE OLD CONSTANTS WERE (1100,303), (1100,336) and (1100,370): the first is on the LABEL
+  # row above the login box and the other two are 30 px high, so a press could land on the
+  # pane rather than in a field.
+  - name: wait for the account page
+    until: [default, user, login]
+    region: [332, 248, 700, 285]
+    region_at: [1920, 1080]
+    scale: 1
+    timeout: 180
+    poll: 6
+
+  - name: account - login name
+    at: [1210, 342]
+    type: "{{ user }}"
+    settle: 2
+  - name: account - password
+    at: [1210, 377]
+    type: "{{ password }}"
+    settle: 2
+  - name: account - confirm password
+    at: [1210, 412]
+    type: "{{ password }}"
+    settle: 3
+
+  # AUTOLOGIN, SO THE DISK COMES UP AT A DESKTOP. The launch stage boots the disk with no
+  # installer and no ssh, so a disk that stops at a greeter can only be judged by its picture.
+  # Ticking this makes the desk the thing that appears - the same reason kubuntu presses
+  # `Log in automatically`. Measured: the checkbox square is x=693..708, y=554..569.
+  - name: autologin
+    at: [700, 561]
+    settle: 4
+
+  - name: default user login
+    at: [1482, 889]
+    settle: 25
+
+  # =======================================================================================
+  # 5. UNTIL IT SAYS SO - AND THIS INSTALLER DOES SAY IT
+  # =======================================================================================
+  #
+  # Unlike mint and opensuse, minstall's last page is readable: `Congratulations! You have
+  # completed the installation.` measured on the run that passed. Matching a terminal
+  # sentence cannot skip a page, because there is nothing after it to skip.
+  #
+  # THE KEEP-ALIVE CLICK IS PART OF THE WAIT: a locked desktop has no installer on it.
+  - name: the installer finishes
+    until_any:
+      - [congratulations]
+      - [completed, the, installation]
+      - [已完成]
+    region: [0, 0, 1920, 1080]
+    region_at: [1920, 1080]
+    scale: 1
+    timeout: 1800
+    poll: 20
+    keep_alive: true

@@ -1,0 +1,324 @@
+# Stage three for linux-opensuse-tumbleweed: put sshd on THIS disk and prove ssh works.
+#
+#     python3 lib/steps.py linux/opensuse-tumbleweed/steps/ssh.yaml --qmp /work/drive.sock.qmp --ssh-port 2222
+#
+# WHY THIS FILE IS PER-DISTRIBUTION AND NOT ONE SHARED WALK
+#
+# Because the four things it does differ on every image, and a shared file would have to be
+# written as a table of exceptions - which is what a per-distribution file already is, only
+# with the exceptions where a reader can see them.
+#
+# WHAT DIFFERS, FOR THIS ONE
+#
+#     terminal    ctrl+alt+t, the session's own emulator
+#     install    zypper --non-interactive --no-gpg-checks install openssh
+#     enable     systemctl enable --now sshd
+#     firewall   firewalld IS active on openSUSE; port 22 must be opened explicitly
+#
+# THE ONE DISTRIBUTION WITH A FIREWALL THAT MATTERS. YaST's install leaves firewalld enabled and its default zone drops 22, so the package alone produces a disk that answers nothing. `firewall-cmd --add-service=ssh` is part of this walk.
+#
+# THE THREE ACTIONS ARE THE SAME EVERYWHERE, WHICH IS WHY THE SHAPE IS THE SAME:
+#
+#     run:          open this session's terminal and type the install
+#     require_ssh:  wait for the daemon it enabled (the step macOS's own ssh.yaml added)
+#     ssh:          run a command IN THE GUEST over the forwarded port - an exit status
+#
+# THE TRANSPORT IS THE DESKTOP. These disks have no getty on ttyS0 - measured on run
+# 42551299241, whose console said `BdsDxe: starting Boot0001` and then nothing - so `run:`
+# is the only way in.
+
+name: linux-opensuse-tumbleweed - sshd
+
+resolution: [1920, 1080]
+
+vars:
+  password:
+    from: args.password
+    default: admin
+  user:
+    from: args.user
+    default: vmuser
+  # THE ACCOUNT IS `docker`, AND IT TOOK A FIX IN install.yaml TO MAKE THAT TRUE.
+  #
+  # YaST derives the login name from the full name as it is typed, and the old walk typed into
+  # BOTH fields - so the disk carried `vmuservmuser` (run 42573078551's prompt, and again on
+  # 2b2f81f's ssh stage where `id -un` returned `vmuservmuser`). `ssh docker@` was refused for
+  # an account that did not exist.
+  #
+  # install.yaml now CLEARS the derived field before typing it, so the login is `docker` and
+  # this file needs no override.
+
+steps:
+
+  # =======================================================================================
+  # 0. GET PAST THE GREETER, WHEN THIS DISK DOES NOT AUTOLOGIN
+  # =======================================================================================
+  #
+  # MEASURED ON RUN 42557318416, AND IT IS THE REASON THE FIRST ssh STAGE INSTALLED NOTHING.
+  # Pop!_OS' launch screenshot is not a desktop at all - it is COSMIC's LOCK SCREEN with
+  # `VM User` and a `Password:` box. `frame_is_painted` is right that something drew, but
+  # ctrl+alt+t does NOTHING on a greeter, so the terminal never opened and the install was
+  # typed into nothing.
+  #
+  # So the greeter is answered first: click the password box, type the account's password,
+  # press Return. The box's position is this greeter's own - SDDM.
+  #
+  # `optional` because a disk that DOES autologin never shows this page, and on one of those
+  # the click lands on the desktop and the typing goes to nothing that matters.
+  - name: greeter - the password box
+    at: [960, 640]
+    settle: 2
+    optional: true
+
+  - name: greeter - log in
+    type: "{{ password }}"
+    settle: 3
+    optional: true
+
+  - name: greeter - submit
+    key: ret
+    settle: 12
+    optional: true
+
+  # =======================================================================================
+  # 1. THE INSTALL, TYPED INTO THIS SESSION'S OWN TERMINAL
+  # =======================================================================================
+  #
+  # `run:` presses ctrl+alt+t to open the terminal, waits `terminal_wait`, types the text,
+  # presses Return and waits `settle`. Every number here is this image's: a desktop that has
+  # just painted has not started its session yet, so the wait comes before the shortcut.
+  # =======================================================================================
+  # 0b. THE TERMINAL, WHICH IS WHERE THE INSTALL IS TYPED
+  # =======================================================================================
+  #
+  # ctrl+alt+t is this desktop's own shortcut. The step EXISTS on its own - rather than being
+  # folded into the `run:` - because "did the terminal open" is the first question when an
+  # install produces nothing, and the recording now answers it.
+  - name: open the terminal
+    key: ctrl+alt+t
+    settle: 10
+
+  # `systemctl enable` IS NOT `systemctl start`, AND ONLY THE SECOND ONE OPENS PORT 22.
+  #
+  # Runs 42573078551 and 42577844686 (opensuse) both show a Konsole whose install had
+  # clearly worked - `Created symlink /etc/systemd/system/multi-user.target.wants/
+  # sshd.service` - and NOTHING after it. `enable --now` was supposed to start the unit as
+  # well as enable it, and the recording never showed whether it did; `tail -5` cut the
+  # answer off, so the stage waited ten minutes against a port that may never have opened.
+  #
+  # So the three actions are separate and each one reports: enable (boot), restart (now),
+  # is-active (the answer). `tail -14` so the status line survives in the recording.
+  #
+  # AND THE FIREWALL, WHICH THIS FILE'S OWN HEADER PROMISED AND THE COMMAND NEVER DID.
+  #
+  # Run 42580099375's frame shows the whole install working and `is-active` answering
+  # `active` - sshd WAS running - and the stage still failed with
+  #
+  #     ssh: connect to host 172.30.0.1 port 2222: No route to host
+  #
+  # `No route to host` is a DROP, not a refusal: nothing is listening on 2222 from the
+  # guest's side because firewalld's default zone is discarding the SYN. Visible in the
+  # screenshot: the terminal shows `active`, and it also shows the `firewall-cmd` this walk
+  # was supposed to run is absent. openSUSE's own header in this file says
+  # `firewall-cmd --add-service=ssh` is part of the walk.
+  #
+  # `--permanent` plus `--reload`, then `--list-services` so the recording shows ssh in the
+  # list rather than leaving the next stage to find out.
+  # ATOMIC STEPS, the shape macOS' and Windows' vm-configure files were split into
+  # (commit 96596c2): one act per step, so a failure names the act. This was a single `run:`
+  # that installed, enabled, started and verified in one line.
+  - name: install openssh
+    run: echo {{ password }} | sudo -S zypper --non-interactive --no-gpg-checks install openssh 2>&1 | tail -5
+    terminal_wait: 0
+    settle: 60
+
+  - name: enable sshd at boot
+    run: echo {{ password }} | sudo -S systemctl enable sshd 2>&1 | tail -3
+    terminal_wait: 0
+    settle: 8
+
+  - name: start sshd
+    run: echo {{ password }} | sudo -S systemctl restart sshd 2>&1 | tail -3
+    terminal_wait: 0
+    settle: 10
+
+  - name: prove sshd is active
+    run: systemctl is-active sshd
+    terminal_wait: 0
+    settle: 5
+
+  # ENABLED AND RUNNING ARE TWO FACTS, AND ONLY ONE OF THEM SURVIVES A REBOOT.
+  #
+  # `is-active` above is answered by the process `restart` just started - it says nothing about
+  # whether the boot will start one. That distinction is what published a cachyos disk whose ssh
+  # stage had proved `id -un` over port 22 and which then booted with NOTHING on port 22.
+  #
+  # `is-enabled` READS THE SYMLINK systemd would follow at boot, which is the only fact here that
+  # outlives the process. `list-unit-files` prints the state beside the unit's own name, so a
+  # failed enable is visible in the recording rather than inferred from a refused port later.
+  # =======================================================================================
+  # 2. WAIT FOR THE DAEMON THAT STEP ENABLED
+  # =======================================================================================
+  #
+  # NO FIXED `wait:` - the number would be a guess about a package install and a
+  # `nixos-rebuild` that share nothing. `require_ssh` asks the only question that matters.
+  - name: open the firewall for ssh
+    run: echo {{ password }} | sudo -S sh -c "firewall-cmd --add-service=ssh --permanent; firewall-cmd --reload; firewall-cmd --list-services" 2>&1 | tail -5
+    terminal_wait: 0
+    settle: 8
+
+  # THE FIREWALL IS OPENED BEFORE THE PORT IS WAITED ON, BECAUSE THE PORT IS WHAT IT CLOSES.
+  #
+  # Run bdd7913 is the measurement. cachyos' stage sat on this for the whole ten minutes:
+  #
+  #     still waiting after 370s of 600s (last status 255: ssh: connect to host 172.30.0.1
+  #                                                    port 2222: Connection timed out)
+  #
+  # `timed out` AND NOT `refused` IS THE TELL. A refused port is a host saying no; a timed out one
+  # is a packet being DROPPED, and ufw's default incoming policy does exactly that. The daemon was
+  # listening the whole time - the step that allows it was thirty lines further down, after the
+  # `require_ssh:` that needed the answer first.
+  #
+  # This is the same shape as the ssh-step ordering fixed in 8bd7746: a step that needs a channel
+  # cannot be written after the step that opens it.
+  - name: wait for sshd
+    require_ssh: true
+    timeout: 600
+
+  # =======================================================================================
+  # 3. THE PROOF, AND IT IS THIS GUEST ANSWERING OVER THE FORWARDED PORT
+  # =======================================================================================
+  - name: prove the kernel over ssh
+    ssh: uname -a
+    timeout: 120
+
+  - name: prove the account over ssh
+    ssh: id -un; hostname
+    timeout: 120
+
+  # THE ENABLE IS DONE AGAIN HERE, OVER SSH, BECAUSE `run:` CANNOT PROVE ANYTHING.
+  #
+  # Everything above this file's `run:` steps types into the guest's own terminal and reads the
+  # screen; a command that fails there still looks like four lines of text, and the step's own
+  # exit status is the terminal's. That is fine for "start it now" and useless for "will it start
+  # at boot", which is a fact nothing on the screen confirms.
+  #
+  # `ssh:` IS A DIFFERENT CHANNEL, and it is available by the time this step runs: the steps
+  # above proved the port answers. It returns an EXIT STATUS, so `systemctl enable --now` here
+  # can fail the stage by failing, and the `test` after it reads the symlink systemd would follow.
+  #
+  # WHY IT IS NOT `enable --now` ONLY. A disk that already has the symlink costs one idempotent
+  # command, and a disk that does not is repaired rather than published - which is the difference
+  # between this and the version of this file that shipped a disk with nothing on port 22.
+
+  # THE HOST KEYS ARE GENERATED WHILE THE CHANNEL IS OPEN, BECAUSE THE BOOT MAY NOT DO IT.
+  #
+  # `sshd.service` on this family runs `sshd-keygen` as an ExecStartPre, and that step needs to
+  # write /etc/ssh/ssh_host_*_key. A disk where it fails - a read-only remount at that point in the
+  # boot, a missing /etc/ssh directory - starts nothing, leaves `is-enabled: enabled` and the
+  # symlink in place, and refuses port 22 forever afterwards. That is the artefact measured here:
+  # the greeter showed `vmuser`, the desktop came up, and 172.30.0.1:2222 answered `Connection
+  # refused` on a disk whose own stage had proved `id -un` through that port minutes earlier.
+  #
+  # RUNNING IT HERE IS NOT A WORKAROUND FOR THE SYMPTOM - it is doing the same work earlier, while
+  # there is a channel to see the result on. `ssh-keygen -A` is idempotent: it writes the keys that
+  # do not exist and leaves the ones that do.
+  - name: make sure the host keys exist
+    ssh: |
+      set -e
+      printf '%s\n' '{{ password }}' | sudo -S -p '' mkdir -p /etc/ssh
+      printf '%s\n' '{{ password }}' | sudo -S -p '' ssh-keygen -A 2>&1 | tail -4
+      echo "--- the keys ---"
+      ls -l /etc/ssh/ssh_host_*_key | head -8
+      echo "--- and the one sshd needs first ---"
+      printf '%s\n' '{{ password }}' | sudo -S -p '' test -s /etc/ssh/ssh_host_ed25519_key
+    timeout: 120
+
+  # AND THE UNIT IS STARTED FRESH FROM THAT STATE, SO A FAILURE NAMES ITSELF.
+  - name: restart sshd now that the keys are on disk
+    ssh: |
+      printf '%s\n' '{{ password }}' | sudo -S -p '' systemctl restart sshd 2>&1 | tail -3
+      sleep 2
+      systemctl is-active sshd
+      ss -lnt 2>/dev/null | grep ':22 ' || apt-get --version >/dev/null 2>&1 || true
+    timeout: 180
+
+  - name: enable sshd again, over ssh, where the exit status is readable
+    ssh: |
+      printf '%s\n' '{{ password }}' | sudo -S -p '' systemctl enable --now sshd 2>&1 | tail -3
+      systemctl is-enabled sshd
+      test "$(systemctl is-enabled sshd)" = "enabled"
+    timeout: 180
+
+  - name: prove sshd will start at boot
+    ssh: |
+      set -e
+      echo "is-enabled: $(systemctl is-enabled sshd)"
+      echo "is-active:  $(systemctl is-active sshd)"
+      echo "wants:      $(ls /etc/systemd/system/multi-user.target.wants/sshd.service 2>&1)"
+      test "$(systemctl is-enabled sshd)" = "enabled"
+      test -L /etc/systemd/system/multi-user.target.wants/sshd.service
+    timeout: 120
+
+
+  # =======================================================================================
+  # THE MACHINE RESTARTS AND HAS TO PROVE SSHD SURVIVES IT
+  # =======================================================================================
+  #
+  # EVERY CHECK ABOVE RUNS IN THE SESSION WHERE SSHD WAS JUST STARTED, so not one of them can
+  # see the failure this stage exists to prevent. That gap is the whole history of this file:
+  #
+  #     `id -un` over port 22             passes, on a daemon `restart` started
+  #     `systemctl is-enabled sshd`       answers `enabled` - the symlink is real
+  #     ls of the .wants symlink          the link is there
+  #     journalctl -b -u sshd             `Started OpenSSH Daemon`, `listening on 0.0.0.0:22`
+  #
+  # and then the PUBLISHED DISK boots to a login screen with nothing on port 22. Measured on the
+  # artifact itself, in a local pod, twice.
+  #
+  # THE ONLY TEST THAT CAN SEE THAT IS A RESTART. `systemctl reboot` through this ssh session
+  # kills the connection it was issued on - that is what `optional: true` is for - and the
+  # `require_ssh:` below is what says whether the machine came back with a listening daemon.
+  #
+  # NO SERIAL CONSOLE AND NO TEXT TTY: this repository does not fall back to either, so a
+  # failure here is reported as a failure of this stage rather than worked around.
+  - name: restart the machine
+    ssh: |
+      printf '%s\n' '{{ password }}' | sudo -S -p '' systemctl reboot
+    timeout: 60
+    optional: true
+
+  # THE OLD DAEMON HAS TO BE GONE BEFORE THE NEW ONE IS WAITED FOR, AND RUN 799fa65 IS WHY.
+  #
+  # `require_ssh:` one step after the reboot passed in ONE SECOND:
+  #
+  #     === restart the machine
+  #     === come back up with sshd answering
+  #     === read what this boot did
+  #     steps.StepError: read what this boot did: the command exited 255
+  #
+  # It connected to the sshd that was STILL RUNNING on the machine that had been asked to reboot.
+  # `systemctl reboot` returns as soon as the request is queued, and the daemon keeps serving for
+  # the second or two before the kernel goes down - so the wait passed on the OLD process, and the
+  # next step, which opens a NEW connection, found nothing.
+  #
+  # `ssh_after_reboot: true` IS THE FIX IN THE ENGINE: it waits for the port to REFUSE before it
+  # waits for it to answer, so anything that answers afterwards is a daemon this boot made.
+  - name: come back up with sshd answering
+    require_ssh: true
+    ssh_after_reboot: true
+    timeout: 900
+
+  # AND NOW THE JOURNAL IS THE BOOT THAT MATTERS - this one, not the one that installed sshd.
+  - name: read what this boot did
+    ssh: |
+      set -e
+      echo "--- identity, over a connection that did not exist when sshd was installed ---"
+      id -un; hostname
+      echo "--- is-enabled / is-active ---"
+      systemctl is-enabled sshd; systemctl is-active sshd
+      echo "--- the unit's own account of this start ---"
+      journalctl -b -u sshd --no-pager 2>&1 | tail -12
+      test "$(systemctl is-enabled sshd)" = "enabled"
+      test "$(systemctl is-active sshd)" = "active"
+    timeout: 120

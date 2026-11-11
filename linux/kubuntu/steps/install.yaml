@@ -1,0 +1,277 @@
+# Kubuntu's Calamares: the panes that need more than one click, as a sequence.
+#
+#     python3 lib/steps.py linux/kubuntu/steps/install.yaml --qmp /work/drive.sock.qmp
+#
+# WHAT THIS REPLACES
+#
+# linux/kubuntu/install.py's walk_calamares(). install.py keeps the machine, the kernel
+# and initrd, the frames, the recording and the publish.
+#
+# WHY TWO OF THE STEPS ARE `python:` AND THE REST ARE `at:`
+#
+# `advance()` IS NOT A CLICK AND MUST NOT BECOME ONE. It presses Next, looks, and if the pane
+# did not change it tries again and then Alt+N - Calamares binds Alt+N to Next on every pane.
+# That is three measured attempts with a reading between them, and the reading decides whether
+# to TRY AGAIN, not WHERE to click: every click in it is the same measured coordinate. Writing
+# it as three `at:` steps would make the retry unconditional, and on this wizard a second
+# unconditional click is a LIABILITY - Calamares advances in one to two seconds, so two clicks
+# 0.8 s apart land the second on the NEXT pane's Next and skip a pane entirely. That is the
+# measured reason the retry is conditional, and it is exactly the kind of thing `python:` is
+# for.
+#
+# `settle_pane()` is the other: it waits for a pane to finish repainting before the account
+# form is typed into it. Both live in panes.py beside this file, which is where a measured
+# exception belongs.
+
+name: kubuntu - the Calamares walk
+resolution: [1920, 1080]
+
+vars:
+  user:
+    from: args.user
+    default: vmuser
+  password:
+    from: args.password
+    default: admin
+
+steps:
+  # =======================================================================================
+  # 1. THE LIVE DESKTOP'S OWN INSTALL BUTTON
+  # =======================================================================================
+  #
+  # Two presses: the first is spent giving the window focus. `repeat` is that shape.
+  - name: install kubuntu on the live desktop
+    at: [1326, 841]
+    repeat: [2, 0.8]
+    settle: 25
+
+  # =======================================================================================
+  # 2..5. THE FOUR PANES THAT ONLY NEED NEXT
+  # =======================================================================================
+  #
+  # NO MARKERS HERE, DELIBERATELY. These four panes are only distinguished by their content,
+  # and the words that name them live in the SIDEBAR where they are always true. So the
+  # question is the stronger one: did the content area change at all? That check is inside
+  # advance(), because it needs a reading before and after.
+  # `repeat_until:` WITH `changed: true` RATHER THAN `python: panes:advance`.
+  #
+  # THE CONDITION IS THE ONE THE PYTHON VERSION USED: did the CONTENT AREA change at all. These
+  # panes have no marker words - the words that name them live in the sidebar, where they are true
+  # from the welcome pane onwards - so "these words are on screen" can be satisfied before anything
+  # moved. What a person checks is that the page is different.
+  #
+  # AND THE THREE ATTEMPTS ARE THE PYTHON VERSION'S THREE, IN ITS ORDER, because the order is
+  # measured: a click, the click again in case the first only focused the window, then alt+n - which
+  # Calamares binds to Next on every pane. alt+n is not first because on the Summary pane it starts
+  # the installation, and a shortcut fired into the wrong pane is worse than a repeated click.
+  #
+  # `changed:` COMPARES A COARSE FINGERPRINT of the frame, so a caret blink or a spinner is not a
+  # change and a page swap is. A pixel-for-pixel comparison would call every repaint a new pane.
+  - name: welcome
+    repeat_until:
+      attempts: 3
+      settle: 12
+      actions:
+        # THE MEASURED NEXT BUTTON, from linux/kubuntu/steps/panes.py's own `NEXT = (1757, 1058)`.
+        # A coordinate this file invents would be a click nobody measured, on the one control every
+        # Calamares pane has.
+        - at: [1757, 1058]
+          settle: 12
+        - at: [1757, 1058]
+          settle: 12
+        - key: alt+n
+          settle: 12
+      until_any:
+        - changed: true
+
+  - name: location
+    repeat_until:
+      attempts: 3
+      settle: 12
+      actions:
+        # THE MEASURED NEXT BUTTON, from linux/kubuntu/steps/panes.py's own `NEXT = (1757, 1058)`.
+        # A coordinate this file invents would be a click nobody measured, on the one control every
+        # Calamares pane has.
+        - at: [1757, 1058]
+          settle: 12
+        - at: [1757, 1058]
+          settle: 12
+        - key: alt+n
+          settle: 12
+      until_any:
+        - changed: true
+
+  - name: keyboard
+    repeat_until:
+      attempts: 3
+      settle: 12
+      actions:
+        # THE MEASURED NEXT BUTTON, from linux/kubuntu/steps/panes.py's own `NEXT = (1757, 1058)`.
+        # A coordinate this file invents would be a click nobody measured, on the one control every
+        # Calamares pane has.
+        - at: [1757, 1058]
+          settle: 12
+        - at: [1757, 1058]
+          settle: 12
+        - key: alt+n
+          settle: 12
+      until_any:
+        - changed: true
+
+  - name: customize
+    repeat_until:
+      attempts: 3
+      settle: 12
+      actions:
+        # THE MEASURED NEXT BUTTON, from linux/kubuntu/steps/panes.py's own `NEXT = (1757, 1058)`.
+        # A coordinate this file invents would be a click nobody measured, on the one control every
+        # Calamares pane has.
+        - at: [1757, 1058]
+          settle: 12
+        - at: [1757, 1058]
+          settle: 12
+        - key: alt+n
+          settle: 12
+      until_any:
+        - changed: true
+
+  # =======================================================================================
+  # 6. ERASE THE DISK
+  # =======================================================================================
+  #
+  # The radio is not followed by a repaint, so it is clicked and the pane is then left by the
+  # footer; there is nothing to confirm between those two.
+  - name: partitions - erase the disk
+    at: [208, 73]
+    settle: 4
+
+  - name: partitions
+    repeat_until:
+      attempts: 3
+      settle: 15
+      actions:
+        - at: [1757, 1058]
+          settle: 15
+        - at: [1757, 1058]
+          settle: 15
+        - key: alt+n
+          settle: 15
+      until_any:
+        - changed: true
+
+  # =======================================================================================
+  # 7. THE ACCOUNT FORM. FIVE CLICKS AT FIVE MEASURED POSITIONS.
+  # =======================================================================================
+  #
+  # NOTHING IS SEARCHED FOR. The numbers came from a CI frame, and the file that used to
+  # record why is worth keeping here: the first version of these was measured on a WINDOWED
+  # installer and every one of them landed on blank panel when CI ran the same wizard
+  # full-screen.
+  #
+  #      name     (296, 52)      password  (296, 254)
+  #      login    (296, 120)     confirm   (500, 254)
+  #      host     (296, 188)
+  #
+  # `host` is `kubuntu` and not the user name: it is the disk's identity, and it is the one
+  # field this driver fills with a literal.
+  - name: users - full name
+    at: [296, 52]
+    type: "{{ user }}"
+    settle: 2
+  - name: users - login name
+    at: [296, 120]
+    type: "{{ user }}"
+    settle: 2
+  # THE HOST NAME IS LEFT AT THE INSTALLER'S DEFAULT, AND THIS STEP USED TO SET IT.
+  #
+  # It typed the account's name here, which made the machine's name a second copy of the login
+  # and had to be kept in step with it by hand - and after the account was renamed it was the one
+  # place a stale name could hide. The name is now set ONCE, after ssh works, by
+  # `steps/vm-configure.yaml`, which is also the only place that knows the disk is finished.
+  #
+  # WHAT THE INSTALLER PUTS HERE IS ITS OWN DEFAULT (`cachyos`, the live medium's name, or the
+  # machine model). It is replaced a stage later, so nothing reads it.
+  - name: users - password
+    at: [296, 254]
+    type: "{{ password }}"
+    settle: 2
+  - name: users - confirm password
+    at: [500, 254]
+    type: "{{ password }}"
+    settle: 3
+
+  # THE `Log in automatically without asking for the password.` CHECKBOX, whose box is 18 px
+  # left of where its label starts at x=221. Ticking it is what lets the launch stage reach a
+  # desktop instead of a greeter - measured, kubuntu's launch screenshot is the KDE desk
+  # rather than the login screen, while zorin's (no such option) is the greeter.
+  - name: log in automatically
+    at: [203, 297]
+    settle: 3
+
+  - name: users
+    repeat_until:
+      attempts: 3
+      settle: 15
+      actions:
+        - at: [1757, 1058]
+          settle: 15
+        - at: [1757, 1058]
+          settle: 15
+        - key: alt+n
+          settle: 15
+      until_any:
+        - changed: true
+
+  # =======================================================================================
+  # 8. SUMMARY -> INSTALL, THEN THE CONFIRMATION DIALOG'S OWN BUTTON
+  # =======================================================================================
+  #
+  # TWO CLICKS AT TWO MEASURED POSITIONS. NOTHING IS LOOKED UP, AND NO CHECK GATES EITHER.
+  #
+  # Three runs in a row stopped here because a check could not read the modal:
+  #
+  #   run 42364250527  looked for the button label, found it in the Summary's PROSE, and
+  #                    clicked a sentence at (896, 424) - the install never started
+  #   run 42371430501  looked for "confirm", which is neither the title nor the button
+  #   run 42372430467  looked for "install now" and tesseract returned only the Summary text
+  #                    BEHIND the modal - the dialog was there, at (1058, 535), on the frame
+  #                    the run uploaded
+  #
+  # The lesson is the rule this driver follows everywhere: THE SCREEN IS READ TO DECIDE
+  # WHETHER A STEP WORKED, NEVER WHETHER TO TAKE IT.
+  #
+  # The `Install` on Summary is the SAME FOOTER POSITION as every Next above - Calamares
+  # only changes its colour and its word.
+  - name: summary - install
+    at: [1757, 1058]
+    settle: 12
+
+  - name: the confirmation dialog's install now
+    at: [1058, 535]
+    settle: 25
+
+  # =======================================================================================
+  # 9. WAIT FOR THE FINISH, BY THE PANE GOING AWAY
+  # =======================================================================================
+  #
+  # "finish" IS NOT A MARKER. Calamares' sidebar lists every pane including the last, so the
+  # word "Finish" is on screen from the welcome pane onwards - the first version of this loop
+  # would have declared success the instant the sidebar was drawn. (It happened not to fire
+  # only because that run's UI was Asturian and the word was "Fin", which is luck rather than
+  # design.)
+  #
+  # THE MARKER IS THE SUMMARY PANE GOING AWAY: copying begins when Calamares leaves it, and from
+  # then on the sidebar no longer highlights it. Run 42364250527 spent eighty-seven of its ninety
+  # minutes showing the same Summary text, one identical OCR line every twenty seconds - which is
+  # why the wait is for the END OF THE INSTALL and not for a word.
+  #
+  # `until_any:` WITH THE THREE SENTENCES Calamares puts on its last pane. They are what the Python
+  # version matched, and they appear nowhere else in this sequence: "all done" and "reboot now" are
+  # the finish pane, and a bare "restart" is the one Kopete-era reboot prompt Calamares reuses.
+  - name: the installer finishes
+    until_any:
+      - [all, done]
+      - [reboot, now]
+      - [restart]
+    timeout: 5400
+    poll: 20

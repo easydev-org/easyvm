@@ -65,6 +65,13 @@ type condition struct {
 	Unit string
 	// Desktop, when set, requires the frame to look like that family's desktop.
 	Desktop string
+	// Changed requires the screen to be DIFFERENT from the one the loop started on.
+	//
+	// IT IS THE CONDITION A WIZARD'S "Next" NEEDS, and it is not the same question as `words:`. A
+	// pane that has advanced usually still shows some of the same text - a title, a sidebar - so
+	// waiting for words is waiting for something that may already be there. What a person checks is
+	// that the page CHANGED.
+	Changed bool
 }
 
 var numberPattern = regexp.MustCompile(`(\d+(?:\.\d+)?)\s*(gb|mb)\b`)
@@ -78,6 +85,23 @@ func (e *Executor) doRepeatUntil(s walk.Step) error {
 
 	e.Driver.Log(fmt.Sprintf("  up to %d attempt(s) of %d action(s), then read the screen",
 		loop.Attempts, len(loop.Actions)))
+
+	// THE BASELINE IS TAKEN BEFORE ANY ACTION, and only when a condition needs it: a fingerprint
+	// costs one screen read, and a loop with word conditions does not need one.
+	needsBaseline := false
+	for _, cond := range loop.Conditions {
+		if cond.Changed {
+			needsBaseline = true
+		}
+	}
+	var baseline [64]float64
+	if needsBaseline {
+		fp, err := e.fingerprint()
+		if err != nil {
+			return fail(s.Name, "reading the screen before the first attempt: %v", err)
+		}
+		baseline = fp
+	}
 
 	for attempt := 1; attempt <= loop.Attempts; attempt++ {
 		// THE READ COMES FIRST ON EVERY ATTEMPT AFTER THE FIRST, so the loop stops as soon as the
@@ -97,6 +121,17 @@ func (e *Executor) doRepeatUntil(s walk.Step) error {
 			if cond.Desktop != "" {
 				if ok, why := e.desktopCondition(cond.Desktop); ok {
 					e.Driver.Log(fmt.Sprintf("  attempt %d: %s", attempt, why))
+					return nil
+				}
+				continue
+			}
+			if cond.Changed {
+				now, err := e.fingerprint()
+				if err != nil {
+					return fail(s.Name, "reading the screen on attempt %d: %v", attempt, err)
+				}
+				if screen.Changed(baseline, now) {
+					e.Driver.Log(fmt.Sprintf("  attempt %d: the screen changed", attempt))
 					return nil
 				}
 				continue
@@ -206,8 +241,18 @@ func (e *Executor) parseRepeatUntil(s walk.Step) (repeatUntil, error) {
 				cond.Unit = "gb"
 			}
 		}
-		if len(cond.Words) == 0 && cond.NumberBetween == nil && cond.Desktop == "" {
-			return loop, fail(s.Name, "until_any[%d] has neither `words:` nor `number_between:`", i)
+		// `changed: true` IS A CONDITION WITH NO TEXT, and it is the one a wizard's Next needs: a
+		// pane that advanced may still show its own title, so "these words are on screen" can be
+		// satisfied before anything moved.
+		if v, ok := mapping["changed"]; ok {
+			if b, isBool := v.(bool); isBool && b {
+				cond.Changed = true
+			}
+		}
+		if len(cond.Words) == 0 && cond.NumberBetween == nil && cond.Desktop == "" && !cond.Changed {
+			return loop, fail(s.Name, "until_any[%d] has none of `words:`, `number_between:`, "+
+				"`desktop:` or `changed:` - a condition that cannot be tested is a loop that "+
+				"presses eight times and reports nothing", i)
 		}
 		loop.Conditions = append(loop.Conditions, cond)
 	}
@@ -237,6 +282,23 @@ func (c condition) matches(words []string, numbers []float64) (bool, string) {
 	}
 	return false, fmt.Sprintf("read %s; nothing in %g..%g GB",
 		formatNumbers(numbers), c.NumberBetween[0], c.NumberBetween[1])
+}
+
+// fingerprint captures a frame and reduces it to the coarse grid `screen.Changed` compares.
+//
+// IT IS A SEPARATE READ FROM readScreen, and that is deliberate: OCR is the expensive half and a
+// `changed:` condition does not need it at all. A wizard's Next is decided by whether the page moved,
+// not by what the page says.
+func (e *Executor) fingerprint() ([64]float64, error) {
+	f, err := e.Driver.Frame()
+	if err != nil {
+		return [64]float64{}, err
+	}
+	img, err := screen.Load(f.Path())
+	if err != nil {
+		return [64]float64{}, err
+	}
+	return screen.Fingerprint(img), nil
 }
 
 // readForLoop captures the screen, reads it, and also extracts every capacity it found.

@@ -1,0 +1,144 @@
+# Stage three for linux-endeavour: put sshd on THIS disk and prove ssh works.
+#
+#     python3 lib/steps.py linux/endeavour/steps/ssh.yaml --qmp /work/drive.sock.qmp --ssh-port 2222
+#
+# WHY THIS FILE IS PER-DISTRIBUTION AND NOT ONE SHARED WALK
+#
+# Because the four things it does differ on every image, and a shared file would have to be
+# written as a table of exceptions - which is what a per-distribution file already is, only
+# with the exceptions where a reader can see them.
+#
+# WHAT DIFFERS, FOR THIS ONE
+#
+#     terminal    ctrl+alt+t, the session's own emulator
+#     install    pacman -Sy --noconfirm --needed openssh
+#     enable     systemctl enable --now sshd
+#     firewall   no firewall is installed on this image
+#
+# Arch family, `sshd`. Its installer is the one that needs the geoip probe disabled, which install.yaml already does; nothing about ssh changes because of it.
+#
+# THE THREE ACTIONS ARE THE SAME EVERYWHERE, WHICH IS WHY THE SHAPE IS THE SAME:
+#
+#     run:          open this session's terminal and type the install
+#     require_ssh:  wait for the daemon it enabled (the step macOS's own ssh.yaml added)
+#     ssh:          run a command IN THE GUEST over the forwarded port - an exit status
+#
+# THE TRANSPORT IS THE DESKTOP. These disks have no getty on ttyS0 - measured on run
+# 42551299241, whose console said `BdsDxe: starting Boot0001` and then nothing - so `run:`
+# is the only way in.
+
+name: linux-endeavour - sshd
+
+resolution: [1920, 1080]
+
+vars:
+  password:
+    from: args.password
+    default: admin
+  user:
+    from: args.user
+    default: vmuser
+
+steps:
+
+  # =======================================================================================
+  # 0. GET PAST THE GREETER, WHEN THIS DISK DOES NOT AUTOLOGIN
+  # =======================================================================================
+  #
+  # MEASURED ON RUN 42557318416, AND IT IS THE REASON THE FIRST ssh STAGE INSTALLED NOTHING.
+  # Pop!_OS' launch screenshot is not a desktop at all - it is COSMIC's LOCK SCREEN with
+  # `VM User` and a `Password:` box. `frame_is_painted` is right that something drew, but
+  # ctrl+alt+t does NOTHING on a greeter, so the terminal never opened and the install was
+  # typed into nothing.
+  #
+  # So the greeter is answered first: click the password box, type the account's password,
+  # press Return. The box's position is this greeter's own - SDDM.
+  #
+  # `optional` because a disk that DOES autologin never shows this page, and on one of those
+  # the click lands on the desktop and the typing goes to nothing that matters.
+  # MEASURED ON THIS GREETER: THE ENTRY'S INTERIOR IS y=614..643, x=776..1096, so its
+  # centre is (936, 628). The previous (960, 640) was three pixels above the box's BOTTOM
+  # BORDER - run 42575602052's frame shows the caret on the field and the placeholder
+  # `Password` still in it after the password had been typed, because the click had put
+  # focus on the border rather than inside the entry.
+  - name: greeter - the password box
+    at: [936, 628]
+    settle: 3
+    optional: true
+
+  - name: greeter - log in
+    type: "{{ password }}"
+    settle: 3
+    optional: true
+
+  - name: greeter - submit
+    key: ret
+    settle: 12
+    optional: true
+
+  # =======================================================================================
+  # 1. THE INSTALL, TYPED INTO THIS SESSION'S OWN TERMINAL
+  # =======================================================================================
+  #
+  # `run:` presses ctrl+alt+t to open the terminal, waits `terminal_wait`, types the text,
+  # presses Return and waits `settle`. Every number here is this image's: a desktop that has
+  # just painted has not started its session yet, so the wait comes before the shortcut.
+  # =======================================================================================
+  # 0b. THE TERMINAL, WHICH IS WHERE THE INSTALL IS TYPED
+  # =======================================================================================
+  #
+  # ctrl+alt+t is this desktop's own shortcut. The step EXISTS on its own - rather than being
+  # folded into the `run:` - because "did the terminal open" is the first question when an
+  # install produces nothing, and the recording now answers it.
+  - name: open the terminal
+    key: ctrl+alt+t
+    settle: 10
+
+  # ATOMIC STEPS, the shape macOS' and Windows' vm-configure files were split into
+  # (commit 96596c2): one act per step, so a failure names the act. This was a single `run:`
+  # that installed, enabled, started and verified in one line.
+  - name: install openssh
+    run: echo {{ password }} | sudo -S pacman -Sy --noconfirm --needed openssh 2>&1 | tail -5
+    terminal_wait: 0
+    settle: 45
+
+  - name: enable sshd at boot
+    run: echo {{ password }} | sudo -S systemctl enable sshd 2>&1 | tail -3
+    terminal_wait: 0
+    settle: 8
+
+  - name: start sshd
+    run: echo {{ password }} | sudo -S systemctl restart sshd 2>&1 | tail -3
+    terminal_wait: 0
+    settle: 10
+
+  - name: prove sshd is active
+    run: systemctl is-active sshd
+    terminal_wait: 0
+    settle: 5
+
+  # THE SECOND HALF, FOR THE SYSTEMS WHERE THE FIRST COULD NOT RUN AS ROOT. `sudo -S` is what
+  # a Debian/Fedora/Arch/suse desktop needs; FreeBSD has no sudo, and NixOS' rebuild must run
+  # as root by design. This step is `optional` so on a disk where the first one worked its only
+  # effect is one harmless line in the same terminal.
+
+  # =======================================================================================
+  # 2. WAIT FOR THE DAEMON THAT STEP ENABLED
+  # =======================================================================================
+  #
+  # NO FIXED `wait:` - the number would be a guess about a package install and a
+  # `nixos-rebuild` that share nothing. `require_ssh` asks the only question that matters.
+  - name: wait for sshd
+    require_ssh: true
+    timeout: 600
+
+  # =======================================================================================
+  # 3. THE PROOF, AND IT IS THIS GUEST ANSWERING OVER THE FORWARDED PORT
+  # =======================================================================================
+  - name: prove the kernel over ssh
+    ssh: uname -a
+    timeout: 120
+
+  - name: prove the account over ssh
+    ssh: id -un; hostname
+    timeout: 120

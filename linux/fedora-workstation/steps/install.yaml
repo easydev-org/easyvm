@@ -1,0 +1,411 @@
+# Fedora Workstation: Anaconda, then GNOME's first-boot wizard - two stages in one file.
+#
+#     python3 lib/steps.py linux/fedora-workstation/steps/install.yaml --qmp /work/drive.sock.qmp
+#     python3 lib/steps.py linux/fedora-workstation/steps/install.yaml --qmp /work/drive.sock.qmp \
+#         --start-at first boot
+#
+# WHAT THIS REPLACES
+#
+# linux/fedora-workstation/install.py's walk_anaconda() and walk_first_boot(). install.py keeps the
+# machine, the frames, the recording and the publish.
+#
+# TWO STAGES IN ONE FILE, AND `--start-at` IS WHY. The installer walk ends by leaving
+# Anaconda; the first-boot wizard runs in a DIFFERENT MACHINE, with no ISO attached, because
+# the point of that stage is that the firmware boots the disk on its own and finds the system
+# Anaconda installed. Both halves are made of the same clicks, so they share one file and the
+# stage picks its half by name.
+#
+# ANACONDA'S FOOTER DOES NOT MOVE AND ITS WINDOW IS 1280x942 CENTRED
+#
+# x 318..1602, y 68..1010 - so its footer is at y 1002, NOT at the bottom of the screen.
+# (729,1002) is inside the Next button. That is why the steps below reuse it.
+#
+# AND Alt+N DOES NOTHING HERE. Anaconda's new UI is a WEB application in a window, not a GTK
+# dialog: its footer buttons are page elements and the toolkit's default-button binding does
+# not exist. Run 42404596625 pressed Alt+N on `Installation method` and nothing moved:
+#
+#     19:10:22  alt+n - installation method: Next
+#     19:10:35  after installation method: (identical)
+
+name: fedora-workstation - anaconda and the first boot
+resolution: [1920, 1080]
+
+vars:
+  user:
+    from: args.user
+    default: vmuser
+  password:
+    from: args.password
+    default: admin
+
+steps:
+  # =======================================================================================
+  # STAGE ONE: ANACONDA
+  # =======================================================================================
+
+  # 1. THE LIVE SESSION'S WELCOME DIALOG, AND THE INSTALLER BEHIND IT.
+  #
+  # THE DIALOG IS NOT THE INSTALLER AND DOES NOT OPEN BY ITSELF. Run 42382690048 clicked
+  # `Install Fedora Linux...` at its measured centre (838,708) and the uploaded frame shows
+  # that dialog still on screen with everything after it pointed at an installer that had
+  # never started: the next click was Anaconda's `Next` at (729,1002), which on the welcome
+  # dialog is blank background, and the run then waited for a pane that could not appear.
+  #
+  # ANACONDA TAKES ABOUT A MINUTE TO DRAW, AND THIS FILE FIRST TRIED TO CLICK THROUGH IT IN
+  # THIRTY SECONDS. Measured from the video of the run that worked: `Initializing...` is up
+  # at t=60, the Welcome pane at t=80, and `Storage configuration` at t=100. Run 42516813616
+  # pressed Next at t=31 and t=43, spent both on the dialog, and then sat on `erase data and
+  # install` at a coordinate that pane does not have - the disk stayed at 0 MiB for ninety
+  # minutes and nothing said so until the wait timed out.
+  #
+  # SO THE OPEN IS RETRIED, AND EACH RETRY ASKS THE ONLY QUESTION THAT MATTERS - is
+  # Anaconda's OWN SIDEBAR on screen. `Installation method` is one of its four panes and
+  # appears nowhere on the live desktop; `Welcome to Fedora Linux` is the DIALOG's title,
+  # which is why matching it would answer the wrong question. Four presses, as the Python
+  # driver had, and then a bounded wait on the same marker.
+  - name: install fedora linux
+    at: [838, 708]
+    repeat: [2, 3]
+    settle: 3
+
+  - name: install fedora linux (again, if anaconda is not up)
+    unless: [installation, method]
+    at: [838, 708]
+    repeat: [2, 3]
+    settle: 25
+
+  - name: install fedora linux (and once more)
+    unless: [installation, method]
+    at: [838, 708]
+    repeat: [2, 3]
+    settle: 30
+
+  # THE BOUNDED WAIT, SO A SLOW RUNNER IS NOT A FAILED ONE. `stuck` is impossible here: the
+  # marker is Anaconda's own sidebar, which either appears or never does.
+  - name: anaconda is up
+    until_any:
+      - [installation, method]
+      - [let's, install]
+    region: [0, 0, 1920, 1080]
+    region_at: [1920, 1080]
+    scale: 1
+    timeout: 300
+    poll: 10
+    keep_alive: true
+
+  # 2. THE WELCOME PANE, WHICH IS NOT COVERED BY ANYTHING.
+  #
+  # FOUR RUNS DIED HERE ON THE SAME WRONG ASSUMPTION. Every earlier version treated the
+  # `Suggested languages` list as a POPUP that had to be dismissed before the footer could be
+  # reached - Escape, then a click on the pane title, three times each - and all six attempts
+  # changed nothing:
+  #
+  #     18:30:33  after dismiss 1: ... Welcome. | Let's | install | Fedora | now. |
+  #               Language | Q | Suggested | languages | English (United States) | ...
+  #     18:30:54  after escape 3: (identical)
+  #
+  # IT IS NOT A POPUP: Anaconda's Web UI renders the language list as ORDINARY PAGE CONTENT,
+  # so `Suggested languages` is on screen whenever the welcome pane is and a check for that
+  # phrase can never be satisfied. What the pane needs is the footer's Next.
+  #
+  # AND THE MARKER THAT SAYS IT WORKED IS THE NEXT PANE'S NAME, not this one's: `installation
+  # method` is the sidebar row of the pane this click is going TO.
+  # THE CHECK NAMED A WORD THE PANE BEING LEFT ALREADY CARRIES, SO IT COULD NOT FAIL.
+  #
+  # `expect_any: [installation, method]` is right - that is the sidebar row of the pane this
+  # click goes TO. `[let's, install]` was the second alternative, and it is THE WELCOME PAGE'S
+  # OWN TITLE (`Welcome. Let's install Fedora now.`). A click that did nothing therefore
+  # matched, and run 8b763bd walked on with the screen exactly where it started:
+  #
+  #     look welcome - after:            26 words :: Welcome. | Let's | install | Fedora ...
+  #     look installation method - after: 26 words :: Welcome. | Let's | install | Fedora ...
+  #     === installation method: DID NOT ADVANCE ===
+  #
+  # The NEXT step's check is what caught it - which is why the two live in the same file - but
+  # the report named the wrong pane. Only the pane being reached may be named here.
+  - name: welcome
+    at: [729, 1002]
+    settle: 15
+    expect_any:
+      - [installation, method]
+
+  # 3. THE PANES BETWEEN WELCOME AND THE POINT OF NO RETURN.
+  #
+  # `Installation method` and `Storage configuration`, each a click on the same footer.
+  #
+  # `expect` IS NOT DECORATION HERE, AND LOSING IT COST A RUN. The original driver checked
+  # each of these two panes against the words of the pane it was REACHING, because Anaconda's
+  # footer buttons do not move: a click that misses does nothing at all, which means a run can
+  # walk every step and never leave the first pane. Run 42516813616 did exactly that in this
+  # file's first version - `erase data and install` was clicked on whatever pane was up, the
+  # disk stayed at 0 MiB for ninety minutes, and nothing said so until the wait timed out.
+  #
+  # So each step names what it expects to see afterwards, which is the check the Python had.
+  - name: installation method
+    at: [729, 1002]
+    settle: 12
+    expect_any:
+      - [storage, configuration]
+      - [configuracion, de, almacenamiento]
+
+  - name: storage configuration
+    at: [729, 1002]
+    settle: 12
+    expect_any:
+      - [review, and, install]
+      - [revisar, e, instalar]
+
+  # 4. THE POINT OF NO RETURN. Its label is not `Next` and its position is not Next's.
+  - name: erase data and install
+    at: [780, 1002]
+    settle: 20
+
+  # 5. THE INSTALL IS WRITTEN, AND THE DISK IS WHAT SAYS SO.
+  #
+  # `Successfully installed` IS ANACONDA'S OWN VERDICT BUT IT DOES NOT ALWAYS COME. Measured on
+  # run 42502633627: Anaconda sat on
+  #
+  #     Installing
+  #     Finalizing: The system configuration is complete.
+  #     Finalizing installation may take a few moments.
+  #     Configuring installed system
+  #
+  # for forty minutes while the disk was being filled, and an earlier run went further still -
+  # its frames show the INSTALLED system's GNOME desktop with Anaconda's window gone - while a
+  # wait for a sentence was still polling for a phrase that had already been and gone.
+  #
+  # AND THE SENTENCE ITSELF IS NOT PROOF: `Finalizing installation may take a few moments` is
+  # printed WHILE IT IS STILL WRITING, so ending the wait on it would declare the install done
+  # at the moment the last files are being copied, and install.py would stop the machine.
+  #
+  # THIS IS `disk_settle`, AND IT IS THE MEASUREMENT MACOS HAS ALWAYS USED. An installation
+  # writes gigabytes into the target qcow2; a guest that has stopped writes nothing. st_blocks
+  # is what grows on a sparse file, so the question becomes "has the disk held still for long
+  # enough, after it was actually written to" - which is the only thing that can tell slow from
+  # stopped. `disk_min_mb: 512` is the floor that stops an untouched sparse image looking
+  # settled at 4 MiB; `disk_settle: 180` covers one qcow2 flush without spending minutes
+  # afterwards.
+  - name: the install is written
+    disk_settle: 180
+    disk_min_mb: 512
+    timeout: 3600
+    poll: 20
+    keep_alive: true
+
+  # LEAVE THE INSTALLER. The disk is written either way, and a run that stops here leaves
+  # qemu showing a modal over the live desktop.
+  - name: exit to the live desktop
+    at: [963, 364]
+    settle: 10
+    optional: true
+
+  # =======================================================================================
+  # STAGE TWO: GNOME'S FIRST-BOOT WIZARD, ON THE DISK THE INSTALLER WROTE
+  # =======================================================================================
+  #
+  # THIS RUNS IN A DIFFERENT MACHINE - see the file header. `--start-at first boot` starts
+  # here.
+  #
+  # THE WIZARD MAY NOT BE THERE AT ALL: either it was already answered on an earlier run of
+  # this disk, or gdm logged straight in, and both mean the install is fine. The desktop's own
+  # search box is that state, and the step below treats it as the end rather than waiting for
+  # a wizard that is not coming.
+  # THE WIZARD IS THE WHOLE POINT OF THIS STAGE, AND IT RUNS ON A SECOND BOOT OF THE DISK.
+  #
+  # See lib/livebake.py `_second_boot`: the bake starts the finished disk with no medium, and
+  # this step is where that walk begins. The markers are the wizard's own; the desktop states
+  # (`type to search`, a clock) are listed because a disk whose wizard was already answered on
+  # an earlier run lands there, and that is a pass too.
+  - name: first boot
+    until_any:
+      - [welcome]
+      - [next]
+      - [type, to, search]
+    region: [0, 0, 1920, 1080]
+    region_at: [1920, 1080]
+    scale: 1
+    timeout: 900
+    poll: 10
+
+  # 1. LANGUAGE. THE LIST IS ORDERED BY GEOIP AND NOTHING IS PRESELECTED IN ENGLISH.
+  #
+  # The old comment here said "English is preselected"; MEASURED ON THE SECOND BOOT OF A DISK
+  # THIS BAKE HAD JUST WRITTEN, it is not. The wizard's own frame:
+  #
+  #     Willkommen!
+  #     [ search box ]
+  #       Deutsch        Deutschland
+  #       English        United States
+  #       Espanol        Espana
+  #       Francais       France
+  #       ...
+  #       汉语  CHECKED  中国
+  #
+  # - `Willkommen!` because the LIST is ordered by geoip, and this pod's egress reports Hong
+  # Kong while the CI runners' reports the United States. SO A COORDINATE CANNOT NAME A ROW:
+  # (960,600) is `English` here and `Espanol` on a runner whose egress is Mexico, and the
+  # footer is `前进(N)` here and `Next` there.
+  #
+  # THE SEARCH BOX IS WHAT MAKES THE TARGET STABLE. Typing `English` filters the list to the
+  # English entries regardless of what the geoip answer was, so the first result is in the
+  # same place on every runner. It is the one control on this page whose position does not
+  # depend on where the machine thinks it is.
+  # SEARCH THE COUNTRY, NOT THE LANGUAGE: `united states` LEAVES EXACTLY ONE ROW.
+  #
+  # MEASURED ON THE SECOND BOOT OF A DISK THIS BAKE WROTE, both searches on the same page:
+  #
+  #     type `English`        -> English / United Kingdom   [tick]
+  #                              English / United States
+  #                              ... nine more English countries ...
+  #     type `united states`  -> English / United States   [tick]  <- one row, y 550
+  #
+  # TWO ROWS IS ALREADY TOO MANY. Filtering by language leaves a list whose FIRST row depends
+  # on the geoip answer (`United Kingdom` here), so its coordinate names a different country on
+  # a runner whose egress is elsewhere. Filtering by COUNTRY leaves one row everywhere, and
+  # `United States` is the answer this repository asks for.
+  - name: language - search for the United States
+    at: [960, 492]
+    type: united states
+    settle: 5
+
+  - name: language - pick English (United States)
+    at: [960, 550]
+    settle: 6
+
+  # THE FOOTER IS THE WIZARD'S `Next`, AND ITS LABEL IS NOW ENGLISH BECAUSE OF THE CLICK ABOVE.
+  # (1432,181) is where it sat in the English layout this file was measured against.
+  - name: language
+    at: [1432, 181]
+    settle: 10
+
+  # 2. TYPING. English (US) is preselected; Next.
+  - name: typing
+    at: [1432, 181]
+    settle: 10
+
+  # 3. PRIVACY. TWO SWITCHES THAT SHIP ON AND ARE TURNED OFF.
+  - name: location services off
+    at: [1209, 485]
+    settle: 2
+
+  - name: automatic problem reporting off
+    at: [1209, 601]
+    settle: 2
+
+  - name: privacy
+    at: [1432, 181]
+    settle: 10
+
+  # 4. TIME ZONE, BY SEARCHING FOR THE CITY - THE MAP WAS MEASURED AND IS NOT BETTER.
+  #
+  # The old step clicked (590,560), described here as "the continent". MEASURED ON THE SECOND
+  # BOOT OF A DISK THIS BAKE WROTE, that press lands in ALASKA:
+  #
+  #     AKST (UTC-09)  Nome, United States   00:49
+  #
+  # The map is a picture with a coordinate-to-timezone mapping behind it, not a set of cities,
+  # so a pixel names whatever happens to sit under it - and at that pixel it is Nome.
+  #
+  # SEARCHING FOR A CITY DOES RETURN AIRPORTS, which is what the old comment warned about, and
+  # it is fine: they are all in the city's own time zone. Typing `new york`:
+  #
+  #     Albany International Airport, New York, United States
+  #     Binghamton Regional Airport, New York, United States
+  #     ...
+  #
+  # and taking a row sets `EST (UTC-05) New York, United States`. The rows are ordered by
+  # distance from the city, so the first is stable.
+  # THE SEARCH IS GONE, BECAUSE IT IS WHAT PUT `york` ON THE DISK.
+  #
+  # Run 6eeff43's published image was booted in a local pod and asked directly:
+  #
+  #     $ getent passwd york
+  #     york:x:1000:1000:york:/home/york:/bin/bash
+  #     $ timedatectl | grep 'Time zone'
+  #     Time zone: Asia/Yakutsk (+09, +0900)
+  #
+  # TWO FACTS FROM THAT PAIR. The time zone was never set to New York - it is still the
+  # geoip default - so the search box never received `new york`. And the ACCOUNT IS `york`,
+  # which is the SECOND WORD of the string this step typed.
+  #
+  # That is the click-then-type race `type_into` has: the click at (960,462) lands, 1.2 s
+  # pass, the typing starts - and on this build the pane under the pointer was already the
+  # ACCOUNT pane, whose Full Name field took the text. `new ` was spent before the field had
+  # focus and `york` is what stayed in it; GNOME then derived the login from it, so the disk
+  # shipped `york` and ssh answered `Permission denied` for `vmuser`.
+  #
+  # THE TIME ZONE IS NOT A REQUIREMENT HERE (no distribution in this repository sets one -
+  # see the note in mint's install.yaml), so the step that names one is removed rather than
+  # repaired. What is left is the footer click that leaves whatever pane this is.
+  - name: time zone
+    at: [1432, 181]
+    settle: 12
+
+  # 5. THIRD-PARTY REPOSITORIES. Not enabled.
+  - name: third party repositories
+    at: [1432, 181]
+    settle: 10
+
+  # 6. THE ACCOUNT. ONE FIELD, AND THE USERNAME IS NOT TOUCHED AT ALL.
+  #
+  # THE COORDINATES HERE WERE MEASURED ON A SECOND BOOT, IN ENGLISH, AND THE OLD ONES WERE OFF.
+  # `(830,511)` is 170 px left of the Full Name entry's centre, `(830,486)`/`(830,629)` the same
+  # for the two password entries. Measured centres:
+  #
+  #     Full Name        (1000, 528)
+  #     Password         ( 960, 493)
+  #     Confirm Password ( 960, 630)
+  #
+  # AND FEDORA'S USERNAME FOLLOWS `Full Name` EXACTLY - typing `docker` gave
+  # `Username docker`, not the `vmuser` that Pop!_OS' installer produces from the same
+  # input. That is why this pane needs no override and why it is one field.
+  #
+  # Run 42405729683 filled this pane twice. GNOME's initial setup copies whatever is typed
+  # into Full Name into Username as you go, so a second click on the username field and a
+  # second `docker` produced
+  #
+  #     Full Name | dockeradminadmir
+  #
+  # on the next pane - three fragments run together - and the wizard would not complete. One
+  # field is filled and Username is left to follow.
+  - name: about you - full name
+    at: [1000, 528]
+    type: "{{ user }}"
+    settle: 2
+    # THE ACCOUNT NAME IS CHECKED, NOT ASSUMED. This pane is where run 6eeff43 lost the
+    # name - the disk shipped `york` while every later step reported success - so the walk
+    # now fails HERE, naming the pane, if the field did not take `{{ user }}`.
+    expect: ["{{ user }}"]
+
+  - name: about you
+    at: [1432, 181]
+    settle: 10
+
+  # 7. THE PASSWORD, TWICE, and the weak-password warning is left to stand: `admin` is what
+  #    every other bake here uses and a mismatch between images would be worse than a short
+  #    password.
+  - name: password - password
+    at: [960, 493]
+    type: "{{ password }}"
+    settle: 2
+
+  - name: password - confirm
+    at: [960, 630]
+    type: "{{ password }}"
+    settle: 3
+
+  - name: password
+    at: [1432, 181]
+    settle: 20
+
+  # 8. THE END OF SETUP, AND THE TOUR OFFER OVER THE DESKTOP.
+  - name: start using fedora linux
+    at: [959, 709]
+    settle: 25
+
+  # THE TOUR OFFER IS A DIALOG OVER THE DESKTOP, not part of setup. Skipping it leaves a
+  # clean frame for the artifact.
+  - name: skip the tour
+    at: [852, 756]
+    settle: 12
+    optional: true

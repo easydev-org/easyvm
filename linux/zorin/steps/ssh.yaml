@@ -1,0 +1,290 @@
+# Stage three for linux-zorin: put sshd on THIS disk and prove ssh works.
+#
+#     python3 lib/steps.py linux/zorin/steps/ssh.yaml --qmp /work/drive.sock.qmp --ssh-port 2222
+#
+# WHY THIS FILE IS PER-DISTRIBUTION AND NOT ONE SHARED WALK
+#
+# Because the four things it does differ on every image, and a shared file would have to be
+# written as a table of exceptions - which is what a per-distribution file already is, only
+# with the exceptions where a reader can see them.
+#
+# WHAT DIFFERS, FOR THIS ONE
+#
+#     terminal    ctrl+alt+t, the session's own emulator
+#     install    DEBIAN_FRONTEND=noninteractive apt-get install -y openssh-server
+#     enable     systemctl enable --now ssh
+#     firewall   ufw inactive; nothing to open
+#
+# Ubiquity's install ships ufw off, like Mint's - the same family, the same two commands.
+#
+# THE THREE ACTIONS ARE THE SAME EVERYWHERE, WHICH IS WHY THE SHAPE IS THE SAME:
+#
+#     run:          open this session's terminal and type the install
+#     require_ssh:  wait for the daemon it enabled (the step macOS's own ssh.yaml added)
+#     ssh:          run a command IN THE GUEST over the forwarded port - an exit status
+#
+# THE TRANSPORT IS THE DESKTOP. These disks have no getty on ttyS0 - measured on run
+# 42551299241, whose console said `BdsDxe: starting Boot0001` and then nothing - so `run:`
+# is the only way in.
+
+name: linux-zorin - sshd
+
+resolution: [1920, 1080]
+
+vars:
+  password:
+    from: args.password
+    default: admin
+  user:
+    from: args.user
+    default: vmuser
+
+steps:
+
+  # =======================================================================================
+  # 0. GET PAST THE GREETER, WHEN THIS DISK DOES NOT AUTOLOGIN
+  # =======================================================================================
+  #
+  # MEASURED ON RUN 42557318416, AND IT IS THE REASON THE FIRST ssh STAGE INSTALLED NOTHING.
+  # Pop!_OS' launch screenshot is not a desktop at all - it is COSMIC's LOCK SCREEN with
+  # `VM User` and a `Password:` box. `frame_is_painted` is right that something drew, but
+  # ctrl+alt+t does NOTHING on a greeter, so the terminal never opened and the install was
+  # typed into nothing.
+  #
+  # So the greeter is answered first: click the password box, type the account's password,
+  # press Return. The box's position is this greeter's own - GDM (Zorin's theme).
+  #
+  # `optional` because a disk that DOES autologin never shows this page, and on one of those
+  # the click lands on the desktop and the typing goes to nothing that matters.
+  # MEASURED ON THIS GREETER: THE ENTRY'S INTERIOR IS y=614..643, x=776..1096, so its
+  # centre is (936, 628). The previous (960, 640) was three pixels above the box's BOTTOM
+  # BORDER - run 42575602052's frame shows the caret on the field and the placeholder
+  # `Password` still in it after the password had been typed, because the click had put
+  # focus on the border rather than inside the entry.
+  # CLICK AND TYPE IN ONE STEP, BECAUSE GDM DROPS THE TYPING OTHERWISE.
+  #
+  # Runs 42575602052 and 42577685826 both ended on this screen with the placeholder
+  # `Password` still in the entry and the caret beside it, after the `type:` step had run -
+  # so GDM had the focus but had not taken the characters. The two-step form (click here,
+  # `type:` into whatever has focus next) gives the greeter a settle window in between and
+  # this one does not honour it.
+  #
+  # `clear: false` because the field is empty and a ctrl+a on a GDM entry selects nothing
+  # useful; the password is typed straight in.
+  # WAKE THE SCREEN BEFORE TOUCHING THE KEYBOARD.
+  #
+  # The launch stage's verdict for this same disk is PASS and its frame is a DESKTOP
+  # (`42519158623`, `VERDICT PASS kind=fedora`) - so the session is already logged in and
+  # what the ssh stage photographs is the LOCK SCREEN, not a greeter. An idle lock screen
+  # ignores synthetic keys until it has been woken, which is why three runs typed a password
+  # at (936,628), showed the caret in the entry, and left `Password` in it.
+  #
+  # Escape wakes it. The pause after it is the one the screen needs to raise the lock dialog
+  # and give the entry focus.
+  - name: greeter - wake the screen
+    key: esc
+    settle: 5
+    optional: true
+
+  # MEASURED ON ZORIN'S OWN FRAME (run 42582881513, t=90): the entry's interior is
+  # x=812..1108, y=611..644 - centre (960, 627). (936,628) was 24 px left of it, close
+  # enough to look right and far enough to land beside the text area.
+  # THE USER TILE FIRST: GDM ASKS WHO, THEN FOR THE PASSWORD.
+  #
+  # THIS IS THE WHOLE ROOT CAUSE, MEASURED ON A LOCAL KVM GUEST (Zorin, 2026-11-09).
+  #
+  # What the greeter shows before anything is clicked is a USER CHOOSER, not a password
+  # prompt:
+  #
+  #     [ (avatar)  docker ]        <- a rounded tile at x=800..1115, y=448..528
+  #     Not listed?
+  #
+  # The password entry does not exist until that tile is clicked. Every earlier attempt
+  # clicked (936,628) or (960,627) - the entry's position on the SECOND screen - while the
+  # FIRST screen was showing, so the click landed on empty wallpaper, the typing went to no
+  # widget, and the recording showed a greeter that "ignored the keyboard".
+  #
+  # Proven by doing both clicks in one session on that guest: after the tile click the entry
+  # appeared, five bullets went into it (`admin`), Return logged in, and `ctrl+alt+t` then
+  # produced a `docker@docker:~$` terminal. Frame by frame:
+  #
+  #     click (960,488)      -> the entry appears
+  #     click (960,627)      -> caret in it
+  #     type admin           -> ●●●●●
+  #     Return               -> "Welcome to Zorin OS 18"
+  #
+  # (960,488) is the tile's centre on 1920x1080; it is the same rounded tile every GDM here
+  # draws, which is why one coordinate serves the four images that use GDM.
+  - name: greeter - the user tile
+    at: [960, 488]
+    settle: 4
+    optional: true
+
+  - name: greeter - the password box
+    at: [960, 627]
+    type: "{{ password }}"
+    clear: false
+    settle: 4
+    optional: true
+
+  - name: greeter - submit
+    key: ret
+    settle: 12
+    optional: true
+
+  # =======================================================================================
+  # 1. THE INSTALL, TYPED INTO THIS SESSION'S OWN TERMINAL
+  # =======================================================================================
+  #
+  # `run:` presses ctrl+alt+t to open the terminal, waits `terminal_wait`, types the text,
+  # presses Return and waits `settle`. Every number here is this image's: a desktop that has
+  # just painted has not started its session yet, so the wait comes before the shortcut.
+  # =======================================================================================
+  # 0b. THE TERMINAL, WHICH IS WHERE THE INSTALL IS TYPED
+  # =======================================================================================
+  #
+  # ctrl+alt+t is this desktop's own shortcut. The step EXISTS on its own - rather than being
+  # folded into the `run:` - because "did the terminal open" is the first question when an
+  # install produces nothing, and the recording now answers it.
+  - name: open the terminal
+    key: ctrl+alt+t
+    settle: 10
+
+  # ZORIN'S SOFTWARE UPDATER PUTS A DIALOG OVER THE DESKTOP, AND IT TAKES THE KEYBOARD.
+  #
+  # Run 54aab47's recording shows it arriving while `sudo` was reading its password:
+  #
+  #     Updated software has been issued since Zorin OS 18 was released.
+  #     Do you want to install it now?
+  #     1057.8 MB will be downloaded.
+  #     [Settings]  [Remind Me Later]  [Install Now]
+  #
+  # - and then, when the typing continued, the polkit prompt that dialog raises:
+  #
+  #     Authentication Required
+  #     To install or remove software, you need to authenticate.
+  #
+  # The `systemctl stop packagekit` step below is not enough on its own: this dialog is already
+  # OPEN, and stopping the service behind it does not close it or give the keyboard back.
+  #
+  # `Remind Me Later` is the measured answer - `Install Now` would download a gigabyte, and
+  # `Settings` opens another window. The centre was read off the same frame with tesseract's own
+  # bounding boxes: the two words span x=915..1021, y=590..599.
+  #
+  # `optional` because a disk whose updater has already been quietened never shows it.
+  - name: dismiss the software updater, if it is up
+    at: [968, 594]
+    settle: 3
+    optional: true
+
+  # `apt-get update` IS NOT OPTIONAL, AND RUN 42567710130 PROVED IT.
+  #
+  # The first version went straight to `apt-get install`, and the disk's own package index -
+  # frozen at the moment the installer wrote it - named a version that had since left the
+  # mirror:
+  #
+  #     E: Failed to fetch http://apt.pop-os.org/ubuntu/pool/main/o/openssh/\
+  #        openssh-server_9.6p1-3ubuntu13.4_amd64.deb 404 Not Found [IP: 99.86.101.11 80]
+  #     E: Unable to fetch some archives, maybe run apt-get update or try with --fix-missing?
+  #
+  # sudo was fine, the terminal was fine, the command ran exactly as written - the one thing
+  # missing was a refresh of the index that names what the mirror actually has. Every Debian
+  # derivative here has the same frozen index, so the update is part of the install.
+  #
+  # `tail -12` rather than `-5` because an update prints its own opinion, and a failure in the
+  # update must be as visible in the recording as a failure in the install.
+  # ATOMIC STEPS, the shape macOS' and Windows' vm-configure files were split into
+  # (commit 96596c2): one act per step, so a failure names the act. This was a single `run:`
+  # that installed, enabled, started and verified in one line.
+  # THE UPDATER IS STOPPED BEFORE apt IS ASKED FOR ANYTHING, AND RUN 6eeff43 IS WHY.
+  #
+  # Zorin's own recording ends with a MODAL GRAPHICAL DIALOG sitting over the terminal:
+  #
+  #     Authentication Required
+  #     To install or remove software, you need to authenticate.
+  #                                            [ Cancel ]  [ Authenticate ]
+  #
+  # That is polkit's agent, raised by Zorin's own Software Updater - `Updated software has been
+  # issued since Zorin OS 18 was released` is in the same frames, so the updater had woken on its
+  # own and was contending for the same dpkg lock. The dialog takes the keyboard, so the
+  # `sudo -S` password typed after it went nowhere, `openssh-server` was never installed, and the
+  # stage waited ten minutes against a port that never opened:
+  #
+  #     ssh: connect to host 172.30.0.1 port 2222: Connection refused
+  #
+  # Ubuntu and Pop!_OS run this identical command and pass, because their images do not raise a
+  # modal polkit prompt on a timer. This is a fact about Zorin, so it is answered here.
+  #
+  # SERVICES ONLY - NO `pkill`, AND THAT IS A CORRECTION. The first version of this step also ran
+  # `pkill -f gnome-software`, which is the running desktop's own process tree: run c3fe4d3 killed
+  # the session that was typing, the terminal went with it, and the four steps after this one
+  # reported success while typing into nothing. `systemctl stop` on the two units that hold the
+  # lock is what is needed, and it does not touch the session.
+  #
+  # `|| true` because an image without one of them is a disk where the command has nothing to do,
+  # not a disk where it failed.
+  - name: stop the updater that puts a dialog over the terminal
+    run: echo {{ password }} | sudo -S sh -c "systemctl stop packagekit 2>/dev/null; systemctl stop unattended-upgrades 2>/dev/null; systemctl stop apt-daily.service 2>/dev/null; systemctl stop apt-daily-upgrade.service 2>/dev/null; true" 2>&1 | tail -3
+    terminal_wait: 0
+    settle: 15
+
+  # APT GETS A LOCK TIMEOUT AND A NONINTERACTIVE FRONTEND, AND BOTH ARE LOAD-BEARING. With the
+  # units stopped the lock should be free, but a lock is still a lock: `DPkg::Lock::Timeout=600`
+  # waits instead of failing, which turns "the updater was mid-run" into a slow install rather
+  # than a failed one.
+  # THE SECOND ATTEMPT, BECAUSE THE DIALOG IS ON ZORIN'S CLOCK AND NOT OURS.
+  #
+  # The one above runs the moment the terminal opens. Run 54aab47's frames show the dialog arriving
+  # a little later than that - the update check had not finished - and then staying over the
+  # terminal for the rest of the stage. One more press of the same button costs three seconds and
+  # covers the case where the first one landed before the dialog existed.
+  - name: dismiss the software updater again
+    at: [968, 594]
+    settle: 3
+    optional: true
+
+  - name: install openssh-server
+    run: echo {{ password }} | sudo -S sh -c "export DEBIAN_FRONTEND=noninteractive; apt-get update -o DPkg::Lock::Timeout=600 && apt-get install -y -o DPkg::Lock::Timeout=600 openssh-server" 2>&1 | tail -6
+    terminal_wait: 0
+    settle: 90
+
+  - name: enable ssh at boot
+    run: echo {{ password }} | sudo -S systemctl enable ssh 2>&1 | tail -3
+    terminal_wait: 0
+    settle: 8
+
+  - name: start ssh
+    run: echo {{ password }} | sudo -S systemctl restart ssh 2>&1 | tail -3
+    terminal_wait: 0
+    settle: 10
+
+  - name: prove ssh is active
+    run: systemctl is-active ssh
+    terminal_wait: 0
+    settle: 5
+
+  # THE SECOND HALF, FOR THE SYSTEMS WHERE THE FIRST COULD NOT RUN AS ROOT. `sudo -S` is what
+  # a Debian/Fedora/Arch/suse desktop needs; FreeBSD has no sudo, and NixOS' rebuild must run
+  # as root by design. This step is `optional` so on a disk where the first one worked its only
+  # effect is one harmless line in the same terminal.
+
+  # =======================================================================================
+  # 2. WAIT FOR THE DAEMON THAT STEP ENABLED
+  # =======================================================================================
+  #
+  # NO FIXED `wait:` - the number would be a guess about a package install and a
+  # `nixos-rebuild` that share nothing. `require_ssh` asks the only question that matters.
+  - name: wait for sshd
+    require_ssh: true
+    timeout: 600
+
+  # =======================================================================================
+  # 3. THE PROOF, AND IT IS THIS GUEST ANSWERING OVER THE FORWARDED PORT
+  # =======================================================================================
+  - name: prove the kernel over ssh
+    ssh: uname -a
+    timeout: 120
+
+  - name: prove the account over ssh
+    ssh: id -un; hostname
+    timeout: 120

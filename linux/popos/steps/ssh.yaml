@@ -1,0 +1,184 @@
+# Stage three for linux-popos: put sshd on THIS disk and prove ssh works.
+#
+#     python3 lib/steps.py linux/popos/steps/ssh.yaml --qmp /work/drive.sock.qmp --ssh-port 2222
+#
+# WHY THIS FILE IS PER-DISTRIBUTION AND NOT ONE SHARED WALK
+#
+# Because the four things it does differ on every image, and a shared file would have to be
+# written as a table of exceptions - which is what a per-distribution file already is, only
+# with the exceptions where a reader can see them.
+#
+# WHAT DIFFERS, FOR THIS ONE
+#
+#     terminal    ctrl+alt+t, the session's own emulator
+#     install    DEBIAN_FRONTEND=noninteractive apt-get install -y openssh-server
+#     enable     systemctl enable --now ssh
+#     firewall   ufw inactive; nothing to open
+#
+# COSMIC desktop. The terminal shortcut happens to be the same one, but this walk waits longer for a session to settle: COSMIC's portal starts later than GNOME's.
+#
+# THE THREE ACTIONS ARE THE SAME EVERYWHERE, WHICH IS WHY THE SHAPE IS THE SAME:
+#
+#     run:          open this session's terminal and type the install
+#     require_ssh:  wait for the daemon it enabled (the step macOS's own ssh.yaml added)
+#     ssh:          run a command IN THE GUEST over the forwarded port - an exit status
+#
+# THE TRANSPORT IS THE DESKTOP. These disks have no getty on ttyS0 - measured on run
+# 42551299241, whose console said `BdsDxe: starting Boot0001` and then nothing - so `run:`
+# is the only way in.
+
+name: linux-popos - sshd
+
+resolution: [1920, 1080]
+
+vars:
+  password:
+    from: args.password
+    default: admin
+  user:
+    from: args.user
+    default: vmuser
+  # THE ACCOUNT ON THIS DISK IS `vmuser`, AND THE INSTALLER CANNOT PRODUCE ANYTHING ELSE.
+  #
+  # MEASURED ON THE REAL PANE, one variable at a time (steps/panes.py carries the table):
+  #
+  #     Full Name `docker`        -> User Name `docker`      footer DISABLED
+  #     Full Name `Docker`        -> User Name `docker`      footer DISABLED   (case is ignored)
+  #     Full Name `VM User`   -> User Name `vmuser`  footer ENABLED
+  #
+  # pop-os-installer refuses to advance when the display name and the login name are the same
+  # after lowercasing and stripping spaces. The ONLY display names that derive `docker` are
+  # `docker` and `Docker`, and both are the same string to that check - so this image cannot
+  # have a `docker` account at all, and `vmuser` is what it has.
+  #
+  # THIS FILE CARRIED THIS OVERRIDE BEFORE, was changed to remove it on the belief that
+  # `Docker` would work, and run e242215 showed the footer grey. The override is back and now
+  # has the measurement behind it rather than a guess.
+  ssh_user: vmuser
+
+steps:
+
+  # =======================================================================================
+  # 0. GET PAST THE GREETER, WHEN THIS DISK DOES NOT AUTOLOGIN
+  # =======================================================================================
+  #
+  # MEASURED ON RUN 42557318416, AND IT IS THE REASON THE FIRST ssh STAGE INSTALLED NOTHING.
+  # Pop!_OS' launch screenshot is not a desktop at all - it is COSMIC's LOCK SCREEN with
+  # `VM User` and a `Password:` box. `frame_is_painted` is right that something drew, but
+  # ctrl+alt+t does NOTHING on a greeter, so the terminal never opened and the install was
+  # typed into nothing.
+  #
+  # So the greeter is answered first: click the password box, type the account's password,
+  # press Return. The box's position is this greeter's own - COSMIC: the password box is at (1120,283), measured on this image's own lock screen.
+  #
+  # `optional` because a disk that DOES autologin never shows this page, and on one of those
+  # the click lands on the desktop and the typing goes to nothing that matters.
+  - name: greeter - the password box
+    at: [1120, 283]
+    settle: 2
+    optional: true
+
+  - name: greeter - log in
+    type: "{{ password }}"
+    settle: 3
+    optional: true
+
+  - name: greeter - submit
+    key: ret
+    settle: 12
+    optional: true
+
+  # =======================================================================================
+  # 1. THE INSTALL, TYPED INTO THIS SESSION'S OWN TERMINAL
+  # =======================================================================================
+  #
+  # `run:` presses ctrl+alt+t to open the terminal, waits `terminal_wait`, types the text,
+  # presses Return and waits `settle`. Every number here is this image's: a desktop that has
+  # just painted has not started its session yet, so the wait comes before the shortcut.
+  # =======================================================================================
+  # 0b. THE TERMINAL. THIS DESKTOP HAS NO ctrl+alt+t.
+  # =======================================================================================
+  #
+  # MEASURED ON RUN 42563749005: Pop!_OS booted to a COSMIC desktop - top bar, dock and
+  # wallpaper all drawn - and ctrl+alt+t did NOTHING. The whole 382 s recording is the desktop
+  # with not one terminal window in it, so the login worked and the install had nowhere to go.
+  #
+  # COSMIC's dock DOES carry a terminal, and (1083,1043) IS IT: a DARK NAVY tile with a
+  # YELLOW `>` glyph, measured on run 42565846891's own last frame.
+  #
+  # THE FIRST COORDINATE WAS WRONG AND THE RECORDING SAID SO. (1013,1048) is the TEXT EDITOR:
+  # that run's failure frame is the editor with its buffer holding
+  #
+  #     echo admin | sudo -S sh -c "DEBIAN_FRONTEND=noninteractive apt-get install ..."
+  #
+  # - the install command typed into a text document, never executed. The dock's order is
+  # (approximately) Files, Editor, Files-manager, ..., Editor tile at 1035, Terminal at 1083.
+  # The yellow `>` is what identifies it: it is the only yellow glyph in the dock.
+  - name: open the terminal
+    at: [1092, 1048]
+    settle: 12
+
+  # `apt-get update` IS NOT OPTIONAL, AND RUN 42567710130 PROVED IT.
+  #
+  # The first version went straight to `apt-get install`, and the disk's own package index -
+  # frozen at the moment the installer wrote it - named a version that had since left the
+  # mirror:
+  #
+  #     E: Failed to fetch http://apt.pop-os.org/ubuntu/pool/main/o/openssh/\
+  #        openssh-server_9.6p1-3ubuntu13.4_amd64.deb 404 Not Found [IP: 99.86.101.11 80]
+  #     E: Unable to fetch some archives, maybe run apt-get update or try with --fix-missing?
+  #
+  # sudo was fine, the terminal was fine, the command ran exactly as written - the one thing
+  # missing was a refresh of the index that names what the mirror actually has. Every Debian
+  # derivative here has the same frozen index, so the update is part of the install.
+  #
+  # `tail -12` rather than `-5` because an update prints its own opinion, and a failure in the
+  # update must be as visible in the recording as a failure in the install.
+  # ATOMIC STEPS, the shape macOS' and Windows' vm-configure files were split into
+  # (commit 96596c2): one act per step, so a failure names the act. This was a single `run:`
+  # that installed, enabled, started and verified in one line.
+  - name: install openssh-server
+    run: echo {{ password }} | sudo -S sh -c "export DEBIAN_FRONTEND=noninteractive; apt-get update -o DPkg::Lock::Timeout=600 && apt-get install -y -o DPkg::Lock::Timeout=600 openssh-server" 2>&1 | tail -6
+    terminal_wait: 0
+    settle: 90
+
+  - name: enable ssh at boot
+    run: echo {{ password }} | sudo -S systemctl enable ssh 2>&1 | tail -3
+    terminal_wait: 0
+    settle: 8
+
+  - name: start ssh
+    run: echo {{ password }} | sudo -S systemctl restart ssh 2>&1 | tail -3
+    terminal_wait: 0
+    settle: 10
+
+  - name: prove ssh is active
+    run: systemctl is-active ssh
+    terminal_wait: 0
+    settle: 5
+
+  # THE SECOND HALF, FOR THE SYSTEMS WHERE THE FIRST COULD NOT RUN AS ROOT. `sudo -S` is what
+  # a Debian/Fedora/Arch/suse desktop needs; FreeBSD has no sudo, and NixOS' rebuild must run
+  # as root by design. This step is `optional` so on a disk where the first one worked its only
+  # effect is one harmless line in the same terminal.
+
+  # =======================================================================================
+  # 2. WAIT FOR THE DAEMON THAT STEP ENABLED
+  # =======================================================================================
+  #
+  # NO FIXED `wait:` - the number would be a guess about a package install and a
+  # `nixos-rebuild` that share nothing. `require_ssh` asks the only question that matters.
+  - name: wait for sshd
+    require_ssh: true
+    timeout: 600
+
+  # =======================================================================================
+  # 3. THE PROOF, AND IT IS THIS GUEST ANSWERING OVER THE FORWARDED PORT
+  # =======================================================================================
+  - name: prove the kernel over ssh
+    ssh: uname -a
+    timeout: 120
+
+  - name: prove the account over ssh
+    ssh: id -un; hostname
+    timeout: 120

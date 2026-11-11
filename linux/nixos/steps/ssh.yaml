@@ -1,0 +1,392 @@
+# Stage three for linux-nixos: put sshd on THIS disk and prove ssh works.
+#
+#     python3 lib/steps.py linux/nixos/steps/ssh.yaml --qmp /work/drive.sock.qmp --ssh-port 2222
+#
+# WHY THIS FILE IS PER-DISTRIBUTION AND NOT ONE SHARED WALK
+#
+# Because the four things it does differ on every image, and a shared file would have to be
+# written as a table of exceptions - which is what a per-distribution file already is, only
+# with the exceptions where a reader can see them.
+#
+# WHAT DIFFERS, FOR THIS ONE
+#
+#     terminal    ctrl+alt+t, the session's own emulator
+#     install    printf '\n  services.openssh.enable = true
+#     enable     nixos-rebuild switch
+#     firewall   the graphical install leaves networking.firewall ENABLED, which drops 22; the appended configuration turns it off
+#
+# THE ONE DISTRIBUTION WHERE sshd IS NOT A PACKAGE INSTALL. NixOS is declarative: its Calamares template ships `# services.openssh.enable = true;` commented out, so the step is to append the attribute and rebuild - there is no package to install.
+#
+# THE THREE ACTIONS ARE THE SAME EVERYWHERE, WHICH IS WHY THE SHAPE IS THE SAME:
+#
+#     run:          open this session's terminal and type the install
+#     require_ssh:  wait for the daemon it enabled (the step macOS's own ssh.yaml added)
+#     ssh:          run a command IN THE GUEST over the forwarded port - an exit status
+#
+# THE TRANSPORT IS THE DESKTOP. These disks have no getty on ttyS0 - measured on run
+# 42551299241, whose console said `BdsDxe: starting Boot0001` and then nothing - so `run:`
+# is the only way in.
+
+name: linux-nixos - sshd
+
+resolution: [1920, 1080]
+
+vars:
+  password:
+    from: args.password
+    default: admin
+  user:
+    from: args.user
+    default: vmuser
+
+steps:
+
+  # =======================================================================================
+  # 0. GET PAST THE GREETER, WHEN THIS DISK DOES NOT AUTOLOGIN
+  # =======================================================================================
+  #
+  # MEASURED ON RUN 42557318416, AND IT IS THE REASON THE FIRST ssh STAGE INSTALLED NOTHING.
+  # Pop!_OS' launch screenshot is not a desktop at all - it is COSMIC's LOCK SCREEN with
+  # `VM User` and a `Password:` box. `frame_is_painted` is right that something drew, but
+  # ctrl+alt+t does NOTHING on a greeter, so the terminal never opened and the install was
+  # typed into nothing.
+  #
+  # So the greeter is answered first: click the password box, type the account's password,
+  # press Return. The box's position is this greeter's own - GDM.
+  #
+  # `optional` because a disk that DOES autologin never shows this page, and on one of those
+  # the click lands on the desktop and the typing goes to nothing that matters.
+  # MEASURED ON THIS GREETER: THE ENTRY'S INTERIOR IS y=614..643, x=776..1096, so its
+  # centre is (936, 628). The previous (960, 640) was three pixels above the box's BOTTOM
+  # BORDER - run 42575602052's frame shows the caret on the field and the placeholder
+  # `Password` still in it after the password had been typed, because the click had put
+  # focus on the border rather than inside the entry.
+  # CLICK AND TYPE IN ONE STEP, BECAUSE GDM DROPS THE TYPING OTHERWISE.
+  #
+  # Runs 42575602052 and 42577685826 both ended on this screen with the placeholder
+  # `Password` still in the entry and the caret beside it, after the `type:` step had run -
+  # so GDM had the focus but had not taken the characters. The two-step form (click here,
+  # `type:` into whatever has focus next) gives the greeter a settle window in between and
+  # this one does not honour it.
+  #
+  # `clear: false` because the field is empty and a ctrl+a on a GDM entry selects nothing
+  # useful; the password is typed straight in.
+  # WAKE THE SCREEN BEFORE TOUCHING THE KEYBOARD.
+  #
+  # The launch stage's verdict for this same disk is PASS and its frame is a DESKTOP
+  # (`42519158623`, `VERDICT PASS kind=fedora`) - so the session is already logged in and
+  # what the ssh stage photographs is the LOCK SCREEN, not a greeter. An idle lock screen
+  # ignores synthetic keys until it has been woken, which is why three runs typed a password
+  # at (936,628), showed the caret in the entry, and left `Password` in it.
+  #
+  # Escape wakes it. The pause after it is the one the screen needs to raise the lock dialog
+  # and give the entry focus.
+  - name: greeter - wake the screen
+    key: esc
+    settle: 5
+    optional: true
+
+  # THE USER TILE FIRST: GDM ASKS WHO, THEN FOR THE PASSWORD.
+  #
+  # THIS IS THE WHOLE ROOT CAUSE, MEASURED ON A LOCAL KVM GUEST (Zorin, 2026-11-09).
+  #
+  # What the greeter shows before anything is clicked is a USER CHOOSER, not a password
+  # prompt:
+  #
+  #     [ (avatar)  docker ]        <- a rounded tile at x=800..1115, y=448..528
+  #     Not listed?
+  #
+  # The password entry does not exist until that tile is clicked. Every earlier attempt
+  # clicked (936,628) or (960,627) - the entry's position on the SECOND screen - while the
+  # FIRST screen was showing, so the click landed on empty wallpaper, the typing went to no
+  # widget, and the recording showed a greeter that "ignored the keyboard".
+  #
+  # Proven by doing both clicks in one session on that guest: after the tile click the entry
+  # appeared, five bullets went into it (`admin`), Return logged in, and `ctrl+alt+t` then
+  # produced a `docker@docker:~$` terminal. Frame by frame:
+  #
+  #     click (960,488)      -> the entry appears
+  #     click (960,627)      -> caret in it
+  #     type admin           -> ●●●●●
+  #     Return               -> "Welcome to Zorin OS 18"
+  #
+  # (960,488) is the tile's centre on 1920x1080; it is the same rounded tile every GDM here
+  # draws, which is why one coordinate serves the four images that use GDM.
+  - name: greeter - the user tile
+    at: [960, 488]
+    settle: 4
+    optional: true
+
+  - name: greeter - the password box
+    at: [936, 628]
+    type: "{{ password }}"
+    clear: false
+    settle: 4
+    optional: true
+
+  - name: greeter - submit
+    key: ret
+    settle: 12
+    optional: true
+
+  # NIXOS' GNOME TAKES MINUTES TO DRAW ITS FIRST DESKTOP, AND THE WALK USED TO ASSUME TWELVE.
+  #
+  # MEASURED ON RUN 42682847712'S OWN RECORDING. After `greeter - submit` the frames are the
+  # NixOS spinner - the blue field with the circular logo at the centre - at 00:30, 01:00,
+  # 01:30 and at the LAST frame of the run. The desktop never appeared, so every step after it
+  # pressed coordinates on a loading screen:
+  #
+  #     desktop - give the shell focus   click (960,700)   -> the spinner
+  #     dismiss the welcome dialog       esc               -> the spinner
+  #     open the overview                Super             -> the spinner
+  #     search for the terminal          type `terminal`   -> nowhere
+  #     wait for the Console result      OCR: `yy. | _.~`   -> nothing to find
+  #
+  # - which is the whole run, and it explains a `wait for sshd` that could never have started.
+  #
+  # THE SPINNER IS STATIC IN SHAPE AND ANIMATED IN PHASE, so `wait_for_change` cannot answer
+  # this: its fingerprint keeps changing while the animation runs, and then the desktop arrives
+  # and stops it. A `wait` with a measured number is the honest primitive for "the session has
+  # not finished starting" - this image is the slowest desktop here and the other four GNOME
+  # images settle well inside it.
+  #
+  # 240 s is the number live.py itself allows a desktop to draw on these runners, and the
+  # spinner above had not finished at 90.
+  - name: let the session finish starting
+    wait: 240
+
+  # THE FIRST LOGIN ENDS ON A MODAL, `Welcome to NixOS 26.05 (Yarara)` WITH Skip / Take Tour.
+  #
+  # MEASURED ON RUN 42682847712 AND AGAIN ON 42684897644. That dialog is gnome-initial-setup's
+  # last page, and it is the reason the overview never opened: the walk pressed Super and the
+  # SEARCH FIELD was not there to receive `terminal`, so `wait for the Console result` polled
+  # `yy. | _.~` - an empty strip - for its whole timeout and the run ended before `install`.
+  #
+  # ESC DOES NOT CLOSE IT. The earlier version of this file pressed Escape BEFORE the greeter
+  # was even answered, which is why it never helped; the dialog does not exist yet at that
+  # point. Even after it exists, Escape is not this dialog's dismissal - the two buttons are.
+  #
+  # The button is measured on run 42684897644's own frame: the Skip button's outline spans
+  # x 765..953, y 715..782, so its centre is (858, 748). It is the left-hand button and it is
+  # pre-focused (the blue outline), so Return alone would also take it - the click is used
+  # because a click does not depend on where the focus happens to be.
+  #
+  # `optional` because a disk that has already finished initial setup never shows it.
+  - name: skip the welcome dialog
+    at: [858, 748]
+    settle: 5
+    optional: true
+
+  # AND IF THE CLICK MISSED (a dock without that dialog, a different layout), Escape is still
+  # worth one press: it costs a second and it is what closes an unexpected GTK sheet.
+  - name: clear anything left over
+    key: esc
+    settle: 2
+    optional: true
+
+  # AND THEN THE DESKTOP IS CONFIRMED, NOT ASSUMED. `Dashboard` is the app-grid button's title
+  # on this GNOME's dock, and it is drawn only once the shell is up. If it is not there, the
+  # steps below still run - `optional` - but the recording says which world it was in.
+  - name: the desktop is up
+    until_any:
+      - [Dashboard]
+      - [Activities]
+    region: [0, 0, 1920, 1080]
+    region_at: [1920, 1080]
+    scale: 2
+    timeout: 120
+    poll: 10
+    keep_alive: true
+    optional: true
+
+  # =======================================================================================
+  # 1. THE INSTALL, TYPED INTO THIS SESSION'S OWN TERMINAL
+  # =======================================================================================
+  #
+  # `run:` presses ctrl+alt+t to open the terminal, waits `terminal_wait`, types the text,
+  # presses Return and waits `settle`. Every number here is this image's: a desktop that has
+  # just painted has not started its session yet, so the wait comes before the shortcut.
+  # =======================================================================================
+  # 0b. THE TERMINAL, WHICH IS WHERE THE INSTALL IS TYPED
+  # =======================================================================================
+  #
+  # NixOS' DESKTOP IS GNOME WITH GREAT CONSOLE, AND THE SEARCH WORD IS `Console`.
+  #
+  # MEASURED ON THE REAL GRAPHICAL ISO IN A LOCAL KVM POD (2026-11-09), twice over.
+  #
+  # First, this file's `ctrl+alt+t` was wrong: it is not a binding on GNOME. Then a run that
+  # used fedora's path (Super, type `terminal`, click (960,178)) failed too, and its own
+  # recording says why - the frame at 02:15 of that run's install.mp4 is the overview with
+  #
+  #     [ search field ]  terminal
+  #     Console                                   <- the only application result
+  #     Characters / Soyombo Terminal Mark-1 ...  <- the list `terminal` also matches
+  #
+  # and the `run:` text landed in the SEARCH FIELD, not a shell:
+  #
+  #     [ udo -S nixos-rebuild switch 2>&1 | tail -8 ]    No results
+  #
+  # - `sudo` had lost its `s` to the field's own handling, and nothing was ever executed.
+  #
+  # NixOS ships GNOME's **Console** (kgx), not gnome-terminal, so `terminal` matches it only
+  # as a substring and it is not the first thing on the page.
+  #
+  # MEASURED IN THE LIVE SESSION, on this ISO, in this pod:
+  #
+  #     Super            the overview
+  #     type "terminal"  a `Console` tile, icon at (960,160), label under it at y=232
+  #     click (960,160)  a terminal opens: `[nixos@nixos:~]$`, titled `nixos@nixos: ~`
+  #
+  # So the path is fedora's four steps with this image's own word and coordinate. The `run:`
+  # afterwards types into the window this opens, and the recording shows the prompt first.
+  - name: desktop - give the shell focus
+    at: [960, 700]
+    settle: 2
+
+  - name: open the overview
+    key: meta_l
+    settle: 4
+
+  - name: search for the terminal
+    type: terminal
+    settle: 3
+
+  # THE CLICK WAITS FOR `Console` TO BE ON SCREEN, AND THAT IS THE WHOLE FIX.
+  #
+  # MEASURED ON RUN 42677442246: the walk typed `terminal`, waited five seconds and clicked
+  # (960,160) - and the next frame is the overview with
+  #
+  #     [ udo -S nixos-rebuild switch 2>&1 | tail -8 ]     No results
+  #
+  # so the click landed on nothing, the `run:` text went into the SEARCH FIELD, and the `s`
+  # of `sudo` was eaten by the field's own tag handling. The terminal never opened, which is
+  # why `wait for sshd` timed out with the install's five-minute settle already spent.
+  #
+  # A FRESH DISK HAS NO SEARCH INDEX YET. `gnome-shell` builds its app cache on first login,
+  # and on the installed disk this stage starts seconds after the greeter - so `terminal`
+  # matches nothing at first and matches `Console` a moment later. Five seconds is a guess
+  # about that cache; `Console` on screen is the fact.
+  # `scale: 3` BECAUSE `Console` IS SMALL, LIGHT GREY ON DARK GREY, AND OCR MISSES IT AT 1:1.
+  #
+  # Measured in the same pod on the same frame: tesseract reads this label correctly from a
+  # crop of the tile (880,90)-(1040,250), and reads NOTHING from the same area at 1:1 inside a
+  # 730x440 region - the whole region is 320k pixels and the label is 60x14 of them. A wait
+  # that never matches is a wait that always times out, which is worse than no wait at all.
+  #
+  # 3x is what makes the label bigger than tesseract's minimum, and the region is the band the
+  # result tile occupies: the overview's search field is y=42..80 and the tile's label is at
+  # y=232, so 60..500 holds the tile and nothing else that says `Console`.
+  - name: wait for the Console result
+    until_any:
+      - [Console]
+    region: [600, 60, 1330, 500]
+    region_at: [1920, 1080]
+    scale: 3
+    timeout: 90
+    poll: 5
+    keep_alive: true
+
+  - name: open the terminal
+    at: [960, 160]
+    settle: 14
+
+  # BOTH LINES RUN AS ROOT, AND THE FIRST ONE HAD TO BE FIXED TO DO SO.
+  #
+  # `/etc/nixos/configuration.nix` is root's file - the installer writes it 0644 as root - and
+  # the original walk appended to it as `docker`:
+  #
+  #     sh: /etc/nixos/configuration.nix: Permission denied
+  #
+  # and then ran `nixos-rebuild switch` on an unchanged configuration, which succeeds, enables
+  # nothing, and looks exactly like a successful install in the recording. sudo is what makes
+  # both lines real, and `sh -c` is what keeps the redirect inside the privileged shell: a
+  # `sudo printf ... >> file` would still do the redirect as `docker`.
+  #
+  # THE APPEND HAS TO GO INSIDE THE BRACES, AND APPENDING TO THE FILE PUT IT OUTSIDE THEM.
+  #
+  # MEASURED ON THE REAL ISO IN A LOCAL KVM POD (2026-11-09). The disk's own
+  # `/etc/nixos/configuration.nix`, printed with `cat -n`, is
+  #
+  #     1  { config, pkgs, ... }:
+  #     2
+  #     3  {
+  #     4    imports = [ <nixpkgs/nixos/modules/installer/cd-dvd/
+  #                      installation-cd-graphical-combined.nix> ];
+  #     5
+  #     6
+  #     7  }
+  #
+  # - an EMPTY attribute set that closes on line 7. Appending with `>>` put the three
+  # attributes on lines 9..11, AFTER the closing brace, and `nixos-rebuild` answered
+  #
+  #     error: syntax error, unexpected '=', expecting end of file
+  #     at /etc/nixos/configuration.nix:9:27:
+  #        9|   services.openssh.enable = true;
+  #            ^
+  #
+  # `sed -i "$ d"` DELETES THE LAST LINE FIRST - the `}` - and the printf then writes the
+  # three attributes and a closing brace of its own. The result is one well-formed attribute
+  # set whose last three entries are the ones this stage needs.
+  #
+  # THE DELETE COMES BEFORE THE PRINTF AND NOT AFTER, because a `}` written first and then
+  # appended to would leave the same broken file; and it is `"$ d"` with double quotes so the
+  # walk's own YAML quoting keeps the dollar out of the shell's hands.
+  #
+  # `PermitRootLogin` IS NOT SET. It defaults to `prohibit-password`, and the account this
+  # stage proves is `docker`, not root - turning root logins on would open an account nothing
+  # here uses. The firewall IS turned off: the graphical install leaves it on and it drops 22,
+  # which is the difference this distribution has from every other one here.
+  # THREE ACTS, THREE STEPS - the shape macOS' and Windows' vm-configure files were split into
+  # (commit 96596c2). Writing the config and rebuilding a declarative system fail for different
+  # reasons, and one `run:` reported neither. They still share one terminal and one `type_gap`.
+  - name: declare openssh in configuration.nix
+    run: |
+      echo {{ password }} | sudo -S sh -c 'sed -i "$ d" /etc/nixos/configuration.nix; printf "  services.openssh.enable = true;\n  services.openssh.settings.PasswordAuthentication = true;\n  networking.firewall.enable = false;\n}\n" >> /etc/nixos/configuration.nix'
+    terminal_wait: 0
+    # 150 ms, NOT THE 40 ms `run:` USES FOR A POSIX SHELL, AND THIS IS A MEASURED GUEST.
+    #
+    # GNOME Console (kgx) is the terminal this image opens, and in a local pod on this ISO it
+    # dropped keystrokes at 10 ms and duplicated one key at 10 ms: the frame showed a screen
+    # of `tttttttt` with a stuck `t`. 40 ms is what a plain xterm takes; a GTK4 terminal
+    # compositing a WebKit-free but still hot path is not that. 150 ms is the same number
+    # windows/11/ssh.py uses for a form that validates as it types, and it costs this line
+    # about twelve seconds.
+    #
+    # The alternative - retrying a command that half-ran - is worse than typing slowly: the
+    # append line is not idempotent, and a second append would put the attributes in the file
+    # twice.
+    type_gap: 0.15
+    settle: 6
+
+  - name: rebuild the system
+    run: echo {{ password }} | sudo -S nixos-rebuild switch 2>&1 | tail -8
+    terminal_wait: 0
+    type_gap: 0.15
+    settle: 300
+
+  - name: prove sshd is active
+    run: systemctl is-active sshd
+    terminal_wait: 0
+    type_gap: 0.15
+    settle: 5
+
+  # =======================================================================================
+  # 2. WAIT FOR THE DAEMON THAT STEP ENABLED
+  # =======================================================================================
+  #
+  # NO FIXED `wait:` - the number would be a guess about a package install and a
+  # `nixos-rebuild` that share nothing. `require_ssh` asks the only question that matters.
+  - name: wait for sshd
+    require_ssh: true
+    timeout: 600
+
+  # =======================================================================================
+  # 3. THE PROOF, AND IT IS THIS GUEST ANSWERING OVER THE FORWARDED PORT
+  # =======================================================================================
+  - name: prove the kernel over ssh
+    ssh: uname -a
+    timeout: 120
+
+  - name: prove the account over ssh
+    ssh: id -un; hostname
+    timeout: 120

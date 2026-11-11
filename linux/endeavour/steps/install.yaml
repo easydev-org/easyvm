@@ -1,0 +1,195 @@
+# EndeavourOS: the live desktop to a written disk, as a sequence.
+#
+#     python3 lib/steps.py linux/endeavour/steps/install.yaml --qmp /work/drive.sock.qmp
+#
+# WHAT THIS REPLACES
+#
+# linux/endeavour/install.py's walk_calamares(). install.py keeps the machine, the
+# frames, the recording and the publish; the walk is here.
+#
+# THE ONE STEP HERE THAT IS NOT A CLICK IS THE LANGUAGE PIN, AND IT IS THE REASON THIS FILE
+# HAS A `run` STEP AT ALL.
+#
+# Calamares asks a geolocation service for the user's country and picks the interface
+# language from the answer. EndeavourOS points that at
+#
+#     /etc/calamares/modules/welcome_offline.conf
+#       geoip:
+#         style:    "xml"
+#         url:      "https://geoip.kde.org/v1/ubiquity"
+#         selector: "CountryCode"
+#
+# so the language is whatever that request returns - and when it fails, Calamares FALLS BACK
+# TO A RANDOM LANGUAGE. Measured, same ISO, three runs:
+#
+#     local machine       Sinhala
+#     CI run 42445140647  Spanish        (`Instalador de EndeavourOS`)
+#     CI run 42454363051  Asturian       (`Açoyida` / `Siguiente`)
+#
+# Every coordinate below is measured on the ENGLISH wizard, so a translated one misses the
+# footer completely: that Asturian run clicked (1340,873) on every pane while `Siguiente` sat
+# at 1406, never advanced past Welcome, and produced a 0 MiB disk.
+#
+# The fix makes the probe FAIL FAST so Calamares keeps its compiled-in default, which is
+# English. Verified on a live session: with the URL below the wizard opens `Welcome to the
+# EndeavourOS Titan-Nova installer` / `American English` instead of `Açoyida` / `asturianu`.
+# `127.0.0.1:9` is the discard port - nothing listens, so the connection is refused at once
+# rather than timing out. It is `run` because the value it changes is inside the image, not
+# on the screen; every other step here is a measured coordinate.
+
+name: endeavour - the Calamares walk
+resolution: [1920, 1080]
+
+vars:
+  user:
+    from: args.user
+    default: vmuser
+  password:
+    from: args.password
+    default: admin
+
+steps:
+  # =======================================================================================
+  # 0. PIN THE LANGUAGE BEFORE THE WIZARD IS STARTED
+  # =======================================================================================
+  #
+  # The config file is read when Calamares starts, so this has to happen first. `run` opens
+  # a terminal with ctrl+alt+t, waits `terminal_wait`, types the line, presses Return and
+  # then waits `settle`.
+  - name: pin the wizard's language to english
+    run: "sudo sed -i 's#https://geoip.kde.org/v1/ubiquity#http://127.0.0.1:9/x#' /etc/calamares/modules/welcome_offline.conf; exit"
+    terminal_wait: 10
+    settle: 8
+
+  - name: close the terminal
+    at: [1402, 310]
+    settle: 6
+
+  # =======================================================================================
+  # 1. THE WELCOME WINDOW'S `Start the Installer`, THEN THE METHOD DIALOG'S `Offline`
+  # =======================================================================================
+  #
+  # ONE CLICK ON EACH, NOT TWO, AND THE SECOND CLICK WAS THE BUG.
+  #
+  # The driver used to press `Start the Installer` twice: the first opened the method
+  # dialog, and the second - a second later, on the SAME coordinate - landed on the Welcome
+  # window behind it, whose row at that height is `Latest release info`. That opened Firefox
+  # on a 404 page, which then covered everything: run 4244... logged
+  #
+  #     installing: 2026-08-15 | a | (c) | 404 | | | Discovery | x | Firefox | Privacy
+  #
+  # for the rest of its life. A coordinate is only right for the screen it was measured on,
+  # and the screen had changed between the two presses.
+  - name: start the installer
+    at: [735, 425]
+    settle: 20
+
+  - name: offline
+    at: [1069, 590]
+    settle: 55
+    expect_any:
+      - [welcome]
+      - [location]
+
+  # =======================================================================================
+  # 2. THE PANES, ALL ON ONE FOOTER POSITION
+  # =======================================================================================
+  #
+  # Measured on Welcome, Location, Keyboard, Bootloader, Partitions, Users and Summary of
+  # this ISO: y=873 is the same on all of them. (Contrast cachyos, whose window resizes.)
+  #
+  # The default location is kept: it is whatever Calamares detected, and the requirement is a
+  # disk that installs, not a particular country.
+  - name: welcome
+    at: [1406, 873]
+    settle: 20
+  - name: location
+    at: [1406, 873]
+    settle: 20
+  - name: keyboard
+    at: [1406, 873]
+    settle: 20
+  - name: bootloader
+    at: [1406, 873]
+    settle: 20
+
+  # THE RADIO BUTTON'S CIRCLE - the row's text is not a control, and the row below it is
+  # `Manual partitioning`.
+  - name: partitions - erase the disk
+    at: [566, 258]
+    settle: 8
+
+  - name: partitions
+    at: [1406, 873]
+    settle: 22
+
+  # =======================================================================================
+  # 3. THE USERS PANE. FIVE FIELDS; THE ROOT PASSWORD IS REUSED BY DEFAULT.
+  # =======================================================================================
+  - name: users - full name
+    at: [847, 302]
+    type: "{{ user }}"
+    settle: 2
+  - name: users - login name
+    at: [847, 356]
+    type: "{{ user }}"
+    settle: 2
+  # THE HOST NAME IS LEFT AT THE INSTALLER'S DEFAULT, AND THIS STEP USED TO SET IT.
+  #
+  # It typed the account's name here, which made the machine's name a second copy of the login
+  # and had to be kept in step with it by hand - and after the account was renamed it was the one
+  # place a stale name could hide. The name is now set ONCE, after ssh works, by
+  # `steps/vm-configure.yaml`, which is also the only place that knows the disk is finished.
+  #
+  # WHAT THE INSTALLER PUTS HERE IS ITS OWN DEFAULT (`cachyos`, the live medium's name, or the
+  # machine model). It is replaced a stage later, so nothing reads it.
+  - name: users - password
+    at: [700, 513]
+    type: "{{ password }}"
+    settle: 2
+  - name: users - confirm password
+    at: [982, 513]
+    type: "{{ password }}"
+    settle: 3
+
+  - name: users
+    at: [1406, 873]
+    settle: 22
+
+  # =======================================================================================
+  # 4. SUMMARY, THEN THE MODAL
+  # =======================================================================================
+  - name: summary - install
+    at: [1406, 873]
+    settle: 18
+
+  - name: the install confirmation's install now
+    at: [1059, 542]
+    settle: 30
+
+  # =======================================================================================
+  # 5. A MEASURED WAIT, LIKE MINT'S AND OPENSUSE'S, AND THE REASON IS THIS IMAGE
+  # =======================================================================================
+  #
+  # THE WORD TEST WAS TRIED HERE AND IT DOES NOT WORK. Run 42448947052 installed correctly -
+  # every pane visited, the confirmation accepted, the disk being written - and then sat on
+  # the progress pane for seventy-five minutes while its log repeated
+  #
+  #     installing: 2026-08-15 | Instalador | de | EndeavourOS | TITAN | nous | Acoyida | ...
+  #
+  # because the progress pane keeps its own heading and slideshow, and Calamares' Finish pane
+  # never appeared in the reading. The languages made it worse: that runner's wizard was
+  # SPANISH, so even the English sentences were the wrong ones to look for.
+  #
+  # So the duration is the answer, which is what mint and opensuse already do and for
+  # the same reason: a graphical installer's last pane is a font and a layout that OCR reads
+  # badly, and a correct disk must not depend on reading it.
+  #
+  # THE DURATION: from `Install Now` to a written disk, about 20 minutes on this ISO on a
+  # runner. FORTY-FIVE is that with room for a slower one, and `--timeout` bounds it again.
+  #
+  # THE KEEP-ALIVE CLICK IS PART OF THE WAIT: an idle desktop raises its lock screen, and a
+  # locked desktop has no installer on it.
+  - name: the install runs, as measured
+    wait: 2700
+    keep_alive: true

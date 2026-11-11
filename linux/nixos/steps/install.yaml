@@ -1,0 +1,291 @@
+# NixOS graphical ISO: Calamares' seven panes, as a sequence, then GNOME.
+#
+#     python3 lib/steps.py linux/nixos/steps/install.yaml --qmp /work/drive.sock.qmp
+#
+# WHAT THIS DRIVES
+#
+# The NixOS GRAPHICAL ISO's own Calamares, whose settings.conf is
+#
+#     welcome, locale, keyboard, users, packagechooser, notesqml@unfree, partition, summary
+#     -> partition, mount, nixos, users, umount  ->  finished
+#
+# - SEVEN panes before Summary, which is two more than Manjaro's and one more than CachyOS's,
+# because `notesqml@unfree` is a QML page no other distribution in this repository shows.
+#
+# A SEQUENCE, NOT PANES. Calamares does not skip panes: the list above is the order it draws
+# them in, so a list of clicks is the whole truth. This is the same shape as manjaro's and
+# cachyos's walks, and the same warning applies: a word-per-pane detector reads panels it
+# is not on, because Calamares' sidebar names every pane at all times.
+#
+# THE FOOTER IS MEASURED PER PANE, AND THE NUMBERS BELOW COME FROM THIS IMAGE'S OWN FRAMES.
+#
+# Every Calamares build in this repository has had its footer at a different height, and on
+# some of them it moves BETWEEN panes: CachyOS' is at 747 / 796 / 902, Manjaro's at 801 / 794.
+# This image's branding.desc says `windowSize: 800px,520px` with `windowExpanding: normal`, so
+# the window starts small and grows to fit each pane's content - which means the footer moves
+# and the numbers have to be per pane. `linux/nixos/probe.py` measures them, and the
+# `FOOTER` table below is that measurement.
+#
+# THE TWO ANSWERS THAT ARE NOT THE DEFAULTS
+#
+#   the desktop    GNOME. `packagechooser.conf` says `default: gnome`, so the first card is
+#                  already chosen; the click is a confirmation, made because this repository
+#                  has been bitten four times by a list whose highlight was not a selection
+#                  (Manjaro's Office Suite, CachyOS' Bootloader and Partitions, Garuda's Role).
+#   the account    docker/admin. `users.conf` requires eight characters OR a weak password
+#                  that is explicitly allowed (`allowWeakPasswords: true`), so `admin` trips
+#                  the warning and the warning has to be accepted.
+
+name: nixos - the Calamares walk
+resolution: [1920, 1080]
+
+vars:
+  user:
+    from: args.user
+    default: vmuser
+  password:
+    from: args.password
+    default: admin
+
+steps:
+  # =======================================================================================
+  # 1. THE INSTALLER, FROM THE LIVE GNOME SESSION
+  # =======================================================================================
+  #
+  # NixOS' graphical medium boots to a GNOME session with a welcome window whose button
+  # starts Calamares; the desktop also carries an `Install NixOS` icon. Both are tried,
+  # because which is drawn first has not been measured here - and a press that lands on the
+  # wrong one costs a second, while a missing press costs the run.
+  #
+  # TWO PRESSES each: the first gives the window focus on a desktop that has just drawn.
+  - name: open the installer
+    at: [960, 640]
+    repeat: [2, 3]
+    settle: 8
+    optional: true
+    expect_any:
+      - [welcome]
+      - [language]
+      - [install]
+
+  - name: open the installer (desktop icon, if the window was not there)
+    unless: [welcome, language]
+    at: [88, 240]
+    repeat: [2, 3]
+    settle: 8
+
+  - name: open the installer (desktop icon again)
+    unless: [welcome, language]
+    at: [88, 240]
+    repeat: [2, 3]
+    settle: 25
+
+  # THE BOUNDED WAIT, ON THE INSTALLER'S OWN WORD. Calamares takes a few seconds to draw and
+  # a slow runner a few more; this is the gate that says it is up before any pane is pressed.
+  - name: calamares is up
+    until_any:
+      - [welcome]
+      - [language]
+      - [keyboard]
+    region: [0, 0, 1920, 1080]
+    region_at: [1920, 1080]
+    scale: 1
+    timeout: 300
+    poll: 10
+    keep_alive: true
+
+  # =======================================================================================
+  # 2. WELCOME. The footer here is the smallest the window ever is.
+  # =======================================================================================
+  #
+  # EVERY FOOTER PRESS BELOW USES `at_bottom`, AND THAT IS THIS IMAGE'S ONE STRUCTURAL FACT.
+  #
+  # Its Calamares has a FIXED TOP (y=296) and a variable BOTTOM: `branding.desc` says
+  # `windowSize: 800px,520px` with `windowExpanding: normal`, so the window grows downward to
+  # fit each pane. Measured on run 42551013541's own recording, two pages of one session:
+  #
+  #     Unfree software   window 296..853   footer button centre y=839
+  #     Summary           window 296..883   footer button centre y=869
+  #
+  # A constant (1324, 835) is correct on the first and 34 px ABOVE the button on the second -
+  # inside the white footer band, on nothing. That is exactly what run 42551013541 did: the
+  # press was accepted and consumed, the install never started, and `disk_settle` watched a
+  # qcow2 that stayed at 0 MiB for an hour before failing. A press that misses is silent.
+  #
+  # On both frames the button's centre is 15-16 px above the window's bottom edge and its x is
+  # 1327, so `at_bottom: [1327, 15]` is the coordinate that survives a page of any height.
+  - name: welcome
+    at_bottom: [1327, 15]
+    settle: 15
+
+  # =======================================================================================
+  # 3. LOCATION AND KEYBOARD. Both defaults are kept: the live session already has a locale,
+  #    and every character this walk types is ASCII.
+  #
+  # `locale` IS IN settings.conf BUT DOES NOT DRAW A PANE ON THIS IMAGE - measured on run
+  # 42544553424's video: Welcome goes straight to Keyboard at 01:19, and the sidebar shows
+  # `Location` as a step that never appears. Calamares' locale module hides its page when
+  # `useSystemTimezone` + a successful geoip lookup settle it, which is this build's config.
+  # So this walk presses Next ONCE from Welcome, and the next pane it is looking at is
+  # Keyboard - not a `locale` click that would land on the Users pane's password field.
+  - name: location
+    at_bottom: [1327, 15]
+    settle: 15
+
+  - name: keyboard
+    at_bottom: [1327, 15]
+    settle: 15
+
+  # =======================================================================================
+  # 4. USERS. SIX FIELDS AND A TICK, MEASURED ON THIS IMAGE'S OWN FRAME.
+  #
+  # THE PANE IS NOT THE SHAPE `users.conf` IMPLIES. Its `doReusePassword: false` reads as
+  # "the user has a password pair and root has none", and the frame at 01:20 of run
+  # 42544553424 shows the opposite: SIX entries, because the user's pair, then
+  # `Use the same password for the administrator account` UNTICKED, then the ADMINISTRATOR's
+  # pair. `doReusePassword: false` is what makes that tick start off.
+  #
+  # THE MEASURED BOXES (x 616..1059, so the centre is 837):
+  #
+  #     What is your name?                        y=377
+  #     What name do you want to use to log in?   y=429
+  #     Password                                  y=494
+  #     Repeat Password                           y=525
+  #     Administrator Password                    y=602
+  #     Administrator Repeat Password             y=634
+  #
+  # `Require strong passwords` IS TICKED and has to be cleared: with it on, `admin` is
+  # rejected with `Password is too short` beside BOTH pairs - measured, the first run typed
+  # an eight-character password into the name fields and never got past this pane.
+  # =======================================================================================
+  - name: users - what is your name
+    at: [700, 377]
+    type: "{{ user }}"
+    settle: 2
+
+  # THE LOGIN NAME IS DERIVED FROM THE NAME ABOVE, AND TYPING INTO IT APPENDS.
+  #
+  # MEASURED ON THE REAL ISO IN A LOCAL KVM POD (2026-11-09). This pane is the only one in
+  # this repository where a field is not empty when the walk reaches it: typing `docker` into
+  # `What is your name?` makes Calamares fill `What name do you want to use to log in?` with
+  # `docker` already. The old step then typed `docker` into it as well, and the frame read
+  #
+  #     What is your name?          docker
+  #     What name ... to log in?    vmuservmuser          <- the old bug, in the field itself
+  #
+  # `vmuservmuser` is a legal user name, so nothing failed at this pane; the install went on
+  # and the account it created was not the one the ssh stage logs in as. THE FIX IS TO CLEAR
+  # THE FIELD FIRST and then type, the same three presses the mint host-name fix uses.
+  - name: users - login name, select all
+    at: [700, 429]
+    key: ctrl+a
+    settle: 1
+  - name: users - login name, clear it
+    key: backspace
+    settle: 1
+  - name: users - login name
+    at: [700, 429]
+    type: "{{ user }}"
+    settle: 2
+
+  # THE TICK COMES OFF FIRST, BEFORE EITHER PASSWORD IS TYPED, so the pane's own validation
+  # never has a reason to mark the fields red.
+  - name: users - allow a short password
+    at: [630, 532]
+    settle: 3
+
+  - name: users - password
+    at: [700, 494]
+    type: "{{ password }}"
+    settle: 2
+  - name: users - repeat password
+    at: [900, 494]
+    type: "{{ password }}"
+    settle: 2
+  - name: users - administrator password
+    at: [700, 603]
+    type: "{{ password }}"
+    settle: 2
+  - name: users - administrator repeat password
+    at: [900, 603]
+    type: "{{ password }}"
+    settle: 3
+
+  - name: users
+    at_bottom: [1327, 15]
+    settle: 18
+
+  # =======================================================================================
+  # 5. PACKAGE CHOOSER - THE DESKTOP. GNOME is the configured default.
+  # =======================================================================================
+  #
+  # THE FIRST CARD, CLICKED. `default: gnome` makes it selected already, and this click is a
+  # confirmation - the same defence Manjaro's Office Suite and CachyOS' Bootloader needed,
+  # where a highlight that looked like a selection was not one.
+  - name: choose gnome
+    at: [1000, 400]
+    settle: 4
+    optional: true
+
+  - name: packagechooser
+    at_bottom: [1327, 15]
+    settle: 15
+
+  # =======================================================================================
+  # 6. notesqml@unfree - THE PAGE NO OTHER CALAMARES HERE SHOWS
+  # =======================================================================================
+  #
+  # `instances: - id: unfree, module: notesqml, config: unfree.conf` puts a QML notes page in
+  # the sequence between the package chooser and partitioning. It is informational: its
+  # `qmlLabel` is `Unfree software` and it offers no choice, only its footer.
+  - name: unfree notes
+    at_bottom: [1327, 15]
+    settle: 12
+
+  # =======================================================================================
+  # 7. PARTITION. `partitionLayout` is one root filling the disk, and `efi.mountPoint` is
+  #    /boot - so `Erase disk` is the preselected layout and the click confirms it.
+  # =======================================================================================
+  # THE RADIO STARTS EMPTY, AND THE HIGHLIGHT IS NOT A SELECTION.
+  #
+  # Run 42547693743's frame at 02:00 is this pane with `Erase disk` looking selected -
+  # its icon is green, its row is the first - and BOTH radio circles empty, `Next` greyed
+  # out at (1324,835). That is the fifth instance of this trap in this repository
+  # (Manjaro's Office Suite, CachyOS' Bootloader and Partitions, Garuda's Role, NixOS'
+  # package chooser) and the tell is always the same: a footer button that will not enable.
+  #
+  # MEASURED: the circles are at x=633, `Erase disk` at y=390 and `Manual partitioning` at
+  # y=438. The walk presses the circle itself, not the row.
+  - name: partitions - erase the disk
+    at: [633, 390]
+    settle: 6
+
+  - name: partitions
+    at_bottom: [1327, 15]
+    settle: 18
+
+  # =======================================================================================
+  # 8. SUMMARY. `prompt-install: false` in settings.conf, so there is NO confirmation dialog
+  #    after the footer - the install starts on this press. That is a measured difference
+  #    from every other Calamares in this repository, and it is why there is no "confirm"
+  #    step after it.
+  # =======================================================================================
+  - name: summary - install
+    at_bottom: [1327, 15]
+    settle: 25
+
+  # =======================================================================================
+  # 9. THE INSTALL IS WRITTEN, AND THE DISK IS WHAT SAYS SO.
+  # =======================================================================================
+  #
+  # `nixos` has `weight: 48` in settings.conf - most of the run - and it unpacks a store into
+  # the target. The progress page is a slideshow with a percentage, and a completed disk must
+  # not depend on reading it: an installation writes gigabytes into the target qcow2 and a
+  # stopped guest writes nothing, so st_blocks is the only honest "it is written". This is the
+  # same measurement fedora and popos use.
+  - name: the install is written
+    disk_settle: 180
+    disk_min_mb: 1024
+    timeout: 3600
+    poll: 20
+    keep_alive: true

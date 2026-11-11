@@ -1,0 +1,189 @@
+# Ubuntu 26.04 LTS desktop: subiquity's panes, as a sequence.
+#
+#     python3 lib/steps.py linux/ubuntu/steps/install.yaml --qmp /work/drive.sock.qmp
+#
+# WHAT THIS REPLACES
+#
+# linux/ubuntu/install.py's Installer.walk() and its PANES table. install.py keeps the
+# machine, the kernel and initrd, the frames, the recording and the publish.
+#
+# A FIXED SEQUENCE OF CLICKS, NOT A SET OF CONDITIONS TO MATCH - and the file that first said
+# so is this driver's own docstring. Its first version decided each pane from the words
+# tesseract read, and it failed on the first CI run in exactly the way drive.py warns about:
+#
+#     A fixed sequence has one failure mode - being wrong about a position - and that is found
+#     on the first run and fixed by changing one number. A reading driver has a failure mode
+#     per pane and per wallpaper.
+#
+# What happened: the disk pane's detector was ("disk", "setup"), the pane actually reads
+# "How do you want to install Ubuntu? Erase disk and install Ubuntu", and "setup" is not on
+# it. The pane was SKIPPED - silently, because a driver that only clicks when its condition
+# holds cannot tell "this pane was skipped by the installer" from "my condition is wrong" -
+# and the run waited out its whole timeout on a screen it was never going to leave.
+#
+# So every step below is a position and a wait. The screen is read afterwards into the log,
+# where it is a diagnostic, never a branch.
+
+name: ubuntu - the subiquity walk
+resolution: [1920, 1080]
+
+vars:
+  user:
+    from: args.user
+    default: vmuser
+  password:
+    from: args.password
+    default: admin
+
+steps:
+  # =======================================================================================
+  # THE PANES, IN THE ORDER SUBIQUITY DRAWS THEM
+  # =======================================================================================
+  #
+  # `Next` is (1355,848) on every pane that has one, and the last pane's `Install` is at the
+  # same place - measured on all thirteen.
+  - name: welcome / language
+    at: [1355, 848]
+    settle: 12
+
+  - name: accessibility
+    at: [1355, 848]
+    settle: 12
+
+  - name: keyboard layout
+    at: [1355, 848]
+    settle: 12
+
+  - name: internet connection
+    at: [1355, 848]
+    settle: 14
+
+  - name: try or install
+    at: [1355, 848]
+    settle: 14
+
+  - name: type of installation
+    at: [1355, 848]
+    settle: 14
+
+  - name: applications
+    at: [1355, 848]
+    settle: 14
+
+  - name: proprietary software
+    at: [1355, 848]
+    settle: 14
+
+  - name: disk setup
+    at: [1355, 848]
+    settle: 20
+
+  - name: encryption
+    at: [1355, 848]
+    settle: 14
+
+  # =======================================================================================
+  # THE ACCOUNT. FIVE FIELDS AND ONE TICK.
+  # =======================================================================================
+  #
+  # THE HOSTNAME FIELD IS LEFT AT THE INSTALLER'S DEFAULT, AND THIS WALK USED TO FILL IT.
+  #
+  # It typed the account's name, which made the machine's name a second copy of the login. After
+  # the account was renamed that copy was the one place a stale name could hide, and it is not a
+  # name anything needs: the machine is named once, after ssh works, by steps/vm-configure.yaml.
+  - name: create your account - full name
+    at: [1139, 393]
+    type: "{{ user }}"
+    settle: 2
+  - name: create your account - username
+    at: [1139, 501]
+    type: "{{ user }}"
+    settle: 2
+  - name: create your account - password
+    at: [1050, 563]
+    type: "{{ password }}"
+    settle: 2
+  - name: create your account - confirm password
+    at: [1139, 616]
+    type: "{{ password }}"
+    settle: 3
+
+  # AUTOLOGIN, SO LATER STAGES CAN REACH THE DESKTOP WITHOUT A PASSWORD PROMPT. The tick is
+  # ON when the pane opens, so this click CLEARS it - which is the opposite of mx and
+  # kubuntu, where the same setting starts off. Measured; that is why it is written down.
+  - name: clear 'require my password to log in'
+    at: [923, 670]
+    settle: 3
+
+  - name: create your account
+    at: [1355, 848]
+    settle: 12
+
+  # =======================================================================================
+  # THE TIME ZONE, WHICH NEEDS A POSITION AND NOTHING ELSE SATISFIES IT
+  # =======================================================================================
+  #
+  # Ubuntu's installer draws a world map with two empty fields above it - Location and
+  # Timezone - and a DISABLED Next. It does not fill them from a geolocation probe: run
+  # 42388038785 sat on that pane for eight minutes while nothing on the network was asked.
+  #
+  # So the pane is answered the way a person answers it - by clicking the map. New York's
+  # position was computed from the map's own bounds - x 480..1439 covers -180..180 degrees of
+  # longitude, y 337..815 covers 85..-60 of latitude - and then CONFIRMED by clicking it and
+  # seeing both fields fill in. London lands at x 959, the map's centre and 0 degrees, which
+  # is what makes the horizontal scale check out.
+  - name: time zone - new york on the map
+    at: [762, 483]
+    settle: 4
+
+  - name: time zone
+    at: [1355, 848]
+    settle: 14
+
+  # =======================================================================================
+  # READY TO INSTALL: THE GREEN BUTTON, AND THEN UNTIL IT SAYS SO
+  # =======================================================================================
+  #
+  # The `Install` button is at the same coordinate as every Next above - only its colour and
+  # its word differ.
+  - name: ready to install - the green install button
+    at: [1355, 848]
+    settle: 30
+
+  # THE COMPLETION TEST IS THE ONE PLACE A WORD MATCH IS RIGHT.
+  #
+  # Every other step here is a position and a wait, because a wrong detector silently skips a
+  # pane. This one is a TERMINAL condition: the installer either eventually says it is
+  # finished or it does not, and matching the words it prints at the end cannot skip anything
+  # - there is nothing after it to skip.
+  #
+  # THE FOUR GROUPS ARE THE FOUR ENDINGS SUBIQUITY HAS BEEN MEASURED TO PRINT: the plain
+  # completion, the `restart now` prompt, and the two-word pairs each of those can arrive as.
+  # A TIMEOUT IS A FAILURE, NOT A SUCCESS: the original Python fell through to the publish
+  # step with `ok` still true, so a run that never finished would have pushed a
+  # half-installed disk. Here the step fails, and the empty-disk check behind it agrees.
+  #
+  # THE KEEP-ALIVE CLICK IS PART OF THE WAIT - a real click, not a pointer move, because the
+  # session's idle timer is what puts the lock screen up and it does not count synthetic
+  # motion. The click lands on the progress page, where there is no control to disturb.
+  - name: the installer finishes
+    until_any:
+      - [installation, complete]
+      - [installed, ready]
+      - [restart, now]
+      - [press, enter, to, restart]
+    region: [0, 0, 1920, 1080]
+    region_at: [1920, 1080]
+    scale: 1
+    # 5400, NOT 3000, AND THE LAST FRAME OF RUN 38bb031 IS WHY.
+    #
+    # At the 3000-second timeout this step gave up while the installer was still working: the
+    # final frame reads `Setting up the system...` with FOUR OF FIVE progress segments filled.
+    # Ubuntu 26.04 copies its packages as snaps and that is slower than any other image here -
+    # kubuntu (the same Ubiquity, the same ISOs' maker) already allows 5400, and cachyos 3600.
+    #
+    # A timeout that expires during a healthy install is worse than a long one: the disk is
+    # then discarded and the next run starts from zero.
+    timeout: 5400
+    poll: 20
+    keep_alive: true

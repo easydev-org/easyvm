@@ -450,3 +450,54 @@ func FindWindowTop(img image.Image, x, from, to int, brightness float64) (int, b
 	}
 	return 0, false
 }
+
+// --- did the screen change -------------------------------------------------------------
+
+// Fingerprint reduces a frame to a coarse grid of block means, for "is this a different screen".
+//
+// A PIXEL-FOR-PIXEL COMPARISON IS THE WRONG TEST and the Python implementation learned it the
+// awkward way: a pane that is being repainted differs in thousands of pixels on every capture, and a
+// cursor blinking is a change that means nothing. A 16x16 grid of block averages is stable against
+// both - it moves when the page moves, and it does not move when a caret blinks.
+//
+// DOWNSCALING IS NOT AN OPTIMISATION, IT IS THE MEASUREMENT. The question is "did the guest leave
+// the pane", not "are these bytes identical", and the coarseness is what makes the two different.
+func Fingerprint(img image.Image) [64]float64 {
+	var out [64]float64
+	b := img.Bounds()
+	w, h := b.Dx(), b.Dy()
+	if w == 0 || h == 0 {
+		return out
+	}
+	const side = 8 // 8x8 blocks
+	// ONE SAMPLE PER BLOCK IS ENOUGH AT THIS COARSENESS, and it keeps the cost to 64 reads per
+	// frame - which matters because this runs inside a poll loop.
+	for by := 0; by < side; by++ {
+		for bx := 0; bx < side; bx++ {
+			x := b.Min.X + (w*(2*bx+1))/(2*side)
+			y := b.Min.Y + (h*(2*by+1))/(2*side)
+			r, g, bl, _ := img.At(x, y).RGBA()
+			// AVERAGE THE THREE CHANNELS: this is about layout, not colour fidelity, and colour
+			// changes (a blue button turning grey) do not all matter equally.
+			out[by*side+bx] = float64(r>>8+g>>8+bl>>8) / 3.0
+		}
+	}
+	return out
+}
+
+// Changed reports whether two fingerprints differ enough to be different screens.
+//
+// THE THRESHOLD IS 2/255 PER BLOCK, averaged. Below that a repaint, a blinking caret or a spinner
+// reads as "the same", which is what a caller waiting for a pane to CHANGE wants; above it, a pane
+// with different text or different controls reads as different.
+func Changed(before, after [64]float64) bool {
+	var diff float64
+	for i := range before {
+		d := before[i] - after[i]
+		if d < 0 {
+			d = -d
+		}
+		diff += d
+	}
+	return diff/float64(len(before)) > 2.0
+}

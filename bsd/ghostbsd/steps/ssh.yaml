@@ -1,0 +1,268 @@
+# Stage three for bsd-ghostbsd-mate: put sshd on THIS disk and prove ssh works.
+#
+#     python3 lib/steps.py bsd/ghostbsd/steps/ssh.yaml --qmp /work/drive.sock.qmp --ssh-port 2222
+#
+# WHY THIS FILE IS PER-DISTRIBUTION AND NOT ONE SHARED WALK
+#
+# Because the four things it does differ on every image, and a shared file would have to be
+# written as a table of exceptions - which is what a per-distribution file already is, only
+# with the exceptions where a reader can see them.
+#
+# WHAT DIFFERS, FOR THIS ONE
+#
+#     terminal    ctrl+alt+t, the session's own emulator
+#     install    sysrc sshd_enable=YES
+#     enable     service sshd restart || service sshd start
+#     firewall   no pf rules are loaded by default on this image
+#
+# FREEBSD HAS NO sudo, so this walk uses `su -m root` and MATE's terminal. Its `sshd_enable` is an rc.conf knob, not a systemd unit, so the wait sees the daemon only after `service sshd start`.
+#
+# THE THREE ACTIONS ARE THE SAME EVERYWHERE, WHICH IS WHY THE SHAPE IS THE SAME:
+#
+#     run:          open this session's terminal and type the install
+#     require_ssh:  wait for the daemon it enabled (the step macOS's own ssh.yaml added)
+#     ssh:          run a command IN THE GUEST over the forwarded port - an exit status
+#
+# THE TRANSPORT IS THE DESKTOP. These disks have no getty on ttyS0 - measured on run
+# 42551299241, whose console said `BdsDxe: starting Boot0001` and then nothing - so `run:`
+# is the only way in.
+
+name: bsd-ghostbsd-mate - sshd
+
+resolution: [1920, 1080]
+
+vars:
+  password:
+    from: args.password
+    default: admin
+  user:
+    from: args.user
+    default: vmuser
+
+steps:
+  # =======================================================================================
+  # 1. THE INSTALL, TYPED INTO THIS SESSION'S OWN TERMINAL
+  # =======================================================================================
+  #
+  # `run:` presses ctrl+alt+t to open the terminal, waits `terminal_wait`, types the text,
+  # presses Return and waits `settle`. Every number here is this image's: a desktop that has
+  # just painted has not started its session yet, so the wait comes before the shortcut.
+  # =======================================================================================
+  # 0b. THE TERMINAL, WHICH IS WHERE THE INSTALL IS TYPED
+  # =======================================================================================
+  #
+  # ctrl+alt+t is this desktop's own shortcut. The step EXISTS on its own - rather than being
+  # folded into the `run:` - because "did the terminal open" is the first question when an
+  # install produces nothing, and the recording now answers it.
+  # =======================================================================================
+  # 0. THE GREETER, IF THIS DISK STOPS AT ONE
+  # =======================================================================================
+  #
+  # GhostBSD's launch has so far photographed a MATE desktop rather than a greeter - its
+  # gbi install sets no display-manager autologin, but the session has come up unasked. That
+  # is luck rather than a guarantee: the same image on a slower runner can land on lightdm.
+  #
+  # `optional` for exactly that reason: on the desktop it is a click on the wallpaper and a
+  # typed password that goes nowhere, and on a greeter it is the login.
+  #
+  # THE BOX IS NOT IN THE MIDDLE - IT IS AT THE LEFT, AND (960,640) WAS THE WALLPAPER.
+  #
+  # Measured on run 42573082305's own recording, the frame at t=20:
+  #
+  #     user tile      `docker`, rounded panel at x=88..432
+  #     password box   white field   x=101..418  y=554..583   centre (259, 568)
+  #
+  # LightDM on MATE anchors this greeter top-left, not centred, so the press at (960,640)
+  # landed on a mountain. The typed password went nowhere, the greeter timed out, and the
+  # screen was black for the rest of the run.
+  - name: greeter - the password box
+    at: [259, 568]
+    settle: 2
+    optional: true
+
+  - name: greeter - log in
+    type: "{{ password }}"
+    settle: 3
+    optional: true
+
+  - name: greeter - submit
+    key: ret
+    settle: 20
+    optional: true
+
+  # MATE HAS NO ctrl+alt+t BY DEFAULT, AND THIS IS THE PROOF.
+  #
+  # t=120 of the same recording is a MATE desktop with `docker's Home` on it - the login had
+  # worked all along - and t=210 is BLACK: the screensaver had taken the screen while the
+  # walk pressed a shortcut MATE does not bind. The terminal never opened.
+  #
+  # So the screen is woken first, and then the terminal is opened the way MATE actually does
+  # it: the `Applications` menu at the top left, then `System Tools` -> `Terminal`. Both
+  # presses are measured from that same frame (the menu bar runs along y=12).
+  # THE TERMINAL IS REACHED BY KEYBOARD, BECAUSE THIS DESKTOP'S MENU DOES NOT ANSWER A CLICK.
+  #
+  # MEASURED ON THE REAL DISK IN A LOCAL KVM POD (2026-11-09). Two things make this
+  # different from every other image here:
+  #
+  #   ctrl+alt+t does NOT open a terminal on this MATE. Pressed on the desktop, the frame
+  #   before and after are byte-identical.
+  #
+  #   A CLICK does not open the Applications menu either. Clicking `Applications` at its own
+  #   measured centre (67,12) left the desktop unchanged, and so did clicking `System Tools`
+  #   inside the menu that Alt+F1 had opened.
+  #
+  # THE KEYBOARD DOES WORK, and it is the only transport that does:
+  #
+  #     Alt+F1            the Applications menu   (frame: Accessories..System Tools)
+  #     Down x6           System Tools is the SIXTH item, not the second
+  #     Right             its submenu: Caja, dconfEditor, fish, Log File Viewer, MATE Disk
+  #                       Usage Analyzer, MATE System Monitor, MATE Terminal, Power Statistics
+  #     Down x6           MATE Terminal is the SEVENTH
+  #     Return            a terminal opens: `Welcome to fish...` / `docker@docker-ghostbsd ~>`
+  #
+  # The frame that proves it is a screenshot of that terminal running on that disk.
+  - name: wake the screen
+    key: esc
+    settle: 3
+
+  - name: open the Applications menu
+    key: alt+f1
+    settle: 4
+
+  # System Tools is the sixth entry: Accessories, Graphics, Internet, Office,
+  # Sound & Video, System Tools.
+  - name: choose System Tools
+    key: down
+    settle: 1
+
+  - name: choose System Tools 2
+    key: down
+    settle: 1
+
+  - name: choose System Tools 3
+    key: down
+    settle: 1
+
+  - name: choose System Tools 4
+    key: down
+    settle: 1
+
+  - name: choose System Tools 5
+    key: down
+    settle: 1
+
+  - name: choose System Tools 6
+    key: down
+    settle: 2
+
+  - name: open the System Tools submenu
+    key: right
+    settle: 3
+
+  # Inside it, MATE Terminal is the seventh of eight entries.
+  - name: choose MATE Terminal 1
+    key: down
+    settle: 1
+
+  - name: choose MATE Terminal 2
+    key: down
+    settle: 1
+
+  - name: choose MATE Terminal 3
+    key: down
+    settle: 1
+
+  - name: choose MATE Terminal 4
+    key: down
+    settle: 1
+
+  - name: choose MATE Terminal 5
+    key: down
+    settle: 1
+
+  - name: choose MATE Terminal 6
+    key: down
+    settle: 2
+
+  - name: open MATE Terminal
+    key: ret
+    settle: 15
+
+  # `sudo`, NOT `su`, BECAUSE FreeBSD'S `su` READS /dev/tty AND A PIPE CANNOT FEED IT.
+  #
+  # Measured on the real GhostBSD disk in a local pod (2026-11-09). The terminal is open, the
+  # command is typed correctly, and the frame reads
+  #
+  #     docker@docker-ghostbsd ~> echo admin | su -m root -c "sysrc sshd_enable=YES; ..."
+  #     Password:
+  #     su: Sorry
+  #
+  # `su` never looked at stdin - it opened the controlling terminal and read from there, so
+  # the `echo` was wasted. Whether root's password is `admin` was never tested by that attempt.
+  #
+  # THIS IMAGE DOES HAVE sudo AND IS IN THE GROUP THAT MAKES IT WORK:
+  #
+  #     $ command -v sudo        -> /usr/local/bin/sudo
+  #     $ id                     -> uid=1001(docker) gid=1001(docker)
+  #                                 groups=1001(docker),0(wheel),5(operator)
+  #
+  # `wheel` is what sudo's default `%wheel ALL=(ALL) ALL` requires, so the image is already
+  # set up for it. `sudo -S` takes the password on stdin, which is what every Linux file here
+  # does, so this distribution stops being an exception.
+  #
+  # PASSWORD AUTHENTICATION IS OFF BY DEFAULT ON FreeBSD'S sshd, AND THAT IS THE NEXT LAYER.
+  #
+  # With sshd running (the frame shows `sshd is running as pid 1807` and
+  # `root sshd 1807 4 tcp4 *:22 *:*`), the client still got
+  #
+  #     docker@172.30.0.1: Permission denied (publickey,keyboard-interactive).
+  #
+  # - `password` is not in the list of methods the server offers. FreeBSD's shipped
+  # sshd_config has `#PasswordAuthentication no` behind a compile-time default, and this
+  # image inherits it. The stage's account has a password, so the server has to be told it may
+  # use it.
+  #
+  # `sed` on the one line, then restart, then the same status and socket check - three
+  # separate ``places`` in the recording where a reader can see whether it took.
+  #
+  # `sysrc` and `service` are still this image's own: an rc.conf knob and an rc.d script, not
+  # a systemd unit.
+  # FOUR ACTS, FOUR STEPS - the shape macOS' and Windows' vm-configure files were split into
+  # (commit 96596c2). Enabling at boot, allowing the password, starting the daemon and proving
+  # it listens fail for different reasons, and one `run:` named none of them.
+  - name: enable sshd at boot
+    run: echo {{ password }} | sudo -S sysrc sshd_enable=YES 2>&1 | tail -3
+    terminal_wait: 0
+    settle: 5
+
+  - name: allow password authentication
+    run: echo {{ password }} | sudo -S sh -c 'printf "PasswordAuthentication yes\n" >> /etc/ssh/sshd_config; grep -c "^PasswordAuthentication yes" /etc/ssh/sshd_config' 2>&1 | tail -3
+    terminal_wait: 0
+    settle: 5
+
+  - name: start sshd
+    run: echo {{ password }} | sudo -S sh -c 'service sshd restart || service sshd start' 2>&1 | tail -3
+    terminal_wait: 0
+    settle: 20
+
+  - name: prove sshd is listening
+    run: echo {{ password }} | sudo -S sh -c 'service sshd status; sockstat -4 -l | grep sshd' 2>&1 | tail -6
+    terminal_wait: 0
+    settle: 8
+  - name: wait for sshd
+    require_ssh: true
+    timeout: 600
+
+  # =======================================================================================
+  # 3. THE PROOF, AND IT IS THIS GUEST ANSWERING OVER THE FORWARDED PORT
+  # =======================================================================================
+  - name: prove the kernel over ssh
+    ssh: uname -a
+    timeout: 120
+
+  - name: prove the account over ssh
+    ssh: id -un; hostname
+    timeout: 120
+
+  # MATE'S OWN sshd IS THE rc.conf ONE, so the wait only succeeds once
+  # `service sshd start` has run - which the install step above does.

@@ -1,0 +1,142 @@
+# GhostBSD MATE: gbi's nine panes, as a sequence.
+#
+#     python3 lib/steps.py bsd/ghostbsd/steps/install.yaml --qmp /work/drive.sock.qmp
+#
+# WHAT THIS REPLACES
+#
+# bsd/ghostbsd/install.py's install_to_disk(), and the desktop-icon press in main(). install.py
+# keeps the machine, the OVMF firmware, the loader step, the frames, the recording and the
+# publish.
+#
+# NOTHING IS READ TO DECIDE ANYTHING. Every step is a number and a duration; the screen is read
+# afterwards and the reading goes into the log, where it is useful for a post-mortem and
+# dangerous as a decision.
+#
+# THE WHOLE FLOW WAS MEASURED ON A LIVE SESSION, one frame per pane. The wizard is a fixed-size
+# window at (557,271)..(1360,802) and its footer does not move:
+#
+#     Back (1025,781)   Cancel (1150,781)   Next/Install (1293,781)
+#
+#     Welcome To GhostBSD!      Language                      Next
+#     Keyboard Setup            layout + model                Next
+#     Time Zone Selection       continent + city              Next
+#     Installation Type         Full disk configuration       Next
+#     ZFS Configuration         THE DISK CHECKBOX             Next
+#     Boot Option               FreeBSD UEFI loader only      Next
+#     User Admin Setup          four fields                   Install
+#     Installation in progress  (the installer writes the disk)
+#     (window closes)
+#
+# THE FIRST STEP IS `python:` AND IT HAS TO BE
+#
+# The desktop puts `Install GhostBSD` and `Trash` in EITHER ORDER - measured on two runs of
+# this same image - so a fixed coordinate double-clicks `Trash` half the time and opens Caja
+# instead of the wizard. The instruction is "double-click the installer's ICON", which a
+# coordinate cannot say; steps/panes.py finds it by the teal disc it draws. See that file.
+#
+# AND THIS DRIVER USED TO STOP AFTER THE FIRST PANE. It double-clicked the icon, read
+# `gbi welcome`, and returned True - so every run produced a 0 MiB disk and "succeeded".
+
+name: ghostbsd-mate - the gbi walk
+resolution: [1920, 1080]
+
+vars:
+  user:
+    from: args.user
+    default: vmuser
+  password:
+    from: args.password
+    default: admin
+
+steps:
+  # =======================================================================================
+  # 1. THE INSTALLER, FROM THE DESKTOP ICON - FOUND BY ITS OWN PIXELS
+  # =======================================================================================
+  - name: install ghostbsd
+    python: panes:install_icon
+    settle: 25
+
+  # =======================================================================================
+  # 2. THE SEVEN PANES BEFORE THE DISK IS TOUCHED
+  # =======================================================================================
+  #
+  # English is preselected on the first two; `America/Adak` on the third is the installer's own
+  # default and the requirement is a disk that boots, not a particular region;
+  # `Full disk configuration` is preselected on the fourth.
+  - name: welcome
+    at: [1293, 781]
+    settle: 12
+
+  - name: keyboard setup
+    at: [1293, 781]
+    settle: 12
+
+  - name: time zone selection
+    at: [1293, 781]
+    settle: 12
+
+  - name: installation type
+    at: [1293, 781]
+    settle: 14
+
+  # THE DISK MUST BE TICKED OR `Next` STAYS DISABLED - measured: the button is grey at
+  # 01:25:07 and black at 01:25:20, one click apart.
+  - name: zfs configuration - tick the disk
+    at: [592, 495]
+    settle: 5
+
+  - name: zfs configuration
+    at: [1293, 781]
+    settle: 14
+
+  # `FreeBSD UEFI loader only` is preselected - the right answer on OVMF.
+  - name: boot option
+    at: [1293, 781]
+    settle: 14
+
+  # =======================================================================================
+  # 3. USER ADMIN SETUP. FOUR FIELDS; THE INSTALLER SETS ROOT'S PASSWORD TO THE SAME ONE.
+  # =======================================================================================
+  - name: user admin - real name
+    at: [959, 457]
+    type: "{{ user }}"
+    settle: 2
+
+  - name: user admin - user name
+    at: [959, 503]
+    type: "{{ user }}"
+    settle: 2
+
+  - name: user admin - password
+    at: [959, 595]
+    type: "{{ password }}"
+    settle: 2
+
+  - name: user admin - verify password
+    at: [959, 643]
+    type: "{{ password }}"
+    settle: 3
+
+  # The same footer button, whose label has changed to `Install`.
+  - name: user admin - install
+    at: [1293, 781]
+    settle: 25
+
+  # =======================================================================================
+  # 4. A MEASURED WAIT. THE PROGRESS PANE IS A SLIDESHOW AND A PROGRESS BAR, SO MEASURING
+  #    "IS IT DONE" WOULD BE A DETECTOR - THE DURATION IS THE ANSWER.
+  # =======================================================================================
+  #
+  # MEASURED: from `Install` to the window closing is about 8 minutes on this ISO. THIRTY
+  # MINUTES is that with room for a slower runner.
+  #
+  # THE KEEP-ALIVE CLICK IS PART OF THE WAIT, AND HERE IT MATTERS: MATE BLANKS ITS OWN DISPLAY
+  # WHEN IDLE - the frame goes solid black, which is what a manual session showed after ten
+  # minutes - and a blanked display reads as an empty screen for every later step.
+  #
+  # Unlike a `until`, this step cannot tell slow from stopped, so the empty-disk check behind
+  # it is the verdict: a written system is gigabytes and an unwritten sparse image is
+  # kilobytes.
+  - name: the install runs, as measured
+    wait: 1800
+    keep_alive: true
