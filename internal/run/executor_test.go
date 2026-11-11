@@ -274,3 +274,36 @@ func probeValue(key string) any {
 	}
 	return true
 }
+
+// A STEP WHOSE ONLY KEY IS A BOOLEAN FALSE STILL HAS TO DISPATCH.
+//
+// `record: false` STOPS A RECORDING, and `Step.Has` is false for it because `Has` answers "is this
+// key present AND true". Every dispatcher branch tests `Has`, so the step matched nothing and fell
+// through to "no implementation for this step's keys".
+//
+// THE COST WAS THE LAST STEP OF A STAGE THAT HAD ALREADY SUCCEEDED. Run 43035390408 passed the
+// shutdown, published the disk and then failed:
+//
+//	status: failed step 29/29 "stop recording"
+//	error:   stop recording: no implementation for this step's keys
+//
+// A run that did everything it was asked and then reported failure, one line from the end.
+func TestBooleanFalseIsAnActionRatherThanAnAbsence(t *testing.T) {
+	d := &fakeDriver{}
+	ex, steps := newExec(d, map[string]any{"name": "stop recording", "record": false})
+	ex.Work = t.TempDir()
+	_, err := ex.Run(steps)
+	if err != nil && strings.Contains(err.Error(), "no implementation") {
+		t.Fatalf("`record: false` reached no branch: %v. It is an ACTION - stopping a recording - "+
+			"and `Has` treats a false boolean as the key being absent", err)
+	}
+	// AND IT IS NOT SILENTLY COUNTED AS DONE. Nothing was recording, so the step has a real
+	// complaint - and that complaint proves the branch ran rather than the dispatcher skipping it.
+	if err == nil {
+		t.Fatal("`record: false` with nothing recording must say so; a silent success is " +
+			"indistinguishable from a dispatcher that never ran the step")
+	}
+	if strings.Contains(err.Error(), "no implementation") {
+		t.Fatalf("the branch ran but reported no implementation: %v", err)
+	}
+}

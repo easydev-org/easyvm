@@ -32,11 +32,29 @@ func TestEveryExecutableKeyHasADispatchBranch(t *testing.T) {
 			if !ok {
 				return true
 			}
-			sel, ok := call.Fun.(*ast.SelectorExpr)
-			if !ok || sel.Sel.Name != "Has" || len(call.Args) != 1 {
+			// TWO SHAPES ARE BRANCHES, AND THEY ARE DIFFERENT QUESTIONS.
+			//
+			//	s.Has("key")      present AND truthy - right for `boot:` and every ordinary key
+			//	hasKey(s, "key")  present at all - right where `false` is an ACTION, which is
+			//	                  `record: false` stopping a recording
+			//
+			// The test has to know both, or adding the second shape reads as a missing branch -
+			// which is exactly what it reported for `record` after the fix.
+			var lit *ast.BasicLit
+			switch fun := call.Fun.(type) {
+			case *ast.SelectorExpr:
+				if fun.Sel.Name != "Has" || len(call.Args) != 1 {
+					return true
+				}
+				lit, ok = call.Args[0].(*ast.BasicLit)
+			case *ast.Ident:
+				if fun.Name != "hasKey" || len(call.Args) != 2 {
+					return true
+				}
+				lit, ok = call.Args[1].(*ast.BasicLit)
+			default:
 				return true
 			}
-			lit, ok := call.Args[0].(*ast.BasicLit)
 			if !ok || lit.Kind != token.STRING {
 				return true
 			}

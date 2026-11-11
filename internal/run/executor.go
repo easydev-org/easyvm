@@ -136,6 +136,16 @@ func (e *Executor) StopNow(method string) {
 // THE ORDER OF THESE BRANCHES IS THE ORDER THE KEYS WERE ADDED, and that matters for a step that
 // carries more than one: a `boot:` with `os:` is a boot, not an `os:` step. The Python
 // implementation's dispatcher had the same shape and the same reason.
+// hasKey reports whether a key is PRESENT, whatever its value.
+//
+// IT EXISTS FOR THE KEYS WHERE `false` IS A STATEMENT rather than an absence - `record: false` stops
+// a recording. Everywhere else `Has` is the right question, because `boot: false` means "this step
+// does not boot".
+func hasKey(s walk.Step, key string) bool {
+	_, ok := s.Spec[key]
+	return ok
+}
+
 func (e *Executor) runOne(s walk.Step) error {
 	switch {
 	case s.Has("boot"):
@@ -146,7 +156,14 @@ func (e *Executor) runOne(s walk.Step) error {
 		return e.doReboot(s)
 	case s.Has("disk"):
 		return e.doDisk(s)
-	case s.Has("record"):
+	case hasKey(s, "record"):
+		// `s.Has` IS FALSE FOR `record: false`, AND THAT IS THE POINT OF THE KEY. Stopping a
+		// recording is an ACTION, not the absence of one: run 43035390408 failed at step 29 of 29 -
+		// after the machine had shut down and the disk had been published - with
+		//
+		//     stop recording: no implementation for this step's keys
+		//
+		// because the step's only key was a boolean false and every dispatcher branch tests `Has`.
 		return e.doRecord(s)
 	case s.Has("compress"):
 		return e.doCompress(s)

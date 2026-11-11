@@ -94,11 +94,19 @@ jobs:
   stage:
     # THE FILTER IS THE INPUT, AND ITS DEFAULT IS "all". A matrix leg whose name is not in the list
     # stops before it starts, so choosing three stages costs three legs rather than eight.
+    #
+    # THE EVENT IS NAMED FIRST, AS EVERY OTHER `inputs.` TEST IN THIS REPOSITORY HAS TO BE. On a
+    # `push` a dispatch input is EMPTY, so `inputs.stages == ''` is true for the wrong reason - and
+    # a condition that is true by accident is one that stops being true when the trigger changes.
     if: |
-      inputs.stages == '' || inputs.stages == 'all'
-      || contains(format(',{0},', inputs.stages), format(',{0},', matrix.name))
+      github.event_name == 'workflow_dispatch'
+      && (inputs.stages == 'all'
+          || contains(format(',{0},', inputs.stages), format(',{0},', matrix.name)))
     runs-on: ubuntu-24.04
-    timeout-minutes: ${{ fromJSON(inputs.timeout_minutes || '90') }}
+    # THE LEG'S OWN TIMEOUT, NOT THE JOB'S. A 150-minute macOS install must not be bounded by a
+    # default chosen for a 70-minute Windows stage; `matrix.timeout` is per leg and this is the
+    # job-wide ceiling above it.
+    timeout-minutes: ${{ fromJSON(inputs.timeout_minutes || '150') }}
     container:
       image: ghcr.io/${{ github.repository }}:latest
       credentials:
