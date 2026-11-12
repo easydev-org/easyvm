@@ -61,7 +61,7 @@ jobs:
       # `--device /dev/kvm` is the accelerator, without which a macOS guest cannot be given `+invtsc`
       # and deadlocks, and every other guest runs fifty times slower.
       options: --device /dev/kvm --device /dev/net/tun --cap-add NET_ADMIN
-    # `packages: READ` WAS THE 403. The install leg publishes its disk with `easyvm push`, and a
+    # `packages: READ` WAS THE 403. The install leg publishes its disk with `oras push`, and a
     # read-only token cannot create a package version at all:
     #
     #	FAILED: the registry refused a pull,push token (HTTP 403):
@@ -331,9 +331,8 @@ jobs:
         # while an `ssh` leg's product is the disk it started from. A missing file is a warning rather
         # than a failure, because the artifact upload behind this still carries the evidence.
         if: always()
-        # THE SAME VARIABLE, ON THE STEP THAT WRITES. `easyvm push` reads `GITHUB_TOKEN` from the
-        # environment to exchange for a `pull,push` registry session; with none set it asks
-        # anonymously and is answered
+        # THE SAME VARIABLE, ON THE STEP THAT WRITES. `oras login` reads `GITHUB_TOKEN` from the
+        # environment; with none set the push is anonymous and is answered
         #
         #	FAILED: the registry refused a pull,push token (HTTP 403): {"errors":[{"code":
         #	"DENIED","message":"requested access to the resource is denied"}]}
@@ -364,8 +363,8 @@ jobs:
           # boot an installed disk. `publish` defaults to the job's own name for the legs that
           # continue themselves.
           # A DIAGNOSTIC, NOT DECORATION. Whether the credential ARRIVED is the one fact this step
-          # cannot otherwise report: `easyvm push` treats an empty token as "ask anonymously", and
-          # GitHub answers that with `DENIED`, which reads like a permission problem on the package.
+          # cannot otherwise report: an empty credential makes the push anonymous, and GitHub
+          # answers that with `DENIED`, which reads like a permission problem on the package.
           # The length is printed rather than the value, so a log never carries the secret.
           if [ -n "${GITHUB_TOKEN:-}" ]; then
             echo "  credential: GITHUB_TOKEN is set (${#GITHUB_TOKEN} characters)"
@@ -375,10 +374,33 @@ jobs:
           fi
           tag="${{ matrix.publish }}"
           if [ -z "$tag" ]; then tag="${{ matrix.name }}"; fi
-          easyvm push --tag "$tag" \
-                      --file "$out" \
-                      --repository "${{ inputs.disks_repository }}" \
-                      --timeout 40m || echo "  the push failed; the artifact below still has the disk"
+          # `oras push`, NOT A SUBCOMMAND OF THIS PROGRAM.
+          #
+          # PUBLISHING IS A REGISTRY TRANSFER, NOT A THING THIS REPOSITORY KNOWS HOW TO DO. The
+          # payload is a bare qcow2 - not a rootfs - and oras stores arbitrary files as OCI
+          # artifacts without inventing a Dockerfile for them. `easyvm push` used to exist and was
+          # 246 lines of registry protocol that duplicated what oras already is, reachable from one
+          # caller and shipped to every user of the binary.
+          #
+          # THE PULL SIDE STAYS: `internal/oci` is how `fetch:` resolves every installer image and
+          # every macOS asset at RUN time, inside the daemon, with no external tool - which is why
+          # the image does not need oras to run a walkthrough, only to publish one.
+          #
+          # ORAS PUSHES FROM THE FILE'S OWN DIRECTORY WITH A BARE FILENAME. It validates the path in
+          # a `file:media:type` reference and rejects an absolute one, and the flag it suggests -
+          # `--disable-path-validation` - turns off ALL of its path checks: absolute paths, "..",
+          # symlinks, anything outside the working directory. Those exist so a mistyped variable
+          # cannot push ~/.ssh/id_rsa to a public package, and turning them off to satisfy one of
+          # them is the wrong trade. A bare name in its own directory satisfies the check instead.
+          repo=$(printf '%s' "${{ inputs.disks_repository }}" | tr '[:upper:]' '[:lower:]')
+          oras login ghcr.io -u "${{ github.actor }}" --password-stdin <<< "$GITHUB_TOKEN"
+          ( cd "$(dirname "$out")" && \
+            oras push "ghcr.io/${repo}:${tag}" \
+              --artifact-type application/vnd.easydev.qcow2 \
+              "$(basename "$out"):application/vnd.oci.image.layer.v1.tar" \
+              --annotation "org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" \
+              --annotation "org.opencontainers.image.revision=${{ github.sha }}" ) \
+            || echo "  the push failed; the recording and console log below are the evidence"
 
       # THE RECORDING IS ITS OWN ARTIFACT, AND IT IS THE FIRST ONE TO OPEN AFTER A FAILURE.
       #
@@ -394,8 +416,8 @@ jobs:
       #   <leg>-logs    daemon.log and console.log          the guest's own words
       #   <leg>-disk    the qcow2                           only a PASSING leg's disk matters
       #
-      # THE DISK IS NOT HOW A DOWNSTREAM STAGE GETS ITS INPUT: that is `easyvm push`/`pull` through
-      # ghcr, which is why this artifact is archive rather than transport.
+      # THE DISK IS NOT HOW A DOWNSTREAM STAGE GETS ITS INPUT: `oras push` writes it and `easyvm
+      # pull` reads it back, which is why this artifact is archive rather than transport.
       - uses: actions/upload-artifact@v4
         if: always()
         with:

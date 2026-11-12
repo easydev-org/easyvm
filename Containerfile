@@ -166,6 +166,35 @@ RUN set -eux; \
 # of the two is a build that breaks when the other changes.
 COPY --chmod=0755 dist/easyvm /usr/local/bin/easyvm
 
+# ORAS, BECAUSE PUBLISHING A DISK IS A REGISTRY TRANSFER AND NOT A PROGRAM IN THIS REPOSITORY.
+#
+# `easyvm push` USED TO EXIST AND IS GONE. Publishing is `oras push` - a real artifact, stored as a
+# real OCI artifact - and the reason is the same one the reference implementation gives: the payload
+# is a bare qcow2, not a rootfs, and oras stores arbitrary files without inventing a Dockerfile.
+#
+# WHY NOT `oras-project/setup-oras`, WHICH IS THE OBVIOUS ANSWER: EVERY STEP IN `stage.yml` RUNS
+# INSIDE THIS IMAGE. The job is a `container:` job, so an action that installs oras onto the RUNNER
+# would put it on a filesystem no step can see. A tool the workflow calls by name has to be in the
+# image, which is the same rule this file already follows for qemu, 7z, xorriso and ffmpeg.
+#
+# THE VERSION AND THE HASH ARE PINNED. An unpinned download in a Dockerfile is a build that changes
+# under the same tag, and this one publishes disks that later stages pull by tag - so the tool that
+# wrote a tag must be a known tool.
+ARG ORAS_VERSION=1.2.2
+ARG ORAS_SHA256=bff970346470e5ef888e9f2c0bf7f8ee47283f5a45207d6e7a037da1fb0eae0d
+RUN set -eux; \
+    arch=$(dpkg --print-architecture); \
+    url="https://github.com/oras-project/oras/releases/download/v${ORAS_VERSION}/oras_${ORAS_VERSION}_linux_${arch}.tar.gz"; \
+    curl -fsSL --retry 5 --retry-all-errors -o /tmp/oras.tgz "$url"; \
+    echo "${ORAS_SHA256}  /tmp/oras.tgz" | sha256sum -c -; \
+    tar -xzf /tmp/oras.tgz -C /usr/local/bin oras; \
+    chmod 0755 /usr/local/bin/oras; \
+    rm -f /tmp/oras.tgz; \
+    oras version
+
+# AND THE SELF-CHECK BELOW HAS TO SEE IT, because a tool that is installed but not on PATH is the
+# same failure one step later.
+
 # A BUILD-TIME SELF-CHECK, AND EVERY LINE IS A TOOL THE GO CODE CALLS BY NAME.
 #
 # THE CPU ASSERTION IS THE MOST IMPORTANT LINE IN THIS FILE. `-cpu Skylake-Client-v4` is what every
@@ -184,7 +213,7 @@ RUN set -eux; \
     dnsmasq --version | head -1; \
     ip -V; \
     iptables --version; \
-    command -v sysctl ffmpeg tesseract debugfs xorriso genisoimage mformat 7z aria2c unzstd wimlib-imagex; \
+    command -v oras sysctl ffmpeg tesseract debugfs xorriso genisoimage mformat 7z aria2c unzstd wimlib-imagex; \
     /usr/local/bin/easyvm versions
 
 # THE CONTAINER MUST BE STARTED WITH THE TUN DEVICE AND NET_ADMIN, AND THE PROGRAM REFUSES AT

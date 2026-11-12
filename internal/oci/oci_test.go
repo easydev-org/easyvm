@@ -3,6 +3,7 @@ package oci
 import (
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -82,55 +83,86 @@ func readFileString(name string) (string, error) {
 //
 // is a run that has DONE ITS WORK and is paying to move a disk nobody will read.
 //
-// `Push` IS THE MIRROR OF `Pull`: one layer holding the disk, an empty config blob, and a manifest
-// naming both. The test asserts the shape rather than the network, because a unit test cannot reach a
-// registry - but the shape is what the protocol requires, and a typo in it fails on the first real
-// push with a message the test would have made unnecessary.
-func TestPushExistsAndAsksForWriteAccess(t *testing.T) {
-	body, err := os.ReadFile("push.go")
+// PUBLISHING MOVED OUT OF THIS PROGRAM, AND THE REASON IS THE SAME ONE `pull` STAYS.
+//
+// `easyvm push` was 246 lines of registry protocol - token exchange, blob upload, manifest PUT - with
+// exactly ONE caller, which was `stage.yml`. It also shipped to every user of the binary, where it was
+// a command that could only work inside CI: it needs `GITHUB_TOKEN` and a repository.
+//
+// PUBLISHING IS A REGISTRY TRANSFER AND `oras` IS THAT TOOL. The payload is a bare qcow2, not a
+// rootfs, and oras stores arbitrary files as OCI artifacts without inventing a Dockerfile.
+//
+// THE PULL SIDE CANNOT FOLLOW IT, and this test is where that is written down: `internal/oci` is how
+// `fetch:` resolves every installer image and every macOS asset AT RUN TIME, inside the daemon, with
+// no external tool on PATH. A walkthrough that needs oras to start would be a walkthrough that cannot
+// run in this image.
+func TestPublishingIsOrasAndPullingStaysHere(t *testing.T) {
+	// THE PULL SIDE IS THIS PACKAGE.
+	body, err := os.ReadFile("oci.go")
 	if err != nil {
-		t.Fatal("no push.go: `easyvm pull` has no counterpart, so nothing can publish a disk for the " +
-			"stage after it - which is why five install legs uploaded for an hour")
+		t.Fatal("no oci.go: nothing resolves a `fetch:` step")
 	}
-	src := string(body)
+	if !strings.Contains(string(body), "func Pull(") {
+		t.Fatal("`Pull` is gone. Every `fetch:` step - the installer images, OpenCore, the recovery " +
+			"image, the developer packages - reads a tag in this repository's package, and this is " +
+			"the only implementation of that")
+	}
 
-	// A PUSH NEEDS `pull,push` SCOPE; a pull's token is `pull` alone and is refused.
-	if !strings.Contains(src, `"pull,push"`) {
-		t.Fatal("`Push` does not ask for `pull,push` scope, so the registry refuses the upload with " +
-			"a `denied` that reads like a permissions problem on the package")
+	// THE PUSH SIDE IS NOT.
+	if _, err := os.Stat("push.go"); err == nil {
+		t.Fatal("push.go is back. Publishing belongs to `oras push` in stage.yml: one caller, a " +
+			"real artifact format, and no second registry implementation to keep correct")
 	}
-	// AND THE THREE PIECES OF AN OCI MANIFEST.
-	for _, want := range []string{
-		"application/vnd.oci.image.manifest.v1+json",
-		"application/vnd.oci.image.config.v1+json",
-		"schemaVersion",
-	} {
-		if !strings.Contains(src, want) {
-			t.Fatalf("the manifest does not carry %q", want)
-		}
+
+	// AND THE CLI HAS NO `push` SUBCOMMAND.
+	main, err := os.ReadFile(filepath.Join("..", "..", "cmd", "easyvm", "main.go"))
+	if err != nil {
+		t.Skipf("no main.go here (%v)", err)
 	}
-	// AND AN EMPTY FILE IS REFUSED, because a stage that produced nothing must not publish it.
-	if !strings.Contains(src, "is empty; a stage that produced nothing must not publish it") {
-		t.Fatal("`Push` would publish an empty file, so a stage that produced nothing would " +
-			"overwrite a good disk with nothing")
+	if strings.Contains(string(main), `case "push":`) {
+		t.Fatal("`easyvm push` is dispatched again; publishing is oras, not this program")
 	}
 }
 
-// AND THE WORKFLOW CALLS IT.
-func TestTheWorkflowPublishesEachStagesDisk(t *testing.T) {
-	body, err := os.ReadFile("../../.github/workflows/stage.yml")
+// AND THE WORKFLOW CALLS ORAS.
+//
+// The name it pushes under is `matrix.publish` - the stage AFTER this one pulls it - and oras needs a
+// bare filename from the file's own directory, because it rejects an absolute path in a
+// `file:media:type` reference and the flag that disables that check also disables the ones protecting
+// a mistyped variable.
+func TestTheWorkflowPublishesWithOras(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "stage.yml"))
 	if err != nil {
 		t.Skipf("no stage.yml here (%v)", err)
 	}
 	src := string(body)
-	if !strings.Contains(src, "easyvm push --tag") {
-		t.Fatal("the workflow never runs `easyvm push`, so no stage's disk is published and every " +
-			"later stage starts from whatever `ssh` uploaded")
+	if !strings.Contains(src, "oras push") {
+		t.Fatal("stage.yml never runs `oras push`, so no stage's disk is published and every later " +
+			"stage starts from a package that has nothing in it")
 	}
-	// IT MUST TOLERATE A MISSING FILE: an `ssh` leg's product is the disk it started from, and several
-	// stages write no disk at all.
+	// COMMENTS MAY NAME IT - the file explains what was removed and why - so only a line that
+	// actually RUNS something counts.
+	for _, line := range strings.Split(src, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if strings.Contains(trimmed, "easyvm push") {
+			t.Fatalf("stage.yml still runs `easyvm push`, which no longer exists: %q", trimmed)
+		}
+	}
+	if !strings.Contains(src, `tag="${{ matrix.publish }}"`) {
+		t.Fatal("the publish step ignores `matrix.publish`, so an install leg writes its own job name " +
+			"and the stage after it pulls a tag nothing publishes")
+	}
+	if !strings.Contains(src, `basename "$out"`) {
+		t.Fatal("oras is given a path rather than a bare filename from the file's own directory, " +
+			"which it refuses - and the flag that would allow it also disables the checks that stop " +
+			"a mistyped variable pushing a key file")
+	}
+	// IT MUST TOLERATE A MISSING FILE: an `ssh` leg's product is the disk it started from, and
+	// several stages write no disk at all.
 	if !strings.Contains(src, "no disk to publish at") {
-		t.Fatal("the publish step does not tolerate a stage that writes no disk, so every ssh leg " +
-			"would fail on a step about a file it was never meant to produce")
+		t.Fatal("the publish step does not tolerate a stage that writes no disk")
 	}
 }

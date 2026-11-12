@@ -224,8 +224,12 @@ func TestThePublishStepHonoursThePublishTag(t *testing.T) {
 		t.Fatal("the publish step ignores `matrix.publish`, so an install leg writes its own job " +
 			"name and the stage after it pulls a tag nothing publishes")
 	}
-	if !regexp.MustCompile(`easyvm push --tag "\$tag"`).MatchString(src) {
-		t.Fatal("the publish step does not push with the resolved `$tag`")
+	if !strings.Contains(src, "oras push") {
+		t.Fatal("the publish step does not run `oras push`; publishing is no longer a subcommand of " +
+			"this program")
+	}
+	if !regexp.MustCompile(`tag=\"\$\{\{ matrix\.publish \}\}\"`).MatchString(src) {
+		t.Fatal("the publish step does not resolve the tag from `matrix.publish`")
 	}
 }
 
