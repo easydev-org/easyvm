@@ -1027,3 +1027,41 @@ func (e *Executor) doActions(s walk.Step) error {
 	}
 	return e.settle(s)
 }
+
+// --- snapshots ---------------------------------------------------------------------
+//
+// `snapshot:` WRITES THE MACHINE'S WHOLE STATE TO A FILE, so a later run can start from it instead of
+// booting. It is the one primitive that makes a sandbox's "pause" mean something: the guest's memory,
+// its devices and its UEFI variables all go into one stream.
+//
+// WHY IT IS A MIGRATION AND NOT `savevm` - the guest refuses that, and the reason is structural:
+//
+//	savevm s1  ->  Error: Device 'pflash1' is writable but does not support snapshots
+//
+// Every guest here boots UEFI, and UEFI's variable store is a pflash device - a firmware chip, not a
+// qcow2 - so `savevm`, which writes the state INTO a block device, has nowhere to put it. A migration
+// stream is a file of its own and asks nothing of the devices.
+//
+// THE STEP TAKES A PATH AND NOTHING ELSE, because everything else about a resume belongs to the boot
+// that reads it: the cpu, the machine type and the device set must match, and this build gives every
+// guest the same ones. A `snapshot:` that also recorded the machine would be a second description of
+// the machine, and the two would disagree.
+func (e *Executor) doSnapshot(s walk.Step) error {
+	dest := s.Get("snapshot")
+	if strings.TrimSpace(dest) == "" {
+		return fail(s.Name, "`snapshot:` must name the file to write the machine state to")
+	}
+	// A RELATIVE PATH IS RESOLVED AGAINST THE WORK DIRECTORY, the same rule `scp:` and `disk:`
+	// follow: a file that a later `run --boot-from` names lives where the daemon put it.
+	if !filepath.IsAbs(dest) {
+		dest = filepath.Join(e.Work, dest)
+	}
+	sv, ok := e.Driver.(interface{ Snapshot(string) error })
+	if !ok {
+		return notImplemented(s, "snapshot")
+	}
+	if err := sv.Snapshot(dest); err != nil {
+		return fail(s.Name, "%v", err)
+	}
+	return nil
+}

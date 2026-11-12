@@ -350,6 +350,7 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 		OpenCoreROM:  spec.OpenCoreROM,
 		OpenCoreVars: spec.OpenCoreVars,
 		BootImage:    spec.BootImage,
+		Incoming:     spec.Incoming,
 	}
 	if err := boot.Validate(); err != nil {
 		return err
@@ -908,3 +909,80 @@ func copyFile(from, dest string) error {
 // screenUnused keeps the screen import honest while the frame reader has no OCR: the desktop step
 // calls screen.Load directly, and this reference documents that the package is reached from here.
 var _ = screen.MinBrightnessDrop
+
+// --- snapshots ---------------------------------------------------------------------
+//
+// SEE THE NOTE IN package qmp FOR WHY THIS IS A MIGRATION AND NOT `savevm`. The short version: the
+// guests here are UEFI, their NVRAM is a pflash device, and `savevm` requires every writable block
+// device to support internal snapshots. A migration stream asks nothing of them.
+//
+// MEASURED ON ALL THREE GUESTS: Linux 2.7 GiB, Windows 12 GiB (unsettled) / 3.7 GiB (settled),
+// macOS 5.3 GiB, from an 8 GiB guest. The size is NOT a fixed multiple of RAM - it depends on how
+// many pages are zero or compressible at the moment the snapshot is taken, which is why a caller
+// must be told the file it got rather than a number it can predict.
+
+// Snapshot writes the machine's whole state to path.
+//
+// THE MACHINE MUST BE RUNNING. A stopped qemu has no state to save, and a caller that asked is told
+// so rather than given an empty file.
+func (d *Driver) Snapshot(path string) error {
+	d.mu.Lock()
+	running := d.proc != nil
+	d.mu.Unlock()
+	if !running {
+		return fmt.Errorf("no machine is running; a `snapshot:` step needs a `boot:` before it")
+	}
+	conn, err := d.qmpSocket()
+	if err != nil {
+		return err
+	}
+	d.logf(fmt.Sprintf("  snapshot: writing the machine state to %s", path))
+
+	// A LONG SNAPSHOT REPORTS PROGRESS. A 12 GiB state file is a minute of work, and a step that
+	// printed nothing until it finished is indistinguishable from a hang.
+	done := make(chan struct{})
+	go func() {
+		tick := time.NewTicker(15 * time.Second)
+		defer tick.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-tick.C:
+				if st, n, err := conn.MigrationStatus(); err == nil && st == "active" {
+					d.logf(fmt.Sprintf("  snapshot: %s, %s written", st, humanBytes(n)))
+				}
+			}
+		}
+	}()
+	err = conn.MigrateToFile(path, snapshotTimeout)
+	close(done)
+	if err != nil {
+		return err
+	}
+	if fi, statErr := os.Stat(path); statErr == nil {
+		d.logf(fmt.Sprintf("  snapshot: %s is %s", path, humanBytes(fi.Size())))
+	}
+	return nil
+}
+
+// snapshotTimeout is how long a migration may take.
+//
+// IT IS GENEROUS BECAUSE THE FILE IS THE GUEST'S MEMORY. 8 GiB of RAM took about 50 seconds on the
+// node this was measured on, and a slower node with more memory would take minutes; a tight timeout
+// would turn a slow node into a broken snapshot.
+const snapshotTimeout = 20 * time.Minute
+
+// humanBytes renders a size for a log line.
+func humanBytes(n int64) string {
+	const unit = 1024
+	if n < unit {
+		return fmt.Sprintf("%d B", n)
+	}
+	div, exp := int64(unit), 0
+	for v := n / unit; v >= unit; v /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
+}

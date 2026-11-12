@@ -94,6 +94,9 @@ type Boot struct {
 	OpenCoreVars string
 	// BootImage is OpenCore's own disk image, the one the firmware boots first.
 	BootImage string
+	// Incoming is a migration stream to restore instead of booting. See the -incoming arguments in
+	// Boot.StorageArgs' caller: it is not a device, it is the machine's starting state.
+	Incoming string
 }
 
 // Validate refuses a boot that cannot work, before qemu is started.

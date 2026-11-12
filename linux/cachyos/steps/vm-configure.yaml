@@ -269,9 +269,22 @@ steps:
       # THE REST OF THIS FILE'S `ssh:` STEPS ARE LEFT ALONE: they call user-level tools that are
       # already on the default path, and changing them all would be a larger edit than the evidence
       # supports.
-      PATH="$PATH:/sbin:/usr/sbin:/usr/local/sbin"
+      # NO PATH ASSIGNMENT AT ALL: THE LOGIN SHELL IS NOT ALWAYS POSIX, AND `/sbin/mount` NEEDS NO PATH.
+      #
+      # MEASURED ON cachyos-vm, step 16 of 23 - TWICE, WITH TWO DIFFERENT SPELLINGS:
+      #
+      #	PATH="$PATH:/sbin:/usr/sbin:/usr/local/sbin"
+      #	fish: Unsupported use of '='. In fish, please use 'set PATH ...'
+      #
+      # `ssh host command` RUNS THE USER'S LOGIN SHELL, and on cachyos that is FISH, where `VAR=value`
+      # is a syntax error rather than an assignment. `export VAR=value` is not fish either - fish has
+      # `set -x` - so the second spelling would have failed the same way.
+      #
+      # `mount` LIVES IN /sbin AND IS NAMED BY ITS PATH INSTEAD. That is true in every shell, needs no
+      # variable, and cannot be broken by the guest's choice of login shell. `/bin/mount` is not used
+      # because on some of these images it is a symlink under /usr/bin.
       echo "--- what is mounted ---"
-      mount | grep -i 'cifs\|smb' || echo "(no cifs/smb line in mount output)"
+      /sbin/mount | grep -i 'cifs\|smb' || echo "(no cifs/smb line in mount output)"
       echo "--- the mount point ---"
       ls -la ~/shared || echo "(~/shared is not readable)"
       echo "--- the round trip ---"

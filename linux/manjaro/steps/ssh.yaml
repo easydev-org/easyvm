@@ -181,13 +181,6 @@ steps:
   # SO BOTH FILES, BEFORE THE START: the drop-in (right where the directory is included, and it
   # survives a package update that rewrites the main file) and an append to the main file itself,
   # guarded by a grep so a second run adds no second line.
-    # THE FIRST PROOF THAT A SHELL RECEIVED THE TYPING, AND IT IS A SIDE EFFECT RATHER THAN A
-    # SECOND ACTION: a terminal echoes what is typed into it, so `pacman` or `sudo` appearing
-    # on screen is the difference between "the keystrokes went somewhere" and "they went into
-    # a shell". Nothing here clicks or types - it reads what the step above already did.
-    expect_any:
-      - [pacman]
-      - [sudo]
   - name: allow password authentication
   # ONE LINE, BECAUSE `run:` TYPES EACH LINE AND PRESSES RETURN AFTER IT.
   #

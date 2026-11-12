@@ -438,3 +438,81 @@ func (c *Conn) Reset() error {
 func (c *Conn) SystemPowerdown() error {
 	return c.raw.SystemPowerdown()
 }
+
+// --- snapshots ---------------------------------------------------------------------
+//
+// A SNAPSHOT IS A MIGRATION TO A FILE, AND THAT IS NOT A WORKAROUND.
+//
+// `savevm` / `loadvm` are the obvious commands and they cannot work for these guests:
+//
+//	savevm s1  ->  Error: Device 'pflash1' is writable but does not support snapshots
+//
+// `pflash1` is OVMF's variable store (NVRAM). `savevm` writes the machine state INTO a block device,
+// and it requires every writable block device to support that. pflash models a firmware chip, not a
+// qcow2, so it refuses - and the requirement is real, not cosmetic.
+//
+// `migrate` is the other path to the same thing: it serialises memory, device state AND the pflash
+// contents into one byte stream. It asks nothing of the block devices, so it works with UEFI where
+// `savevm` cannot. Measured on Linux, Windows and macOS guests; the macOS one needs
+// `tsc-frequency=` on the cpu (see machine.Boot.CPU) or the migration is refused by the invtsc
+// blocker before it starts.
+//
+// THE STREAM IS ALSO THE THING A PAUSE/RESUME API WANTS. It is self-contained, can be stored in an
+// object store, can be read by a different node, and can be opened by many processes at once without
+// copying - which is what makes forking a sandbox cheap.
+
+// MigrateToFile writes the whole machine state to path and waits until it has landed.
+//
+// IT WAITS BECAUSE A CALLER THAT RETURNED EARLY WOULD LET THE NEXT STEP DELETE A HALF-WRITTEN FILE.
+// The status is polled rather than assumed: `migrate` answers as soon as it starts.
+func (c *Conn) MigrateToFile(path string, timeout time.Duration) error {
+	// A FILE THAT ALREADY EXISTS IS A FAILED RESTORE WAITING TO HAPPEN, and qemu appends to it
+	// rather than truncating.
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("removing the previous state file: %w", err)
+	}
+	if err := c.raw.Migrate("file:"+path, nil, nil, nil); err != nil {
+		return fmt.Errorf("starting the migration: %w", err)
+	}
+	deadline := time.Now().Add(timeout)
+	for {
+		info, err := c.raw.QueryMigrate()
+		if err != nil {
+			return fmt.Errorf("asking the migration how it is going: %w", err)
+		}
+		// A NIL STATUS IS A MIGRATION THAT HAS NOT DECIDED YET, not an error.
+		if info.Status != nil {
+			switch *info.Status {
+			case raw.MigrationStatusCompleted:
+				return nil
+			case raw.MigrationStatusFailed, raw.MigrationStatusCancelled:
+				return fmt.Errorf("the migration %s: %s", info.Status, info.ErrorDesc)
+			}
+		}
+		if time.Now().After(deadline) {
+			st := "unknown"
+			if info.Status != nil {
+				st = info.Status.String()
+			}
+			return fmt.Errorf("the migration did not finish within %s (status %q). The state file "+
+				"is %s and must be treated as unusable", timeout, st, path)
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+}
+
+// MigrationStatus is one reading of where a migration is, for a caller that wants to log progress.
+//
+// IT EXISTS SO A LONG SNAPSHOT CAN SAY WHAT IT IS DOING. A 12 GiB state file is a minute of work, and
+// a step that printed nothing until it finished would be indistinguishable from a hang - the same
+// lesson the run loop learned about its own steps.
+func (c *Conn) MigrationStatus() (status string, transferred int64, err error) {
+	info, err := c.raw.QueryMigrate()
+	if err != nil {
+		return "", 0, err
+	}
+	if info.Status == nil {
+		return "unknown", info.RAM.Transferred, nil
+	}
+	return info.Status.String(), info.RAM.Transferred, nil
+}

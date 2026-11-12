@@ -144,6 +144,13 @@ type BootSpec struct {
 	DriverCD string
 	// Recovery is macOS's recovery image, attached as removable media.
 	Recovery string
+	// Incoming is a `snapshot:` file to restore from instead of booting.
+	//
+	// IT IS A SEPARATE FIELD FROM Disk BECAUSE THE TWO ANSWER DIFFERENT QUESTIONS. Disk says what
+	// the guest's storage IS; Incoming says the guest's memory is already decided and qemu must load
+	// it rather than run a boot loader. A resume without the disk finds nothing, and a disk boot with
+	// an Incoming is a resume - so both must be given together, and Validate enforces it.
+	Incoming string
 	// OpenCoreROM, OpenCoreVars and BootImage are the macOS loader, built from the recovery image.
 	OpenCoreROM  string
 	OpenCoreVars string

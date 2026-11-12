@@ -11,7 +11,7 @@ func ExecutableKeys() []string {
 		// acted on by runOne's switch
 		"boot", "shutdown", "reboot",
 		"disk",
-		"record", "compress",
+		"record", "compress", "snapshot",
 		"require_ssh", "ssh", "scp", "script", "write", "fetch",
 		"desktop",
 		"share_serve", "share_mount",

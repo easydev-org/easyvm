@@ -178,6 +178,8 @@ func (e *Executor) runOne(s walk.Step) error {
 		return e.doRecord(s)
 	case s.Has("compress"):
 		return e.doCompress(s)
+	case s.Has("snapshot"):
+		return e.doSnapshot(s)
 	case s.Has("require_ssh"):
 		return e.doRequireSSH(s)
 	case s.Has("ssh"):
