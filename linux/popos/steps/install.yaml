@@ -177,10 +177,36 @@ steps:
   #
   # `Full Name` IS THE INSTALLER'S OWN WORD, taken from the account pane this file already reads,
   # so it is a fact about pop-os-installer rather than a word guessed to be on screen.
+  # THE WAIT ASKS FOR A WORD ONLY pop-os-installer DRAWS.
+  #
+  # MEASURED TWICE ON popos-install, AND THE SECOND TIME IS THE PROOF:
+  #
+  #	wait for the installer window: never saw "language" or "welcome" or "full name"
+  #	last read: Wskspaces Applications M11 12 3:49 AM u = (c) O (c) i : : F J ...
+  #
+  # THE SCREEN NEVER SHOWED ANYTHING BUT THE DESKTOP'S OWN TOP BAR. `Wskspaces` IS `Workspaces` - one
+  # OCR error in a word that belongs to the desktop, next to `Applications` and the clock. A LONE
+  # `language` IS TOO WEAK A MARKER: every live desktop with a language indicator satisfies it.
+  #
+  # AND THAT LET EVERY PANE BELOW BE CLICKED ONTO A DESKTOP. `at_button:` found a control fill anyway,
+  # because the language page's Select button is x=1326..1408 y=775..806 and the desktop has a coloured
+  # region in nearly the same place - so the run pressed (1367, 811) four times on a window that was
+  # not there, and the account pane then waited ninety seconds on a screen with no account pane in it.
+  #
+  # THE REFERENCE IMPLEMENTATION'S NOTE ABOUT THAT SAME BUTTON IS THE PROOF OF THE MISMATCH:
+  #
+  #	the language pane's Select fill spans x=1326..1408, y=775..806, so its centre is (1367,790)
+  #
+  # y=775..806 AGAINST OUR y=795..826 - TWENTY PIXELS LOWER AND A DIFFERENT COLOURED THING. A fill test
+  # cannot tell a button from wallpaper, so the ONLY defence is to require a word the installer alone
+  # draws before anything is clicked.
+  #
+  # `clean install` IS THAT WORD-PAIR: it is this installer's own footer button, and the file's own step
+  # 12 is named after it.
   - name: wait for the installer window
     until_any:
-      - [language]
-      - [welcome]
+      - [clean, install]
+      - [erase, and, install]
       - ["full", "name"]
     timeout: 300
     poll: 3

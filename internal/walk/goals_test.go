@@ -1,6 +1,7 @@
 package walk
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1111,4 +1112,84 @@ func TestARunBodyIsOneLine(t *testing.T) {
 		t.Skip("no run steps here")
 	}
 	t.Logf("checked %d run step(s)", checked)
+}
+
+// A WAIT FOR AN INSTALLER MUST NAME A WORD THE INSTALLER ALONE DRAWS.
+//
+// MEASURED TWICE ON popos-install. The wait was
+//
+//	until_any: [[language], [welcome], ["full","name"]]
+//
+// and it PASSED on a screen whose only content was the desktop's top bar:
+//
+//	last read: Wskspaces Applications M11 12 3:49 AM u = (c) O (c) i : : F J ...
+//
+// EVERY PANE AFTER IT WAS THEN CLICKED ONTO A DESKTOP. `at_button:` found a control fill anyway - the
+// language page's Select button is y=775..806 on the reference machine and the match here was
+// y=795..826, twenty pixels lower on something else entirely - so the run pressed the same point four
+// times and the account pane then waited ninety seconds on a screen with no account pane in it.
+//
+// A LONE `language` IS NOT A MARKER. Any live desktop with a language indicator satisfies it, and a
+// fill test cannot tell a button from wallpaper. The marker must be a word-pair only the installer
+// draws: this file's own `clean install` footer.
+func TestAnInstallerWaitNamesAnInstallerWord(t *testing.T) {
+	root := filepath.Join("..", "..")
+	// WORDS THAT EVERY LIVE DESKTOP HAS, so a wait on one of them can pass with no installer at all.
+	generic := map[string]bool{
+		"language": true, "welcome": true, "install": true, "settings": true,
+		"applications": true, "workspaces": true, "activities": true,
+	}
+	files, err := filepath.Glob(filepath.Join(root, "linux", "*", "steps", "install.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) == 0 {
+		t.Skip("no Linux install walkthroughs here")
+	}
+	var checked int
+	for _, path := range files {
+		rel, _ := filepath.Rel(root, path)
+		doc, err := Load(path, nil)
+		if err != nil {
+			continue
+		}
+		for _, s := range doc.Steps {
+			if !strings.Contains(strings.ToLower(s.Name), "installer") {
+				continue
+			}
+			sets, _ := s.Spec["until_any"].([]any)
+			if len(sets) == 0 {
+				continue
+			}
+			checked++
+			// AT LEAST ONE WORD-SET MUST BE FREE OF GENERIC WORDS, and a single generic word alone
+			// in its set is what passed over a bare desktop.
+			specific := false
+			for _, raw := range sets {
+				words, ok := raw.([]any)
+				if !ok || len(words) < 2 {
+					continue // a one-word set is the shape being refused
+				}
+				allGeneric := true
+				for _, w := range words {
+					if !generic[strings.ToLower(fmt.Sprint(w))] {
+						allGeneric = false
+					}
+				}
+				if !allGeneric {
+					specific = true
+				}
+			}
+			if !specific {
+				t.Errorf("%s: %q waits on %v - every set is either ONE WORD or made only of words "+
+					"every live desktop has, so it can pass over a bare desktop with no installer "+
+					"on screen. Measured: `language` alone matched `Workspaces Applications ... 3:49 AM`",
+					rel, s.Name, sets)
+			}
+		}
+	}
+	if checked == 0 {
+		t.Skip("no installer waits here")
+	}
+	t.Logf("checked %d installer wait(s)", checked)
 }
