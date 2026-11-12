@@ -228,3 +228,50 @@ func TestThePublishStepHonoursThePublishTag(t *testing.T) {
 		t.Fatal("the publish step does not push with the resolved `$tag`")
 	}
 }
+
+// A REUSABLE WORKFLOW CANNOT ASK FOR MORE PERMISSION THAN ITS CALLER GRANTS.
+//
+// `stage.yml` declares `packages: write` and it is not enough on its own: the called workflow's
+// permissions are CLAMPED to the caller's, and every caller here declared none - so the token handed
+// down had the repository default and the install leg's push was refused with
+//
+//	FAILED: the registry refused a pull,push token (HTTP 403):
+//	{"errors":[{"code":"DENIED","message":"requested access to the resource is denied"}]}
+//
+// MEASURED ON windows-install, which had ALREADY WRITTEN A 10767 MiB DISK and could not publish it.
+// `artifacts-publish.yml` pushed successfully throughout because it is a top-level workflow, where
+// the file's own `permissions:` is the one that applies - which is exactly what made this hard to see.
+func TestEveryCallerGrantsPackagesWrite(t *testing.T) {
+	root := filepath.Join("..", "..", ".github", "workflows")
+	files, err := filepath.Glob(filepath.Join(root, "*.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked := 0
+	for _, name := range files {
+		body, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("cannot read %s: %v", name, err)
+		}
+		src := string(body)
+		// ONLY THE CALLERS: a file that invokes `./.github/workflows/stage.yml`.
+		if !strings.Contains(src, "uses: ./.github/workflows/stage.yml") {
+			continue
+		}
+		checked++
+		if !regexp.MustCompile(`(?m)^permissions:`).MatchString(src) {
+			t.Errorf("%s calls stage.yml and declares no `permissions:`, so the called job's "+
+				"`packages: write` is clamped to the repository default and every `easyvm push` in "+
+				"it is a 403", filepath.Base(name))
+			continue
+		}
+		if !regexp.MustCompile(`(?ms)^permissions:.*?packages:\s*write`).MatchString(src) {
+			t.Errorf("%s calls stage.yml but does not grant `packages: write`, so a finished disk "+
+				"cannot be published", filepath.Base(name))
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no caller of stage.yml was found, so this test would pass over anything")
+	}
+	t.Logf("checked %d caller(s)", checked)
+}

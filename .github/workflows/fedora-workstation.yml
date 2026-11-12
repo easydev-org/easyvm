@@ -31,6 +31,22 @@ concurrency:
   group: fedora-workstation
   cancel-in-progress: true
 
+# THE CALLED WORKFLOW CANNOT ASK FOR MORE THAN ITS CALLER GRANTS.
+#
+# `stage.yml` declares `packages: write`, and that is not enough on its own: a reusable workflow's
+# permissions are CLAMPED to the caller's. This file declared none, so the token it handed down had
+# the repository default - and the install leg's `easyvm push` was refused with
+#
+#	FAILED: the registry refused a pull,push token (HTTP 403):
+#	{"errors":[{"code":"DENIED","message":"requested access to the resource is denied"}]}
+#
+# measured on windows-install, which had already written a 10767 MiB disk and could not publish it.
+# `artifacts-publish.yml` worked the whole time because it is a TOP-LEVEL workflow and its own
+# `permissions:` block is the one that applies.
+permissions:
+  contents: read
+  packages: write
+
 jobs:
   stages:
     uses: ./.github/workflows/stage.yml
