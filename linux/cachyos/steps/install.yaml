@@ -149,6 +149,21 @@ steps:
   # TWO SEPARATE PRESSES, NOT A DOUBLE-CLICK: this desktop's launcher takes a press to focus
   # and a second to activate, and `repeat` is exactly that shape - the first at once, the
   # second after `settle`.
+  # THE DESKTOP HAS TO HAVE SETTLED BEFORE ITS ICON IS PRESSED.
+  #
+  # `desktop: linux` MEASURES A PANEL, AND A PANEL IS DRAWN BEFORE THE ICONS ARE. Measured on
+  # zorin-install, the same failure with a recording: its launcher was an EMPTY PANEL at 60s and drew
+  # its cards at 100s, so the press at 10s hit nothing.
+  #
+  # THE LAST RESORT IS A FIXED PAUSE, NOT A WORD - a live desktop's first frames have no words on them
+  # at all, and a gate that waited for one would hang on the run it was meant to protect. Fifteen
+  # seconds is longer than the measured 40-second gap between "panel up" and "cards drawn" ONLY when
+  # combined with the `settle:` on the press; what it really buys is that the compositor has finished
+  # the frame the icons land in.
+  - name: let the desktop settle
+    wait: 15
+    keep_alive: true
+
   - name: open the installer
     at: [960, 743]
     repeat: [2, 0.8]

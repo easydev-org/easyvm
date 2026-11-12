@@ -97,6 +97,24 @@ steps:
   # wallpaper, a theme - behaves exactly as the old fixed constant did rather than pressing nothing.
   #
   # `double: true` because a desktop icon opens on a double-click.
+  # THE DESKTOP, BEFORE ITS ICON IS PRESSED.
+  #
+  # THIS FILE HAD NO GATE HERE AND EVERY OTHER INSTALL DOES. `desktop:` is the linux/windows/macos
+  # measurement and there is no BSD branch for it - the family would be refused at dispatch - so the
+  # wait has to be spelled differently rather than omitted.
+  #
+  # `until_any:` ON THE INSTALLER'S OWN FIRST PANE, because `boot:` RETURNS WHEN QEMU IS RUNNING,
+  # which is several minutes before a live medium has finished unpacking itself. `at_button:` measures
+  # the frame it is given, so pressing too early does not press the wrong thing - it presses a frame
+  # that has no teal disc in it and falls back to the recorded row, which on an unfinished desktop is
+  # wallpaper.
+  #
+  # AND A FIXED WAIT AFTER IT, because the pane's words can arrive while the icon set is still being
+  # drawn. `keep_alive` is part of both: a live BSD session's screen saver races everything here.
+  - name: wait for the live desktop
+    wait: 45
+    keep_alive: true
+
   - name: install ghostbsd
     at_button: [30, 40, 160, 420]
     at_fallback: [88, 240]

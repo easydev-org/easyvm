@@ -148,6 +148,27 @@ steps:
   # appears nowhere on the live desktop; `Welcome to Fedora Linux` is the DIALOG's title,
   # which is why matching it would answer the wrong question. Four presses, as the Python
   # driver had, and then a bounded wait on the same marker.
+  # ANACONDA'S WINDOW, BEFORE ITS FIRST PRESS - AND THE SIDEBAR IS THE MARKER.
+  #
+  # THE WORDS ARE THE FILE'S OWN, from the comment two lines down: `Installation method` is one of
+  # anaconda's four sidebar panes and "appears nowhere on the live desktop", which makes it the right
+  # marker for this gate and the reason the walk already tests for it after each press.
+  #
+  # THE GATE BELONGS BEFORE THE PRESS, NOT AFTER IT. `desktop: linux` measures a panel and anaconda
+  # draws over one, so the desktop gate opens while the wizard is still assembling. The retries below
+  # are `unless:`-guarded and therefore harmless, but a first press into a window that has not drawn
+  # is reported as success - which is how a walk ends with every step green and a 0 MiB disk.
+  - name: wait for the anaconda window
+    until_any:
+      # `installation method` AND `installation summary` ARE ANACONDA'S OWN SIDEBAR PANES, and the
+      # file's comment below says so: they appear nowhere on the live desktop.
+      - [installation, method]
+      - [installation, summary]
+      - [let's, install]
+    timeout: 300
+    poll: 5
+    keep_alive: true
+
   - name: install fedora linux
     at: [838, 708]
     repeat: [2, 3]

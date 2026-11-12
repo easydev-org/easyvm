@@ -165,6 +165,21 @@ steps:
   #
   # for the rest of its life. A coordinate is only right for the screen it was measured on,
   # and the screen had changed between the two presses.
+  # THE CALAMARES WINDOW, BEFORE ITS FIRST PANE IS PRESSED.
+  #
+  # THE WORDS ARE THE FILE'S OWN, from the welcome/location gate below. `desktop: linux` measures a
+  # panel and Calamares draws over one, so the desktop gate can open before the wizard exists.
+  - name: wait for the calamares window
+    until_any:
+      # `install endeavouros` IS THE LAUNCHER'S OWN BUTTON, and Calamares's welcome pane offers
+      # `american english`. `welcome` and `install` alone are desktop words.
+      - [install, endeavouros]
+      - [erase, disk]
+      - [american, english]
+    timeout: 300
+    poll: 5
+    keep_alive: true
+
   - name: start the installer
     at: [735, 425]
     settle: 20

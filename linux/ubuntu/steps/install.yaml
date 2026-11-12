@@ -136,6 +136,33 @@ steps:
   #
   # `Next` is (1355,848) on every pane that has one, and the last pane's `Install` is at the
   # same place - measured on all thirteen.
+
+  # THE WIZARD, BEFORE ITS FIRST PANE IS PRESSED.
+  #
+  # `desktop: linux` MEASURES A PANEL AND SUBIQUITY HAS ONE - it draws its window over the live
+  # desktop - so the gate opens while the installer is still assembling itself. The first press then
+  # lands on whatever is under the pointer at the time, which is how a walk can report every step
+  # successful and leave a disk untouched.
+  #
+  # MEASURED ON zorin-install, THE SAME FAILURE WITH A RECORDING TO PROVE IT: its launcher showed an
+  # EMPTY PANEL at 60s and drew its cards at 100s, so the press at 10s hit nothing and the "installer"
+  # that followed was the launcher, not the wizard.
+  #
+  # `until_any:` BECAUSE A FIRST PANE HAS MORE THAN ONE NAME. `Welcome` and `Install` are what this
+  # wizard writes, and `Try or Install Ubuntu` is what its launcher/greeter writes on the runs where
+  # the desktop hands over to it - a gate that required one of them would hang on the other.
+  - name: wait for the installer window
+    until_any:
+      # `install ubuntu` IS THE GREETER'S BUTTON TEXT and `try or install ubuntu` is the same control
+      # written out. `welcome` and `install` alone are words a bare desktop can satisfy - measured on
+      # popos, where a wait on `language` passed over `Workspaces Applications ... 3:49 AM`.
+      - [install, ubuntu]
+      - [try, or, install, ubuntu]
+      - [erase, disk, and, install, ubuntu]
+    timeout: 300
+    poll: 5
+    keep_alive: true
+
   - name: welcome / language
     at: [1355, 848]
     settle: 12

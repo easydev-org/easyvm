@@ -125,6 +125,25 @@ steps:
   # =======================================================================================
   #
   # Two presses: the first is spent giving the window focus. `repeat` is that shape.
+  # THE CALAMARES WINDOW, BEFORE ITS FIRST PANE IS PRESSED.
+  #
+  # `desktop: linux` MEASURES A PANEL, AND CALAMARES DRAWS OVER ONE - so the gate opens while the
+  # wizard is still assembling itself and the first press lands on whatever is under the pointer.
+  #
+  # THE WORDS ARE THE FILE'S OWN, from the panes below: a Calamares welcome says `Welcome`, and its
+  # partition page says `Install`. Nothing here is invented, which is the point - a gate written from
+  # a guess is a gate that hangs on the run it was meant to protect.
+  - name: wait for the calamares window
+    until_any:
+      # `install kubuntu` IS ON THE LAUNCHER, and `erase disk` / `manual partitioning` are Calamares's
+      # own pane labels. A lone `welcome` or `install` is satisfied by a bare desktop.
+      - [install, kubuntu]
+      - [erase, disk]
+      - [manual, partitioning]
+    timeout: 300
+    poll: 5
+    keep_alive: true
+
   - name: install kubuntu on the live desktop
     at: [1326, 841]
     repeat: [2, 0.8]
