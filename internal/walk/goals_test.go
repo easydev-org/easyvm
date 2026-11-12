@@ -1193,3 +1193,67 @@ func TestAnInstallerWaitNamesAnInstallerWord(t *testing.T) {
 	}
 	t.Logf("checked %d installer wait(s)", checked)
 }
+
+// AN INSTALL LEG THAT LEAVES NO DISK HAS PRODUCED NOTHING FOR THE STAGE AFTER IT.
+//
+// EVERY install LEG IS DECLARED IN ITS WORKFLOW WITH `"out": "linux-<distro>.qcow2"`, and `--out` is
+// where a `compress:` WRITES - it is not a filename the engine invents. WITH NO `compress:` STEP IN THE
+// FILE, NOTHING WAS WRITTEN, and the measurement is unambiguous:
+//
+//	linux-zorin-install-disk        518 bytes
+//	linux-zorin-vm-disk      10,497,859,093 bytes
+//
+// THE FIRST IS AN EMPTY ZIP; THE SECOND IS A DISK. And `zorin-install` had just PASSED - every pane of
+// the installer driven correctly - and then produced nothing, so the leg proved the installer works and
+// left no artifact.
+//
+// A `compress:` NAMES `{{ out }}`, WHICH MEANS THE FILE MUST DECLARE THAT VARIABLE. `easyvm check`
+// refused all thirteen files when the step was first added, which is the vocabulary doing its job: an
+// undeclared variable is a path the engine cannot resolve.
+func TestAnInstallLegPublishesItsDisk(t *testing.T) {
+	root := filepath.Join("..", "..")
+	var files []string
+	for _, pat := range []string{
+		filepath.Join(root, "linux", "*", "steps", "install.yaml"),
+		filepath.Join(root, "bsd", "*", "steps", "install.yaml"),
+	} {
+		got, err := filepath.Glob(pat)
+		if err != nil {
+			t.Fatal(err)
+		}
+		files = append(files, got...)
+	}
+	if len(files) == 0 {
+		t.Skip("no install walkthroughs here")
+	}
+	var checked int
+	for _, path := range files {
+		rel, _ := filepath.Rel(root, path)
+		doc, err := Load(path, nil)
+		if err != nil {
+			continue
+		}
+		checked++
+		// A STEP THAT WRITES THE ARTIFACT.
+		publishes := false
+		for _, s := range doc.Steps {
+			if strings.Contains(s.Get("compress"), "out") {
+				publishes = true
+			}
+		}
+		if !publishes {
+			t.Errorf("%s has no `compress:` step, so `--out` writes nothing and the workflow's "+
+				"`\"out\"` file is never created - measured on zorin-install, whose `-disk` artifact "+
+				"was 518 bytes while its `-vm-disk` was 10 GiB", rel)
+		}
+		// AND THE VARIABLE IT NAMES IS DECLARED.
+		if _, ok := doc.Vars["out"]; !ok {
+			t.Errorf("%s has a `compress:` naming `{{ out }}` but declares no `out` variable, so the "+
+				"engine cannot resolve the path", rel)
+		}
+	}
+	if checked == 0 {
+		t.Skip("no install walkthroughs loaded")
+	}
+	t.Logf("checked %d install walkthrough(s)", checked)
+}

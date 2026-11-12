@@ -32,6 +32,15 @@ vars:
   password:
     from: args.password
     default: admin
+  # WHERE `compress:` WRITES, AND IT COMES FROM THE WORKFLOW'S `--out`.
+  #
+  # The workflow declares each install leg with `"out": "linux-<distro>.qcow2"` and passes it as
+  # `--out`; a `compress: "{{ out }}"` step names that same file. WITHOUT THE DECLARATION HERE the
+  # variable does not exist and `easyvm check` refuses the file - which is what happened when the step
+  # was first added, and is the vocabulary doing its job.
+  out:
+    from: args.out
+    default: out/distro.qcow2
 
 steps:
   # THE RECORDING IS PART OF THE VERDICT, NOT A CONVENIENCE.
@@ -273,6 +282,21 @@ steps:
   - name: the install runs, as measured
     wait: 2400
     keep_alive: true
+
+  # THE DISK IS THE ARTIFACT, AND WITHOUT THIS STEP THERE IS NONE.
+  #
+  # THE WORKFLOW ASKS FOR ONE: each install leg is declared with `"out": "linux-<distro>.qcow2"`, and
+  # `--out` is where a `compress:` WRITES - it is not a filename the engine invents. WITH NO
+  # `compress:` STEP NOTHING WAS WRITTEN, and the leg's `-disk` artifact was 518 bytes:
+  #
+  #	linux-zorin-install-disk   518 bytes
+  #	linux-zorin-vm-disk     10,497,859,093 bytes
+  #
+  # A PASSING INSTALL THAT LEAVES NO DISK is a leg that proves the installer works and produces nothing
+  # for the stage after it. `compress:` flattens the overlay's parent chain into one qcow2 with zstd, so
+  # the file it leaves is the install itself.
+  - name: publish the disk
+    compress: "{{ out }}"
 
   - name: stop recording
     record: false
