@@ -355,3 +355,54 @@ func TestThePublishStepRefusesAnEmptyQcow2(t *testing.T) {
 		t.Error("the publish step does not measure the output; `-s` only tells zero from non-zero")
 	}
 }
+
+// A CONTAINER JOB RUNS ITS STEPS WITH /bin/sh, WHICH IS dash - AND dash HAS NO `<<<`.
+//
+// MEASURED ON cachyos-install, WHICH HAD JUST PRODUCED A 6962 MiB DISK:
+//
+//	publishing .../linux-cachyos.qcow2: 6962 MiB
+//	credential: GITHUB_TOKEN is set (377 characters)
+//	....sh: 74: Syntax error: redirection unexpected
+//	##[error]Process completed with exit code 2.
+//
+// THE CREDENTIAL WAS THERE, THE DISK WAS THERE, and the shell refused the line before `oras` ran. A
+// bash here-string is invisible in review because it is valid in every shell a developer types into.
+func TestNoWorkflowUsesABashOnlyConstruct(t *testing.T) {
+	root := filepath.Join("..", "..", ".github", "workflows")
+	files, err := filepath.Glob(filepath.Join(root, "*.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// THE TWO THAT HAVE ALREADY COST A RUN. `<<<` is the here-string; `[[` is the doubled bracket
+	// test; `$SECONDS` is a bash variable dash leaves empty. Each was measured on a real leg.
+	banned := map[string]string{
+		"<<<":      "a bash here-string; use `printf '%s' \"$var\" | cmd --password-stdin`",
+		"[[":       "a bash test; use `[` and quote both sides",
+		"$SECONDS": "a bash variable that dash leaves empty, so a timeout compares against nothing",
+	}
+	checked := 0
+	for _, name := range files {
+		body, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("cannot read %s: %v", name, err)
+		}
+		for _, line := range strings.Split(string(body), "\n") {
+			trimmed := strings.TrimSpace(line)
+			// COMMENTS MAY NAME THEM - stage.yml explains this exact failure in prose.
+			if strings.HasPrefix(trimmed, "#") {
+				continue
+			}
+			checked++
+			for bad, why := range banned {
+				if strings.Contains(trimmed, bad) {
+					t.Errorf("%s uses %q, which is %s. A container job's steps run under dash, "+
+						"where the line is a syntax error rather than a command: %q",
+						filepath.Base(name), bad, why, trimmed)
+				}
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no workflow lines were checked")
+	}
+}

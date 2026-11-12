@@ -147,7 +147,20 @@ jobs:
           # reads; it has to be exchanged once, and without this every push is anonymous and is
           # answered `denied: requested access to the resource is denied` - measured on
           # iso-popos-desktop, whose 2.4 GiB download and sha256 BOTH succeeded first.
-          oras login ghcr.io -u "${{ github.actor }}" --password-stdin <<< "$GITHUB_TOKEN"
+          # `printf | oras login --password-stdin`, NOT `<<< "$GITHUB_TOKEN"`.
+          #
+          # `<<<` IS A BASH HERE-STRING AND THIS STEP RUNS UNDER /bin/sh (dash). Measured on
+          # cachyos-install, which had JUST PRODUCED A 6962 MiB DISK:
+          #
+          #	publishing .../linux-cachyos.qcow2: 6962 MiB
+          #	credential: GITHUB_TOKEN is set (377 characters)
+          #	....sh: 74: Syntax error: redirection unexpected
+          #	##[error]Process completed with exit code 2.
+          #
+          # - the credential was there, the disk was there, and the shell refused the line before
+          # oras ever ran. `printf '%s' | ... --password-stdin` is the portable spelling and is what
+          # this file already uses for other stdin.
+          printf '%s' "$GITHUB_TOKEN" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
           for tag in macos-recovery-sequoia; do
             echo "=== $tag"
             dest="$RUNNER_TEMP/$tag.dmg"
@@ -218,7 +231,20 @@ jobs:
 
           # THE LOGIN, ONCE, BEFORE ANY PUSH. See the note in the mirror step above: an unauthenticated
           # oras answers `denied` and the message names the package rather than the missing session.
-          oras login ghcr.io -u "${{ github.actor }}" --password-stdin <<< "$GITHUB_TOKEN"
+          # `printf | oras login --password-stdin`, NOT `<<< "$GITHUB_TOKEN"`.
+          #
+          # `<<<` IS A BASH HERE-STRING AND THIS STEP RUNS UNDER /bin/sh (dash). Measured on
+          # cachyos-install, which had JUST PRODUCED A 6962 MiB DISK:
+          #
+          #	publishing .../linux-cachyos.qcow2: 6962 MiB
+          #	credential: GITHUB_TOKEN is set (377 characters)
+          #	....sh: 74: Syntax error: redirection unexpected
+          #	##[error]Process completed with exit code 2.
+          #
+          # - the credential was there, the disk was there, and the shell refused the line before
+          # oras ever ran. `printf '%s' | ... --password-stdin` is the portable spelling and is what
+          # this file already uses for other stdin.
+          printf '%s' "$GITHUB_TOKEN" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
 
           echo "=== the catalogue ==="
           awk -F'\t' '{printf "  %-34s %-8s %s\n", $1, $2, ($4==""?"(unpinned - size floor only)":"sha256 "+substr($4,1,16))}' /tmp/catalogue.tsv

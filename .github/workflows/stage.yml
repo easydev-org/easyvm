@@ -463,7 +463,20 @@ jobs:
           # cannot push ~/.ssh/id_rsa to a public package, and turning them off to satisfy one of
           # them is the wrong trade. A bare name in its own directory satisfies the check instead.
           repo=$(printf '%s' "${{ inputs.disks_repository }}" | tr '[:upper:]' '[:lower:]')
-          oras login ghcr.io -u "${{ github.actor }}" --password-stdin <<< "$GITHUB_TOKEN"
+          # `printf | oras login --password-stdin`, NOT `<<< "$GITHUB_TOKEN"`.
+          #
+          # `<<<` IS A BASH HERE-STRING AND THIS STEP RUNS UNDER /bin/sh (dash). Measured on
+          # cachyos-install, which had JUST PRODUCED A 6962 MiB DISK:
+          #
+          #	publishing .../linux-cachyos.qcow2: 6962 MiB
+          #	credential: GITHUB_TOKEN is set (377 characters)
+          #	....sh: 74: Syntax error: redirection unexpected
+          #	##[error]Process completed with exit code 2.
+          #
+          # - the credential was there, the disk was there, and the shell refused the line before
+          # oras ever ran. `printf '%s' | ... --password-stdin` is the portable spelling and is what
+          # this file already uses for other stdin.
+          printf '%s' "$GITHUB_TOKEN" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
           ( cd "$(dirname "$out")" && \
             oras push "ghcr.io/${repo}:${tag}" \
               --artifact-type application/vnd.easydev.qcow2 \
