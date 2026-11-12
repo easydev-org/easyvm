@@ -67,3 +67,70 @@ func readFileString(name string) (string, error) {
 	b, err := os.ReadFile(name)
 	return string(b), err
 }
+
+// `pull` HAD NO COUNTERPART, AND THAT WAS A STRUCTURAL GAP RATHER THAN AN OMISSION.
+//
+// Every stage AFTER an install starts from a published disk: the workflow leg says
+// `"pull": "linux-<distro>-<stage>"` and `easyvm pull` fetches it. NOTHING EVER PUSHED. The install
+// legs declared `"out": "linux-<distro>.qcow2"` and produced it, and then the file travelled as a
+// 4-to-8 GiB GitHub artifact that nothing downstream read.
+//
+// MEASURED: five install legs sat in `upload-artifact` for an hour AFTER their walkthroughs had
+// finished - and a run whose install step list is
+//
+//	follow it, what it produced, stop the daemon, upload-artifact x3, ...
+//
+// is a run that has DONE ITS WORK and is paying to move a disk nobody will read.
+//
+// `Push` IS THE MIRROR OF `Pull`: one layer holding the disk, an empty config blob, and a manifest
+// naming both. The test asserts the shape rather than the network, because a unit test cannot reach a
+// registry - but the shape is what the protocol requires, and a typo in it fails on the first real
+// push with a message the test would have made unnecessary.
+func TestPushExistsAndAsksForWriteAccess(t *testing.T) {
+	body, err := os.ReadFile("push.go")
+	if err != nil {
+		t.Fatal("no push.go: `easyvm pull` has no counterpart, so nothing can publish a disk for the " +
+			"stage after it - which is why five install legs uploaded for an hour")
+	}
+	src := string(body)
+
+	// A PUSH NEEDS `pull,push` SCOPE; a pull's token is `pull` alone and is refused.
+	if !strings.Contains(src, `"pull,push"`) {
+		t.Fatal("`Push` does not ask for `pull,push` scope, so the registry refuses the upload with " +
+			"a `denied` that reads like a permissions problem on the package")
+	}
+	// AND THE THREE PIECES OF AN OCI MANIFEST.
+	for _, want := range []string{
+		"application/vnd.oci.image.manifest.v1+json",
+		"application/vnd.oci.image.config.v1+json",
+		"schemaVersion",
+	} {
+		if !strings.Contains(src, want) {
+			t.Fatalf("the manifest does not carry %q", want)
+		}
+	}
+	// AND AN EMPTY FILE IS REFUSED, because a stage that produced nothing must not publish it.
+	if !strings.Contains(src, "is empty; a stage that produced nothing must not publish it") {
+		t.Fatal("`Push` would publish an empty file, so a stage that produced nothing would " +
+			"overwrite a good disk with nothing")
+	}
+}
+
+// AND THE WORKFLOW CALLS IT.
+func TestTheWorkflowPublishesEachStagesDisk(t *testing.T) {
+	body, err := os.ReadFile("../../.github/workflows/stage.yml")
+	if err != nil {
+		t.Skipf("no stage.yml here (%v)", err)
+	}
+	src := string(body)
+	if !strings.Contains(src, "easyvm push --tag") {
+		t.Fatal("the workflow never runs `easyvm push`, so no stage's disk is published and every " +
+			"later stage starts from whatever `ssh` uploaded")
+	}
+	// IT MUST TOLERATE A MISSING FILE: an `ssh` leg's product is the disk it started from, and several
+	// stages write no disk at all.
+	if !strings.Contains(src, "no disk to publish at") {
+		t.Fatal("the publish step does not tolerate a stage that writes no disk, so every ssh leg " +
+			"would fail on a step about a file it was never meant to produce")
+	}
+}

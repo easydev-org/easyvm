@@ -81,6 +81,8 @@ func main() {
 		os.Exit(cmdVersions())
 	case "pull":
 		os.Exit(cmdPull(args))
+	case "push":
+		os.Exit(cmdPush(args))
 	case "serve":
 		os.Exit(cmdServe(args))
 	case "run":
@@ -561,4 +563,67 @@ func gatherVars(args []string) map[string]string {
 		out[kv[0]] = kv[1]
 	}
 	return out
+}
+
+// cmdPush publishes a disk so the stage after this one can pull it.
+//
+// IT IS THE COUNTERPART `pull` NEVER HAD, AND ITS ABSENCE WAS STRUCTURAL: every later stage starts
+// from a published disk, none was ever published, and an install leg's output travelled as a 4-to-8 GiB
+// GitHub artifact that nothing downstream read. Five legs sat uploading for an hour after their
+// walkthroughs had already finished.
+func cmdPush(args []string) int {
+	fs := flag.NewFlagSet("push", flag.ContinueOnError)
+	tag := fs.String("tag", "", "the tag to publish under, `repository:tag` or just `tag`")
+	file := fs.String("file", "", "the disk to publish")
+	registry := fs.String("registry", oci.DefaultRegistry, "the registry host")
+	repository := fs.String("repository", "", "owner/repo, lowercased; default is $GITHUB_REPOSITORY")
+	timeout := fs.Duration("timeout", 60*time.Minute, "how long the transfer may take")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *tag == "" && fs.NArg() > 0 {
+		*tag = fs.Arg(0)
+	}
+	if *tag == "" || *file == "" {
+		fmt.Fprintln(os.Stderr, "easyvm push: --tag and --file are required")
+		return 2
+	}
+
+	var art oci.Artifact
+	if strings.Contains(*tag, ":") || strings.Contains(*tag, "/") {
+		parsed, err := oci.TagFrom(*tag)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "FAILED: %v\n", err)
+			return 1
+		}
+		art = parsed
+	} else {
+		art = oci.Artifact{Tag: *tag}
+	}
+	if *registry != "" {
+		art.Registry = *registry
+	}
+	if *repository != "" {
+		art.Repository = *repository
+	} else if art.Repository == "" {
+		env := os.Getenv("GITHUB_REPOSITORY")
+		if env == "" {
+			fmt.Fprintln(os.Stderr, "easyvm push: --repository is required when GITHUB_REPOSITORY "+
+				"is not set")
+			return 2
+		}
+		art.Repository = strings.ToLower(env)
+	}
+	if art.Token == "" {
+		art.Token = os.Getenv("GITHUB_TOKEN")
+	}
+
+	ctx, cancel := oci.WithTimeout(*timeout)
+	defer cancel()
+	if err := oci.Push(ctx, art, *file, func(s string) { fmt.Println(s) }); err != nil {
+		fmt.Fprintf(os.Stderr, "FAILED: %v\n", err)
+		return 1
+	}
+	fmt.Printf("  %s\n", art.Tag)
+	return 0
 }

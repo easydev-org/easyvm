@@ -253,6 +253,31 @@ jobs:
           fi
           pgrep -a qemu-system-x86_64 || true
 
+      - name: publish the disk
+        # A LEG THAT PRODUCED A DISK PUBLISHES IT, AND THAT IS HOW THE NEXT STAGE GETS ITS INPUT.
+        #
+        # WITHOUT THIS, EVERY LATER STAGE STARTED FROM WHATEVER `ssh` HAD PUBLISHED and an install's
+        # output existed only as a 4-to-8 GiB artifact - which is why five legs sat uploading for an
+        # hour after their walkthroughs had finished, and why nothing downstream ever saw an
+        # installed disk.
+        #
+        # `if:` IS THE FILE, NOT THE LEG: an `install` declares `"out"` and a `vm-configure` does too,
+        # while an `ssh` leg's product is the disk it started from. A missing file is a warning rather
+        # than a failure, because the artifact upload behind this still carries the evidence.
+        if: always()
+        run: |
+          set -u
+          out="$GITHUB_WORKSPACE/work/${{ matrix.out }}"
+          if [ ! -s "$out" ]; then
+            echo "no disk to publish at $out (the stage may not write one)"
+            ls -l "$GITHUB_WORKSPACE/work/" || true
+            exit 0
+          fi
+          easyvm push --tag "${{ matrix.name }}" \
+                      --file "$out" \
+                      --repository "${{ inputs.disks_repository }}" \
+                      --timeout 40m || echo "  the push failed; the artifact below still has the disk"
+
       # THE RECORDING IS ITS OWN ARTIFACT, AND IT IS THE FIRST ONE TO OPEN AFTER A FAILURE.
       #
       # MEASURED: `linux-cachyos-vm` was ONE artifact of 7,362,380,205 bytes - the recording, the
