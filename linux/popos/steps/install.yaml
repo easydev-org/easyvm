@@ -151,6 +151,32 @@ steps:
   # which button it is - green for forward, salmon for `Erase and Install`, grey while disabled - and
   # the search accepts all three, because the first version accepted only green and grey and then
   # reported "NO FOOTER BUTTON" on the pane whose button was plainly on screen in salmon.
+  # THE INSTALLER WINDOW IS ITS OWN WAIT, BECAUSE THE DESKTOP IS NOT IT.
+  #
+  # MEASURED ON popos-install: the desktop gate PASSED - `a desktop is on screen (56s); drop=+36.6
+  # on a 1920x1080 frame` - and the very next step failed with
+  #
+  #	select a language: no control fill in [1240,755 1430,845], and no `at_fallback:` to use
+  #
+  # A PANEL IS UP AND THE INSTALLER HAS NOT DRAWN YET. pop-os-installer is a window that appears a
+  # few seconds after the session starts, and `at_button:` searches for a CONTROL FILL inside a
+  # measured rectangle - a fraction of a second too early and the rectangle holds wallpaper.
+  #
+  # THE REFERENCE IMPLEMENTATION HAS NO SUCH GATE and does not need one: its machine is started by
+  # an external driver that waits for the installer before the walk begins. This build starts its own
+  # machine, so the wait belongs in the file.
+  #
+  # `Full Name` IS THE INSTALLER'S OWN WORD, taken from the account pane this file already reads,
+  # so it is a fact about pop-os-installer rather than a word guessed to be on screen.
+  - name: wait for the installer window
+    until_any:
+      - [language]
+      - [welcome]
+      - ["full", "name"]
+    timeout: 300
+    poll: 3
+    keep_alive: true
+
   - name: select a language
     at_button: [1240, 755, 1430, 845]
     settle: 21
