@@ -38,8 +38,13 @@ const (
 type Driver struct {
 	file *walk.File
 	work string
-	port int
-	pass string
+	// guestOS is the family the machine was actually STARTED as, remembered at boot.
+	//
+	// IT IS NOT READ FROM THE FILE, because a sandbox runs several files against one machine and the
+	// file in hand may not be the one that booted it. What is true is what was passed to qemu.
+	guestOS string
+	port    int
+	pass    string
 
 	// novncPort is where the browser page listens; 0 disables it.
 	novncPort int
@@ -329,6 +334,7 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 	if err != nil {
 		return err
 	}
+	d.guestOS = spec.OS
 	// THE ACCELERATOR IS NAMED IN THE COMMAND LINE, AND QEMU IS THE AUTHORITY ON IT.
 	//
 	// `-accel kvm` IS IN THE ARGUMENTS BELOW, which makes qemu refuse to start rather than silently
@@ -846,6 +852,18 @@ func (m machineControl) Reboot() error {
 	d.mu.Unlock()
 	d.logf("  the machine was reset; the ssh connection was closed with it")
 	return nil
+}
+
+// OS is the family this driver was prepared for, so a `boot:` step can tell a no-op from a mistake.
+//
+// THE FILE'S OWN `os:` IS THE ANSWER, because the driver was built from that file. A second YAML
+// naming a different guest against this machine is a question with no good answer - one daemon holds
+// one machine - and saying so is better than letting a click land on the wrong screen.
+func (m machineControl) OS() string {
+	d := m.d
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.guestOS
 }
 
 func (m machineControl) IsRunning() bool {

@@ -74,6 +74,17 @@ type Daemon struct {
 	// walkthrough in progress, which ends by itself; a sandbox has no end except `destroy`.
 	sandbox      bool
 	sandboxClose func()
+	// machine is the driver this daemon HOLDS, and it outlives every walkthrough.
+	//
+	// THE DAEMON WAS ONE FILE PER MACHINE: `runWalkthrough` called `NewDriver` and deferred its
+	// closer, so each YAML got a fresh driver and therefore a fresh qemu. That is a bake.
+	//
+	// A SANDBOX IS THE OTHER WAY ROUND - THE MACHINE IS THE LONG-LIVED THING AND A YAML IS A SET OF
+	// ACTIONS ON IT. `init.yaml` installs, `dev.yaml` adds a toolchain, `test.yaml` runs the tests, and
+	// all three act on ONE machine that was booted once. So the driver is created on the first file
+	// that needs one and kept until `destroy`.
+	machine      run.Driver
+	machineClose func()
 }
 
 // New returns an idle daemon.

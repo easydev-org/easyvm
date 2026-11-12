@@ -105,3 +105,75 @@ func TestTheCLIOffersCreateAndDestroy(t *testing.T) {
 			"boot that has not happened yet")
 	}
 }
+
+// A YAML IS A SET OF ACTIONS ON A MACHINE, AND THE MACHINE OUTLIVES EVERY FILE.
+//
+// THE FIRST MODEL WAS ONE FILE PER MACHINE: `runWalkthrough` called `NewDriver` and deferred its
+// closer, so each YAML got a fresh qemu. That is a bake, and it is right for a CI leg.
+//
+// A SANDBOX IS THE OTHER WAY ROUND - `init.yaml` installs, `dev.yaml` adds a toolchain, `test.yaml`
+// runs the tests, ALL ON ONE MACHINE BOOTED ONCE. So the driver lives in `d.machine`, created on the
+// first file that needs one and closed by `destroy` (or by a bake's own ending).
+//
+// AND A `boot:` STEP AGAINST A RUNNING MACHINE IS A NO-OP, not an error: a later file says "this
+// machine must be running", and it is. The same rule as `mkdir -p`.
+func TestAMachineOutlivesTheFileThatBootedIt(t *testing.T) {
+	body, err := os.ReadFile("transport.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(body)
+	i := strings.Index(src, "func (d *Daemon) runWalkthroughFile(")
+	if i < 0 {
+		t.Fatal("no runWalkthroughFile - the file is not split from the driving, so a sandbox " +
+			"cannot hand over a narrowed file without a second copy of the machinery")
+	}
+	rest := src[i:]
+	if end := strings.Index(rest[1:], "\nfunc "); end > 0 {
+		rest = rest[:end+1]
+	}
+	code := stripGoComments(rest)
+
+	// THE DRIVER IS REUSED, NOT RECREATED PER FILE.
+	if !strings.Contains(code, "driver := d.machine") {
+		t.Fatal("`runWalkthroughFile` does not look for a machine the daemon already holds, so " +
+			"every YAML would boot its own qemu")
+	}
+	// AND A FRESH ONE IS STORED FOR THE NEXT FILE.
+	if !strings.Contains(code, "d.machine = fresh") {
+		t.Fatal("`runWalkthroughFile` does not keep the driver it created, so the next file would " +
+			"boot a second machine")
+	}
+	// AND WHETHER IT CLOSES DEPENDS ON THE MODE, NOT ON THE FILE.
+	if !strings.Contains(code, "keep := d.sandbox") {
+		t.Fatal("`runWalkthroughFile` does not consult `d.sandbox`, so either every bake would leak " +
+			"a guest or every sandbox would close after its first file")
+	}
+}
+
+// AND THE BOOT STEP DOES NOT REFUSE A RUNNING MACHINE.
+func TestBootIsANoOpOnARunningMachine(t *testing.T) {
+	body, err := os.ReadFile("../run/actions.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(body)
+	i := strings.Index(src, "func (e *Executor) doBoot(")
+	if i < 0 {
+		t.Fatal("no doBoot")
+	}
+	rest := src[i:]
+	if end := strings.Index(rest[1:], "\nfunc "); end > 0 {
+		rest = rest[:end+1]
+	}
+	code := stripGoComments(rest)
+	if !strings.Contains(code, "IsRunning()") {
+		t.Fatal("`doBoot` does not ask whether the machine is already up, so a second YAML's boot " +
+			"step would fail with \"a machine is already running\" - which is a bake's rule, not a " +
+			"sandbox's")
+	}
+	if !strings.Contains(code, "already running:") {
+		t.Fatal("`doBoot` does not log the no-op, so a reader cannot tell a skipped boot from an " +
+			"unnoticed one")
+	}
+}

@@ -148,14 +148,55 @@ func (d *Daemon) runWalkthrough(req Request, work string, done chan struct{}) {
 		fail("the walkthrough could not be loaded", err)
 		return
 	}
+	d.runWalkthroughFile(req, work, done, file)
+}
 
-	driver, closeDriver, err := NewDriver(file, work, req.BootDisk, file.SSHPort,
-		req.Password, req.NoVNCPort)
-	if err != nil {
-		fail("the machine could not be prepared", err)
-		return
+// runWalkthroughFile is the half that drives an ALREADY-LOADED file, so a sandbox can narrow one to
+// its boot steps and hand it over rather than keeping a second copy of this machinery.
+func (d *Daemon) runWalkthroughFile(req Request, work string, done chan struct{}, file *walk.File) {
+	fail := func(msg string, err error) {
+		d.mu.Lock()
+		d.st.Status = "failed"
+		d.st.Message = msg
+		if err != nil {
+			d.st.Error = err.Error()
+		}
+		d.ex = nil
+		d.mu.Unlock()
 	}
-	defer closeDriver()
+
+	// THE MACHINE IS THE LONG-LIVED THING; A YAML IS A SET OF ACTIONS ON IT.
+	//
+	// THIS USED TO BE `driver, closeDriver, err := NewDriver(...)` FOLLOWED BY `defer closeDriver()`:
+	// every walkthrough got a fresh driver and therefore a fresh qemu, and the machine died with the
+	// file. That is a bake, and it is right for one.
+	//
+	// A SANDBOX RUNS SEVERAL FILES AGAINST ONE MACHINE - `init.yaml` installs, `dev.yaml` adds a
+	// toolchain, `test.yaml` runs the tests - so the driver is created on the FIRST file that needs
+	// one and kept in `d.machine` until `destroy`. A later file finds it and reuses it; its `boot:`
+	// step is a no-op because the machine is already up.
+	//
+	// AND A FILE THAT CHANGES THE DISK IS REFUSED, because the machine has already read it: a second
+	// `disk:` on a running guest would be a file describing a machine that does not exist.
+	d.mu.Lock()
+	driver := d.machine
+	d.mu.Unlock()
+
+	if driver == nil {
+		fresh, closeFresh, err := NewDriver(file, work, req.BootDisk, file.SSHPort,
+			req.Password, req.NoVNCPort)
+		if err != nil {
+			fail("the machine could not be prepared", err)
+			return
+		}
+		driver = fresh
+		d.mu.Lock()
+		d.machine = fresh
+		d.machineClose = closeFresh
+		d.mu.Unlock()
+	} else {
+		fmt.Printf("[easyvm]   reusing the machine already running for %s\n", filepath.Base(req.File))
+	}
 
 	// THE HOOK IS HOW `stop` REACHES A RUN THAT IS MID-STEP. Without it, `stop` could only set a
 	// flag the executor never reads, and a run blocked in a 900-second ssh wait would ignore it.
@@ -188,7 +229,22 @@ func (d *Daemon) runWalkthrough(req Request, work string, done chan struct{}) {
 
 	res, runErr := ex.Run(file.Steps)
 
+	// A BAKE CLOSES ITS MACHINE; A SANDBOX DOES NOT, AND THE FILE SAYS WHICH IT IS.
+	//
+	// `run` IS UNCHANGED IN BEHAVIOUR: it closes the machine when the steps end, because that is what
+	// every CI leg needs and a machine that outlived its file would hold /dev/kvm. `create` sets
+	// `d.sandbox`, and a sandbox keeps the machine - which is the whole point of the mode.
+	//
+	// SO THE SAME `runWalkthrough` SERVES BOTH, and the only difference is whether the closer is
+	// called. That is the smallest change that makes "a YAML is a set of actions on a machine" true
+	// without making every bake leak a guest.
 	d.mu.Lock()
+	keep := d.sandbox
+	closeFn := d.machineClose
+	if !keep {
+		d.machine = nil
+		d.machineClose = nil
+	}
 	d.ex = nil
 	d.st.Answered = res.Answered
 	if runErr != nil {
@@ -204,6 +260,10 @@ func (d *Daemon) runWalkthrough(req Request, work string, done chan struct{}) {
 		d.st.Message = fmt.Sprintf("%d step(s) ran", len(res.Answered))
 	}
 	d.mu.Unlock()
+
+	if !keep && closeFn != nil {
+		closeFn()
+	}
 }
 
 // SocketDir is where a daemon for a walkthrough file would put its socket, for a client that was

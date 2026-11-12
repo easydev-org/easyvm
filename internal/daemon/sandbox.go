@@ -58,7 +58,7 @@ func (d *Daemon) startSandbox(req Request) Response {
 	d.done = done
 	d.mu.Unlock()
 
-	go d.bootSandbox(req, work, done)
+	go d.runBootOnly(req, work, done)
 
 	return Response{OK: true, State: ptr(d.snapshot())}
 }
@@ -173,22 +173,24 @@ func bootSteps(f *walk.File) []walk.Step {
 }
 
 // destroySandbox stops the machine a `create` started.
+//
+// IT IS THE ONLY ENDING A SANDBOX HAS, and it is the SAME CLOSER a bake uses - the difference is only
+// WHEN it is called. A bake calls it when its steps end; a sandbox calls it here.
 func (d *Daemon) destroySandbox() Response {
 	d.mu.Lock()
-	closeFn := d.sandboxClose
-	d.sandboxClose = nil
+	closeFn := d.machineClose
+	machine := d.machine
+	d.machineClose = nil
+	d.machine = nil
 	was := d.sandbox
 	d.sandbox = false
-	if closeFn == nil {
-		d.mu.Unlock()
-		if !was {
-			return Response{OK: false, Error: "no sandbox is running"}
-		}
-		return Response{OK: true}
-	}
 	d.mu.Unlock()
 
-	closeFn()
+	if closeFn != nil {
+		closeFn()
+	} else if machine == nil && !was {
+		return Response{OK: false, Error: "no sandbox is running"}
+	}
 
 	d.mu.Lock()
 	d.st.Status = "destroyed"
@@ -196,4 +198,57 @@ func (d *Daemon) destroySandbox() Response {
 	st := d.st
 	d.mu.Unlock()
 	return Response{OK: true, State: &st}
+}
+
+// runBootOnly starts the machine a file describes and STOPS THERE, leaving it up.
+//
+// IT IS `runWalkthrough` WITH A FILE OF JUST THE BOOT STEPS, which is the smallest thing that makes a
+// sandbox and a bake the same mechanism with different endings:
+//
+//	A BAKE      runs every step, and because `d.sandbox` is false the machine closes at the end.
+//	A SANDBOX   runs the boot steps and the machine stays, because `d.sandbox` is true.
+//
+// THE FLAG IS SET BEFORE THE RUN STARTS, not after, because `runWalkthrough` reads it when the steps
+// end - and a flag set afterwards would be a machine that closed on the way to being a sandbox.
+func (d *Daemon) runBootOnly(req Request, work string, done chan struct{}) {
+	overrides := map[string]string{
+		"args.out":  req.Out,
+		"args.work": work,
+	}
+	for k, v := range req.Vars {
+		if v != "" {
+			overrides["args."+k] = v
+		}
+	}
+	file, err := walk.Load(req.File, overrides)
+	if err != nil {
+		d.mu.Lock()
+		d.st.Status = "failed"
+		d.st.Message = "the walkthrough could not be loaded"
+		d.st.Error = err.Error()
+		d.mu.Unlock()
+		close(done)
+		return
+	}
+	boots := bootSteps(file)
+	if len(boots) == 0 {
+		d.mu.Lock()
+		d.st.Status = "failed"
+		d.st.Message = "nothing to boot"
+		d.st.Error = fmt.Sprintf("`%s` has no `boot:` step, so `create` has no machine to start",
+			req.File)
+		d.mu.Unlock()
+		close(done)
+		return
+	}
+
+	// THE SAME FILE, WITH ONLY ITS BOOT STEPS, so `runWalkthrough` needs no second code path.
+	narrowed := *file
+	narrowed.Steps = boots
+
+	d.mu.Lock()
+	d.sandbox = true
+	d.mu.Unlock()
+
+	d.runWalkthroughFile(req, work, done, &narrowed)
 }

@@ -21,6 +21,35 @@ func (e *Executor) doBoot(s walk.Step) error {
 	if m == nil {
 		return fail(s.Name, "this driver has no machine to start")
 	}
+
+	// A MACHINE THAT IS ALREADY RUNNING IS NOT AN ERROR, BECAUSE A YAML IS AN ACTION ON A MACHINE.
+	//
+	// THE FIRST MODEL WAS ONE FILE PER MACHINE: every walkthrough booted, did its steps and closed.
+	// A SANDBOX IS THE OTHER WAY ROUND - `init.yaml` installs, `dev.yaml` adds a toolchain, `test.yaml`
+	// runs the tests, ALL ON ONE MACHINE THAT WAS BOOTED ONCE.
+	//
+	// So a `boot:` step whose machine is already up is a NO-OP WITH A LOG LINE rather than a failure.
+	// It is the same rule as a `mkdir -p`: the step says "this machine must be running", and it is.
+	//
+	// THE `os:` STILL HAS TO MATCH, when the step names one. A file that says `os: windows` against a
+	// running Linux guest is a mistake, not a no-op, and it would otherwise be discovered by a click
+	// landing on the wrong screen.
+	if running, ok := m.(interface{ IsRunning() bool }); ok && running.IsRunning() {
+		want := s.Get("os")
+		if want == "" {
+			want = s.Get("family")
+		}
+		if want != "" {
+			if named, ok := m.(interface{ OS() string }); ok {
+				if have := named.OS(); have != "" && have != want {
+					return fail(s.Name, "the machine is already running %s, and this step asks "+
+						"for %s. One daemon holds one machine; `destroy` it to change the guest", have, want)
+				}
+			}
+		}
+		e.Driver.Log(fmt.Sprintf("  already running: %s", s.Name))
+		return nil
+	}
 	// `os:` REPLACED `family:`, and both are read so a file that has not been renamed still runs.
 	osName := s.Get("os")
 	if osName == "" {
