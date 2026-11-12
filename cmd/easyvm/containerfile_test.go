@@ -435,7 +435,7 @@ func TestTheVideoIsNotBundledWithTheDisk(t *testing.T) {
 		t.Fatal("no upload-artifact steps found; this test would pass on a workflow that uploads nothing")
 	}
 
-	var sawVideo, sawDisk bool
+	var sawVideo bool
 	for _, b := range blocks {
 		hasMP4 := strings.Contains(b, "*.mp4")
 		hasQcow := strings.Contains(b, "*.qcow2")
@@ -452,14 +452,22 @@ func TestTheVideoIsNotBundledWithTheDisk(t *testing.T) {
 					"for it after a failure should not have to guess which of three zips it is")
 			}
 		}
+		// A DISK IS NOT AN ARTIFACT AT ALL, AND THIS TEST USED TO REQUIRE ONE.
+		//
+		// The old assertion was `!sawDisk -> "a passing leg's disk is thrown away"`, and it was right
+		// for the build it described: nothing else carried the disk, so the artifact was the only
+		// copy. `easyvm push` changed that - the disk goes to ghcr, the next leg pulls it, and an
+		// upload here is a SECOND copy of a file nobody downloads.
+		//
+		// MEASURED: `windows-install` published `windows11` (10,786 MiB in ghcr) and then uploaded the
+		// same disk again as a 22,133,669,203-byte artifact. Every passing install leg pays that.
 		if hasQcow {
-			sawDisk = true
+			t.Errorf("an artifact carries `*.qcow2`. The disk is transport: `easyvm push` puts it in " +
+				"ghcr and `easyvm pull` is what the next leg runs. Uploading it as well is a second " +
+				"copy of 22 GiB for a file no post-mortem opens")
 		}
 	}
 	if !sawVideo {
 		t.Fatal("no artifact carries `*.mp4` at all, so a failing leg leaves no recording")
-	}
-	if !sawDisk {
-		t.Fatal("no artifact carries `*.qcow2`, so a passing leg's disk is thrown away")
 	}
 }

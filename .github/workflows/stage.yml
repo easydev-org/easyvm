@@ -422,11 +422,25 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: ${{ matrix.name }}-disk
-          path: |
-            work/*.qcow2
-          if-no-files-found: warn
-          retention-days: 7
+      # THE DISK IS NOT AN ARTIFACT. IT GOES TO ghcr AND NOWHERE ELSE.
+      #
+      # THIS UPLOAD WAS 22 GiB ON `windows-install` - the qcow2 of a whole Windows guest, zipped and
+      # pushed a second time, to storage that is not what a downstream stage reads and not what a
+      # post-mortem opens.
+      #
+      # THE THREE ARTIFACTS ABOVE EACH HAVE A READER:
+      #
+      #   <leg>-video   the recording          "what was on screen" - tens of megabytes
+      #   <leg>-logs    daemon.log, console.log  "what the guest said" - kilobytes
+      #   (nothing)     the qcow2              the disk is TRANSPORT, and its transport is `easyvm
+      #                                        push` -> `easyvm pull`, which is what the next stage
+      #                                        actually runs
+      #
+      # MEASURED: `windows-install` succeeded, published `windows11` (10,786 MiB in ghcr), and then
+      # spent SEVEN MINUTES re-uploading the same file as a 22,133,669,203-byte artifact. Every
+      # passing install leg would pay that, on every run, for a file nobody downloads: a leg that
+      # passes needs no post-mortem, and a leg that fails has no disk worth reading.
+      #
+      # A FAILING LEG'S DISK IS STILL RECOVERABLE from the work directory in the job log's own
+      # `what it produced` listing, and the two files that DO explain a failure - the recording and
+      # the guest's console - are already separate artifacts.
