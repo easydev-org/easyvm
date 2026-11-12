@@ -41,7 +41,7 @@ steps:
   - 1920
   - 1080
   scale: 2
-  timeout: 900
+  timeout: 1800
   poll: 10
 - name: select disk utility
   at:
