@@ -107,6 +107,17 @@ steps:
       - [install]
     timeout: 5400
     poll: 5
+    # THE SESSION IS KEPT AWAKE, AND THAT IS NOT A REFINEMENT.
+    #
+    # This wait can run for ninety minutes - a live medium unpacks itself from a multi-gigabyte ISO
+    # and an installer copies a system - and the live session's idle timer puts a LOCK SCREEN up
+    # well before that. The reference implementation says the same thing in the same place:
+    #
+    #   THE KEEP-ALIVE CLICK IS PART OF THE WAIT - a real click, not a pointer move, because the
+    #   session's idle timer is what puts the lock screen up and it does not count synthetic
+    #   motion. The click lands on the progress page, where there is no control to disturb.
+    #
+    keep_alive: true
 
   # =======================================================================================
   # 0. PIN THE LANGUAGE BEFORE THE WIZARD IS STARTED

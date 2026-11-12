@@ -855,6 +855,15 @@ func TestAnInstallerIsWaitedForTheWayItAppears(t *testing.T) {
 			t.Errorf("%s: %s has neither `desktop:` nor `until_any:`, so it is not a wait at all",
 				rel, wait.Name)
 		}
+		// AND THE SESSION IS KEPT AWAKE. This wait can run for ninety minutes, and a live session's
+		// idle timer puts a LOCK SCREEN up well before that - after which every word on the screen is
+		// the lock screen's and the wait can never succeed. The reference implementation makes the
+		// same point: "a real click, not a pointer move, because the session's idle timer is what
+		// puts the lock screen up and it does not count synthetic motion".
+		if !wait.Has("keep_alive") {
+			t.Errorf("%s: %s does not set `keep_alive: true`, and this wait runs long enough for "+
+				"the live session to lock its screen", rel, wait.Name)
+		}
 	}
 	if checked == 0 {
 		t.Skip("no install waits here")
