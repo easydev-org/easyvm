@@ -249,3 +249,57 @@ func fill(img *image.RGBA, r image.Rectangle, c color.RGBA) {
 		}
 	}
 }
+
+// CROP MUST NOT CARE WHICH DECODER PRODUCED THE FRAME.
+//
+// `image.Decode` RETURNS A DIFFERENT CONCRETE TYPE PER FORMAT. qemu's screendump is P6 PPM, which
+// this package decodes to `*image.RGBA`; the PNG that the lab tooling writes decodes to
+// `*image.NRGBA`. A hard type assertion on the pixel value therefore works on every frame a
+// walkthrough reads and PANICS on the frames a person looks at.
+//
+// MEASURED ON linux-ubuntu-install, WHICH HAD ALREADY PASSED EVERY PANE:
+//
+//	=== the installer finishes
+//	  waiting up to 1h30m0s for "installation complete" ...
+//	panic: interface conversion: color.Color is nrgb.Color, not color.RGBA
+//	goroutine 18: internal/screen.Crop(...)
+//
+// - a finished install reported as a failure, with a stack trace instead of a reason.
+func TestCropAcceptsEveryDecodedImageKind(t *testing.T) {
+	// THE SAME PICTURE, ENCODED BOTH WAYS A FRAME ARRIVES.
+	rgba := image.NewRGBA(image.Rect(0, 0, 40, 20))
+	for y := 0; y < 20; y++ {
+		for x := 0; x < 40; x++ {
+			rgba.SetRGBA(x, y, color.RGBA{R: uint8(x * 6), G: uint8(y * 12), B: 200, A: 255})
+		}
+	}
+	nrgba := image.NewNRGBA(rgba.Bounds())
+	for y := 0; y < 20; y++ {
+		for x := 0; x < 40; x++ {
+			nrgba.Set(x, y, rgba.At(x, y))
+		}
+	}
+
+	for name, img := range map[string]image.Image{
+		"*image.RGBA (a PPM screendump)": rgba,
+		"*image.NRGBA (a PNG or JPEG)":   nrgba,
+		"*image.Gray (a single-channel)": image.NewGray(rgba.Bounds()),
+	} {
+		// A PANIC HERE IS THE FAILURE, so it is caught rather than allowed to abort the test binary.
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Fatalf("Crop panicked on %s: %v. The pixel conversion has to work for any "+
+						"color.Color, not just the one qemu's own decoder produces", name, r)
+				}
+			}()
+			out, err := Crop(img, [4]int{2, 2, 20, 12}, 2)
+			if err != nil {
+				t.Fatalf("Crop on %s: %v", name, err)
+			}
+			if b := out.Bounds(); b.Dx() != 36 || b.Dy() != 20 {
+				t.Fatalf("Crop on %s produced %dx%d, want 36x20", name, b.Dx(), b.Dy())
+			}
+		}()
+	}
+}

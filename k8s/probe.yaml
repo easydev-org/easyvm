@@ -1,0 +1,29 @@
+name: probe - where is zorin's installer
+resolution:
+- 1920
+- 1080
+steps:
+- name: start recording
+  record: probe.mp4
+  poll: 3
+- name: boot the installer
+  boot: true
+  os: linux
+  iso: installer_iso
+  timeout: 1800
+- name: wait for the live desktop
+  desktop: linux
+  timeout: 5400
+  poll: 5
+  keep_alive: true
+- name: press super, for the application grid
+  key: meta_l
+  settle: 4
+- name: type install into the overview search
+  type: install
+  settle: 4
+- name: press enter
+  key: ret
+  settle: 12
+- name: stop recording
+  record: probe.mp4

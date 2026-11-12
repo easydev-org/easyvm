@@ -390,7 +390,23 @@ func Crop(img image.Image, rect [4]int, scale int) (image.Image, error) {
 		for x := 0; x < w; x++ {
 			// NEAREST NEIGHBOUR, because this is for OCR and an interpolated edge invents grey that
 			// tesseract then has to decide about.
-			out.SetRGBA(x, y, img.At(b.Min.X+x0+x/scale, b.Min.Y+y0+y/scale).(color.RGBA))
+			//
+			// `color.RGBAModel`, NOT A TYPE ASSERTION. The frames this crops come from two decoders -
+			// qemu's PPM, which is `*image.RGBA`, and the PNG that `qmpkey` and the recording write,
+			// which decodes to `*image.NRGBA`. A hard `.(color.RGBA)` therefore PANICS on the second
+			// kind, and it did, in the middle of a working ubuntu install:
+			//
+			//	panic: interface conversion: color.Color is nrgb.Color, not color.RGBA
+			//	goroutine 18: internal/screen.Crop(...)
+			//
+			// - which killed the walk AFTER every pane had passed and the installer had finished, so
+			// the log looked like an installer failure and was a colour model.
+			//
+			// The Model conversion is defined for ANY color.Color, so the decoder stops mattering.
+			r, g, bl, a := img.At(b.Min.X+x0+x/scale, b.Min.Y+y0+y/scale).RGBA()
+			out.SetRGBA(x, y, color.RGBA{
+				R: uint8(r >> 8), G: uint8(g >> 8), B: uint8(bl >> 8), A: uint8(a >> 8),
+			})
 		}
 	}
 	return out, nil
