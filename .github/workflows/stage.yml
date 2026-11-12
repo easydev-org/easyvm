@@ -363,6 +363,16 @@ jobs:
           # ssh leg pulled `linux-zorin`, so the two names never met and a fresh package could never
           # boot an installed disk. `publish` defaults to the job's own name for the legs that
           # continue themselves.
+          # A DIAGNOSTIC, NOT DECORATION. Whether the credential ARRIVED is the one fact this step
+          # cannot otherwise report: `easyvm push` treats an empty token as "ask anonymously", and
+          # GitHub answers that with `DENIED`, which reads like a permission problem on the package.
+          # The length is printed rather than the value, so a log never carries the secret.
+          if [ -n "${GITHUB_TOKEN:-}" ]; then
+            echo "  credential: GITHUB_TOKEN is set (${#GITHUB_TOKEN} characters)"
+          else
+            echo "::error::GITHUB_TOKEN is EMPTY in this step. The push below will ask the registry"
+            echo "::error::anonymously and be refused with DENIED, which is not a permission problem."
+          fi
           tag="${{ matrix.publish }}"
           if [ -z "$tag" ]; then tag="${{ matrix.name }}"; fi
           easyvm push --tag "$tag" \
