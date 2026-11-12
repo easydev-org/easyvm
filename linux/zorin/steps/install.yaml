@@ -234,6 +234,25 @@ steps:
   #
   # Measured: the radio is filled when the pane is first drawn, so the only click it needs is
   # `Install Now`, which puts up the confirmation.
+  # MEASURED FROM THIS STAGE'S OWN RECORDING, FRAME BY FRAME, AND IT IS WHY THE DISK STAYED 0 MiB:
+  #
+  #	100s   Keyboard layout, `Continue` at (1361,764)
+  #	180s   STILL Keyboard layout, and the keyboard TEST BOX now reads
+  #	       `}nn || qpabep [[rgyigy K` - which is this file's account-name typing arriving here
+  #	300s   Installation type, with `Write the changes to disks?` up and UNPRESSED
+  #
+  # THE WHOLE WALK WAS ONE PANE BEHIND. Every step's fixed `settle:` was shorter than the time the
+  # next pane needed, so each click landed on the pane BEFORE the one it was written for - and the
+  # wizard never reached "install", while every step still reported success.
+  #
+  # SO EACH PANE WAITS FOR ITSELF. The words are the pane's own heading, which no other pane uses.
+  - name: the keyboard pane is done
+    until_any:
+      - [installation, type]
+      - [updates, and, other, software]
+    timeout: 180
+    poll: 3
+
   - name: installation type - install now
     at: [1361, 764]
     settle: 18
@@ -245,12 +264,29 @@ steps:
   # A conditional that gates a click is the same mistake as a lookup that chooses one, and
   # this repository has paid for it four times. The click costs nothing when the dialog is
   # absent: the point is blank space on the pane underneath.
+  # AND THE CONFIRMATION WAITS FOR ITSELF TOO. The dialog is what writes the disk, and pressing it
+  # while it is still assembling is the same failure one pane later - measured at 300s in the same
+  # recording, where it was drawn and untouched.
+  - name: the disk warning is up
+    until_any:
+      - [write, the, changes, to, disks]
+      - [partition, tables]
+    timeout: 120
+    poll: 2
+
   - name: write the changes to disks
     at: [1293, 673]
     settle: 20
 
   # The time zone default is kept: on this cluster it is a US zone, and the requirement is a
   # disk that installs, not a particular region.
+  - name: the disk warning is answered
+    until_any:
+      - [where, are, you]
+      - [time, zone]
+    timeout: 180
+    poll: 3
+
   - name: where are you
     at: [1361, 764]
     settle: 18
@@ -264,6 +300,13 @@ steps:
   #     Pick a username:       (859, 477)
   #     Choose a password:     (873, 514)
   #     Confirm your password: (883, 550)
+  - name: the time zone pane is done
+    until_any:
+      - [who, are, you]
+      - [your, name]
+    timeout: 180
+    poll: 3
+
   - name: who are you - your name
     at: [975, 386]
     type: "{{ user }}"
