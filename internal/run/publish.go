@@ -35,6 +35,17 @@ func (e *Executor) pendingRecorder() *recorder {
 	return e.rec
 }
 
+// The recording's size, and FHD is the default because every guest here draws at 1920x1080.
+//
+// IT IS NOT A DOWNSCALE: a frame that is already 1920x1080 passes through unchanged, and the only
+// frames that are padded are the ones qemu drew smaller - the boot menu at 640x480. Without a fixed
+// size the encoder takes whatever the FIRST frame happens to be, which is how a 424-second recording
+// of a 1920x1080 desktop came out 640x480.
+const (
+	RecordWidth  = 1920
+	RecordHeight = 1080
+)
+
 // encode writes the frames as a video.
 //
 // IT REFUSES WITH A SENTENCE WHEN THERE IS NOTHING TO ENCODE. Returning silently is what made the
@@ -55,14 +66,75 @@ func (r *recorder) encode(video string, log func(string)) error {
 	if err := os.MkdirAll(filepath.Dir(video), 0o755); err != nil {
 		return err
 	}
-	// The frames are numbered by the sampler, so a glob plus a fixed rate is enough; `-framerate 1`
-	// matches the one-frame-per-second sampler rather than the step's own pace.
-	pattern := filepath.Join(filepath.Dir(frames[0]), "frame-*.ppm")
-	cmd := exec.Command("ffmpeg", "-y", "-loglevel", "error",
-		"-framerate", "1", "-pattern_type", "glob", "-i", pattern,
-		"-c:v", "libx264", "-pix_fmt", "yuv420p", video)
+
+	// THE FRAMES ARE RENUMBERED INTO A SCRATCH DIRECTORY AS ONE UNIFORM FORMAT, WHICH IS THE ONLY WAY
+	// THE ENCODER CAN BE TOLD WHICH FRAMES AND IN WHAT ORDER.
+	//
+	// MEASURED ON popos-install: a 424-SECOND RECORDING OF A 1920x1080 GUEST CAME OUT 640x480.
+	//
+	// `screendump` WRITES ONE DIRECTORY WITH ONE NUMBER SEQUENCE, shared by the sampler and by every
+	// `until:`/`desktop:`/`expect:` that reads the screen. THE FIRST FRAME OF THE RUN IS THE BOOT MENU,
+	// which qemu draws at 640x480 - and the encode used
+	//
+	//	-pattern_type glob -i frame-*.ppm
+	//
+	// which takes its size from the first file the glob returns. So a desktop at 1920x1080 was
+	// letterboxed into a boot menu's 640x480 for the whole video.
+	//
+	// THE REFERENCE IMPLEMENTATION SOLVED THIS AND ITS NOTE IS WHY: it stages every frame as a JPEG
+	// with a fresh `frame-%04d` number, then encodes the sequence. That fixes three things at once -
+	// only the sampler's frames are encoded, their order is the sampler's, and a mixed set (PPM from
+	// one step, JPEG from another) has one extension.
+	//
+	// AND IT RECORDS THE GLOB TRAP: `-pattern_type glob -i 'frame-*'` with no extension is rejected by
+	// ffmpeg's image2 demuxer, so the staged files are all one type and the input is a NUMBER SEQUENCE.
+	stage, err := os.MkdirTemp(filepath.Dir(video), "frames-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(stage)
+
+	n := 0
+	for _, src := range frames {
+		dst := filepath.Join(stage, fmt.Sprintf("frame-%04d.jpg", n))
+		// CONVERTED **AND SCALED TO THE GUEST'S OWN SCREEN**, because a mixed-size sequence is encoded
+		// at the FIRST frame's size whatever the later frames are.
+		//
+		// MEASURED, TWICE: a 640x480 first frame followed by 1920x1080 frames produced a 640x480 video
+		// BOTH with `-pattern_type glob` and with a numbered sequence. ffmpeg's image2 demuxer fixes
+		// the stream size when it reads the first file; the rest are then resized into it. So the
+		// encoder cannot be told "use the desktop's size" - the FRAMES must be made uniform first.
+		//
+		// THE BOOT MENU IS GENUINELY 640x480 and cannot be upscaled into detail it does not have, so
+		// those frames are letterboxed rather than stretched: `force_original_aspect_ratio=decrease`
+		// shrinks the frame to fit and `pad` centres it in the FHD frame. The result is honest - a
+		// small picture in a large frame - and the desktop frames that follow are native 1920x1080.
+		//
+		// `-q:v 4` IS THE REFERENCE IMPLEMENTATION'S NUMBER for the intermediate JPEG.
+		cmd := exec.Command("ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
+			"-i", src,
+			"-vf", fmt.Sprintf("scale=%d:%d:force_original_aspect_ratio=decrease,"+
+				"pad=%d:%d:(ow-iw)/2:(oh-ih)/2", RecordWidth, RecordHeight, RecordWidth, RecordHeight),
+			"-q:v", "4", dst)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			log(fmt.Sprintf("  recording: could not convert %s: %s", filepath.Base(src),
+				firstLineOf(string(out))))
+			continue
+		}
+		n++
+	}
+	if n == 0 {
+		return fmt.Errorf("no frame could be converted, so there is no video to write")
+	}
+
+	cmd := exec.Command("ffmpeg", "-hide_banner", "-loglevel", "warning", "-nostdin", "-y",
+		"-framerate", "1", "-start_number", "0",
+		"-i", filepath.Join(stage, "frame-%04d.jpg"),
+		"-c:v", "libx264", "-preset", "ultrafast",
+		"-pix_fmt", "yuv420p", "-movflags", "+faststart",
+		video)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("ffmpeg: %w (%s)", err, strings.TrimSpace(string(out)))
+		return fmt.Errorf("ffmpeg: %w (%s)", err, firstLineOf(string(out)))
 	}
 	log(fmt.Sprintf("  recording: %d frame(s) -> %s", len(frames), video))
 	return nil

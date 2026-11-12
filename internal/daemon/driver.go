@@ -190,6 +190,19 @@ func (d *Driver) sendStrokes(conn *qmp.Conn, strokes []keys.Stroke, perChar time
 	return nil
 }
 
+// The guest's screen, and the default is FHD because every coordinate in this repository was
+// measured on one.
+//
+// `-device VGA` IS THE ONLY FORM THAT TAKES `xres`/`yres`: `-vga std` cannot, and a guest given it
+// comes up at qemu's own 1280x800 - which put every click on a different screen and failed
+// `linux-nixos-ssh` with "`region_at` is [1920, 1080] but this frame is 1280x800".
+//
+// `vgamem_mb=32` IS NOT TUNING. The adapter's default is 8 MiB, and 1920x1080 at 32 bits per pixel
+// is 7.91 MiB BEFORE double buffering - so the default is just too small, the adapter cannot hold a
+// frame, and the symptom is a black screen from the first capture with no error at all. 32 MiB is
+// four frames of headroom.
+const DefaultVideoDevice = "VGA,xres=1920,yres=1080,vgamem_mb=32"
+
 // --- the guest ------------------------------------------------------------------------
 
 func (d *Driver) Guest() *guest.Client {
@@ -483,9 +496,7 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 	if boot.VGA(opts.VGA) == "none" {
 		args = append(args, "-vga", "none")
 	} else {
-		args = append(args,
-			"-device", "VGA,xres=1920,yres=1080,vgamem_mb=32",
-		)
+		args = append(args, "-device", DefaultVideoDevice)
 	}
 	args = append(args, boot.StorageArgs()...)
 	args = append(args, boot.SMCArgs("")...)
