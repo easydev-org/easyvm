@@ -215,10 +215,39 @@ func (d *Driver) mountOnce(client *guest.Client, family, dir string) error {
 	var cmd string
 	switch family {
 	case "windows":
-		// `net use` IS WINDOWS'S MOUNT. An empty password is spelled `""` because cmd's argument
-		// splitting would otherwise drop it, and Samba then answers NT_STATUS_LOGON_FAILURE, which
-		// reads as a wrong password rather than a missing argument.
-		cmd = `net use "%USERPROFILE%\shared" \\172.30.0.1\shared /user:guest "" /persistent:no`
+		// `New-SmbMapping`, NOT `net use`, BECAUSE AN EMPTY PASSWORD SHIFTS THE ARGUMENT LIST.
+		//
+		// MEASURED ON windows-vm-configure, STEP 13 OF 20, AND THE REFERENCE IMPLEMENTATION HAD ALREADY
+		// WRITTEN THIS DOWN:
+		//
+		//	net use \\172.30.0.1\shared "" /user:guest /persistent=no
+		//	The option /PERSISTENT=NO is unknown.
+		//
+		// `net use` TAKES THE PASSWORD AS A POSITIONAL ARGUMENT. The account has no password, so the
+		// argument is `""` - cmd drops it, EVERY ARGUMENT AFTER IT MOVES LEFT, and the switch that was
+		// meant to be `/persistent` is read as the password. cmd then answers with its help text:
+		//
+		//	The syntax of this command is:
+		//	NET USE
+		//	[devicename | *] [\\computername\sharename[\volume] [password | *]]
+		//
+		// A POWERSHELL CREDENTIAL IS AN OBJECT, so there is no list for anything to shift in:
+		//
+		//	New-SmbMapping -RemotePath \\server\share -UserName guest -Password '' -Persistent $false
+		//
+		// `-Password ''` IS AN EMPTY STRING THAT STAYS AN EMPTY STRING, and `null passwords = yes` on
+		// the Samba side accepts it - which is the pair the reference implementation settled on.
+		//
+		// `-Persistent $false` REPLACES `/persistent:no`: a mapping that outlives the run would make
+		// the next one fail with "already connected", and the share is per-run.
+		//
+		// AND `-ErrorAction Stop` MAKES A REFUSAL AN EXCEPTION, so the exit status is not 0 over a
+		// warning - the same reason `mountOnce` checks `res.Status` rather than trusting an empty error.
+		cmd = `powershell -NoProfile -ExecutionPolicy Bypass -Command "` +
+			`$m = Get-SmbMapping -RemotePath '\\172.30.0.1\shared' -ErrorAction SilentlyContinue; ` +
+			`if ($m) { Remove-SmbMapping -RemotePath '\\172.30.0.1\shared' -Force -ErrorAction SilentlyContinue | Out-Null }; ` +
+			`New-SmbMapping -RemotePath '\\172.30.0.1\shared' -UserName guest -Password '' -Persistent $false -ErrorAction Stop | Out-Null; ` +
+			`Write-Output 'SMB_MAPPED'"`
 	case "macos":
 		// `mount_smbfs`, NOT `mount -t cifs`: macOS has no cifs filesystem type.
 		//
@@ -306,7 +335,11 @@ func headTail(s string, head, tail int) []string {
 // tableCommand reports the system's own view of the mounts, as one command per platform.
 func tableCommand(family string) string {
 	if family == "windows" {
-		return "net use"
+		// `Get-SmbMapping` IS THE TABLE THE MOUNT ITSELF USES, so the check reads the same source the
+		// mount wrote to. `net use` lists its own mappings and would agree, but a check that asks a
+		// DIFFERENT subsystem than the one that mounted is a check that can disagree for a reason
+		// nobody can see.
+		return `powershell -NoProfile -Command "Get-SmbMapping | ForEach-Object { $_.RemotePath }"`
 	}
 	return "mount"
 }

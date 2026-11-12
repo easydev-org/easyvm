@@ -452,13 +452,32 @@ func TestTheShareMountSpeaksTheGuestSHostShell(t *testing.T) {
 		t.Fatal("`mountOnce` does not branch on the family, so a Windows guest is sent a POSIX command " +
 			"and answers `'cat' is not recognized as an internal or external command`")
 	}
-	if !strings.Contains(once, "net use") {
-		t.Fatal("the Windows branch does not use `net use`, which is how a Windows guest mounts a share")
+	// `New-SmbMapping`, NOT `net use`, AND THE REFERENCE IMPLEMENTATION HAD ALREADY WRITTEN DOWN WHY:
+	//
+	//	net use \\172.30.0.1\shared "" /user:guest /persistent=no
+	//	The option /PERSISTENT=NO is unknown.
+	//
+	// `net use` TAKES THE PASSWORD AS A POSITIONAL ARGUMENT. The account has no password, so the
+	// argument is `""`; cmd drops it, every argument after it moves left, and the switch meant to be
+	// `/persistent` is read as the password. MEASURED ON windows-vm-configure, 13 of 20, where cmd
+	// answered with its own help text.
+	if !strings.Contains(once, "New-SmbMapping") {
+		t.Fatal("the Windows branch does not use `New-SmbMapping`. `net use` takes the password " +
+			"positionally, so an empty one shifts the whole argument list and cmd answers with help " +
+			"text instead of mounting")
 	}
-	// THE EMPTY PASSWORD IS SPELLED, or cmd's splitting drops it and Samba answers
-	// NT_STATUS_LOGON_FAILURE - which reads as a wrong password rather than a missing argument.
-	if !strings.Contains(once, `/user:guest ""`) {
-		t.Fatal("the Windows mount does not pass an explicit empty password")
+	if strings.Contains(once, `net use`) {
+		t.Fatal("the Windows branch still uses `net use`, whose positional password cannot be empty")
+	}
+	// AND THE EMPTY PASSWORD IS AN EXPLICIT EMPTY STRING, which `New-SmbMapping` keeps as one.
+	if !strings.Contains(once, `-Password ''`) {
+		t.Fatal("the Windows mount does not pass `-Password ''`; the share account has no password " +
+			"and `null passwords = yes` is what accepts it")
+	}
+	// AND A REFUSAL IS AN EXCEPTION, not a warning the exit status never sees.
+	if !strings.Contains(once, "-ErrorAction Stop") {
+		t.Fatal("the Windows mount does not use `-ErrorAction Stop`, so a refusal would be a warning " +
+			"and the step would report success over an unmounted share")
 	}
 	// AND macOS HAS ITS OWN, because `mount -t cifs` DOES NOT EXIST THERE.
 	if !strings.Contains(once, `case "macos"`) {
