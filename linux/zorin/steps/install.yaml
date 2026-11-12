@@ -104,7 +104,7 @@ steps:
     - and
     - other
     - software
-  timeout: 180
+  timeout: 240
   poll: 3
 - name: installation type - install now
   at:
