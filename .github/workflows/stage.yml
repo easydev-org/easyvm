@@ -135,6 +135,22 @@ jobs:
         # starts from a published one, and `pull` is the tag - so a leg can be pointed at any disk this
         # repository has ever published.
         if: matrix.pull != ''
+        # THE TOKEN IS THE VARIABLE `easyvm pull` READS, AND IT IS NOT IN THE CONTAINER BY
+        # DEFAULT.
+        #
+        # `GITHUB_TOKEN` IS NOT AUTOMATICALLY EXPORTED INTO A CONTAINER JOB. It was used for the
+        # registry login of the container image itself - the only place this file mentioned it -
+        # while `easyvm` reads `os.Getenv("GITHUB_TOKEN")` to exchange for a registry session.
+        # WITH NONE SET, EVERY PULL AND EVERY PUSH ASKED ANONYMOUSLY and the registry answered
+        #
+        #	FAILED: the registry refused a pull,push token (HTTP 403): {"errors":[{"code":
+        #	"DENIED","message":"requested access to the resource is denied"}]}
+        #
+        # `artifacts-publish.yml` HAS ALWAYS SET THIS, which is why it could push while the stages
+        # could not. One workflow passing a variable and the other not does not show up in a diff
+        # of their `permissions:` blocks, and that is where this was looked for first.
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -u
           # A FALLBACK, BECAUSE THE LEGS RUN AT THE SAME TIME.
@@ -315,6 +331,16 @@ jobs:
         # while an `ssh` leg's product is the disk it started from. A missing file is a warning rather
         # than a failure, because the artifact upload behind this still carries the evidence.
         if: always()
+        # THE SAME VARIABLE, ON THE STEP THAT WRITES. `easyvm push` reads `GITHUB_TOKEN` from the
+        # environment to exchange for a `pull,push` registry session; with none set it asks
+        # anonymously and is answered
+        #
+        #	FAILED: the registry refused a pull,push token (HTTP 403): {"errors":[{"code":
+        #	"DENIED","message":"requested access to the resource is denied"}]}
+        #
+        # measured on windows-install, whose 10767 MiB disk was finished and unpublished.
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -u
           out="$GITHUB_WORKSPACE/work/${{ matrix.out }}"

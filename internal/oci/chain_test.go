@@ -275,3 +275,73 @@ func TestEveryCallerGrantsPackagesWrite(t *testing.T) {
 	}
 	t.Logf("checked %d caller(s)", checked)
 }
+
+// `GITHUB_TOKEN` IS NOT IN A CONTAINER JOB UNLESS THE STEP PASSES IT.
+//
+// This is the fourth cause found in the same symptom, and the only one that explains why one workflow
+// pushed and another did not with identical `permissions:` blocks.
+//
+//	artifacts-publish.yml   env: GITHUB_TOKEN: ${{ github.token }}   -> published 15 ISOs
+//	stage.yml               (nothing)                                -> 403 DENIED, every time
+//
+// `easyvm push` and `easyvm pull` read the credential from the environment and exchange it for a
+// registry session. An empty one is not an error the build can see - it is an ANONYMOUS request, and
+// GitHub's answer to an anonymous write is
+//
+//	{"errors":[{"code":"DENIED","message":"requested access to the resource is denied"}]}
+//
+// which reads exactly like the permission problem it is not. MEASURED ON windows-install, whose
+// 10767 MiB disk was finished, compressed, and could not be published.
+//
+// SO THE TWO STEPS THAT TALK TO THE REGISTRY MUST BOTH CARRY IT, and this test is what keeps a later
+// edit from dropping one of them.
+func TestTheStageStepsThatUseTheRegistryPassTheToken(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "stage.yml"))
+	if err != nil {
+		t.Skipf("no stage.yml here (%v)", err)
+	}
+	var doc struct {
+		Jobs map[string]struct {
+			Steps []struct {
+				Name string            `yaml:"name"`
+				Env  map[string]string `yaml:"env"`
+			} `yaml:"steps"`
+		} `yaml:"jobs"`
+	}
+	if err := yaml.Unmarshal(body, &doc); err != nil {
+		t.Fatalf("stage.yml does not parse: %v", err)
+	}
+	wanted := map[string]bool{"pull the input disk": false, "publish the disk": false}
+	for _, job := range doc.Jobs {
+		for _, st := range job.Steps {
+			if _, ok := wanted[st.Name]; !ok {
+				continue
+			}
+			wanted[st.Name] = true
+			tok, ok := st.Env["GITHUB_TOKEN"]
+			if !ok || !strings.Contains(tok, "github.token") {
+				t.Errorf("stage.yml: %q has no `GITHUB_TOKEN` in its `env`, so `easyvm` asks the "+
+					"registry anonymously and the answer to a write is 403 `DENIED` - which looks "+
+					"like a permissions bug and is a missing variable", st.Name)
+			}
+		}
+	}
+	for name, found := range wanted {
+		if !found {
+			t.Errorf("stage.yml has no step named %q, so this test is checking nothing", name)
+		}
+	}
+}
+
+// AND THE WORKFLOW THAT ALREADY WORKED STILL HAS TO.
+func TestThePublisherPassesTheTokenToo(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "artifacts-publish.yml"))
+	if err != nil {
+		t.Skipf("no artifacts-publish.yml here (%v)", err)
+	}
+	src := string(body)
+	if strings.Count(src, "GITHUB_TOKEN:") < 2 {
+		t.Fatal("artifacts-publish.yml no longer passes `GITHUB_TOKEN` to both its steps; it was " +
+			"the workflow that proved the variable is what the registry wants")
+	}
+}
