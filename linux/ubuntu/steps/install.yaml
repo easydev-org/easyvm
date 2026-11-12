@@ -305,16 +305,33 @@ steps:
   # write lock on it until the machine is stopped - so a `compress:` before a `shutdown:` cannot work
   # however good the install was.
   #
-  # `acpi`, NOT `ssh`: AN INSTALL LEG HAS NO ssh AT ALL - the guest it drives is an installer, and
-  # `require_ssh` never appears in this file. `shutdown: ssh` needs a connection and would fail here
-  # with "no connection, and there is none".
+  # `kill`, NOT `acpi`, AND THE MEASUREMENT IS WHY.
   #
-  # `acpi` IS THE POWER BUTTON, WHICH EVERY INSTALLER ANSWERS: it is a request the guest's own init
-  # handles, so the filesystem is unmounted and the disk is closed before the process exits - which is
-  # what makes the read below possible and the published disk clean.
+  # MEASURED ON zorin-install, WHICH PASSED ALL 21 STEPS AND THEN PRODUCED A 0 MiB DISK:
+  #
+  #	=== stop the machine
+  #	  stopping with method "acpi"
+  #	  pressing the power button
+  #	  the guest did not power off within 5m0s; killing it - the disk will need a journal replay
+  #	=== publish the disk
+  #	  compressing with zstd
+  #	  linux-zorin.qcow2: 0 MiB
+  #
+  # A LIVE INSTALLER DOES NOT ANSWER THE POWER BUTTON. `acpi` pressed it, the guest ignored it, the
+  # wait expired after five minutes, and the kill that followed raced `qemu-img convert` - which read
+  # a disk qemu was still releasing and wrote ZERO BYTES.
+  #
+  # `kill` IS NOT A COMPROMISE HERE, BECAUSE THE INSTALLER HAS ALREADY FINISHED: the step above waits
+  # for the install to complete, and what follows is a disk with a written system on it. The journal
+  # replay the kill costs is paid on the next boot, which is the stage after this one, and it is
+  # cheaper than five minutes of waiting for a button nothing presses.
+  #
+  # THE WAIT IS SHORTENED TOO: 120 seconds, because a kill does not need the five minutes a graceful
+  # request does - and the boot after this one replays the journal either way.
   - name: stop the machine
-    shutdown: acpi
-    timeout: 600
+    shutdown: kill
+    timeout: 120
+
   - name: publish the disk
     compress: "{{ out }}"
 

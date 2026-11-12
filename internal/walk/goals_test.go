@@ -1333,11 +1333,29 @@ func TestAnInstallStopsTheMachineBeforePublishingTheDisk(t *testing.T) {
 		if shutdownAt > compressAt {
 			t.Errorf("%s stops the machine AFTER compressing the disk, which is backwards", rel)
 		}
-		// AND IT IS `acpi`, BECAUSE THERE IS NO ssh ON AN INSTALL LEG.
+		// AND IT IS `kill`, WHICH IS THE ONLY METHOD A LIVE INSTALLER ANSWERS.
+		//
+		// MEASURED ON zorin-install, WHICH PASSED ALL 21 STEPS AND THEN PRODUCED A 0 MiB DISK:
+		//
+		//	stopping with method "acpi"
+		//	pressing the power button
+		//	the guest did not power off within 5m0s; killing it
+		//	compressing with zstd
+		//	linux-zorin.qcow2: 0 MiB
+		//
+		// A LIVE INSTALLER DOES NOT ANSWER THE POWER BUTTON. `acpi` waited the full five minutes and
+		// then killed anyway, and the kill raced `qemu-img convert` - which read a disk qemu was
+		// still releasing and wrote ZERO BYTES.
+		//
+		// `kill` IS NOT A COMPROMISE: THE INSTALLER HAS ALREADY FINISHED, because the step above waits
+		// for the install to complete. The journal replay it costs is paid by the next boot, which is
+		// the stage after this one.
 		shutdown := doc.Steps[shutdownAt].Get("shutdown")
-		if shutdown == "ssh" {
-			t.Errorf("%s uses `shutdown: ssh`, but an install leg has no ssh - the guest is an "+
-				"installer and `require_ssh` never appears in the file", rel)
+		if shutdown != "kill" {
+			t.Errorf("%s uses `shutdown: %s`. An install leg must use `kill`: there is no ssh to ask "+
+				"with, a live installer ignores ACPI, and waiting for a button nothing presses ends "+
+				"with the same kill five minutes later - after which `qemu-img convert` can read a "+
+				"disk qemu is still releasing", rel, shutdown)
 		}
 	}
 	if checked == 0 {
