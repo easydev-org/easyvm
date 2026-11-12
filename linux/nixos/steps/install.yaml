@@ -156,7 +156,6 @@ steps:
     at: [960, 640]
     repeat: [2, 3]
     settle: 8
-    optional: true
     expect_any:
       - [welcome]
       - [language]
@@ -319,7 +318,6 @@ steps:
   - name: choose gnome
     at: [1000, 400]
     settle: 4
-    optional: true
 
   - name: packagechooser
     at_bottom: [1327, 15]

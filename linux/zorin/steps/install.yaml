@@ -179,7 +179,6 @@ steps:
     at: [1223, 586]
     repeat: [2, 3]
     settle: 40
-    optional: true
 
   # NOW THE TERMINAL, WITH UBIQUITY ALREADY UP AND OWNING THE SCREEN.
   #
@@ -236,14 +235,14 @@ steps:
   # press that was meant for `Install Now` landed on this pane's Continue, the wizard advanced one
   # page, and every pane after it was clicked a page early. The 0 MiB disk is the end of that chain.
   #
-  # SO THE PANE IS CLICKED WHEN IT IS THERE. `optional: true` because the older images really do skip
-  # it, and its words are the heading the file now waits for.
+  # SO THE PANE IS CLICKED WHEN IT IS THERE, and the step is NOT `optional:` - a press that does not
+  # happen is a failure here, not a warning. The gate is `unless_any:` on `installation type`, so on
+  # an image that skips this pane the step is correctly skipped rather than silently mis-pressing.
   - name: updates and other software, when this build shows it
     unless_any:
       - [installation, type]
     at: [1361, 764]
     settle: 18
-    optional: true
 
   # =======================================================================================
   # 3. INSTALLATION TYPE. `Erase disk and install Zorin OS` IS ALREADY SELECTED.

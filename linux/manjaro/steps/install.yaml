@@ -181,7 +181,6 @@ steps:
     # A LOG LINE, NOT A GATE, AND `optional` IS WHAT MAKES IT ONE. The original driver
     # retried once and only failed if the wizard was still not up after that; an `expect_any`
     # that can fail the whole walk would lose that retry. See the next step.
-    optional: true
     expect_any:
       - [welcome]
       - [location]

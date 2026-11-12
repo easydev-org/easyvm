@@ -1,0 +1,79 @@
+# A POD THAT RUNS easyvm INTERACTIVELY, SO A WALK CAN BE WATCHED INSTEAD OF INFERRED.
+#
+# THE PROBLEM THIS SOLVES. Every fix in this repository has been argued from a RECORDING - a 1 fps mp4
+# that is only available AFTER the leg ends, from an artifact that must be downloaded and frames that
+# must be extracted. That is how the zorin one-pane-behind bug was found, and it took four rounds
+# because each round could only see the finished walk.
+#
+# THIS POD LETS THE SAME WALK BE RUN BY HAND: boot the ISO, take a frame after each action, compare it
+# with what the YAML expected, and only then write the fix. A frame costs a tenth of a second here.
+#
+# THE DEVICES ARE THE SAME THREE EVERY CI LEG GETS:
+#
+#	/dev/kvm        the accelerator - without it a Windows install takes a day, and macOS deadlocks
+#	/dev/net/tun    the tap the NIC is attached to
+#	NET_ADMIN       creating the tap, the bridge and the iptables rules
+#
+# THIS CLUSTER EXPOSES THEM AS `squat.ai/kvm` AND `squat.ai/tun`, which is why the pod asks for the
+# extended resources as well as the device nodes - a node advertises 30 of each.
+#
+# NO SLEEP, NO PORT-FORWARD, NO LONG-LIVED PROCESS IN THIS FILE: the pod runs `sleep infinity`, and
+# every actual command is a `kubectl exec` from the caller. That keeps the whole thing debuggable - a
+# crashed walk leaves the pod up so its work directory can be inspected.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: easyvm-lab
+  labels:
+    app: easyvm-lab
+spec:
+  restartPolicy: Never
+  terminationGracePeriodSeconds: 5
+  containers:
+    - name: easyvm
+      image: ghcr.io/easydev-org/easyvm:latest
+      # THE ENTRYPOINT IS OVERRIDDEN ON PURPOSE. The image's is `/usr/local/bin/easyvm`, which with no
+      # arguments prints usage and exits - a pod that ends before anyone can exec into it.
+      command: ["sleep", "infinity"]
+      securityContext:
+        capabilities:
+          add: ["NET_ADMIN"]
+      resources:
+        requests:
+          cpu: "4"
+          memory: 8Gi
+          squat.ai/kvm: "1"
+          squat.ai/tun: "1"
+        limits:
+          cpu: "8"
+          memory: 16Gi
+          squat.ai/kvm: "1"
+          squat.ai/tun: "1"
+      volumeMounts:
+        - name: work
+          mountPath: /work
+        - name: dev-kvm
+          mountPath: /dev/kvm
+        - name: dev-tun
+          mountPath: /dev/net/tun
+      env:
+        - name: GITHUB_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: easyvm-lab-token
+              key: token
+              optional: true
+  volumes:
+    - name: work
+      emptyDir:
+        sizeLimit: 200Gi
+    # HOST DEVICE NODES. The `squat.ai` resources schedule the pod onto a node that HAS them; these
+    # mounts make the nodes appear inside the container.
+    - name: dev-kvm
+      hostPath:
+        path: /dev/kvm
+        type: CharDevice
+    - name: dev-tun
+      hostPath:
+        path: /dev/net/tun
+        type: CharDevice

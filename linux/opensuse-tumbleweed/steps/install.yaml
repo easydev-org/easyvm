@@ -187,7 +187,6 @@ steps:
       - [language]
     double: [267, 34]
     settle: 45
-    optional: true
 
   # =======================================================================================
   # 2. WELCOME -> SYSTEM PROBING -> ONLINE REPOSITORIES

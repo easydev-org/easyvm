@@ -303,7 +303,6 @@ steps:
   - name: exit to the live desktop
     at: [963, 364]
     settle: 10
-    optional: true
 
   # =======================================================================================
   # STAGE TWO: GNOME'S FIRST-BOOT WIZARD, ON THE DISK THE INSTALLER WROTE
@@ -514,7 +513,6 @@ steps:
   - name: skip the tour
     at: [852, 756]
     settle: 12
-    optional: true
 
   # THE DISK IS THE ARTIFACT, AND WITHOUT THIS STEP THERE IS NONE.
   #

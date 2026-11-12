@@ -121,17 +121,14 @@ steps:
   - name: greeter - the password box
     at: [259, 568]
     settle: 2
-    optional: true
 
   - name: greeter - log in
     type: "{{ password }}"
     settle: 3
-    optional: true
 
   - name: greeter - submit
     key: ret
     settle: 12
-    optional: true
 
   # =======================================================================================
   # 1. THE INSTALL, TYPED INTO THIS SESSION'S OWN TERMINAL

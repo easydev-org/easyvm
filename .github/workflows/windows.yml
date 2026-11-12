@@ -59,7 +59,7 @@ jobs:
             "pull": "",
             "out": "windows11.qcow2",
             "publish": "windows11",
-            "timeout": 130
+            "timeout": 175
           },
           {
             "name": "windows-ssh",

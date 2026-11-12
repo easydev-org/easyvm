@@ -114,7 +114,6 @@ steps:
   - name: greeter - wake the screen
     key: esc
     settle: 5
-    optional: true
 
   # THE USER TILE FIRST: GDM ASKS WHO, THEN FOR THE PASSWORD.
   #
@@ -145,19 +144,16 @@ steps:
   - name: greeter - the user tile
     at: [960, 488]
     settle: 4
-    optional: true
 
   - name: greeter - the password box
     at: [936, 628]
     type: "{{ password }}"
     clear: false
     settle: 4
-    optional: true
 
   - name: greeter - submit
     key: ret
     settle: 12
-    optional: true
 
   # NIXOS' GNOME TAKES MINUTES TO DRAW ITS FIRST DESKTOP, AND THE WALK USED TO ASSUME TWELVE.
   #
@@ -205,14 +201,12 @@ steps:
   - name: skip the welcome dialog
     at: [858, 748]
     settle: 5
-    optional: true
 
   # AND IF THE CLICK MISSED (a dock without that dialog, a different layout), Escape is still
   # worth one press: it costs a second and it is what closes an unexpected GTK sheet.
   - name: clear anything left over
     key: esc
     settle: 2
-    optional: true
 
   # AND THEN THE DESKTOP IS CONFIRMED, NOT ASSUMED. `Dashboard` is the app-grid button's title
   # on this GNOME's dock, and it is drawn only once the shell is up. If it is not there, the
@@ -227,7 +221,6 @@ steps:
     timeout: 120
     poll: 10
     keep_alive: true
-    optional: true
 
   # =======================================================================================
   # 1. THE INSTALL, TYPED INTO THIS SESSION'S OWN TERMINAL

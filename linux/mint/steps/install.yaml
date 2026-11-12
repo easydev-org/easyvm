@@ -195,7 +195,6 @@ steps:
   - name: install linux mint
     double: [114, 47]
     settle: 25
-    optional: true
     expect_any:
       - [welcome]
       - [install]
