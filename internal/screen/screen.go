@@ -731,7 +731,7 @@ func IsLinuxDesktop(img image.Image) (bool, Stats) {
 		if margin < 0 {
 			margin = -margin
 		}
-		if margin > 18 && spread < 42 && bandSat > 0.05 {
+		if margin > 40 && spread < 42 && bandSat > 0.05 {
 			st.BrightnessDrop = margin
 			return true, st
 		}
