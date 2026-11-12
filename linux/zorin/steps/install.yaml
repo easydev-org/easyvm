@@ -146,6 +146,25 @@ steps:
   #
   # TWO PRESSES 3 SECONDS APART. One press only focuses the window; the pair, three seconds
   # apart, is what was measured to start Ubiquity.
+  # A GATE BEFORE THE PRESS, BECAUSE THE LAUNCHER DRAWS ITS CARDS LATE.
+  #
+  # MEASURED FROM THIS STAGE'S OWN RECORDING, frame by frame: the launcher window is up at 60s as an
+  # EMPTY PANEL, and its two cards (`Try Zorin OS`, `Install Zorin OS`) do not appear until about
+  # 100s. The old walk pressed (1223, 586) at 10s, into blank window, and never pressed the card that
+  # starts Ubiquity at all - so the "installer" that appeared at 300s was the launcher finally
+  # finishing, not Ubiquity, and every pane after it was a click on the launcher's own body.
+  #
+  # `until_any:` RATHER THAN `until:`, because the launcher's language is whatever the geolocation
+  # probe says - `Welcome` on one run, `Bienvenue` on the next, `Paigaldamine` on a third. Only the
+  # words that never move are named, and the card labels are among them.
+  - name: wait for the launcher's cards
+    until_any:
+      - [install, zorin]
+      - [try, zorin]
+      - [installer, zorin]
+    timeout: 300
+    poll: 5
+
   - name: install zorin os
     at: [1223, 586]
     repeat: [2, 3]

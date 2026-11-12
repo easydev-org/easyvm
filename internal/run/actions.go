@@ -430,6 +430,28 @@ func (e *Executor) doDesktop(s walk.Step) error {
 			want := resolutionOf(e.File)
 			w, h := f.Size()
 			if w > 0 && (w != want[0] || h != want[1]) {
+				// A GUEST THAT NEVER SWITCHES IS NOT A GUEST TO WAIT FOR FOREVER, and the first
+				// version of this check did exactly that. Measured on the images themselves:
+				//
+				//	opensuse-tumbleweed-install   a desktop ... on a 1920x1080 frame   (46s)
+				//	zorin-install                 a desktop ... on a  800x600 frame   (10s)
+				//
+				// SAME qemu ARGUMENTS, DIFFERENT ANSWER, because `-device VGA,xres=,yres=` is what the
+				// ADAPTER offers and the guest's own session decides. A distribution whose live session
+				// has no mode for it stays where it started, and no amount of waiting changes that.
+				//
+				// SO THE CHECK IS A DEADLINE RATHER THAN A LOOP. A guest that is going to switch does it
+				// while the desktop is still drawing - tens of seconds - and one that has not by now is
+				// not going to. Waiting the whole desktop timeout would turn a mis-sized guest into a
+				// ninety-minute stage, which is strictly worse than the 0 MiB disk it replaces.
+				if time.Since(start) > resSwitchBudget {
+					e.Driver.Log(fmt.Sprintf("  a desktop is on screen at %dx%d after %s, and this "+
+						"file's coordinates were measured at %dx%d; this guest is not switching, so "+
+						"every click in it will land somewhere else - continuing rather than waiting "+
+						"for a mode this session does not have",
+						w, h, time.Since(start).Round(time.Second), want[0], want[1]))
+					return nil
+				}
 				e.Driver.Log(fmt.Sprintf("  a desktop is on screen at %dx%d, and this file's "+
 					"coordinates were measured at %dx%d; waiting for the guest to switch modes",
 					w, h, want[0], want[1]))
@@ -1139,6 +1161,15 @@ func (e *Executor) doSnapshot(s walk.Step) error {
 	}
 	return nil
 }
+
+// resSwitchBudget is how long a desktop at the wrong size is given to switch to the right one.
+//
+// IT IS NOT THE `timeout:` OF THE STEP, DELIBERATELY. The step's timeout is how long the guest may
+// take to draw a desktop AT ALL - ninety minutes for a live medium that unpacks itself from a
+// multi-gigabyte ISO. The mode switch happens once the panel is up, and a session that has drawn its
+// panel and stayed at 800x600 has no other mode to offer. Two minutes is generous for the ones that
+// do switch and bounded for the ones that never will.
+const resSwitchBudget = 2 * time.Minute
 
 // resolutionOf is the guest screen size a file's coordinates were measured at.
 //
