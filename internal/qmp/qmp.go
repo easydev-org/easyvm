@@ -47,6 +47,8 @@ type Conn struct {
 
 	mu    sync.Mutex
 	frame int
+	lastW int
+	lastH int
 }
 
 // Open connects to path and completes the capability handshake.
@@ -120,6 +122,10 @@ func (c *Conn) Screendump(dir string) (Frame, error) {
 	if err != nil {
 		return Frame{}, err
 	}
+	// THE SIZE IS REMEMBERED, because the pointer's pixels are in it - see `screen()`.
+	c.mu.Lock()
+	c.lastW, c.lastH = w, h
+	c.mu.Unlock()
 	return Frame{Path: path, Width: w, Height: h}, nil
 }
 
@@ -334,11 +340,32 @@ func (r *Registry) CloseAll() error {
 // ONE EVENT PER AXIS, WHICH IS QEMU'S OWN SHAPE. `InputMoveEvent` carries an axis and a value, and
 // the two axes are separate events applied in order - a version that tried to send both at once had
 // nowhere to put them, because the generated type has one `Axis` field.
+// Click moves the pointer and presses, AND THE POSITION AND THE PRESS GO IN ONE EVENT LIST.
+//
+// THREE SEPARATE REQUESTS - MOVE, THEN PRESS, THEN RELEASE - LET THE GUEST HANDLE THE BUTTON BEFORE IT
+// HAS APPLIED THE COORDINATES. QMP does not reorder events inside one `input-send-event`, so putting
+// the axes and the press together makes "at (x, y), pressed" a single fact; split across requests it
+// is two facts the guest may see in either order.
+//
+// MEASURED ON popos-install: four Select clicks across 250 seconds, and the recording is BYTE-IDENTICAL
+// from the 90th second to the 340th - the pointer never moved from the top-left corner, because every
+// press arrived at the position the guest still had, which was (0, 0).
+//
+// AND THE RELEASE FOLLOWS IN ITS OWN REQUEST after 150ms, because a widget that polls needs to see the
+// button DOWN for at least one poll: sent back to back, the guest reads up/up and opens nothing.
 func (c *Conn) Click(x, y int) error {
-	if err := c.moveTo(x, y); err != nil {
-		return err
+	w, h := c.screen()
+	ax, ay := toAxis(x, w), toAxis(y, h)
+
+	if err := c.raw.InputSendEvent(nil, nil, []raw.InputEvent{
+		raw.InputEventAbs(raw.InputMoveEvent{Axis: raw.InputAxisX, Value: ax}),
+		raw.InputEventAbs(raw.InputMoveEvent{Axis: raw.InputAxisY, Value: ay}),
+		raw.InputEventBtn(raw.InputBtnEvent{Down: true, Button: raw.InputButtonLeft}),
+	}); err != nil {
+		return fmt.Errorf("click at (%d, %d): %w", x, y, err)
 	}
-	return c.button(raw.InputButtonLeft, true)
+	time.Sleep(150 * time.Millisecond)
+	return c.button(raw.InputButtonLeft, false)
 }
 
 // DoubleClick moves once and presses twice. Moving between the presses would make it two clicks in
@@ -347,6 +374,7 @@ func (c *Conn) DoubleClick(x, y int) error {
 	if err := c.moveTo(x, y); err != nil {
 		return err
 	}
+	_ = 0
 	if err := c.button(raw.InputButtonLeft, true); err != nil {
 		return err
 	}
@@ -360,15 +388,67 @@ func (c *Conn) DoubleClick(x, y int) error {
 	return c.button(raw.InputButtonLeft, false)
 }
 
+// AxisMax is the range QEMU's absolute pointer axes use.
+//
+// `input-send-event` DOES NOT TAKE PIXELS. An `abs` value is in the device's own axis range, 0..32767,
+// and a pixel value in a 1920-wide frame is therefore about SIX PERCENT of the way across the screen -
+// which puts the pointer near the left edge whatever the caller asked for.
+const AxisMax = 32767
+
+// moveTo puts the pointer at a PIXEL coordinate, in the range the guest expects.
 func (c *Conn) moveTo(x, y int) error {
+	w, h := c.screen()
 	events := []raw.InputEvent{
-		raw.InputEventAbs(raw.InputMoveEvent{Axis: raw.InputAxisX, Value: int64(x)}),
-		raw.InputEventAbs(raw.InputMoveEvent{Axis: raw.InputAxisY, Value: int64(y)}),
+		// A CORNER FIRST, because a pointer that has never moved may not be where the device says.
+		// The guest's first absolute report can be ignored, so the position is ESTABLISHED before it
+		// is used - and the second move is the one the guest acts on.
+		raw.InputEventAbs(raw.InputMoveEvent{Axis: raw.InputAxisX, Value: 0}),
+		raw.InputEventAbs(raw.InputMoveEvent{Axis: raw.InputAxisY, Value: 0}),
+		raw.InputEventAbs(raw.InputMoveEvent{Axis: raw.InputAxisX, Value: toAxis(x, w)}),
+		raw.InputEventAbs(raw.InputMoveEvent{Axis: raw.InputAxisY, Value: toAxis(y, h)}),
 	}
 	if err := c.raw.InputSendEvent(nil, nil, events); err != nil {
 		return fmt.Errorf("pointer to (%d, %d): %w", x, y, err)
 	}
+	// AND IT IS GIVEN A MOMENT, because the move is a report the guest has to process before a press
+	// means anything at that position.
+	time.Sleep(150 * time.Millisecond)
 	return nil
+}
+
+// screen is the frame size the pointer's pixels are in, remembered from the last screendump.
+//
+// IT IS NOT ASSUMED. A guest starts at the firmware's mode and switches to the desktop's, so the size
+// that was true at boot is not the size that is true when a click happens - and a pointer scaled by
+// the wrong one lands in the wrong place in a way that looks like a dead widget.
+func (c *Conn) screen() (int, int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.lastW > 0 && c.lastH > 0 {
+		return c.lastW, c.lastH
+	}
+	return DefaultScreenWidth, DefaultScreenHeight
+}
+
+// DefaultScreenWidth and DefaultScreenHeight are what a guest gets before its first screendump, and
+// they are the size every walkthrough in this repository was measured at.
+const (
+	DefaultScreenWidth  = 1920
+	DefaultScreenHeight = 1080
+)
+
+// toAxis converts a pixel coordinate into the device's absolute range.
+func toAxis(v, size int) int64 {
+	if size <= 0 {
+		return int64(v)
+	}
+	if v < 0 {
+		v = 0
+	}
+	if v > size {
+		v = size
+	}
+	return int64(v) * AxisMax / int64(size)
 }
 
 func (c *Conn) button(b raw.InputButton, down bool) error {

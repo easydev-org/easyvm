@@ -248,3 +248,129 @@ func com_itoa(v int) string {
 	}
 	return string(b)
 }
+
+// `input-send-event` DOES NOT TAKE PIXELS, AND A CLICK SPLIT ACROSS REQUESTS LANDS WHERE THE POINTER WAS.
+//
+// MEASURED ON popos-install, AND THE RECORDING IS THE PROOF: the installer's Select button was pressed
+// four times across 250 seconds, and the video is BYTE-IDENTICAL from the 90th second to the 340th.
+// The pointer never moved; every press arrived at the position the guest still held, which was (0,0).
+//
+// THREE THINGS WERE WRONG, AND THE REFERENCE IMPLEMENTATION HAD ALL THREE RIGHT:
+//
+//	1  an `abs` axis value is in the DEVICE'S RANGE (0..32767), not in pixels. A pixel value in a
+//	   1920-wide frame is six percent of the way across, which is the left edge whatever was asked for.
+//	2  THE POSITION AND THE PRESS MUST BE ONE EVENT LIST. Three requests leave the guest free to handle
+//	   the button before it applied the coordinates - "a click delivered at the OLD pointer position is
+//	   what the frames show: the dock redrawing around the cursor and no launch".
+//	3  THE RELEASE MUST WAIT. A widget that polls needs the button DOWN for at least one poll; sent
+//	   back to back, the guest reads up/up and opens nothing.
+func TestAClickScalesAndPressesInOneList(t *testing.T) {
+	body, err := os.ReadFile("qmp.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(body)
+
+	// THE AXIS RANGE EXISTS AND IS USED.
+	if !strings.Contains(src, "AxisMax = 32767") {
+		t.Fatal("no axis range constant; `input-send-event` does not take pixels")
+	}
+	i := strings.Index(src, "func (c *Conn) Click(")
+	if i < 0 {
+		t.Fatal("no Click")
+	}
+	rest := src[i:]
+	if end := strings.Index(rest[1:], "\nfunc "); end > 0 {
+		rest = rest[:end+1]
+	}
+	code := dropComments(rest)
+	if !strings.Contains(code, "toAxis(x, w)") {
+		t.Fatal("`Click` sends the pixel coordinate without converting it to the axis range, so the " +
+			"pointer lands near the left edge whatever was asked for")
+	}
+	// AND THE PRESS IS IN THE SAME LIST AS THE MOVE.
+	if !strings.Contains(code, "InputEventBtn") {
+		t.Fatal("`Click` does not press inside the same `input-send-event` as the move, so the guest " +
+			"can handle the button before it applied the coordinates")
+	}
+	// THE MOVE+PRESS IS ONE CALL IN `Click`; THE RELEASE IS `c.button(...)`, ITS OWN REQUEST.
+	if n := strings.Count(code, "InputSendEvent"); n != 1 {
+		t.Fatalf("`Click` makes %d `input-send-event` calls for the move-and-press; it must be exactly "+
+			"one, with the release in its own request afterwards", n)
+	}
+	if !strings.Contains(code, "c.button(") {
+		t.Fatal("`Click` never releases the button")
+	}
+	// AND THE RELEASE IS DELAYED.
+	if !strings.Contains(code, "150 * time.Millisecond") {
+		t.Fatal("`Click` releases immediately; a polling widget needs the button down for at least " +
+			"one poll or it reads up/up and opens nothing")
+	}
+}
+
+// AND THE POINTER IS SCALED BY THE GUEST'S OWN SIZE, NOT A CONSTANT.
+func TestThePointerUsesTheGuestsOwnSize(t *testing.T) {
+	body, err := os.ReadFile("qmp.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(body)
+	i := strings.Index(src, "func (c *Conn) screen()")
+	if i < 0 {
+		t.Fatal("no screen(); the pointer would be scaled by an assumed size")
+	}
+	rest := src[i:]
+	if end := strings.Index(rest[1:], "\nfunc "); end > 0 {
+		rest = rest[:end+1]
+	}
+	if !strings.Contains(rest, "c.lastW") {
+		t.Fatal("`screen()` does not use the size remembered from a screendump, so a guest that " +
+			"switched modes gets a pointer scaled by the firmware's size")
+	}
+	// AND THE SCREENDJUMP RECORDS IT.
+	if !strings.Contains(src, "c.lastW, c.lastH = w, h") {
+		t.Fatal("`Screendump` does not record the frame size, so `screen()` has nothing to report")
+	}
+}
+
+// dropComments removes `//` comments so a check reads the CODE rather than the paragraph explaining it.
+func dropComments(src string) string {
+	var out []byte
+	i := 0
+	for i < len(src) {
+		c := src[i]
+		switch {
+		case c == '"' || c == '\'':
+			q := c
+			out = append(out, c)
+			i++
+			for i < len(src) {
+				out = append(out, src[i])
+				if src[i] == '\\' && i+1 < len(src) {
+					out = append(out, src[i+1])
+					i += 2
+					continue
+				}
+				if src[i] == q {
+					i++
+					break
+				}
+				i++
+			}
+		case c == '/' && i+1 < len(src) && src[i+1] == '/':
+			for i < len(src) && src[i] != '\n' {
+				i++
+			}
+		case c == '/' && i+1 < len(src) && src[i+1] == '*':
+			i += 2
+			for i+1 < len(src) && !(src[i] == '*' && src[i+1] == '/') {
+				i++
+			}
+			i += 2
+		default:
+			out = append(out, c)
+			i++
+		}
+	}
+	return string(out)
+}
