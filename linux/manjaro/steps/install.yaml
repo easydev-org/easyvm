@@ -86,11 +86,35 @@ steps:
   # `desktop: linux` is a measurement of the panel a booted session draws, which is the honest gate
   # for every live installer here. The `timeout` is generous because unpacking a 4 GiB image is real
   # work, and a fixed `settle` would be a guess that is right on a fast runner and wrong on a slow one.
+  # THE INSTALLER'S OWN FIRST SCREEN, READ AS TEXT.
+  #
+  # `desktop: linux` MEASURES A PANEL AND THESE INSTALLERS HAVE NO PANEL: they are
+  # full-screen console UI (subiquity, calamares in text mode, the Debian installer,
+  # anaconda) drawing character cells. Measured on ubuntu-install: fifteen minutes of
+  # `drop=+0.0 ratio=0.0x sat=+0.00` - a black screen - while `console.log` showed the
+  # firmware boot the DVD, GRUB load, and the installer take over. The test was
+  # measuring the wrong thing, which is the fourth time this session.
+  #
+  # AND THE BUDGET IS THE INSTALL'S, NOT A GUI'S: a live medium unpacks itself from a
+  # multi-gigabyte ISO before its first screen exists, and the reference implementation
+  # gives this 5400 seconds rather than guessing a smaller number.
+  # THE DESKTOP, BECAUSE THIS INSTALLER IS AN ICON ON IT.
+  #
+  # `open the installer` DOUBLE-CLICKS a launcher on the live session's desktop, so a
+  # screen that has not drawn is a screen with nothing to click - the failure that cost
+  # this stage three runs: five `run:` steps finishing in a tenth of a second because
+  # the keystrokes reached no session at all.
+  #
+  # `desktop: linux` is the right measurement HERE and the wrong one for ubuntu, whose
+  # subiquity takes over the whole screen and draws no panel. THE TWO ARE NOT THE SAME
+  # WAIT: one asks whether a session is up, the other asks whether a console UI is.
+  #
+  # AND THE BUDGET IS 5400 SECONDS, because a live medium unpacks itself from a
+  # multi-gigabyte ISO before any of this exists.
   - name: wait for the live desktop
     desktop: linux
-    timeout: 900
+    timeout: 5400
     poll: 5
-
 
   # =======================================================================================
   # 1. THE INSTALLER, WHICH OPENS FROM MANJARO HELLO

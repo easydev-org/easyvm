@@ -764,3 +764,100 @@ func TestWindowsSSHStepsDoNotUsePOSIXQuoting(t *testing.T) {
 	}
 	t.Logf("checked %d Windows ssh step(s)", checked)
 }
+
+// AN INSTALLER THAT TAKES OVER THE SCREEN HAS NO PANEL, SO `desktop: linux` CANNOT SEE IT.
+//
+// MEASURED ON ubuntu-install, FIFTEEN MINUTES OF:
+//
+//	no linux desktop within 15m0s; drop=+0.0 (need 15) ratio=0.0x (need 2) sat=+0.00 on a 1920x1080 frame
+//
+// AND `console.log` - which this project only started keeping in the artifact that run - SHOWED:
+//
+//	BdsDxe: starting Boot0002 "UEFI QEMU DVD-ROM QM00011"
+//	GNU GRUB version 2.14
+//	*Try or Install Ubuntu Server
+//
+// THE FIRMWARE BOOTED THE DVD AND THE INSTALLER TOOK OVER. `IsLinuxDesktop` measures a strip of colour
+// along an edge - a panel - and subiquity draws character cells across the whole screen and no panel at
+// all. The test was asking a question the guest could not answer, which is the FOURTH time this session
+// that a screen check measured the wrong thing.
+//
+// THE TWO KINDS OF INSTALLER NEED TWO KINDS OF WAIT, AND THIS TEST IS THE DISTINCTION:
+//
+//	an installer that comes up by itself     `until_any:` on its own first-screen words
+//	an installer that is an ICON on a desktop `desktop: linux`, because the next step double-clicks it
+//
+// THE REFERENCE IMPLEMENTATION ALREADY SAID SO and I did not read it: `DesktopWhen(all_of=('welcome',
+// 'ubuntu'))` reads TEXT, with a 5400-second budget rather than the 900 I had guessed.
+func TestAnInstallerIsWaitedForTheWayItAppears(t *testing.T) {
+	root := filepath.Join("..", "..")
+	files, err := filepath.Glob(filepath.Join(root, "linux", "*", "steps", "install.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) == 0 {
+		t.Skip("no Linux install walkthroughs here")
+	}
+
+	// THE INSTALLERS THAT ARE DESKTOP ICONS, named because it is a fact about each distribution's live
+	// session rather than something derivable from the file.
+	iconBased := map[string]bool{
+		"opensuse-tumbleweed": true, // YaST is launched from the desktop
+		"cachyos":             true,
+		"manjaro":             true,
+	}
+
+	var checked int
+	for _, path := range files {
+		rel, _ := filepath.Rel(root, path)
+		distro := filepath.Base(filepath.Dir(filepath.Dir(path)))
+		doc, err := Load(path, nil)
+		if err != nil {
+			continue
+		}
+		// FIND THE WAIT, AND WHAT THE STEP AFTER IT DOES.
+		waitAt := -1
+		for i, s := range doc.Steps {
+			if strings.Contains(strings.ToLower(s.Name), "wait for the") &&
+				(strings.Contains(strings.ToLower(s.Name), "desktop") ||
+					strings.Contains(strings.ToLower(s.Name), "installer")) {
+				waitAt = i
+				break
+			}
+		}
+		if waitAt < 0 {
+			t.Errorf("%s has no step that waits for its installer to appear", rel)
+			continue
+		}
+		checked++
+		wait := doc.Steps[waitAt]
+		hasText := wait.Has("until") || wait.Has("until_any")
+		hasDesktop := wait.Get("desktop") != ""
+
+		if iconBased[distro] {
+			// AN ICON-BASED INSTALLER NEEDS THE DESKTOP, because the next step double-clicks a launcher
+			// and a launcher does not exist until the session has drawn.
+			if !hasDesktop {
+				t.Errorf("%s: %s waits for text, but its installer is a launcher on the desktop - "+
+					"the next step double-clicks one and a session that has not drawn has none", rel,
+					wait.Name)
+			}
+			continue
+		}
+		// EVERY OTHER INSTALLER TAKES OVER THE SCREEN, so text is the only thing that appears.
+		if hasDesktop {
+			t.Errorf("%s: %s uses `desktop: %s`, which measures a PANEL. This installer is a "+
+				"full-screen console UI with no panel, so the gate cannot pass however long it waits - "+
+				"measured on ubuntu as fifteen minutes of drop=+0.0 against a booted installer",
+				rel, wait.Name, wait.Get("desktop"))
+		}
+		if !hasText {
+			t.Errorf("%s: %s has neither `desktop:` nor `until_any:`, so it is not a wait at all",
+				rel, wait.Name)
+		}
+	}
+	if checked == 0 {
+		t.Skip("no install waits here")
+	}
+	t.Logf("checked %d installer wait(s)", checked)
+}

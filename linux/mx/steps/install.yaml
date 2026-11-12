@@ -87,11 +87,24 @@ steps:
   # `desktop: linux` is a measurement of the panel a booted session draws, which is the honest gate
   # for every live installer here. The `timeout` is generous because unpacking a 4 GiB image is real
   # work, and a fixed `settle` would be a guess that is right on a fast runner and wrong on a slow one.
-  - name: wait for the live desktop
-    desktop: linux
-    timeout: 900
+  # THE INSTALLER'S OWN FIRST SCREEN, READ AS TEXT.
+  #
+  # `desktop: linux` MEASURES A PANEL AND THESE INSTALLERS HAVE NO PANEL: they are
+  # full-screen console UI (subiquity, calamares in text mode, the Debian installer,
+  # anaconda) drawing character cells. Measured on ubuntu-install: fifteen minutes of
+  # `drop=+0.0 ratio=0.0x sat=+0.00` - a black screen - while `console.log` showed the
+  # firmware boot the DVD, GRUB load, and the installer take over. The test was
+  # measuring the wrong thing, which is the fourth time this session.
+  #
+  # AND THE BUDGET IS THE INSTALL'S, NOT A GUI'S: a live medium unpacks itself from a
+  # multi-gigabyte ISO before its first screen exists, and the reference implementation
+  # gives this 5400 seconds rather than guessing a smaller number.
+  - name: wait for the installer's first screen
+    until_any:
+      - [mx]
+      - [linux]
+    timeout: 5400
     poll: 5
-
 
   # =======================================================================================
   # 1. THE INSTALLER'S OWN SIDEBAR ICON, NOT THE WELCOME WINDOW'S CARD
