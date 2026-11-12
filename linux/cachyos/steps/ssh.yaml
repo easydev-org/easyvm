@@ -9,6 +9,9 @@ vars:
   user:
     from: args.user
     default: vmuser
+  out:
+    from: args.out
+    default: out/distro.qcow2
 steps:
 - name: start recording
   record: cachyos-ssh.mp4
@@ -50,8 +53,8 @@ steps:
   terminal_wait: 0
   settle: 45
 - name: allow password authentication
-  run: echo {{ password }} | sudo -S -p '' sh -c 'mkdir -p /etc/ssh/sshd_config.d; printf "PasswordAuthentication yes\n" > /etc/ssh/sshd_config.d/99-vm.conf; sed -i "s/^#\?\s*PasswordAuthentication.*/PasswordAuthentication
-    yes/" /etc/ssh/sshd_config; grep -q "^PasswordAuthentication yes" /etc/ssh/sshd_config || printf "PasswordAuthentication yes\n" >> /etc/ssh/sshd_config' 2>&1 | tail -3
+  run: echo {{ password }} | sudo -S -p '' sh -c 'mkdir -p /etc/ssh/sshd_config.d; printf "PasswordAuthentication yes\n" > /etc/ssh/sshd_config.d/99-vm.conf; sed -i "s/^#\?\s*PasswordAuthentication.*/PasswordAuthentication yes/" /etc/ssh/sshd_config; grep
+    -q "^PasswordAuthentication yes" /etc/ssh/sshd_config || printf "PasswordAuthentication yes\n" >> /etc/ssh/sshd_config' 2>&1 | tail -3
   terminal_wait: 0
   settle: 3
 - name: enable sshd at boot
@@ -136,11 +139,10 @@ steps:
     '
   timeout: 120
 - name: leave the sshd diagnosis where a later boot can read it
-  ssh: "printf '%s\\n' '{{ password }}' | sudo -S -p '' sh -c '\n  {\n    echo \"=== $(date) writing the diagnosis before the reboot ===\"\n    echo \"--- is-enabled / is-active / is-failed ---\"\n    systemctl\
-    \ is-enabled sshd; systemctl is-active sshd; systemctl is-failed sshd\n    echo \"--- the unit that is enabled ---\"\n    systemctl cat sshd 2>&1 | head -30\n    echo \"--- the symlinks that would start\
-    \ it ---\"\n    ls -l /etc/systemd/system/*.wants/sshd* /etc/systemd/system/sshd* 2>&1\n    echo \"--- masked? ---\"\n    systemctl is-enabled sshd 2>&1\n    echo \"--- host keys ---\"\n    ls -l /etc/ssh/ssh_host_*_key\
-    \ 2>&1\n    echo \"--- the journal of this boot ---\"\n    journalctl -b -u sshd --no-pager 2>&1 | tail -20\n  } > /var/log/easyvm-sshd.txt 2>&1\n  chmod 644 /var/log/easyvm-sshd.txt\n  echo \"wrote\
-    \ $(wc -l < /var/log/easyvm-sshd.txt) lines to /var/log/easyvm-sshd.txt\"'\n"
+  ssh: "printf '%s\\n' '{{ password }}' | sudo -S -p '' sh -c '\n  {\n    echo \"=== $(date) writing the diagnosis before the reboot ===\"\n    echo \"--- is-enabled / is-active / is-failed ---\"\n    systemctl is-enabled sshd; systemctl is-active sshd;\
+    \ systemctl is-failed sshd\n    echo \"--- the unit that is enabled ---\"\n    systemctl cat sshd 2>&1 | head -30\n    echo \"--- the symlinks that would start it ---\"\n    ls -l /etc/systemd/system/*.wants/sshd* /etc/systemd/system/sshd* 2>&1\n \
+    \   echo \"--- masked? ---\"\n    systemctl is-enabled sshd 2>&1\n    echo \"--- host keys ---\"\n    ls -l /etc/ssh/ssh_host_*_key 2>&1\n    echo \"--- the journal of this boot ---\"\n    journalctl -b -u sshd --no-pager 2>&1 | tail -20\n  } > /var/log/easyvm-sshd.txt\
+    \ 2>&1\n  chmod 644 /var/log/easyvm-sshd.txt\n  echo \"wrote $(wc -l < /var/log/easyvm-sshd.txt) lines to /var/log/easyvm-sshd.txt\"'\n"
   timeout: 180
 - name: enable the socket as well, for a boot where the service does not start
   ssh: "printf '%s\\n' '{{ password }}' | sudo -S -p '' sh -c '\n  systemctl enable --now sshd.socket 2>&1 | tail -3\n  systemctl is-enabled sshd.socket 2>&1 || true'\n"
@@ -177,5 +179,10 @@ steps:
 
     '
   timeout: 120
+- name: stop the machine
+  shutdown: ssh
+  timeout: 300
+- name: publish the disk
+  compress: '{{ out }}'
 - name: stop recording
   record: false

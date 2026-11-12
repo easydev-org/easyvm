@@ -1554,3 +1554,51 @@ func TestTypedWindowsCommandsCarryNoBackslashOrPipe(t *testing.T) {
 	}
 	t.Logf("checked %d typed windows command(s)", checked)
 }
+
+// A LEG DECLARED WITH `out:` MUST HAVE A STEP THAT WRITES IT.
+//
+// MEASURED ON linux-ubuntu-ssh, WHICH REACHED success WITH EVERY PROOF PASSING:
+//
+//	=== prove the kernel over ssh
+//	    Linux vmuser-Standard-PC-Q35-ICH9-2009 7.0.0-43-generic ... x86_64 GNU/Linux
+//	publish the disk:  no disk to publish at .../linux-ubuntu-ssh.qcow2
+//
+// THE WALK HAD INSTALLED SSHD AND PROVED IT OVER A REAL SSH SESSION, and the file its workflow asked
+// for was never written - because `compile:` is a STEP, not a property of the leg, and the ssh
+// walkthrough had no `compress:`. So `publish` reported `no disk to publish`, `linux-ubuntu-ssh` was
+// never pushed, and the vm leg spent thirty minutes on the fallback install disk.
+//
+// ELEVEN OF THE TWELVE LINUX SSH WALKTHROUGHS WERE MISSING IT. Only `ubuntu` gained one here; the
+// other eleven and ghostbsd were fixed in the same pass.
+func TestAnSSHLegWritesTheDiskItsWorkflowPublishes(t *testing.T) {
+	root := filepath.Join("..", "..")
+	files, err := filepath.Glob(filepath.Join(root, "*", "*", "steps", "ssh.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked := 0
+	for _, path := range files {
+		doc, err := Load(path, nil)
+		if err != nil {
+			continue
+		}
+		rel, _ := filepath.Rel(root, path)
+		checked++
+		writes := false
+		for _, s := range doc.Steps {
+			if s.Has("compress") {
+				writes = true
+				break
+			}
+		}
+		if !writes {
+			t.Errorf("%s has no `compress:` step, so its workflow publishes a disk that is never "+
+				"written. Measured on linux-ubuntu-ssh: every proof passed and `publish the disk` "+
+				"reported `no disk to publish at .../linux-ubuntu-ssh.qcow2`", rel)
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no ssh walkthroughs were found")
+	}
+	t.Logf("checked %d ssh walkthrough(s)", checked)
+}

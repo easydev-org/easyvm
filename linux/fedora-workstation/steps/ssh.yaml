@@ -9,6 +9,9 @@ vars:
   user:
     from: args.user
     default: vmuser
+  out:
+    from: args.out
+    default: out/distro.qcow2
 steps:
 - name: start recording
   record: fedora-workstation-ssh.mp4
@@ -59,8 +62,8 @@ steps:
   terminal_wait: 0
   settle: 45
 - name: allow password authentication
-  run: echo {{ password }} | sudo -S -p '' sh -c 'mkdir -p /etc/ssh/sshd_config.d; printf "PasswordAuthentication yes\n" > /etc/ssh/sshd_config.d/99-vm.conf; sed -i "s/^#\?\s*PasswordAuthentication.*/PasswordAuthentication
-    yes/" /etc/ssh/sshd_config; grep -q "^PasswordAuthentication yes" /etc/ssh/sshd_config || printf "PasswordAuthentication yes\n" >> /etc/ssh/sshd_config' 2>&1 | tail -3
+  run: echo {{ password }} | sudo -S -p '' sh -c 'mkdir -p /etc/ssh/sshd_config.d; printf "PasswordAuthentication yes\n" > /etc/ssh/sshd_config.d/99-vm.conf; sed -i "s/^#\?\s*PasswordAuthentication.*/PasswordAuthentication yes/" /etc/ssh/sshd_config; grep
+    -q "^PasswordAuthentication yes" /etc/ssh/sshd_config || printf "PasswordAuthentication yes\n" >> /etc/ssh/sshd_config' 2>&1 | tail -3
   terminal_wait: 0
   settle: 3
 - name: enable sshd at boot
@@ -92,5 +95,10 @@ steps:
 - name: prove the account over ssh
   ssh: id -un; hostname
   timeout: 120
+- name: stop the machine
+  shutdown: ssh
+  timeout: 300
+- name: publish the disk
+  compress: '{{ out }}'
 - name: stop recording
   record: false

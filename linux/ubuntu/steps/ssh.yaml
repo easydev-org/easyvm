@@ -9,6 +9,9 @@ vars:
   user:
     from: args.user
     default: vmuser
+  out:
+    from: args.out
+    default: out/distro.qcow2
 steps:
 - name: start recording
   record: ubuntu-ssh.mp4
@@ -84,5 +87,10 @@ steps:
 - name: prove the account over ssh
   ssh: id -un; hostname
   timeout: 120
+- name: stop the machine
+  shutdown: ssh
+  timeout: 300
+- name: publish the disk
+  compress: '{{ out }}'
 - name: stop recording
   record: false
