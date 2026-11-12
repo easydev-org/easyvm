@@ -239,17 +239,28 @@ steps:
   # a click that may have landed on nothing.
   - name: the installer window is up
     until_any:
-      # THE THREE PHRASES ARE THE REFERENCE IMPLEMENTATION'S, MEASURED ON THIS IMAGE:
-      # "the window title `Install Pop!_OS 24.04 LTS`, the first pane `Select a Language`, and the
-      # product name". `pop` ALONE IS THE PREFIX OF `pop-os` AND OF `Pop!_OS`, so it matches the title
-      # and the product name both.
+      # EVERY WORD HERE IS ONE THE DESKTOP DOES NOT DRAW, AND THAT IS THE WHOLE POINT.
+      #
+      # THE PREVIOUS LIST HAD `pop!_os` IN IT, AND THE DESKTOP SATISFIED IT. Measured on the run that
+      # added the dock click: `the installer window is up` PASSED, then ten clicks landed on wallpaper,
+      # and the account pane timed out with
+      #
+      #	last read: Workspaces Applications M1112 7:21 AM ...
+      #
+      # - the desktop's own top bar. `pop!_os` is the product name and it is printed on the live
+      # session as well as on the installer, so it is not a marker for the installer.
+      #
+      # `select a language` AND `install pop` ARE THE REFERENCE IMPLEMENTATION'S first two, and its
+      # third - the product name - is the one that does not discriminate. The rest are later panes,
+      # which are still installer-only and still a correct answer.
       - [select, a, language]
-      - [install, pop]
-      - ["pop!_os"]
-      # AND THE LATER PANES AS WELL, because a slower image reaches one of them before the title is
-      # ever re-read - and any of these is a screen the installer alone draws.
       - [clean, install]
+      - [erase, and, install]
       - ["full", "name"]
+      # `install pop` IS DELIBERATELY ABSENT ALTHOUGH THE REFERENCE IMPLEMENTATION HAS IT. The dock's
+      # icon is titled `Install Pop!_OS`, and a tooltip is enough to satisfy two words that are also
+      # the window title - the same trap `pop!_os` was. What is left is a pane's own heading or a
+      # footer button, neither of which the desktop draws.
     timeout: 300
     poll: 3
     keep_alive: true
