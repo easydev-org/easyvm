@@ -1,52 +1,8 @@
-# Linux Mint Cinnamon: Ubiquity's seven panes, as a sequence.
-#
-#     python3 lib/steps.py linux/mint/steps/install.yaml --qmp /work/drive.sock.qmp
-#
-# WHAT THIS REPLACES
-#
-# linux/mint/install.py's walk_ubiquity() and stop_the_screensaver(). install.py keeps
-# the machine, the kernel and initrd, the frames, the recording and the publish.
-#
-# THE FIRST STEP IS THE ONE THAT KEEPS THE WHOLE RUN ALIVE, AND IT HAS ITS OWN HISTORY
-#
-# A CLICK PER POLL DID NOT KEEP THIS SESSION AWAKE. Measured twice: run 42408624906 read
-# `14:25`, `14:26`, `14:34` for ten minutes and run 42414965231 read `15:58`, `15:59`,
-# `16:00` - both times a full-window Mint LOCK SCREEN with a large clock and the Mint logo,
-# no installer anywhere, while a correct install finished underneath it. The screen saver
-# engages on this live session within about two minutes of the last real input, and
-# synthetic clicks from QMP are evidently not what its idle timer counts.
-#
-# So it is DISABLED rather than raced, and every mechanism that can blank this screen is
-# turned off in one line - see the `run` step below, which is the same command the driver
-# typed into a terminal.
-#
-# THE END IS A MEASURED WAIT, AND THE REASON IS THAT THIS ISO'S LAST MODAL IS UNREADABLE
-#
-# Ubiquity's last screen is a modal - `Installation Complete`, `Installation has finished.
-# You can continue testing Linux Mint now...`, `Continue Testing` / `Restart Now` - and on
-# this ISO tesseract reads THE WHOLE MODAL AS AN EMPTY LINE:
-#
-#     $ tesseract frame.jpg stdout --psm 3
-#     Install Linux Mint
-#
-#     (©) i | oo ii (-} 2 4) o7:16
-#
-# A local run copied files, configured hardware, configured the bootloader and put that modal
-# up - a complete, correct install - while the log said `installing: (©) i | | | 6 4)` every
-# twenty seconds. Any completion test built on those words would have thrown the disk away.
-#
-# So this walk waits a MEASURED TIME, the same way ubuntu and kubuntu do. The
-# measurement: from `Continue` on the Who-are-you pane to the completion modal is about
-# 25 minutes on this ISO - 22:51 to 23:16 in the local run that ended in the frame above, and
-# 21:20 to 22:0x in CI. FORTY MINUTES is that with room for a slower runner.
-
 name: mint - the ubiquity walk
-resolution: [1920, 1080]
-
+resolution:
+- 1920
+- 1080
 vars:
-  # THE FIRST WORD OF THIS IS THE LOGIN NAME. Ubiquity on Mint lowercases the first word of
-  # the full name and uses it as the account, so `VM User` becomes `vm` - see the note at the
-  # full-name step. Pop!_OS' installer behaves differently with the same string.
   display_name: Vmuser User
   user:
     from: args.user
@@ -54,353 +10,121 @@ vars:
   password:
     from: args.password
     default: admin
-  # WHERE `compress:` WRITES, AND IT COMES FROM THE WORKFLOW'S `--out`.
-  #
-  # The workflow declares each install leg with `"out": "linux-<distro>.qcow2"` and passes it as
-  # `--out`; a `compress: "{{ out }}"` step names that same file. WITHOUT THE DECLARATION HERE the
-  # variable does not exist and `easyvm check` refuses the file - which is what happened when the step
-  # was first added, and is the vocabulary doing its job.
   out:
     from: args.out
     default: out/distro.qcow2
-
 steps:
-  # THE RECORDING IS PART OF THE VERDICT, NOT A CONVENIENCE.
-  #
-  # A FAILURE THAT SAYS "did not advance: read ..." IS A FEW WORDS OF OCR, and the question
-  # it cannot answer is "what was on screen". A recording can, and it is tens of megabytes -
-  # which is why it is its own artifact rather than travelling with the disk.
-  - name: start recording
-    record: mint-install.mp4
-    poll: 20
-
-  # THE MACHINE AND ITS INSTALLER, WHICH USED TO BE THE BAKE SKELETON IN PYTHON.
-  #
-  # THIS FILE IS A DECLARATION OF THE WIZARD STEPS AND NOTHING ELSE. Its own header says so:
-  #
-  #     WHAT THIS FILE IS. It is a DECLARATION, not an implementation. The bake skeleton - disk,
-  #     guest, recording, the QMP driver, the walk, ...
-  #
-  # and in the Python implementation lib/install_skeleton.py built the machine, created the disk and
-  # attached the ISO before running these steps. Reproduced as YAML that skeleton has to be IN the
-  # file, or the first `at:` reports `drive.sock.qmp: no such file` on a machine nobody started.
-  #
-  # 64G IS THE WORKFLOW'S OWN `--disk-size 64G`, not a number chosen here: every coordinate in this
-  # directory was measured on a disk that size, and the installer's partitioning pane reads capacity.
-  - name: create the empty disk
-    disk: disk.qcow2
-    disk_gb: 64
-
-  # THE INSTALLER IMAGE, BY THE TAG THIS REPOSITORY PUBLISHES IT UNDER.
-  - name: fetch the installer image
-    fetch: linux_iso
-    release: mint
-
-  - name: boot the installer
-    boot: true
-    os: linux
-    iso: installer_iso
-    timeout: 1800
-  # THE LIVE DESKTOP FIRST, BECAUSE A CLICK ON A SCREEN THAT HAS NOT DRAWN IS A CLICK ON NOTHING.
-  #
-  # `boot:` RETURNS WHEN QEMU IS RUNNING, WHICH IS NOT WHEN THE INSTALLER IS VISIBLE. A live medium
-  # unpacks itself from a multi-gigabyte ISO after that: measured on opensuse-tumbleweed, whose first
-  # click landed on
-  #
-  #	Guest has not initialized the display (yet).
-  #
-  # - the VNC server's own text, meaning the guest had drawn NO FRAME AT ALL.
-  #
-  # `desktop: linux` is a measurement of the panel a booted session draws, which is the honest gate
-  # for every live installer here. The `timeout` is generous because unpacking a 4 GiB image is real
-  # work, and a fixed `settle` would be a guess that is right on a fast runner and wrong on a slow one.
-  # THE INSTALLER'S OWN FIRST SCREEN, READ AS TEXT.
-  #
-  # `desktop: linux` MEASURES A PANEL AND THESE INSTALLERS HAVE NO PANEL: they are
-  # full-screen console UI (subiquity, calamares in text mode, the Debian installer,
-  # anaconda) drawing character cells. Measured on ubuntu-install: fifteen minutes of
-  # `drop=+0.0 ratio=0.0x sat=+0.00` - a black screen - while `console.log` showed the
-  # firmware boot the DVD, GRUB load, and the installer take over. The test was
-  # measuring the wrong thing, which is the fourth time this session.
-  #
-  # AND THE BUDGET IS THE INSTALL'S, NOT A GUI'S: a live medium unpacks itself from a
-  # multi-gigabyte ISO before its first screen exists, and the reference implementation
-  # gives this 5400 seconds rather than guessing a smaller number.
-  # THE DESKTOP, BECAUSE EVERY IMAGE HERE IS A DESKTOP IMAGE AND THE PANES BELOW ARE MEASURED ON IT.
-  #
-  # `desktop: linux` MEASURES A PANEL - a strip of colour along an edge that an installer does not
-  # draw - so it answers "is a live session up". That is the question: the next step clicks or
-  # double-clicks something ON that session, and a session that has not drawn has nothing to click.
-  #
-  # `keep_alive` IS PART OF THE WAIT, not a refinement: it can run for ninety minutes and a live
-  # session's idle timer puts a lock screen up well before that, after which every word on the screen
-  # is the lock screen's and nothing below can match.
-  - name: wait for the live desktop
-    desktop: linux
-    timeout: 5400
-    poll: 5
-    keep_alive: true
-
-  # =======================================================================================
-  # 0. TURN THE SCREEN SAVER, ITS LOCK AND THE DPMS BLANK OFF
-  # =======================================================================================
-  #
-  # EVERY MECHANISM IN ONE COMMAND, because gsettings alone was not enough: the first
-  # attempt set all three Cinnamon keys and the session still came up locked (`16:39`,
-  # `16:41`, `16:45` on run 42418654318). Cinnamon's screen saver and the X server's own
-  # DPMS blank are SEPARATE timers here, and the second one is not in gsettings at all:
-  #
-  #     gsettings ... idle-delay 0                 never blank
-  #     gsettings ... lock-enabled false           never lock
-  #     gsettings ... idle-activation-enabled false
-  #     xset s off; xset -dpms; xset s noblank     the X server's own blank
-  #
-  # AND A KEEPALIVE OF LAST RESORT, because the settings path has failed once already.
-  # `xdotool` moves the pointer from INSIDE the session, which is the only kind of event every
-  # idle timer on this build agrees about - QMP's synthetic clicks from outside are not it.
-  # The loop runs detached and stops itself after six hours; it is started here so that it is
-  # already ticking while Ubiquity copies files.
-  - name: disable the screen saver, its lock and the dpms blank
-    run: "gsettings set org.cinnamon.desktop.session idle-delay 0; gsettings set org.cinnamon.desktop.screensaver lock-enabled false; gsettings set org.cinnamon.desktop.screensaver idle-activation-enabled false; xrandr --output Virtual-1 --mode 1920x1080 2>/dev/null || xrandr --output Virtual1 --mode 1920x1080 2>/dev/null || xrandr -s 1920x1080 2>/dev/null || true; xset s off; xset -dpms; xset s noblank; ( for i in $(seq 1 1080); do xdotool mousemove_relative -- 1 0 2>/dev/null; xdotool mousemove_relative -- -1 0 2>/dev/null; sleep 20; done ) >/dev/null 2>&1 & exit"
-    terminal_wait: 8
-    settle: 10
-
-  # =======================================================================================
-  # 1. THE INSTALLER. A DOUBLE-CLICK ON THE DESKTOP ICON.
-  # =======================================================================================
-  #
-  # Ubiquity is not running when the session settles; its icon is on the desktop at (114,47).
-  # The double-click matters: a single press only selects the icon on this desktop.
-  #
-  # `optional` BECAUSE THE ORIGINAL DRIVER DID NOT FAIL HERE EITHER: it double-clicked, and
-  # let the sequence tell the truth - a wizard that never opened leaves every later click on
-  # the desktop and the empty-disk check says so loudly. This reading is a log line.
-  # THE INSTALLER'S WINDOW, BEFORE THE PRESS THAT STARTS IT.
-  #
-  # THE WORDS ARE THE FILE'S OWN, from the `expect_any:` on the step below - which is the right check
-  # for AFTER the press and the wrong one before it: an `expect_any:` that fails is a warning, so a
-  # press into a window that has not drawn is reported as success.
-  - name: wait for the installer launcher
-    until_any:
-      # THE SAME TRAP AS ubuntu, WHICH IS MEASURED: a gate on the LAUNCHER's button text
-      # (`install linux mint`) waits for words that belong to the desktop, not to the wizard - and the
-      # wizard's own first pane says `Welcome to Linux Mint` with a language list.
-      - [welcome, to, linux, mint]
-      - [choose, your, language]
-      - [installation, type]
-    timeout: 600
-    poll: 5
-    keep_alive: true
-
-  - name: install linux mint
-    double: [114, 47]
-    settle: 25
-    expect_any:
-      - [welcome]
-      - [install]
-
-  # =======================================================================================
-  # 2. THE PANES THAT ONLY NEED `Continue`
-  # =======================================================================================
-  #
-  # Quit / Back / Continue are right-aligned inside the window, which Ubiquity centres on a
-  # fixed-size 1920x1080 screen: Continue is (1306,727) on every pane that has it.
-  - name: welcome
-    at: [1306, 727]
-    settle: 12
-
-  # The checkbox for multimedia codecs ships OFF and stays off: a bake does not need them,
-  # and enabling them is a download this run does not have to make.
-  - name: keyboard
-    at: [1306, 727]
-    settle: 12
-
-  - name: multimedia codecs
-    at: [1306, 727]
-    settle: 12
-
-  # `Erase disk and install Linux Mint` is already selected.
-  - name: installation type
-    at: [1306, 727]
-    settle: 15
-
-  # =======================================================================================
-  # 3. THE CONFIRMATION, CLICKED WHETHER OR NOT THE SCREEN WAS READ
-  # =======================================================================================
-  #
-  # Run 42372449152 stopped here: a conditional decided from an OCR read whether the `Write
-  # the changes to disks?` dialog had appeared, did not see it, and skipped the click - then
-  # spent the rest of the run on the Installation type pane with the modal possibly open
-  # behind it.
-  #
-  # A CONDITIONAL THAT GATES A CLICK IS THE SAME MISTAKE AS A LOOKUP THAT CHOOSES ONE, and
-  # this repository has paid for it four times. The click costs nothing when the dialog is
-  # absent: (1269,659) is blank space on the pane, so a stray click there selects nothing.
-  # MEASURED ON THIS IMAGE'S OWN MODAL (local run, 2026-11-09): the `Continue` button inside
-  # `Write the changes to disks?` is x=1180..1352, y=645..681 - centre (1266, 663). The old
-  # (1269, 659) is inside that box too, so the press was not the whole story: the modal was
-  # still on screen when the walk reached the next pane, which means the press was delivered
-  # before the dialog had finished drawing. `settle` before the press, and again after.
-  - name: write the changes to disks
-    at: [1266, 663]
-    settle: 25
-
-  # AND `Install Now` A SECOND TIME, BECAUSE THE MODAL DOES NOT LEAVE THE PANE.
-  #
-  # MEASURED, AND IT IS WHY THE ACCOUNT PANE WAS NEVER FILLED. On this image `Install Now`
-  # opens the `Write the changes to disks?` modal; dismissing that modal returns to the SAME
-  # `Installation type` pane, and only a SECOND press of `Install Now` starts the copy.
-  #
-  # Run after run pressed `Install Now` once, pressed `Continue` in the modal, and then typed
-  # the four account fields into an `Installation type` pane that had no text fields at all -
-  # every keystroke went nowhere. The disk was then installed with the installer's own
-  # defaults, which is why its LightDM kept answering
-  #
-  #     Invalid password, please try again
-  #
-  # to `admin` and to seven other candidates: the password on that disk was never set by this
-  # walk. The frame that proves the pane is still there after the modal comes from a local run
-  # on 2026-11-09.
-  - name: installation type - install now, after the modal
-    at: [1307, 726]
-    settle: 30
-
-  # The time zone default is kept: on this cluster it is Shanghai, and changing it is one
-  # more text field that can go wrong for no gain.
-  - name: where are you
-    at: [1306, 727]
-    settle: 15
-
-  # =======================================================================================
-  # 4. WHO ARE YOU? THE ACCOUNT, IN THE SAME SHAPE EVERY LINUX BAKE HERE USES.
-  # =======================================================================================
-  #
-  # THE HOSTNAME IS DERIVED FROM THE MACHINE MODEL - `docker-Standard-PC-Q35` - and is
-  # replaced with the user name so the disk has one canonical name in it.
-  # THE FULL NAME IS A DISPLAY NAME, AND THE HOST NAME IS DERIVED FROM IT.
-  #
-  # This walk used to type `docker` into BOTH fields. Ubiquity capitalises the full name as
-  # it goes - `VMUSER` - and seeds the host name from it, so the second press appended the
-  # walk's `docker` to what Ubiquity had already put there. Measured on run 42577663888's
-  # own lightdm title bar:
-  #
-  #     VMUSERvmuser-Standard-PC-Q35-ICH9-2009
-  #
-  # and the login name on that disk is `VMUSERvmuser`, not `docker`.
-  #
-  # `VM User` WAS THE WRONG SHAPE, AND RUN 6eeff43 MEASURED WHAT UBUNTU'S UBIQUITY ACTUALLY
-  # DOES WITH IT. The comment that used to sit here said "a human name with a space, from
-  # which a clean login name follows" - and the disk that run published answers differently:
-  #
-  #     vm@vmuser:~$          <- the login is `vm`, the FULL NAME's FIRST WORD
-  #
-  # Ubiquity on Mint derives the login from the first word of the full name, lowercased. It
-  # does NOT strip the spaces the way Pop!_OS' installer does (`VM User` -> `vmuser` there,
-  # `vm` here), and the difference is invisible until a stage tries to log in: the disk's own
-  # terminal is the evidence, and ssh answered `Permission denied` for `vmuser` against a disk
-  # whose account is `vm`.
-  #
-  # SO THE FIRST WORD HAS TO BE THE WHOLE LOGIN NAME. `Vmuser User` derives `vmuser`; `vmuser`
-  # and `Vmuser` do too, and the space is what keeps the display name a human name.
-  - name: who are you - full name
-    at: [965, 347]
-    type: "{{ display_name }}"
-    settle: 2
-  # THE COMPUTER NAME IS LEFT ALONE, AND THAT IS A CHANGE OF POLICY RATHER THAN A SIMPLIFICATION.
-  #
-  # It used to be cleared and replaced with the account's name, in four steps, because a
-  # one-step `type:` had once INSERTED the name into Ubiquity's own default and produced
-  #
-  #     docker-Standockerdard-F
-  #
-  # Every part of that work existed to put OUR name in the field. The machine is now named once,
-  # after ssh works, by steps/vm-configure.yaml - which is a stage that knows the disk is
-  # finished, can see whether its command worked, and cannot corrupt a field it never types in.
-  #
-  # THE DEFAULT UBIQUITY PUTS THERE IS A VALID HOST NAME (`mint-Standard-PC-Q35-ICH9-2009`, from
-  # the machine model), and nothing in this repository reads it before vm-configure replaces it.
-  # Leaving it alone also removes the last thing on this pane that could be typed into wrongly.
-  - name: who are you - password
-    at: [877, 458]
-    type: "{{ password }}"
-    settle: 2
-  - name: who are you - confirm password
-    at: [877, 492]
-    type: "{{ password }}"
-    settle: 3
-
-  # `Short password` is shown in red beside the field for `admin`, and Continuing anyway is
-  # the measured, working answer.
-  - name: who are you
-    at: [1306, 727]
-    settle: 20
-
-  # =======================================================================================
-  # 5. UNTIL THE MEASURED END, BECAUSE THE MODAL THAT WOULD SAY IT IS UNREADABLE
-  # =======================================================================================
-  #
-  # See the file header: this ISO's completion modal OCRs as a blank line, so any test built
-  # on its words throws a correct disk away. Forty minutes is the measured 25 with room.
-  #
-  # THE KEEP-ALIVE CLICK IS PART OF THE WAIT, and here it is not a nicety: this is the
-  # session whose screen saver was racing the installer, and the `run` step above is the
-  # other half of the same defence.
-  - name: the install runs, as measured
-    wait: 2400
-    keep_alive: true
-
-  # THE DISK IS THE ARTIFACT, AND WITHOUT THIS STEP THERE IS NONE.
-  #
-  # THE WORKFLOW ASKS FOR ONE: each install leg is declared with `"out": "linux-<distro>.qcow2"`, and
-  # `--out` is where a `compress:` WRITES - it is not a filename the engine invents. WITH NO
-  # `compress:` STEP NOTHING WAS WRITTEN, and the leg's `-disk` artifact was 518 bytes:
-  #
-  #	linux-zorin-install-disk   518 bytes
-  #	linux-zorin-vm-disk     10,497,859,093 bytes
-  #
-  # A PASSING INSTALL THAT LEAVES NO DISK is a leg that proves the installer works and produces nothing
-  # for the stage after it. `compress:` flattens the overlay's parent chain into one qcow2 with zstd, so
-  # the file it leaves is the install itself.
-  # THE MACHINE IS STOPPED BEFORE THE DISK IS READ, AND THAT IS WHY THIS STEP EXISTS.
-  #
-  # MEASURED ON zorin-install, WHICH ANSWERED ALL 21 STEPS AND THEN FAILED ON THE LAST ONE:
-  #
-  #	publish the disk: qemu-img convert: exit status 1
-  #	(qemu-img: Could not open '/__w/easyvm/easyvm/work/disk.qcow2': Failed to get shared "write" lock
-  #
-  # THE INSTALL WAS COMPLETE AND THE DISK WAS STILL OPEN. `compress:` READS THE FILE, and qemu holds a
-  # write lock on it until the machine is stopped - so a `compress:` before a `shutdown:` cannot work
-  # however good the install was.
-  #
-  # `kill`, NOT `acpi`, AND THE MEASUREMENT IS WHY.
-  #
-  # MEASURED ON zorin-install, WHICH PASSED ALL 21 STEPS AND THEN PRODUCED A 0 MiB DISK:
-  #
-  #	=== stop the machine
-  #	  stopping with method "acpi"
-  #	  pressing the power button
-  #	  the guest did not power off within 5m0s; killing it - the disk will need a journal replay
-  #	=== publish the disk
-  #	  compressing with zstd
-  #	  linux-zorin.qcow2: 0 MiB
-  #
-  # A LIVE INSTALLER DOES NOT ANSWER THE POWER BUTTON. `acpi` pressed it, the guest ignored it, the
-  # wait expired after five minutes, and the kill that followed raced `qemu-img convert` - which read
-  # a disk qemu was still releasing and wrote ZERO BYTES.
-  #
-  # `kill` IS NOT A COMPROMISE HERE, BECAUSE THE INSTALLER HAS ALREADY FINISHED: the step above waits
-  # for the install to complete, and what follows is a disk with a written system on it. The journal
-  # replay the kill costs is paid on the next boot, which is the stage after this one, and it is
-  # cheaper than five minutes of waiting for a button nothing presses.
-  #
-  # THE WAIT IS SHORTENED TOO: 120 seconds, because a kill does not need the five minutes a graceful
-  # request does - and the boot after this one replays the journal either way.
-  - name: stop the machine
-    shutdown: kill
-    timeout: 120
-
-  - name: publish the disk
-    compress: "{{ out }}"
-
-  - name: stop recording
-    record: false
+- name: start recording
+  record: mint-install.mp4
+- name: create the empty disk
+  disk: disk.qcow2
+  disk_gb: 64
+- name: fetch the installer image
+  fetch: linux_iso
+  release: mint
+- name: boot the installer
+  boot: true
+  os: linux
+  iso: installer_iso
+  timeout: 1800
+- name: wait for the live desktop
+  desktop: linux
+  timeout: 5400
+  poll: 5
+  keep_alive: true
+- name: disable the screen saver, its lock and the dpms blank
+  run: gsettings set org.cinnamon.desktop.session idle-delay 0; gsettings set org.cinnamon.desktop.screensaver lock-enabled false; gsettings set org.cinnamon.desktop.screensaver idle-activation-enabled
+    false; xrandr --output Virtual-1 --mode 1920x1080 2>/dev/null || xrandr --output Virtual1 --mode 1920x1080 2>/dev/null || xrandr -s 1920x1080 2>/dev/null || true; xset s off; xset -dpms; xset s noblank;
+    ( for i in $(seq 1 1080); do xdotool mousemove_relative -- 1 0 2>/dev/null; xdotool mousemove_relative -- -1 0 2>/dev/null; sleep 20; done ) >/dev/null 2>&1 & exit
+  terminal_wait: 8
+  settle: 10
+- name: wait for the installer launcher
+  until_any:
+  - - welcome
+    - to
+    - linux
+    - mint
+  - - choose
+    - your
+    - language
+  - - installation
+    - type
+  timeout: 600
+  poll: 5
+  keep_alive: true
+- name: install linux mint
+  double:
+  - 114
+  - 47
+  settle: 25
+  expect_any:
+  - - welcome
+  - - install
+- name: welcome
+  at:
+  - 1306
+  - 727
+  settle: 12
+- name: keyboard
+  at:
+  - 1306
+  - 727
+  settle: 12
+- name: multimedia codecs
+  at:
+  - 1306
+  - 727
+  settle: 12
+- name: installation type
+  at:
+  - 1306
+  - 727
+  settle: 15
+- name: write the changes to disks
+  at:
+  - 1266
+  - 663
+  settle: 25
+- name: installation type - install now, after the modal
+  at:
+  - 1307
+  - 726
+  settle: 30
+- name: where are you
+  at:
+  - 1306
+  - 727
+  settle: 15
+- name: who are you - full name
+  at:
+  - 965
+  - 347
+  type: '{{ display_name }}'
+  settle: 2
+- name: who are you - password
+  at:
+  - 877
+  - 458
+  type: '{{ password }}'
+  settle: 2
+- name: who are you - confirm password
+  at:
+  - 877
+  - 492
+  type: '{{ password }}'
+  settle: 3
+- name: who are you
+  at:
+  - 1306
+  - 727
+  settle: 20
+- name: the install runs, as measured
+  wait: 2400
+  keep_alive: true
+- name: stop the machine
+  shutdown: kill
+  timeout: 120
+- name: publish the disk
+  compress: '{{ out }}'
+- name: stop recording
+  record: false

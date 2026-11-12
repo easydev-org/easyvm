@@ -1,38 +1,7 @@
-# Pop!_OS: `pop-os-installer`'s panes, as a sequence.
-#
-#     python3 lib/steps.py linux/popos/steps/install.yaml --qmp /work/drive.sock.qmp
-#
-# WHAT THIS REPLACES
-#
-# linux/popos/install.py's walk_installer(). install.py keeps the machine, the frames,
-# the recording and the publish.
-#
-# POP!_OS HAS AN INSTALLER OF ITS OWN - not Calamares, not Ubiquity, not Anaconda. It is a GTK
-# application that OPENS BY ITSELF on the live desktop, and its window is a fixed-size card at
-# (485,155)..(1435,860) with the same footer position on every pane: Next / Select / Erase and
-# Install at (1367,817), Back at (1279,817).
-#
-# TWO THINGS ARE NOT DEFAULTS, AND BOTH COST RUNS
-#
-# 1. `Clean Install` IS A CHOICE. The Install pane offers `Clean Install` and `Custom
-#    (Advanced)` as two cards with NEITHER SELECTED, so the footer button does nothing until
-#    one is clicked.
-#
-# 2. THE FULL NAME IS NOT THE USER NAME. With both fields holding `docker` the footer's `Next`
-#    stays GREY: measured, three presses in a run at 9d4e83a left the pane unchanged. Typing
-#    `VM User` instead makes the installer derive `vmuser` and the button turns green
-#    at once. So the display name is `VM User` and the login is `docker`.
-#
-# AND ONE THAT COST THIS RUN TODAY: A GTK ENTRY VALIDATES ON FOCUS-OUT.
-#
-# Run 42502695338 typed both fields correctly and the footer stayed grey for forty-two
-# minutes, because nothing moved the focus after the last character - the caret was still in
-# User Name. One `Tab` leaves the field, which is the event the pane listens for; it also moves
-# the focus to the footer, so it cannot type into another control.
-
 name: popos - the pop installer walk
-resolution: [1920, 1080]
-
+resolution:
+- 1920
+- 1080
 vars:
   user:
     from: args.user
@@ -40,485 +9,177 @@ vars:
   password:
     from: args.password
     default: admin
-  # WHERE `compress:` WRITES, AND IT COMES FROM THE WORKFLOW'S `--out`.
-  #
-  # The workflow declares each install leg with `"out": "linux-<distro>.qcow2"` and passes it as
-  # `--out`; a `compress: "{{ out }}"` step names that same file. WITHOUT THE DECLARATION HERE the
-  # variable does not exist and `easyvm check` refuses the file - which is what happened when the step
-  # was first added, and is the vocabulary doing its job.
   out:
     from: args.out
     default: out/distro.qcow2
-
 steps:
-  # THE RECORDING IS PART OF THE VERDICT, NOT A CONVENIENCE.
-  #
-  # A FAILURE THAT SAYS "did not advance: read ..." IS A FEW WORDS OF OCR, and the question
-  # it cannot answer is "what was on screen". A recording can, and it is tens of megabytes -
-  # which is why it is its own artifact rather than travelling with the disk.
-  - name: start recording
-    record: popos-install.mp4
-    poll: 20
-
-  # THE MACHINE AND ITS INSTALLER, WHICH USED TO BE THE BAKE SKELETON IN PYTHON.
-  #
-  # THIS FILE IS A DECLARATION OF THE WIZARD STEPS AND NOTHING ELSE. Its own header says so:
-  #
-  #     WHAT THIS FILE IS. It is a DECLARATION, not an implementation. The bake skeleton - disk,
-  #     guest, recording, the QMP driver, the walk, ...
-  #
-  # and in the Python implementation lib/install_skeleton.py built the machine, created the disk and
-  # attached the ISO before running these steps. Reproduced as YAML that skeleton has to be IN the
-  # file, or the first `at:` reports `drive.sock.qmp: no such file` on a machine nobody started.
-  #
-  # 64G IS THE WORKFLOW'S OWN `--disk-size 64G`, not a number chosen here: every coordinate in this
-  # directory was measured on a disk that size, and the installer's partitioning pane reads capacity.
-  - name: create the empty disk
-    disk: disk.qcow2
-    disk_gb: 64
-
-  # THE INSTALLER IMAGE, BY THE TAG THIS REPOSITORY PUBLISHES IT UNDER.
-  - name: fetch the installer image
-    fetch: linux_iso
-    release: popos
-
-  - name: boot the installer
-    boot: true
-    os: linux
-    iso: installer_iso
-    timeout: 1800
-  # THE LIVE DESKTOP FIRST, BECAUSE A CLICK ON A SCREEN THAT HAS NOT DRAWN IS A CLICK ON NOTHING.
-  #
-  # `boot:` RETURNS WHEN QEMU IS RUNNING, WHICH IS NOT WHEN THE INSTALLER IS VISIBLE. A live medium
-  # unpacks itself from a multi-gigabyte ISO after that: measured on opensuse-tumbleweed, whose first
-  # click landed on
-  #
-  #	Guest has not initialized the display (yet).
-  #
-  # - the VNC server's own text, meaning the guest had drawn NO FRAME AT ALL.
-  #
-  # `desktop: linux` is a measurement of the panel a booted session draws, which is the honest gate
-  # for every live installer here. The `timeout` is generous because unpacking a 4 GiB image is real
-  # work, and a fixed `settle` would be a guess that is right on a fast runner and wrong on a slow one.
-  # THE INSTALLER'S OWN FIRST SCREEN, READ AS TEXT.
-  #
-  # `desktop: linux` MEASURES A PANEL AND THESE INSTALLERS HAVE NO PANEL: they are
-  # full-screen console UI (subiquity, calamares in text mode, the Debian installer,
-  # anaconda) drawing character cells. Measured on ubuntu-install: fifteen minutes of
-  # `drop=+0.0 ratio=0.0x sat=+0.00` - a black screen - while `console.log` showed the
-  # firmware boot the DVD, GRUB load, and the installer take over. The test was
-  # measuring the wrong thing, which is the fourth time this session.
-  #
-  # AND THE BUDGET IS THE INSTALL'S, NOT A GUI'S: a live medium unpacks itself from a
-  # multi-gigabyte ISO before its first screen exists, and the reference implementation
-  # gives this 5400 seconds rather than guessing a smaller number.
-  # THE DESKTOP, BECAUSE THIS IS A DESKTOP IMAGE AND THE PANES BELOW WERE MEASURED ON IT.
-  #
-  # `ubuntu` USED TO RESOLVE TO `iso-ubuntu`, WHICH IS THE *SERVER* LIVE IMAGE (2,792 MiB): its GRUB
-  # entry reads "Try or Install Ubuntu Server" and its installer takes over the whole screen with no
-  # panel, so `desktop: linux` could never pass and neither could the coodinate panes that follow.
-  #
-  # `ubuntu: iso-ubuntu-desktop` IS 6,182 MiB - Desktop 26.04.1 exactly - and it boots to a live
-  # desktop with a panel, an install launcher, and the Ubiquity-style panes these files click.
-  #
-  # THE SAME CORRECTION APPLIES TO FOUR MORE, and the SIZES are what say so rather than a guess:
-  #
-  #	nixos     iso-nixos 1,665 MiB          -> iso-nixos-graphical 3,708   (minimal has NO desktop)
-  #	popos     iso-popos 3,753 MiB          -> iso-popos-desktop   2,568
-  #	manjaro   iso-manjaro 4,969 MiB        -> iso-manjaro-kde     5,278
-  #	zorin     iso-zorin 3,728 MiB          -> iso-zorin-core      3,612
-  #
-  # `keep_alive` IS PART OF THE WAIT: it can run for ninety minutes and a live session's idle timer
-  # puts a lock screen up well before that, after which every word on the screen is the lock screen's.
-  - name: wait for the live desktop
-    desktop: linux
-    timeout: 5400
-    poll: 5
-    keep_alive: true
-
-  # =======================================================================================
-  # 1. THE FOUR PRESELECTED PANES. ONE FOOTER POSITION, MEASURED ON ALL OF THEM.
-  # =======================================================================================
-  #
-  #     Select a Language      English preselected                  Select (1367,790)
-  #     Languages (variants)   United States preselected            Select
-  #     Keyboard Layout        English (US) preselected             Select
-  #     Keyboard (variants)    Default preselected - NOT Dvorak     Select
-  #
-  # y=790, NOT 817, AND THE 27 PIXELS COST A RUN. Measured from run 42526614298's frame at
-  # 21:49:03: the language pane's Select fill spans x=1326..1408, y=775..806, so its centre is
-  # (1367,790). The walk pressed (1367,817) - 27 px BELOW the button - four times, and since
-  # nothing advanced, the next step's `Clean Install` click at (1180,456) landed on the
-  # `German` row of the still-open language list. That opened the German VARIANT submenu, and
-  # the installer then sat on it for the rest of the run: every later click, including the
-  # account and password steps, was aimed at a pane that was never showing.
-  #
-  # THE LATER PANES ARE TALLER. The window grows once a list is not the whole page, so
-  # `Erase and Install` and the account panes really are at y=817 - see the steps below. This
-  # is the same lesson as cachyos' three footer heights, and the numbers are per pane.
-  # `at_button:` RATHER THAN `python: footer:press_footer`.
-  #
-  # THE BUTTON MOVES WITH EVERY PANE, WHICH IS WHY A CONSTANT DOES NOT WORK HERE. That driver's own
-  # measurements: y=790 on Select a Language, y=810 on Keyboard Layout and Install, y=798 on Select a
-  # drive, y=810 on Create User Account - the card SHRINKS AND GROWS as the pane changes. A press ten
-  # pixels below the button lands on wallpaper, nothing advances, and the NEXT step's clicks are
-  # aimed at a pane that never appeared. Four runs were lost that way, each ending at disk 0 MiB.
-  #
-  # `[1240, 755, 1430, 845]` IS THAT DRIVER'S OWN FOOTER BOX, not a guess: every pane measured has
-  # its button inside it, and no other control of that size is drawn there. The fill's colour says
-  # which button it is - green for forward, salmon for `Erase and Install`, grey while disabled - and
-  # the search accepts all three, because the first version accepted only green and grey and then
-  # reported "NO FOOTER BUTTON" on the pane whose button was plainly on screen in salmon.
-  # THE INSTALLER WINDOW IS ITS OWN WAIT, BECAUSE THE DESKTOP IS NOT IT.
-  #
-  # MEASURED ON popos-install: the desktop gate PASSED - `a desktop is on screen (56s); drop=+36.6
-  # on a 1920x1080 frame` - and the very next step failed with
-  #
-  #	select a language: no control fill in [1240,755 1430,845], and no `at_fallback:` to use
-  #
-  # A PANEL IS UP AND THE INSTALLER HAS NOT DRAWN YET. pop-os-installer is a window that appears a
-  # few seconds after the session starts, and `at_button:` searches for a CONTROL FILL inside a
-  # measured rectangle - a fraction of a second too early and the rectangle holds wallpaper.
-  #
-  # THE REFERENCE IMPLEMENTATION HAS NO SUCH GATE and does not need one: its machine is started by
-  # an external driver that waits for the installer before the walk begins. This build starts its own
-  # machine, so the wait belongs in the file.
-  #
-  # `Full Name` IS THE INSTALLER'S OWN WORD, taken from the account pane this file already reads,
-  # so it is a fact about pop-os-installer rather than a word guessed to be on screen.
-  # THE WAIT ASKS FOR A WORD ONLY pop-os-installer DRAWS.
-  #
-  # MEASURED TWICE ON popos-install, AND THE SECOND TIME IS THE PROOF:
-  #
-  #	wait for the installer window: never saw "language" or "welcome" or "full name"
-  #	last read: Wskspaces Applications M11 12 3:49 AM u = (c) O (c) i : : F J ...
-  #
-  # THE SCREEN NEVER SHOWED ANYTHING BUT THE DESKTOP'S OWN TOP BAR. `Wskspaces` IS `Workspaces` - one
-  # OCR error in a word that belongs to the desktop, next to `Applications` and the clock. A LONE
-  # `language` IS TOO WEAK A MARKER: every live desktop with a language indicator satisfies it.
-  #
-  # AND THAT LET EVERY PANE BELOW BE CLICKED ONTO A DESKTOP. `at_button:` found a control fill anyway,
-  # because the language page's Select button is x=1326..1408 y=775..806 and the desktop has a coloured
-  # region in nearly the same place - so the run pressed (1367, 811) four times on a window that was
-  # not there, and the account pane then waited ninety seconds on a screen with no account pane in it.
-  #
-  # THE REFERENCE IMPLEMENTATION'S NOTE ABOUT THAT SAME BUTTON IS THE PROOF OF THE MISMATCH:
-  #
-  #	the language pane's Select fill spans x=1326..1408, y=775..806, so its centre is (1367,790)
-  #
-  # y=775..806 AGAINST OUR y=795..826 - TWENTY PIXELS LOWER AND A DIFFERENT COLOURED THING. A fill test
-  # cannot tell a button from wallpaper, so the ONLY defence is to require a word the installer alone
-  # draws before anything is clicked.
-  #
-  # `clean install` IS THAT WORD-PAIR: it is this installer's own footer button, and the file's own step
-  # 12 is named after it.
-  # THE INSTALLER IS LAUNCHED FROM THE DOCK, BECAUSE IT DOES NOT LAUNCH ITSELF.
-  #
-  # MEASURED, AND THE EVIDENCE IS A RECORDING RATHER THAN A GUESS: the mp4 from run
-  # 43141376447 - extracted frame by frame - shows the live session at 200 seconds with its top bar,
-  # its wallpaper and its dock, AND NO INSTALLER WINDOW. Five minutes of waiting for
-  # `select a language`, `install pop`, `pop!_os`, `clean install` and `full name` produced only
-  #
-  #	last read: Wskspaces Applications M11 12 6:12 AM ...
-  #
-  # POP-OS-INSTALLER IS NOT AUTOSTARTED ON THIS IMAGE. The reference implementation waits for it too,
-  # and its 300-second budget is the number it chose - but it has never run in CI here, so "it works
-  # in the reference" was an assumption rather than a measurement.
-  #
-  # THE ICON IS IN THE DOCK, AND ITS POSITION WAS MEASURED FROM THE RECORDING: the dock's last item is
-  # a light-grey rounded square carrying the `P!` mark, at (1265, 1390) on a 1920x1080 frame. The
-  # video is 640x480, so the measurement is the frame's own coordinate times three - and `at_button:`
-  # refines it by the ICON'S OWN FILL, which is what makes the click land on the icon rather than on
-  # the wallpaper beside it.
-  - name: open the installer from the dock
-    at_button: [1210, 1340, 1330, 1450]
-    at_fallback: [1265, 1390]
-    settle: 20
-
-  # AND IF THE DOCK'S ICON WAS NOT THERE, THE ACTIVITIES GRID HAS IT - a second way in, not a retry of
-  # a click that may have landed on nothing.
-  - name: the installer window is up
-    until_any:
-      # EVERY WORD HERE IS ONE THE DESKTOP DOES NOT DRAW, AND THAT IS THE WHOLE POINT.
-      #
-      # THE PREVIOUS LIST HAD `pop!_os` IN IT, AND THE DESKTOP SATISFIED IT. Measured on the run that
-      # added the dock click: `the installer window is up` PASSED, then ten clicks landed on wallpaper,
-      # and the account pane timed out with
-      #
-      #	last read: Workspaces Applications M1112 7:21 AM ...
-      #
-      # - the desktop's own top bar. `pop!_os` is the product name and it is printed on the live
-      # session as well as on the installer, so it is not a marker for the installer.
-      #
-      # `select a language` AND `install pop` ARE THE REFERENCE IMPLEMENTATION'S first two, and its
-      # third - the product name - is the one that does not discriminate. The rest are later panes,
-      # which are still installer-only and still a correct answer.
-      - [select, a, language]
-      - [clean, install]
-      - [erase, and, install]
-      - ["full", "name"]
-      # `install pop` IS DELIBERATELY ABSENT ALTHOUGH THE REFERENCE IMPLEMENTATION HAS IT. The dock's
-      # icon is titled `Install Pop!_OS`, and a tooltip is enough to satisfy two words that are also
-      # the window title - the same trap `pop!_os` was. What is left is a pane's own heading or a
-      # footer button, neither of which the desktop draws.
-    timeout: 300
-    poll: 3
-    keep_alive: true
-
-  - name: select a language
-    at_button: [1240, 755, 1430, 845]
-    settle: 21
-  - name: language variants
-    at_button: [1240, 755, 1430, 845]
-    settle: 21
-  - name: keyboard layout
-    at_button: [1240, 755, 1430, 845]
-    settle: 21
-  - name: keyboard variants
-    at_button: [1240, 755, 1430, 845]
-    settle: 21
-
-  # =======================================================================================
-  # 2. THE INSTALL PANE. `Clean Install` IS A CHOICE, NOT THE DEFAULT.
-  # =======================================================================================
-  #
-  # The pane offers two cards with neither selected, so the footer does nothing until one is
-  # clicked. `Clean Install` erases the drive this guest owns (`/dev/vda`, 64.0 GiB) and
-  # installs a fresh copy.
-  - name: clean install
-    at: [1180, 456]
-    settle: 8
-
-  - name: install
-    at_button: [1240, 755, 1430, 845]
-    settle: 21
-
-  # =======================================================================================
-  # 3. SELECT A DRIVE. THE CARD, THEN `Erase and Install`.
-  # =======================================================================================
-  #
-  # THE CARD IS AT (1193,498), NOT A BAR AT y=312. Measured on run 42533083200's frame at
-  # 23:07, which is the pane this step was actually looking at: the drive's card - the icon
-  # plus `Virtio Block Device` and `/dev/vda 64.0 GiB` - has its ink between x=1114..1272,
-  # y=477..519.
-  #
-  # AN EARLIER VERSION USED (1000,312) FROM A DIFFERENT LAYOUT. That frame (run 42529279468)
-  # showed a horizontal grey bar for the drive because the disk was then UNPARTITIONED and the
-  # pane drew a partition strip; on a fresh disk this pane draws a CARD in the middle instead.
-  # Clicking the empty bar selected nothing, `Erase and Install` stayed grey, and the locator
-  # then reported "no footer button" - which is the honest answer and how this was found.
-  - name: select a drive
-    at: [1193, 498]
-    settle: 8
-
-  # `Erase and Install` is enabled by that selection. The locator finds it: on this pane its
-  # grey fill is at y=805..828, and once the card is selected it turns green in place.
-  - name: erase and install
-    at_button: [1240, 755, 1430, 845]
-    settle: 44
-
-  # =======================================================================================
-  # 4. THE ACCOUNT, PANE ONE: FULL NAME AND USER NAME
-  # =======================================================================================
-  #
-  # A `python:` STEP, AND THE RUN THAT MADE IT ONE. Run 42516547644 reached this pane and its
-  # frame at t=150s reads
-  #
-  #     Full Name    docker          <- the DIM PLACEHOLDER, not typed text
-  #     User Name    docker|
-  #     Next                         <- grey
-  #
-  # - the walk had just typed `VM User` into Full Name and nothing landed, because
-  # `type_into` is click, ctrl+a, sixty BackSpaces, then type, and THIS PANE'S ENTRIES SIT
-  # BESIDE THE ARTWORK PICKER: a ctrl+a or a BackSpace that lands on the wrong control
-  # selects the avatar and opens a GTK file chooser over the form. So the pane is CLICK AND
-  # TYPE with no clearing, which is a different action from the generic helper - see
-  # steps/panes.py.
-  #
-  # THE PANE MUST BE UP BEFORE A KEY IS SENT, SO ITS OWN WORDS GATE THE TYPING.
-  #
-  # `Full Name` and `User Name` appear on this pane and nowhere else in the installer, which makes
-  # them a fair thing to wait for - and the wait decides WHEN to type, not where.
-  - name: wait for the account pane
-    until: [Full, Name, User]
-    timeout: 90
-    poll: 2
-
-  # `VM User` AND NOT `vmuser`, AND THAT IS THE WHOLE OF THIS PANE.
-  #
-  # pop-os-installer DERIVES the login name from the display name by lowercasing it and removing
-  # spaces, and it REFUSES TO ADVANCE WHEN THE TWO ARE THE SAME after that normalisation. So every
-  # single-word display is refused:
-  #
-  #     vmuser  -> derives vmuser  same -> footer DISABLED
-  #     Vmuser  -> derives vmuser  same -> footer DISABLED
-  #     VMUSER  -> derives vmuser  same -> footer DISABLED
-  #
-  # and a display WITH A SPACE derives the space-stripped form, which is a different string:
-  #
-  #     VM User -> derives vmuser  different -> ENABLED
-  #
-  # Measured on the real pane, one variable at a time, with both entries read from their own pixels
-  # and the footer judged by its green fill. `docker` cannot be obtained from this installer at all.
-  - name: type the display name
-    at: [1188, 494]
-    type: "VM User"
-    type_gap: 0.09
-    settle: 2
-
-  # THE FOCUS-OUT IS WHAT ENABLES THE FOOTER. A GTK entry validates on focus-out, and nothing moved
-  # the focus after the last character until this was added - run 42502695338 sat with Next grey for
-  # forty-two minutes.
-  #
-  # NOTHING TYPES INTO USER NAME: the derived value is already right, and typing over it replaces it
-  # with an equal one, which the pane then refuses.
-  - name: leave the field so it validates
-    key: tab
-    settle: 2
-
-  - name: create user account
-    at_button: [1240, 755, 1430, 845]
-    settle: 22
-
-  # =======================================================================================
-  # 5. THE ACCOUNT, PANE TWO: THE PASSWORD TWICE
-  # =======================================================================================
-  #
-  # THE PANE'S OWN WORD GATES THE TYPING, for the reason run 42535359047 shows: the click meant to
-  # leave the account-name pane was still settling, so the account pane came back with a name typed
-  # into Full Name, the password boxes received nothing, and the step then reported SUCCESS because
-  # all it checked for was a file chooser. `Choose Account Password` appears nowhere else.
-  - name: wait for the password pane
-    until_any:
-      - [Choose, Account, Password]
-      - [Account, Password]
-    timeout: 90
-    poll: 2
-
-  # ESC FIRST, ALWAYS. If a click has already landed on the artwork picker, a GTK file chooser is up
-  # over the installer and every later keystroke goes into ITS search box - the frame that proved it
-  # read `adminadmin` in the chooser's field.
-  - name: dismiss anything a stray click opened
-    key: esc
-    settle: 2
-
-  # THE X IS 1350, NOT 1188, AND THAT IS A MEASURED DEFECT FIXED. The artwork picker's avatar circle
-  # is at (1190,405) with a radius of about 40 px and the entry is a long box starting at x=970, so a
-  # press at x=1188 is directly BELOW that circle - and the presses meant for the entry kept landing
-  # on the picker. Run 42525650794's frame at 21:38:45 is a `Choose Icon` chooser.
-  - name: type the password
-    at: [1350, 447]
-    type: "{{ password }}"
-    type_gap: 0.09
-    settle: 2
-
-  # THE INSTALLER DRAWS THE TWO ENTRIES 96 PIXELS APART, from the focused entry's ring at y=432..463
-  # whose centre is 447.
-  - name: confirm the password
-    at: [1350, 543]
-    type: "{{ password }}"
-    type_gap: 0.09
-    settle: 2
-
-  - name: account password next
-    at_button: [1240, 755, 1430, 845]
-    settle: 25
-
-  # =======================================================================================
-  # 6. DRIVE ENCRYPTION. THE PANE DEFAULTS TO `Encrypt`.
-  # =======================================================================================
-  #
-  # The three buttons are at their own coordinates, measured on a live pane:
-  #
-  #     Don't Encrypt  (1081, 808)      Set Password  (1213, 808)      Encrypt  (1347, 808)
-  #
-  # An encrypted disk needs a passphrase at boot - one more thing that can fail on a machine
-  # nobody is watching - so `Don't Encrypt` is the press that matters.
-  #
-  # ONE LONG SETTLE, THEN THE PRESS, and the reason is measured: runs 42483315092 and
-  # 42484716882 both pressed this coordinate 40 s after the password pane and the installer
-  # CLOSED. This pane's rows are drawn after its content - the `The password is shorter than
-  # 8 characters` note from the page before is drawn ABOVE the button row and moves it while
-  # the window is still settling. A live session that took a frame first and then pressed
-  # worked on the first try.
-  - name: drive encryption - don't encrypt
-    at: [1081, 808]
-    settle: 35
-
-  # =======================================================================================
-  # 7. THE INSTALL IS WRITTEN, AND THE DISK IS WHAT SAYS SO.
-  # =======================================================================================
-  #
-  # THE PROGRESS PANE SHOWS `Extracting Files (N%)`, AND THE PERCENTAGE IS THE ONLY TEXT ON
-  # IT - so a completed disk must not depend on reading it. But a blind `wait` cannot tell
-  # "written" from "the installer closed early", and run 42516547644 showed exactly that
-  # ambiguity: from 20:12 onwards the screen read only the desktop (seven words, no installer
-  # window at all), which is what BOTH a finished install and a crashed one look like.
-  #
-  # So the finish is `disk_settle`, the same measurement fedora now uses: an install writes
-  # gigabytes into the target qcow2 and a stopped guest writes nothing, so st_blocks is the
-  # thing that can tell slow from stopped. `disk_min_mb: 512` stops an untouched sparse image
-  # looking settled; `disk_settle: 180` covers a qcow2 flush without spending minutes after
-  # the last write. MEASURED: a completed popos disk is 3.58 GiB, so the floor is far below it.
-  - name: the install is written
-    disk_settle: 180
-    disk_min_mb: 512
-    timeout: 3600
-    poll: 20
-    keep_alive: true
-
-  # THE DISK IS THE ARTIFACT, AND WITHOUT THIS STEP THERE IS NONE.
-  #
-  # THE WORKFLOW ASKS FOR ONE: each install leg is declared with `"out": "linux-<distro>.qcow2"`, and
-  # `--out` is where a `compress:` WRITES - it is not a filename the engine invents. WITH NO
-  # `compress:` STEP NOTHING WAS WRITTEN, and the leg's `-disk` artifact was 518 bytes:
-  #
-  #	linux-zorin-install-disk   518 bytes
-  #	linux-zorin-vm-disk     10,497,859,093 bytes
-  #
-  # A PASSING INSTALL THAT LEAVES NO DISK is a leg that proves the installer works and produces nothing
-  # for the stage after it. `compress:` flattens the overlay's parent chain into one qcow2 with zstd, so
-  # the file it leaves is the install itself.
-  # THE MACHINE IS STOPPED BEFORE THE DISK IS READ, AND THAT IS WHY THIS STEP EXISTS.
-  #
-  # MEASURED ON zorin-install, WHICH ANSWERED ALL 21 STEPS AND THEN FAILED ON THE LAST ONE:
-  #
-  #	publish the disk: qemu-img convert: exit status 1
-  #	(qemu-img: Could not open '/__w/easyvm/easyvm/work/disk.qcow2': Failed to get shared "write" lock
-  #
-  # THE INSTALL WAS COMPLETE AND THE DISK WAS STILL OPEN. `compress:` READS THE FILE, and qemu holds a
-  # write lock on it until the machine is stopped - so a `compress:` before a `shutdown:` cannot work
-  # however good the install was.
-  #
-  # `kill`, NOT `acpi`, AND THE MEASUREMENT IS WHY.
-  #
-  # MEASURED ON zorin-install, WHICH PASSED ALL 21 STEPS AND THEN PRODUCED A 0 MiB DISK:
-  #
-  #	=== stop the machine
-  #	  stopping with method "acpi"
-  #	  pressing the power button
-  #	  the guest did not power off within 5m0s; killing it - the disk will need a journal replay
-  #	=== publish the disk
-  #	  compressing with zstd
-  #	  linux-zorin.qcow2: 0 MiB
-  #
-  # A LIVE INSTALLER DOES NOT ANSWER THE POWER BUTTON. `acpi` pressed it, the guest ignored it, the
-  # wait expired after five minutes, and the kill that followed raced `qemu-img convert` - which read
-  # a disk qemu was still releasing and wrote ZERO BYTES.
-  #
-  # `kill` IS NOT A COMPROMISE HERE, BECAUSE THE INSTALLER HAS ALREADY FINISHED: the step above waits
-  # for the install to complete, and what follows is a disk with a written system on it. The journal
-  # replay the kill costs is paid on the next boot, which is the stage after this one, and it is
-  # cheaper than five minutes of waiting for a button nothing presses.
-  #
-  # THE WAIT IS SHORTENED TOO: 120 seconds, because a kill does not need the five minutes a graceful
-  # request does - and the boot after this one replays the journal either way.
-  - name: stop the machine
-    shutdown: kill
-    timeout: 120
-
-  - name: publish the disk
-    compress: "{{ out }}"
-
-  - name: stop recording
-    record: false
+- name: start recording
+  record: popos-install.mp4
+- name: create the empty disk
+  disk: disk.qcow2
+  disk_gb: 64
+- name: fetch the installer image
+  fetch: linux_iso
+  release: popos
+- name: boot the installer
+  boot: true
+  os: linux
+  iso: installer_iso
+  timeout: 1800
+- name: wait for the live desktop
+  desktop: linux
+  timeout: 5400
+  poll: 5
+  keep_alive: true
+- name: open the installer from the dock
+  at_button:
+  - 1210
+  - 1340
+  - 1330
+  - 1450
+  at_fallback:
+  - 1265
+  - 1390
+  settle: 20
+- name: the installer window is up
+  until_any:
+  - - select
+    - a
+    - language
+  - - clean
+    - install
+  - - erase
+    - and
+    - install
+  - - full
+    - name
+  timeout: 300
+  poll: 3
+  keep_alive: true
+- name: select a language
+  at_button:
+  - 1240
+  - 755
+  - 1430
+  - 845
+  settle: 21
+- name: language variants
+  at_button:
+  - 1240
+  - 755
+  - 1430
+  - 845
+  settle: 21
+- name: keyboard layout
+  at_button:
+  - 1240
+  - 755
+  - 1430
+  - 845
+  settle: 21
+- name: keyboard variants
+  at_button:
+  - 1240
+  - 755
+  - 1430
+  - 845
+  settle: 21
+- name: clean install
+  at:
+  - 1180
+  - 456
+  settle: 8
+- name: install
+  at_button:
+  - 1240
+  - 755
+  - 1430
+  - 845
+  settle: 21
+- name: select a drive
+  at:
+  - 1193
+  - 498
+  settle: 8
+- name: erase and install
+  at_button:
+  - 1240
+  - 755
+  - 1430
+  - 845
+  settle: 44
+- name: wait for the account pane
+  until:
+  - Full
+  - Name
+  - User
+  timeout: 90
+  poll: 2
+- name: type the display name
+  at:
+  - 1188
+  - 494
+  type: VM User
+  type_gap: 0.09
+  settle: 2
+- name: leave the field so it validates
+  key: tab
+  settle: 2
+- name: create user account
+  at_button:
+  - 1240
+  - 755
+  - 1430
+  - 845
+  settle: 22
+- name: wait for the password pane
+  until_any:
+  - - Choose
+    - Account
+    - Password
+  - - Account
+    - Password
+  timeout: 90
+  poll: 2
+- name: dismiss anything a stray click opened
+  key: esc
+  settle: 2
+- name: type the password
+  at:
+  - 1350
+  - 447
+  type: '{{ password }}'
+  type_gap: 0.09
+  settle: 2
+- name: confirm the password
+  at:
+  - 1350
+  - 543
+  type: '{{ password }}'
+  type_gap: 0.09
+  settle: 2
+- name: account password next
+  at_button:
+  - 1240
+  - 755
+  - 1430
+  - 845
+  settle: 25
+- name: drive encryption - don't encrypt
+  at:
+  - 1081
+  - 808
+  settle: 35
+- name: the install is written
+  disk_settle: 180
+  disk_min_mb: 512
+  timeout: 3600
+  poll: 20
+  keep_alive: true
+- name: stop the machine
+  shutdown: kill
+  timeout: 120
+- name: publish the disk
+  compress: '{{ out }}'
+- name: stop recording
+  record: false

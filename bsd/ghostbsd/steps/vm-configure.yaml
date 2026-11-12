@@ -1,39 +1,7 @@
-# Stage four for bsd-ghostbsd: everything a finished disk needs before the toolchain - a name,
-# the host share, and an agent that can shut the machine down.
-#
-#     python3 lib/steps.py bsd/ghostbsd/steps/vm-configure.yaml \
-#         --boot-disk out/ghostbsd-mate-ssh.qcow2 --out out/ghostbsd-mate-vm.qcow2
-#
-# WHY THIS STAGE EXISTS, AND WHY IT COMES AFTER ssh
-#
-# It is macOS' stage four and the twelve Linux ones', for the same three reasons. Before ssh there
-# is no way in that is not a keyboard and a screen; after it, everything here is ordinary remote
-# work. So the stages are ordered install -> ssh -> vm-configure -> dev, and nothing in this file
-# clicks anything.
-#
-# WHAT IT DOES
-#
-#     the machine's name        `easyvm-<8 hex>`, through rc.conf and `hostname`
-#     the host share            ~/shared, mounted from the smbd `share_serve:` starts
-#     the qemu guest agent      a shutdown that is a request, not a power button
-#     the login launcher        a .xinitrc hook that runs ~/shared/bootstrap.sh at login
-#
-# WHAT IS DIFFERENT FROM THE TWELVE LINUX FILES, AND WHY THIS IS PER-DISTRIBUTION
-#
-#   the system manager   rc.conf and `service`, not systemd. There is no `hostnamectl`, no
-#                        `systemctl is-enabled`, and no `.wants` symlink to check.
-#   the package manager  `pkg install`, and the guest agent is `qemu-guest-agent` from ports.
-#   the share client     mount_smbfs? No - GhostBSD has no smbfs driver in the base kernel. It
-#                        mounts with `mount_smbfs` only when the `fusefs-smbnetfs` port is there,
-#                        so this file installs it and mounts through smbnetfs.
-#   the launcher         MATE reads ~/.xinitrc; there is no systemd user session to enable.
-#
-# THE COMMANDS ARE THE IMAGE'S OWN, and every one of them was measured on this disk's own
-# console in bsd/ghostbsd/steps/ssh.yaml - `sudo -S`, `sysrc`, `service`, fish as the login shell.
-
 name: bsd-ghostbsd - configure the vm (name, share, guest agent)
-resolution: [1920, 1080]
-
+resolution:
+- 1920
+- 1080
 vars:
   user:
     from: args.user
@@ -41,453 +9,145 @@ vars:
   password:
     from: args.password
     default: admin
-  # THE MACHINE'S NAME. `args.hostname` is filled by the engine with `easyvm-<8 hex>` unless the
-  # caller names one, so two disks on one bridge never answer to the same name.
   hostname:
     from: args.hostname
     default: easyvm-vm
-  # THE SERVER, SO NO PROOF BELOW HARD-CODES AN ADDRESS.
   host:
     from: args.host
     default: 172.30.0.1
-  # THE SHARE'S NAME, WHICH IS ALSO THE PORT-FORWARD'S, AND THE ONLY PART OF THE smbnetfs TREE
-  # THIS FILE NEEDS TO KNOW: the depth above it is the client's business.
   share_name:
     from: args.share_name
     default: shared
-  # WHERE THIS STAGE'S DISK GOES, AND HOW LONG THE GUEST MAY TAKE TO COME UP.
   out:
     from: args.out
     default: out/vm-configure.qcow2
   boot_timeout:
     from: args.boot_timeout
-    default: "1800"
-
+    default: '1800'
 ssh_user: vmuser
 ssh_port: 2222
-
 steps:
+- name: start recording
+  record: vm-configure.mp4
+- name: take the input disk
+  disk: disk.qcow2
+- name: boot the disk
+  boot: true
+  os: bsd
+  timeout: '{{ boot_timeout }}'
+- name: wait for sshd
+  require_ssh: true
+  timeout: '{{ boot_timeout }}'
+- name: announce the machine's name
+  ssh: echo "this machine will be named '{{ hostname }}'"
+  timeout: 60
+- name: set the machine's name in rc.conf
+  ssh: 'printf ''%s\n'' ''{{ password }}'' | sudo -S -p '''' sysrc hostname="{{ hostname }}"
 
-  # =======================================================================================
-  # 0. THE MACHINE, WHICH IS FIVE STEPS AND WAS A STAGE IN PYTHON
-  # =======================================================================================
-  - name: start recording
-    record: vm-configure.mp4
-    poll: 20
+    '
+  timeout: 120
+- name: set the running name
+  ssh: 'printf ''%s\n'' ''{{ password }}'' | sudo -S -p '''' hostname "{{ hostname }}"
 
-  - name: take the input disk
-    disk: disk.qcow2
+    '
+  timeout: 180
+- name: point the loopback line at that name
+  ssh: "printf '%s\\n' '{{ password }}' | sudo -S -p '' sh -c '\n  if grep -q \"^127\\.0\\.1\\.1\" /etc/hosts; then\n    sed -i \"\" \"s/^127\\.0\\.1\\.1.*/127.0.1.1 {{ hostname }}/\" /etc/hosts\n  else\n\
+    \    printf \"127.0.1.1\\t%s\\n\" \"{{ hostname }}\" >> /etc/hosts\n  fi'\n"
+  timeout: 120
+- name: prove the name
+  ssh: "sh -c '\n  set -e\n  echo \"rc.conf: $(sysrc -n hostname)\"\n  echo \"kernel:  $(hostname)\"\n  test \"$(sysrc -n hostname)\" = \"{{ hostname }}\"\n  test \"$(hostname)\" = \"{{ hostname }}\"'\n"
+  timeout: 60
+- name: install the guest agent
+  ssh: 'printf ''%s\n'' ''{{ password }}'' | sudo -S -p '''' pkg install -y qemu-guest-agent 2>&1 | tail -5
 
-  # `os: bsd` - the generic UEFI path in lib/vm_session.py, which is what GhostBSD is: OVMF, an
-  # OVMF variable store and a virtio disk.
-  - name: boot the disk
-    boot: true
-    os: bsd
-    timeout: "{{ boot_timeout }}"
+    '
+  timeout: 900
+- name: enable the guest agent at boot
+  ssh: "printf '%s\\n' '{{ password }}' | sudo -S -p '' sh -c '\n  sysrc qemu_guest_agent_enable=YES 2>&1\n  service qemu-guest-agent start 2>&1 | tail -3'\n"
+  timeout: 180
+- name: prove the guest agent is running
+  ssh: "sh -c '\n  echo \"--- the process ---\"\n  PIDS=$(pgrep -f qemu-ga 2>/dev/null || true)\n  echo \"${PIDS:-none}\"\n  echo \"--- a virtio console, whichever path this kernel uses ---\"\n  CONS=$(ls\
+    \ -d /dev/vtcon/* /dev/virtio-ports/* 2>/dev/null || true)\n  echo \"${CONS:-none}\"\n  test -n \"$PIDS\"\n  test -n \"$CONS\"'\n"
+  timeout: 120
+- name: install the userspace smb client
+  ssh: 'printf ''%s\n'' ''{{ password }}'' | sudo -S -p '''' pkg install -y fusefs-smbnetfs 2>&1 | tail -5
 
-  - name: wait for sshd
-    require_ssh: true
-    timeout: "{{ boot_timeout }}"
+    '
+  timeout: 900
+- name: load the fuse module
+  ssh: 'printf ''%s\n'' ''{{ password }}'' | sudo -S -p '''' sh -c ''kldload fusefs 2>&1 || true; kldstat | grep -c fusefs''
 
-  # =======================================================================================
-  # 1. THE MACHINE'S NAME, THROUGH rc.conf
-  # =======================================================================================
-  #
-  # `sysrc` WRITES THE KNOB AND `hostname` SETS IT FOR THIS BOOT, which is the same pair the Linux
-  # files need: the file alone leaves the running kernel answering the old name, and the command
-  # alone is lost at reboot.
-  - name: announce the machine's name
-    ssh: echo "this machine will be named '{{ hostname }}'"
-    timeout: 60
-
-  # THE KNOB AND THE RUNNING NAME ARE TWO STEPS, AND RUN 5e91ea1 IS WHY.
-  #
-  # They were one `sh -c` and the connection died inside it:
-  #
-  #     ssh: printf '%s\n' 'admin' | sudo -S -p '' sh -c '
-  #       sysrc hostname="easyvm-362eab0f"
-  #       hostname "easyvm-362eab0f"'
-  #      -> 255
-  #         Connection timed out during banner exchange
-  #
-  # A `banner exchange` timeout is the CONNECT phase, not the command - so sshd was not answering
-  # at that moment, and one command in one connection means one flaky second costs the stage. The
-  # eleven Linux files set the name with `hostnamectl`, one command over systemd's own bus; this
-  # one writes rc.conf and then calls `hostname`, which is two acts on two different subsystems.
-  #
-  # SPLIT, so a failure names which half and a retry is cheap.
-  - name: set the machine's name in rc.conf
-    ssh: |
-      printf '%s\n' '{{ password }}' | sudo -S -p '' sysrc hostname="{{ hostname }}"
-    timeout: 120
-
-  - name: set the running name
-    ssh: |
-      printf '%s\n' '{{ password }}' | sudo -S -p '' hostname "{{ hostname }}"
-    timeout: 180
-
-  - name: point the loopback line at that name
-    ssh: |
-      printf '%s\n' '{{ password }}' | sudo -S -p '' sh -c '
-        if grep -q "^127\.0\.1\.1" /etc/hosts; then
-          sed -i "" "s/^127\.0\.1\.1.*/127.0.1.1 {{ hostname }}/" /etc/hosts
-        else
-          printf "127.0.1.1\t%s\n" "{{ hostname }}" >> /etc/hosts
-        fi'
-    timeout: 120
-
-  - name: prove the name
-    ssh: |
-      sh -c '
-        set -e
-        echo "rc.conf: $(sysrc -n hostname)"
-        echo "kernel:  $(hostname)"
-        test "$(sysrc -n hostname)" = "{{ hostname }}"
-        test "$(hostname)" = "{{ hostname }}"'
-    timeout: 60
-
-  # =======================================================================================
-  # 2. THE QEMU GUEST AGENT
-  # =======================================================================================
-  #
-  # WHY A GUEST AGENT AT ALL, WHEN ssh ALREADY WORKS: `system_powerdown` is an ACPI event and a
-  # desktop answers it with whatever its session policy says. `guest-shutdown` over qga is a
-  # request the guest's own agent executes, and it is acknowledged.
-  #
-  # THE PORT IS `qemu-guest-agent` FROM PORTS, and it is started through rc.conf like everything
-  # else here.
-  - name: install the guest agent
-    ssh: |
-      printf '%s\n' '{{ password }}' | sudo -S -p '' pkg install -y qemu-guest-agent 2>&1 | tail -5
-    timeout: 900
-
-  - name: enable the guest agent at boot
-    ssh: |
-      printf '%s\n' '{{ password }}' | sudo -S -p '' sh -c '
-        sysrc qemu_guest_agent_enable=YES 2>&1
-        service qemu-guest-agent start 2>&1 | tail -3'
-    timeout: 180
-
-  # THE PROCESS AND A VIRTIO CONSOLE, AND THE PATH IS NOT THE LINUX ONE.
-  #
-  # Run 83bb7dc showed the agent starting correctly
-  #
-  #     qemu_guest_agent_enable:  -> YES
-  #     Starting qemu_guest_agent.
-  #
-  # and then failed on the check I wrote, which hard-coded Linux's path:
-  #
-  #     ls: /dev/virtio-ports/org.qemu.guest_agent.0: No such file or directory
-  #
-  # FREEBSD EXPOSES A VIRTIO CONSOLE DIFFERENTLY. `/dev/virtio-ports/<name>` is the Linux
-  # convention; on FreeBSD the same device appears under `/dev/vtcon/` (its virtio_console driver)
-  # and the agent is told which one to open by its own rc script. Naming one path from the other
-  # platform is a check that can only ever fail on this one.
-  #
-  # SO THE CHECK IS TWO THINGS THAT ARE TRUE ON BOTH: the daemon is running, and SOME virtio
-  # console device exists. A disk with the agent installed but no channel has the process and no
-  # device, which is the failure this is meant to catch.
-  # THE PROOF IS THE OUTPUT, NOT THE EXIT STATUS OF A PIPELINE.
-  #
-  # Run 85f73fe printed everything this step exists to print
-  #
-  #     --- the process ---
-  #     1345
-  #     1346
-  #     1341
-  #     --- a virtio console, whichever path this kernel uses ---
-  #     /dev/vtcon/org.qemu.guest_agent.0
-  #
-  # - the daemon running and the device node present, which is exactly the pair the step asks for -
-  # and then exited 1. The cause is `pgrep -af qemu-ga || pgrep -af qemu-guest-agent`: the first
-  # pgrep finds nothing on this image, so the `||` branch runs and prints the pids, and the
-  # pipeline's status is whichever pgrep happened to be last. Under `set -e` that status ends the
-  # step, AFTER the output has already proved the point.
-  #
-  # SO NOTHING HERE DEPENDS ON A PIPELINE'S STATUS. Each fact is captured into a variable, the
-  # variable is printed, and the step asserts on what was CAPTURED - which is the same standard the
-  # `expect:` steps use, and the reason they exist.
-  - name: prove the guest agent is running
-    ssh: |
-      sh -c '
-        echo "--- the process ---"
-        PIDS=$(pgrep -f qemu-ga 2>/dev/null || true)
-        echo "${PIDS:-none}"
-        echo "--- a virtio console, whichever path this kernel uses ---"
-        CONS=$(ls -d /dev/vtcon/* /dev/virtio-ports/* 2>/dev/null || true)
-        echo "${CONS:-none}"
-        test -n "$PIDS"
-        test -n "$CONS"'
-    timeout: 120
-
-  # =======================================================================================
-  # 3. THE HOST SHARE
-  # =======================================================================================
-  #
-  # THE CLIENT IS A USERSPACE ONE, AND `mount_smbfs` IS NOT USED AT ALL.
-  #
-  # FreeBSD's `mount_smbfs` IS the kernel's smbfs, which speaks SMB1 and never learned SMB2. This
-  # server sets `server min protocol = SMB2_10` because macOS 15 refuses SMB1 outright and Windows
-  # 11 ships with it off - so the two cannot meet, and the failure is a TCP connection that opens
-  # and an SMB session that never starts:
-  #
-  #     Connection to 172.30.0.1 445 port [tcp/microsoft-ds] succeeded!    (nc, from the guest)
-  #     mount_smbfs: unable to open connection: syserr = Operation timed out
-  #
-  # LOWERING THE SERVER WOULD COST MORE THAN IT BUYS: macOS and Windows would stop mounting.
-  #
-  # `fusefs-smbnetfs` speaks SMB2/3 through libsmbclient and mounts with FUSE, which this kernel
-  # already has. It is the BSD equivalent of the `cifs-utils` the twelve Linux files install.
-  - name: install the userspace smb client
-    ssh: |
-      printf '%s\n' '{{ password }}' | sudo -S -p '' pkg install -y fusefs-smbnetfs 2>&1 | tail -5
-    timeout: 900
-
-  - name: load the fuse module
-    ssh: |
-      printf '%s\n' '{{ password }}' | sudo -S -p '' sh -c 'kldload fusefs 2>&1 || true; kldstat | grep -c fusefs'
-    timeout: 120
-
-  # CAN THIS GUEST REACH THE SERVER AT ALL? ASKED BEFORE THE MOUNT, BECAUSE "CAN'T GET SERVER
-  # ADDRESS" IS A DIFFERENT SENTENCE FROM "THE MOUNT FAILED".
-  #
-  # Run 58cf56c's only diagnostic was
-  #
-  #     mount_smbfs: can't get server address: syserr = Operation timed out
-  #
-  # which is the RESOLVE step - so the question "is 445 reachable from inside this guest" was never
-  # answered, and every change to the mount command after it was a guess.
-  - name: serve the host share
-    share_serve: true
-    timeout: 60
-
-  - name: prove the guest can reach the server on 445
-    ssh: |
-      sh -c '
-        echo "--- the address this guest has ---"
-        ifconfig | grep "inet " | head -4
-        echo "--- the route to the host ---"
-        route -n get {{ host }} 2>&1 | head -6
-        echo "--- can it open 445 ---"
-        timeout 10 nc -z -v {{ host }} 445 2>&1 || timeout 10 nc {{ host }} 445 </dev/null 2>&1 || true
-        echo "--- and can it resolve nothing? (the mount takes an address, not a name) ---"
-        getent hosts {{ host }} 2>&1 || true'
-    timeout: 120
-    optional: true
-
-  # `share_family: bsd` IS THE smbnetfs COMMAND, not the cifs one the twelve Linux files use.
-  # THE MOUNT IS FOUR STEPS AND NO `share_mount:`, BECAUSE THIS CLIENT NEEDS FILES.
-  #
-  # `share_mount:` sends one command. smbnetfs wants two configuration files that cannot be
-  # written from inside `sudo sh -c '...'` - a heredoc there needs quotes of its own, and the
-  # second layer of quoting truncates every line at its first word:
-  #
-  #     Invalid input line : auth
-  #     Invalid input line : smb_
-  #
-  # and `-o smb_server=...` is refused by FUSE before smbnetfs sees it:
-  #
-  #     fuse: unknown option `smb_server=172.30.0.1'
-  #
-  # So the files are WRITTEN ON THE HOST (`python:`), COPIED IN (`scp:`), and only the mount itself
-  # is a command - which is the one thing about this that is like the other twelve.
-  # `write: smb_conf` RATHER THAN `python: bootstrap_files:smbnetfs_conf`: both files are host-side
-  # text and `internal/bootstrap` writes them. The keywords are not guesses - see its comment for the
-  # four this parser accepts and the two errors that cost fifteen runs.
-  - name: write the smb client's configuration
-    write: smb_conf
-    timeout: 60
-
-  - name: copy smb.conf in
-    scp: ["smb.conf", "/tmp/smb.conf"]
-    timeout: 300
-
-  - name: copy smbnetfs.conf in
-    scp: ["smbnetfs.conf", "/tmp/smbnetfs.conf"]
-    timeout: 300
-
-  # 0600 BEFORE THE CLIENT READS IT, AND THE TREE IS ASYNCHRONOUS.
-  #
-  # Run b5267d9 got the config ACCEPTED for the first time - no `Invalid input line` at all - and
-  # the mount point still listed only `.` and `..` while its link count said 3, which means one
-  # subdirectory existed internally and readdir had not been handed it. smbnetfs forks an smbclient
-  # context per host and fills the tree in from the child, so a fixed `sleep 5` is a guess about a
-  # process this step cannot see.
-  #
-  # SO THE STEP WAITS FOR THE TREE INSTEAD OF FOR A DURATION, and prints the client's own log when
-  # it gives up. `smbnetfs_debug 7` and `log_file` are in the config it was given, so the reason is
-  # in that file rather than in a second round of guesses about keywords.
-  - name: mount the host share
-    ssh: |
-      sh -c '
-        set -e
-        MOUNT="$HOME/shared"
-        mkdir -p "$MOUNT"
-        printf "%s\n" "{{ password }}" | sudo -S -p "" sh -c "
-          mkdir -p /root/.smb
-          cp /tmp/smb.conf /root/.smb/smb.conf
-          cp /tmp/smbnetfs.conf /root/.smb/smbnetfs.conf
-          chmod 600 /root/.smb/smb.conf /root/.smb/smbnetfs.conf
-          echo \"--- the conf smbnetfs will read ---\"
-          cat -e /root/.smb/smbnetfs.conf
-          echo \"--- end ---\"
-          rm -f /tmp/smbnetfs.log /tmp/smbnetfs.out
-          smbnetfs -o allow_other \"$MOUNT\" >/tmp/smbnetfs.out 2>&1
-          sleep 2"
-        echo "--- what smbnetfs said on its own streams ---"
-        printf "%s\\n" "{{ password }}" | sudo -S -p "" tail -12 /tmp/smbnetfs.out 2>&1 || true
-        echo "--- waiting for the tree ---"
-        n=0
-        while [ $n -lt 30 ]; do
-          if [ -n "$(ls -A \"$MOUNT\" 2>/dev/null)" ]; then
-            echo "the tree appeared after $((n * 2))s"
-            break
-          fi
-          n=$((n + 1))
-          sleep 2
-        done
-        echo "--- what appeared ---"
-        ls -la "$MOUNT" 2>&1 | head -10
-        find "$MOUNT" -maxdepth 3 -type d 2>/dev/null | head -12
-        # TOUCH THE SHARE, NOT JUST THE TREE. `stat` is fabricated by smbnetfs (it answers 0777
-        # for any name in its own tree without asking the server), so only a readdir or a write
-        # can provoke the session setup. Doing it HERE means the refusal, if there is one, lands
-        # while this step is running, so the witness step after it can read the server log.
-        #
-        # NO APOSTROPHE IN THESE FOUR LINES, AND THAT IS NOT STYLE. They sit INSIDE the single
-        # quoted body of `sh -c`, and one possessive closed that quote early - which is what fish
-        # reported as `Expected a command, but found an incomplete token`, one line from the end.
-        echo "--- a first attempt at the share itself ---"
-        ls "$MOUNT"/{{ host }}/{{ share_name }} 2>&1 | head -5'
-    # THE MOUNT IS BEST EFFORT; THE PROOF IS THE JUDGE. Marked optional so that a refusal does
-    # not stop the walk before the server's own log is read - the step after this one exists for
-    # exactly that, and a step that stops the walk cannot be witnessed.
-    optional: true
-    timeout: 600
-
-  # THE SERVER'S SIDE, READ BEFORE THE VERDICT IS GIVEN.
-  #
-  # `lib/steps.py` prints smbd's log whenever a `share_mount:` is refused, because the client says
-  # one sentence and the server says which half refused it - the dialect, the auth type offered,
-  # the nt status returned. This file cannot use `share_mount:` (smbnetfs needs two config files,
-  # so the mount is an `ssh:` step with `scp:` before it), and that is the whole reason twenty runs
-  # have been argued from the client alone.
-  #
-  # IT SITS HERE, AFTER THE MOUNT TOUCHED THE SHARE, AND BEFORE THE PROOF - so it runs even when
-  # the proof is about to fail, which is the only time its output is worth anything.
-  #
-  # `optional: true`: it is a witness, not a judge.
-  - name: print the server's account of the session
-    host_log: smbd
-    optional: true
-    timeout: 60
-
-  # THE ROUND TRIP IS THE VERDICT, AND THE LOG IS TAKEN AFTER THE ATTEMPT THAT FAILED.
-  #
-  # Runs b43b65a and 3ce95d1 both ended with
-  #
-  #     /home/vmuser/shared/172.30.0.1/shared
-  #     total 0
-  #     ls: ...: Permission denied
-  #
-  # and the client log printed just before it had NOT ONE line about the share - only the IPC$
-  # session and the readdir that produced the tree. That is a MEASUREMENT ERROR, not evidence:
-  # the log was tailed at the end of the MOUNT step, and the opendir that fails happens six seconds
-  # later in THIS step. So the reason was never in the output, and every fix since has been reasoned
-  # from an error message instead of from libsmbclient's own words.
-  #
-  # IT IS TAKEN HERE NOW, AFTER the failed `ls` and write, with `set +e` so a failure cannot skip it.
-  # `smb_debug_level 7` is in the config the client was given, so libsmbclient's NT_STATUS for a
-  # refused tree connect is in this file - and `grep -i` keeps it to the lines that matter.
-  #
-  # `total 0` AND A SUCCESSFUL `stat` PROVE NOTHING, which is worth stating where the next reader
-  # will look: `function_stat()` in smbnetfs FABRICATES `0040777` for anything in its own tree
-  # without asking the server. Only the readdir/write below touch the share.
-  - name: prove the share is readable and writable
-    ssh: |
-      sh -c '
-        set +e
-        MOUNT="$HOME/shared"
-        echo "--- the tree smbnetfs built ---"
-        find "$MOUNT" -mindepth 1 -maxdepth 4 -type d 2>/dev/null | head -12
-        SHARE="$MOUNT/{{ host }}/{{ share_name }}"
-        [ -d "$SHARE" ] || \
-          SHARE=$(find "$MOUNT" -mindepth 1 -maxdepth 4 -type d -name {{ share_name }} 2>/dev/null | head -1)
-        echo "--- the share ---"
-        echo "$SHARE"
-        rc=0
-        echo "--- ls ---"
-        ls -la "$SHARE" 2>&1 | head -20 || rc=1
-        echo "--- write ---"
-        if printf "written-by-the-guest\n" > "$SHARE/from-guest.txt" 2>/tmp/write.err; then
-          cat "$SHARE/from-guest.txt" 2>&1 | head -3
-          [ "$(cat "$SHARE/from-guest.txt" 2>/dev/null)" = "written-by-the-guest" ] || rc=1
-        else
-          cat /tmp/write.err 2>/dev/null | head -3
-          rc=1
-        fi
-        echo "--- the client log, taken AFTER the attempt (unfiltered) ---"
-        printf "%s\n" "{{ password }}" | sudo -S -p "" \
-          tail -50 /tmp/smbnetfs.log 2>&1
-        echo "--- the streams smbnetfs wrote ---"
-        printf "%s\n" "{{ password }}" | sudo -S -p "" \
-          tail -20 /tmp/smbnetfs.out 2>&1
-        echo "--- round trip rc=$rc ---"
-        [ $rc -eq 0 ] && echo "round trip ok"
-        exit $rc'
-    timeout: 180
-
-  # =======================================================================================
-  # 4. THE BOOTSTRAP LAUNCHER
-  # =======================================================================================
-  #
-  # MATE ON THIS IMAGE STARTS FROM ~/.xinitrc rather than from a systemd user session, so the
-  # hook is a line in that file. It is written idempotently: `grep -q` first, append only when it
-  # is missing, so a second run does not add it twice.
-  - name: write the launcher
-    write: launcher
-    family: linux
-    timeout: 60
-
-  - name: copy the launcher in
-    scp: ["bootstrap-launcher.sh", "/tmp/bootstrap-launcher.sh"]
-    timeout: 300
-
-  - name: install the launcher
-    ssh: |
-      sh -c '
-        set -e
-        install -m 0755 /tmp/bootstrap-launcher.sh "$HOME/bootstrap-launcher.sh"
-        touch "$HOME/.xinitrc"
-        grep -q bootstrap-launcher.sh "$HOME/.xinitrc" || \
-        printf "\n%s\n" "sh $HOME/bootstrap-launcher.sh &" >> "$HOME/.xinitrc"
-        echo INSTALLED_FOR_NEXT_LOGIN
-        tail -3 "$HOME/.xinitrc"'
-    timeout: 300
-
-  - name: prove the launcher is installed
-    ssh: |
-      sh -c '
-        set -e
-        ls -l "$HOME/bootstrap-launcher.sh" "$HOME/.xinitrc"
-        grep -q bootstrap-launcher.sh "$HOME/.xinitrc"
-        echo enabled'
-    timeout: 60
-
-  # =======================================================================================
-  # 5. THE MACHINE GOES BACK TO ITS DISK, AND THE DISK BECOMES THE ARTIFACT
-  # =======================================================================================
-  #
-  # `ssh` RATHER THAN `kill`: this guest owns the real disk and its filesystem is what gets
-  # published. `lib/vm_session.py`'s SHUTDOWN_COMMAND has the bsd line, and it uses
-  # `shutdown -p now` - FreeBSD's `-h` HALTS and stops at "The operating system has stopped",
-  # leaving qemu running forever.
-  - name: stop the machine
-    shutdown: ssh
-    timeout: 300
-
-  - name: publish the disk
-    compress: "{{ out }}"
-
-  - name: stop recording
-    record: false
+    '
+  timeout: 120
+- name: serve the host share
+  share_serve: true
+  timeout: 60
+- name: prove the guest can reach the server on 445
+  ssh: "sh -c '\n  echo \"--- the address this guest has ---\"\n  ifconfig | grep \"inet \" | head -4\n  echo \"--- the route to the host ---\"\n  route -n get {{ host }} 2>&1 | head -6\n  echo \"--- can\
+    \ it open 445 ---\"\n  timeout 10 nc -z -v {{ host }} 445 2>&1 || timeout 10 nc {{ host }} 445 </dev/null 2>&1 || true\n  echo \"--- and can it resolve nothing? (the mount takes an address, not a name)\
+    \ ---\"\n  getent hosts {{ host }} 2>&1 || true'\n"
+  timeout: 120
+  optional: true
+- name: write the smb client's configuration
+  write: smb_conf
+  timeout: 60
+- name: copy smb.conf in
+  scp:
+  - smb.conf
+  - /tmp/smb.conf
+  timeout: 300
+- name: copy smbnetfs.conf in
+  scp:
+  - smbnetfs.conf
+  - /tmp/smbnetfs.conf
+  timeout: 300
+- name: mount the host share
+  ssh: "sh -c '\n  set -e\n  MOUNT=\"$HOME/shared\"\n  mkdir -p \"$MOUNT\"\n  printf \"%s\\n\" \"{{ password }}\" | sudo -S -p \"\" sh -c \"\n    mkdir -p /root/.smb\n    cp /tmp/smb.conf /root/.smb/smb.conf\n\
+    \    cp /tmp/smbnetfs.conf /root/.smb/smbnetfs.conf\n    chmod 600 /root/.smb/smb.conf /root/.smb/smbnetfs.conf\n    echo \\\"--- the conf smbnetfs will read ---\\\"\n    cat -e /root/.smb/smbnetfs.conf\n\
+    \    echo \\\"--- end ---\\\"\n    rm -f /tmp/smbnetfs.log /tmp/smbnetfs.out\n    smbnetfs -o allow_other \\\"$MOUNT\\\" >/tmp/smbnetfs.out 2>&1\n    sleep 2\"\n  echo \"--- what smbnetfs said on its\
+    \ own streams ---\"\n  printf \"%s\\\\n\" \"{{ password }}\" | sudo -S -p \"\" tail -12 /tmp/smbnetfs.out 2>&1 || true\n  echo \"--- waiting for the tree ---\"\n  n=0\n  while [ $n -lt 30 ]; do\n  \
+    \  if [ -n \"$(ls -A \\\"$MOUNT\\\" 2>/dev/null)\" ]; then\n      echo \"the tree appeared after $((n * 2))s\"\n      break\n    fi\n    n=$((n + 1))\n    sleep 2\n  done\n  echo \"--- what appeared\
+    \ ---\"\n  ls -la \"$MOUNT\" 2>&1 | head -10\n  find \"$MOUNT\" -maxdepth 3 -type d 2>/dev/null | head -12\n  # TOUCH THE SHARE, NOT JUST THE TREE. `stat` is fabricated by smbnetfs (it answers 0777\n\
+    \  # for any name in its own tree without asking the server), so only a readdir or a write\n  # can provoke the session setup. Doing it HERE means the refusal, if there is one, lands\n  # while this\
+    \ step is running, so the witness step after it can read the server log.\n  #\n  # NO APOSTROPHE IN THESE FOUR LINES, AND THAT IS NOT STYLE. They sit INSIDE the single\n  # quoted body of `sh -c`, and\
+    \ one possessive closed that quote early - which is what fish\n  # reported as `Expected a command, but found an incomplete token`, one line from the end.\n  echo \"--- a first attempt at the share\
+    \ itself ---\"\n  ls \"$MOUNT\"/{{ host }}/{{ share_name }} 2>&1 | head -5'\n"
+  optional: true
+  timeout: 600
+- name: print the server's account of the session
+  host_log: smbd
+  optional: true
+  timeout: 60
+- name: prove the share is readable and writable
+  ssh: "sh -c '\n  set +e\n  MOUNT=\"$HOME/shared\"\n  echo \"--- the tree smbnetfs built ---\"\n  find \"$MOUNT\" -mindepth 1 -maxdepth 4 -type d 2>/dev/null | head -12\n  SHARE=\"$MOUNT/{{ host }}/{{\
+    \ share_name }}\"\n  [ -d \"$SHARE\" ] || \\\n    SHARE=$(find \"$MOUNT\" -mindepth 1 -maxdepth 4 -type d -name {{ share_name }} 2>/dev/null | head -1)\n  echo \"--- the share ---\"\n  echo \"$SHARE\"\
+    \n  rc=0\n  echo \"--- ls ---\"\n  ls -la \"$SHARE\" 2>&1 | head -20 || rc=1\n  echo \"--- write ---\"\n  if printf \"written-by-the-guest\\n\" > \"$SHARE/from-guest.txt\" 2>/tmp/write.err; then\n \
+    \   cat \"$SHARE/from-guest.txt\" 2>&1 | head -3\n    [ \"$(cat \"$SHARE/from-guest.txt\" 2>/dev/null)\" = \"written-by-the-guest\" ] || rc=1\n  else\n    cat /tmp/write.err 2>/dev/null | head -3\n\
+    \    rc=1\n  fi\n  echo \"--- the client log, taken AFTER the attempt (unfiltered) ---\"\n  printf \"%s\\n\" \"{{ password }}\" | sudo -S -p \"\" \\\n    tail -50 /tmp/smbnetfs.log 2>&1\n  echo \"---\
+    \ the streams smbnetfs wrote ---\"\n  printf \"%s\\n\" \"{{ password }}\" | sudo -S -p \"\" \\\n    tail -20 /tmp/smbnetfs.out 2>&1\n  echo \"--- round trip rc=$rc ---\"\n  [ $rc -eq 0 ] && echo \"\
+    round trip ok\"\n  exit $rc'\n"
+  timeout: 180
+- name: write the launcher
+  write: launcher
+  family: linux
+  timeout: 60
+- name: copy the launcher in
+  scp:
+  - bootstrap-launcher.sh
+  - /tmp/bootstrap-launcher.sh
+  timeout: 300
+- name: install the launcher
+  ssh: "sh -c '\n  set -e\n  install -m 0755 /tmp/bootstrap-launcher.sh \"$HOME/bootstrap-launcher.sh\"\n  touch \"$HOME/.xinitrc\"\n  grep -q bootstrap-launcher.sh \"$HOME/.xinitrc\" || \\\n  printf \"\
+    \\n%s\\n\" \"sh $HOME/bootstrap-launcher.sh &\" >> \"$HOME/.xinitrc\"\n  echo INSTALLED_FOR_NEXT_LOGIN\n  tail -3 \"$HOME/.xinitrc\"'\n"
+  timeout: 300
+- name: prove the launcher is installed
+  ssh: "sh -c '\n  set -e\n  ls -l \"$HOME/bootstrap-launcher.sh\" \"$HOME/.xinitrc\"\n  grep -q bootstrap-launcher.sh \"$HOME/.xinitrc\"\n  echo enabled'\n"
+  timeout: 60
+- name: stop the machine
+  shutdown: ssh
+  timeout: 300
+- name: publish the disk
+  compress: '{{ out }}'
+- name: stop recording
+  record: false

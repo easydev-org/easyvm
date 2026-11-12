@@ -1,43 +1,7 @@
-# MX Linux: minstall's panes, as a sequence with a title wait before each click.
-#
-#     python3 lib/steps.py linux/mx/steps/install.yaml --qmp /work/drive.sock.qmp
-#
-# WHAT THIS REPLACES
-#
-# linux/mx/install.py's walk_minstall(). install.py keeps the machine, the frames, the
-# recording and the publish.
-#
-# MX IS NEITHER CALAMARES NOR UBIQUITY, AND ITS SHAPE IS THE REASON EVERY CLICK HERE IS
-# PRECEDED BY AN `until`
-#
-# minstall asks THREE questions first (terms, installation type, a final confirmation), and
-# then - WHILE THE DISK IS ALREADY BEING WRITTEN - asks the rest one page at a time. The first
-# of those takes about ninety seconds to appear, because the drive is being formatted.
-#
-# THE FIXED SETTLE THAT USED TO BE HERE COST A RUN, AND THIS FILE IS THE CORRECTION
-#
-# Run 42497635410's last frame is the swap page with
-#
-#     Location: admin        Size: 0 MB        Invalid location
-#
-# - the account had been typed into the SWAP PAGE's location field, one page behind where the
-# driver thought it was. The driver pressed `Next` three times on an 18-second settle; all
-# three presses were spent on the confirmation page, and every later step ran one page early.
-#
-# So each page's `Next` is now preceded by an `until` on the TITLE minstall draws in its own
-# sidebar pane. That reading does not choose a coordinate - every click is still a measured
-# number below - it only says WHEN the page that has that coordinate has arrived. It is the
-# same distinction kubuntu's advance() makes, written as two steps because the wait and the
-# click are separate facts here.
-#
-# THE TITLES WERE READ AT 1:1 ON SIX FRAMES AND ALL SIX COME BACK EXACTLY:
-#
-#     General Instructions | Installation Options | Final Review and Confirmation
-#     Create a swap file   | Computer Identity    | Localization Defaults | Default User Login
-
 name: mx - the minstall walk
-resolution: [1920, 1080]
-
+resolution:
+- 1920
+- 1080
 vars:
   user:
     from: args.user
@@ -45,342 +9,232 @@ vars:
   password:
     from: args.password
     default: admin
-  # WHERE `compress:` WRITES, AND IT COMES FROM THE WORKFLOW'S `--out`.
-  #
-  # The workflow declares each install leg with `"out": "linux-<distro>.qcow2"` and passes it as
-  # `--out`; a `compress: "{{ out }}"` step names that same file. WITHOUT THE DECLARATION HERE the
-  # variable does not exist and `easyvm check` refuses the file - which is what happened when the step
-  # was first added, and is the vocabulary doing its job.
   out:
     from: args.out
     default: out/distro.qcow2
-
 steps:
-  # THE RECORDING IS PART OF THE VERDICT, NOT A CONVENIENCE.
-  #
-  # A FAILURE THAT SAYS "did not advance: read ..." IS A FEW WORDS OF OCR, and the question
-  # it cannot answer is "what was on screen". A recording can, and it is tens of megabytes -
-  # which is why it is its own artifact rather than travelling with the disk.
-  - name: start recording
-    record: mx-install.mp4
-    poll: 20
-
-  # THE MACHINE AND ITS INSTALLER, WHICH USED TO BE THE BAKE SKELETON IN PYTHON.
-  #
-  # THIS FILE IS A DECLARATION OF THE WIZARD STEPS AND NOTHING ELSE. Its own header says so:
-  #
-  #     WHAT THIS FILE IS. It is a DECLARATION, not an implementation. The bake skeleton - disk,
-  #     guest, recording, the QMP driver, the walk, ...
-  #
-  # and in the Python implementation lib/install_skeleton.py built the machine, created the disk and
-  # attached the ISO before running these steps. Reproduced as YAML that skeleton has to be IN the
-  # file, or the first `at:` reports `drive.sock.qmp: no such file` on a machine nobody started.
-  #
-  # 64G IS THE WORKFLOW'S OWN `--disk-size 64G`, not a number chosen here: every coordinate in this
-  # directory was measured on a disk that size, and the installer's partitioning pane reads capacity.
-  - name: create the empty disk
-    disk: disk.qcow2
-    disk_gb: 64
-
-  # THE INSTALLER IMAGE, BY THE TAG THIS REPOSITORY PUBLISHES IT UNDER.
-  - name: fetch the installer image
-    fetch: linux_iso
-    release: mx
-
-  - name: boot the installer
-    boot: true
-    os: linux
-    iso: installer_iso
-    timeout: 1800
-  # THE LIVE DESKTOP FIRST, BECAUSE A CLICK ON A SCREEN THAT HAS NOT DRAWN IS A CLICK ON NOTHING.
-  #
-  # `boot:` RETURNS WHEN QEMU IS RUNNING, WHICH IS NOT WHEN THE INSTALLER IS VISIBLE. A live medium
-  # unpacks itself from a multi-gigabyte ISO after that: measured on opensuse-tumbleweed, whose first
-  # click landed on
-  #
-  #	Guest has not initialized the display (yet).
-  #
-  # - the VNC server's own text, meaning the guest had drawn NO FRAME AT ALL.
-  #
-  # `desktop: linux` is a measurement of the panel a booted session draws, which is the honest gate
-  # for every live installer here. The `timeout` is generous because unpacking a 4 GiB image is real
-  # work, and a fixed `settle` would be a guess that is right on a fast runner and wrong on a slow one.
-  # THE INSTALLER'S OWN FIRST SCREEN, READ AS TEXT.
-  #
-  # `desktop: linux` MEASURES A PANEL AND THESE INSTALLERS HAVE NO PANEL: they are
-  # full-screen console UI (subiquity, calamares in text mode, the Debian installer,
-  # anaconda) drawing character cells. Measured on ubuntu-install: fifteen minutes of
-  # `drop=+0.0 ratio=0.0x sat=+0.00` - a black screen - while `console.log` showed the
-  # firmware boot the DVD, GRUB load, and the installer take over. The test was
-  # measuring the wrong thing, which is the fourth time this session.
-  #
-  # AND THE BUDGET IS THE INSTALL'S, NOT A GUI'S: a live medium unpacks itself from a
-  # multi-gigabyte ISO before its first screen exists, and the reference implementation
-  # gives this 5400 seconds rather than guessing a smaller number.
-  # THE DESKTOP, BECAUSE EVERY IMAGE HERE IS A DESKTOP IMAGE AND THE PANES BELOW ARE MEASURED ON IT.
-  #
-  # `desktop: linux` MEASURES A PANEL - a strip of colour along an edge that an installer does not
-  # draw - so it answers "is a live session up". That is the question: the next step clicks or
-  # double-clicks something ON that session, and a session that has not drawn has nothing to click.
-  #
-  # `keep_alive` IS PART OF THE WAIT, not a refinement: it can run for ninety minutes and a live
-  # session's idle timer puts a lock screen up well before that, after which every word on the screen
-  # is the lock screen's and nothing below can match.
-  - name: wait for the live desktop
-    desktop: linux
-    timeout: 5400
-    poll: 5
-    keep_alive: true
-
-  # =======================================================================================
-  # 1. THE INSTALLER'S OWN SIDEBAR ICON, NOT THE WELCOME WINDOW'S CARD
-  # =======================================================================================
-  #
-  # `MX Welcome` draws a grid of cards and `Install MX Linux` is one of them, but a press at
-  # its centre - measured in CI run 42476000228 - opened `Frequently Asked Questions` in
-  # qpdfview instead: the cards are close together and the press landed one row off. The
-  # desktop's OWN panel icon is a single small target with nothing beside it, at (81,259),
-  # and it opened the installer on the second press.
-  - name: desktop - installer
-    at: [81, 259]
-    repeat: [2, 3]
-    settle: 28
-
-  # =======================================================================================
-  # 2. TERMS -> INSTALLATION TYPE -> CONFIRMATION
-  # =======================================================================================
-  # THE REGION WAS THE LEFT HELP PANEL, SO THE CONDITION WAS ALWAYS TRUE.
-  #
-  # MEASURED ON RUN e242215. Both `until` steps below read (332,248)-(700,285), which is inside
-  # the installer's permanent HELP pane - its first heading is `General Instructions` and it
-  # never changes. The log proves it:
-  #
-  #     10:19:58  wait for the terms page  -> 2 words :: General | Instructions
-  #     10:20:00  terms of use             -> clicked (1482,889) TWO SECONDS after the
-  #                                            installer opened, before the page had drawn
-  #     10:20:14  wait for the installation type page -> 2 words :: General | Instructions
-  #     ... twenty more identical reads ...
-  #
-  # A condition that matches before the pane exists is worse than none: it pressed a button on
-  # a blank window and then waited three minutes on a page that had never advanced.
-  #
-  # THE RIGHT-HAND CONTENT AREA IS THE PAGE. It says `Terms of Use` here and
-  # `Installation Options` next; the help panel says neither.
-  - name: wait for the terms page
-    until: [terms, of, use]
-    region: [690, 225, 1560, 265]
-    region_at: [1920, 1080]
-    scale: 2
-    timeout: 180
-    poll: 6
-
-  - name: terms of use
-    at: [1482, 889]
-    settle: 14
-
-  # THE PANE SAYS `Select Type of Installation`, NOT `Installation Options`.
-  #
-  # MEASURED ON RUN d18429b, which is the run that proved the region fix above: the terms pane
-  # was left, and the content area then read
-  #
-  #     look wait for the installation type page in (690, 225, 1560, 265): 4 words ::
-  #       select | type | of | insta
-  #
-  # every six seconds for its whole timeout. The pane was there and the marker was not.
-  - name: wait for the installation type page
-    until: [select, type, of, installation]
-    region: [690, 225, 1560, 265]
-    region_at: [1920, 1080]
-    scale: 2
-    timeout: 180
-    poll: 6
-
-  # `Regular install using the entire disk` is preselected and the only drive is the guest's
-  # own `vda (64.0 GB)`.
-  - name: installation type
-    at: [1482, 889]
-    settle: 16
-
-  - name: wait for the confirmation page
-    until: [final, review]
-    region: [332, 248, 700, 285]
-    region_at: [1920, 1080]
-    scale: 1
-    timeout: 180
-    poll: 6
-
-  # THIS IS THE POINT OF NO RETURN: `Start` formats the drive, and MX begins writing.
-  - name: installation confirmation - start
-    at: [1478, 889]
-    settle: 25
-
-  # THE MODAL `Start` CAN RAISE, DISMISSED WHETHER OR NOT IT IS READ.
-  #
-  # Frame `mx8` shows it: `Invalid settings found in configuration file ().` with an `OK`,
-  # and while it is up the installer does nothing. (1069,583) is blank space on the
-  # confirmation page when no dialog is up, so the press costs nothing when there is nothing
-  # to dismiss - the same shape as mint's WRITE_CONTINUE.
-  - name: dismiss the invalid settings modal if it is up
-    at: [1069, 583]
-    settle: 4
-
-  # =======================================================================================
-  # 3. THE PAGES THAT COME WHILE THE DISK IS BEING WRITTEN
-  # =======================================================================================
-  #
-  # THE FIRST ONE TAKES ABOUT NINETY SECONDS - the drive is being formatted - and that is the
-  # whole point of the title wait before it.
-  - name: wait for the swap file page
-    until: [create, a, swap, file]
-    region: [332, 248, 700, 285]
-    region_at: [1920, 1080]
-    scale: 1
-    timeout: 240
-    poll: 6
-
-  - name: swap file
-    at: [1482, 889]
-    settle: 18
-
-  - name: wait for the computer identity page
-    until: [computer, identity]
-    region: [332, 248, 700, 285]
-    region_at: [1920, 1080]
-    scale: 1
-    timeout: 240
-    poll: 6
-
-  - name: computer identity
-    at: [1482, 889]
-    settle: 18
-
-  - name: wait for the localization page
-    until: [localization, defaults]
-    region: [332, 248, 700, 285]
-    region_at: [1920, 1080]
-    scale: 1
-    timeout: 240
-    poll: 6
-
-  - name: localization defaults
-    at: [1482, 889]
-    settle: 18
-
-  # =======================================================================================
-  # 4. DEFAULT USER LOGIN. THE THREE BOXES ARE MEASURED, AND THE PAGE IS AWAITED FIRST.
-  # =======================================================================================
-  #
-  # The three entries are the light rectangles at x=879..1541 in the account pane; their rows
-  # are y=330..354, 366..388 and 400..424. The centres below are the middle of each.
-  #
-  # THE OLD CONSTANTS WERE (1100,303), (1100,336) and (1100,370): the first is on the LABEL
-  # row above the login box and the other two are 30 px high, so a press could land on the
-  # pane rather than in a field.
-  - name: wait for the account page
-    until: [default, user, login]
-    region: [332, 248, 700, 285]
-    region_at: [1920, 1080]
-    scale: 1
-    timeout: 180
-    poll: 6
-
-  - name: account - login name
-    at: [1210, 342]
-    type: "{{ user }}"
-    settle: 2
-  - name: account - password
-    at: [1210, 377]
-    type: "{{ password }}"
-    settle: 2
-  - name: account - confirm password
-    at: [1210, 412]
-    type: "{{ password }}"
-    settle: 3
-
-  # AUTOLOGIN, SO THE DISK COMES UP AT A DESKTOP. The launch stage boots the disk with no
-  # installer and no ssh, so a disk that stops at a greeter can only be judged by its picture.
-  # Ticking this makes the desk the thing that appears - the same reason kubuntu presses
-  # `Log in automatically`. Measured: the checkbox square is x=693..708, y=554..569.
-  - name: autologin
-    at: [700, 561]
-    settle: 4
-
-  - name: default user login
-    at: [1482, 889]
-    settle: 25
-
-  # =======================================================================================
-  # 5. UNTIL IT SAYS SO - AND THIS INSTALLER DOES SAY IT
-  # =======================================================================================
-  #
-  # Unlike mint and opensuse, minstall's last page is readable: `Congratulations! You have
-  # completed the installation.` measured on the run that passed. Matching a terminal
-  # sentence cannot skip a page, because there is nothing after it to skip.
-  #
-  # THE KEEP-ALIVE CLICK IS PART OF THE WAIT: a locked desktop has no installer on it.
-  - name: the installer finishes
-    until_any:
-      - [congratulations]
-      - [completed, the, installation]
-    region: [0, 0, 1920, 1080]
-    region_at: [1920, 1080]
-    scale: 1
-    timeout: 1800
-    poll: 20
-    keep_alive: true
-
-  # THE DISK IS THE ARTIFACT, AND WITHOUT THIS STEP THERE IS NONE.
-  #
-  # THE WORKFLOW ASKS FOR ONE: each install leg is declared with `"out": "linux-<distro>.qcow2"`, and
-  # `--out` is where a `compress:` WRITES - it is not a filename the engine invents. WITH NO
-  # `compress:` STEP NOTHING WAS WRITTEN, and the leg's `-disk` artifact was 518 bytes:
-  #
-  #	linux-zorin-install-disk   518 bytes
-  #	linux-zorin-vm-disk     10,497,859,093 bytes
-  #
-  # A PASSING INSTALL THAT LEAVES NO DISK is a leg that proves the installer works and produces nothing
-  # for the stage after it. `compress:` flattens the overlay's parent chain into one qcow2 with zstd, so
-  # the file it leaves is the install itself.
-  # THE MACHINE IS STOPPED BEFORE THE DISK IS READ, AND THAT IS WHY THIS STEP EXISTS.
-  #
-  # MEASURED ON zorin-install, WHICH ANSWERED ALL 21 STEPS AND THEN FAILED ON THE LAST ONE:
-  #
-  #	publish the disk: qemu-img convert: exit status 1
-  #	(qemu-img: Could not open '/__w/easyvm/easyvm/work/disk.qcow2': Failed to get shared "write" lock
-  #
-  # THE INSTALL WAS COMPLETE AND THE DISK WAS STILL OPEN. `compress:` READS THE FILE, and qemu holds a
-  # write lock on it until the machine is stopped - so a `compress:` before a `shutdown:` cannot work
-  # however good the install was.
-  #
-  # `kill`, NOT `acpi`, AND THE MEASUREMENT IS WHY.
-  #
-  # MEASURED ON zorin-install, WHICH PASSED ALL 21 STEPS AND THEN PRODUCED A 0 MiB DISK:
-  #
-  #	=== stop the machine
-  #	  stopping with method "acpi"
-  #	  pressing the power button
-  #	  the guest did not power off within 5m0s; killing it - the disk will need a journal replay
-  #	=== publish the disk
-  #	  compressing with zstd
-  #	  linux-zorin.qcow2: 0 MiB
-  #
-  # A LIVE INSTALLER DOES NOT ANSWER THE POWER BUTTON. `acpi` pressed it, the guest ignored it, the
-  # wait expired after five minutes, and the kill that followed raced `qemu-img convert` - which read
-  # a disk qemu was still releasing and wrote ZERO BYTES.
-  #
-  # `kill` IS NOT A COMPROMISE HERE, BECAUSE THE INSTALLER HAS ALREADY FINISHED: the step above waits
-  # for the install to complete, and what follows is a disk with a written system on it. The journal
-  # replay the kill costs is paid on the next boot, which is the stage after this one, and it is
-  # cheaper than five minutes of waiting for a button nothing presses.
-  #
-  # THE WAIT IS SHORTENED TOO: 120 seconds, because a kill does not need the five minutes a graceful
-  # request does - and the boot after this one replays the journal either way.
-  - name: stop the machine
-    shutdown: kill
-    timeout: 120
-
-  - name: publish the disk
-    compress: "{{ out }}"
-
-  - name: stop recording
-    record: false
+- name: start recording
+  record: mx-install.mp4
+- name: create the empty disk
+  disk: disk.qcow2
+  disk_gb: 64
+- name: fetch the installer image
+  fetch: linux_iso
+  release: mx
+- name: boot the installer
+  boot: true
+  os: linux
+  iso: installer_iso
+  timeout: 1800
+- name: wait for the live desktop
+  desktop: linux
+  timeout: 5400
+  poll: 5
+  keep_alive: true
+- name: desktop - installer
+  at:
+  - 81
+  - 259
+  repeat:
+  - 2
+  - 3
+  settle: 28
+- name: wait for the terms page
+  until:
+  - terms
+  - of
+  - use
+  region:
+  - 690
+  - 225
+  - 1560
+  - 265
+  region_at:
+  - 1920
+  - 1080
+  scale: 2
+  timeout: 180
+  poll: 6
+- name: terms of use
+  at:
+  - 1482
+  - 889
+  settle: 14
+- name: wait for the installation type page
+  until:
+  - select
+  - type
+  - of
+  - installation
+  region:
+  - 690
+  - 225
+  - 1560
+  - 265
+  region_at:
+  - 1920
+  - 1080
+  scale: 2
+  timeout: 180
+  poll: 6
+- name: installation type
+  at:
+  - 1482
+  - 889
+  settle: 16
+- name: wait for the confirmation page
+  until:
+  - final
+  - review
+  region:
+  - 332
+  - 248
+  - 700
+  - 285
+  region_at:
+  - 1920
+  - 1080
+  scale: 1
+  timeout: 180
+  poll: 6
+- name: installation confirmation - start
+  at:
+  - 1478
+  - 889
+  settle: 25
+- name: dismiss the invalid settings modal if it is up
+  at:
+  - 1069
+  - 583
+  settle: 4
+- name: wait for the swap file page
+  until:
+  - create
+  - a
+  - swap
+  - file
+  region:
+  - 332
+  - 248
+  - 700
+  - 285
+  region_at:
+  - 1920
+  - 1080
+  scale: 1
+  timeout: 240
+  poll: 6
+- name: swap file
+  at:
+  - 1482
+  - 889
+  settle: 18
+- name: wait for the computer identity page
+  until:
+  - computer
+  - identity
+  region:
+  - 332
+  - 248
+  - 700
+  - 285
+  region_at:
+  - 1920
+  - 1080
+  scale: 1
+  timeout: 240
+  poll: 6
+- name: computer identity
+  at:
+  - 1482
+  - 889
+  settle: 18
+- name: wait for the localization page
+  until:
+  - localization
+  - defaults
+  region:
+  - 332
+  - 248
+  - 700
+  - 285
+  region_at:
+  - 1920
+  - 1080
+  scale: 1
+  timeout: 240
+  poll: 6
+- name: localization defaults
+  at:
+  - 1482
+  - 889
+  settle: 18
+- name: wait for the account page
+  until:
+  - default
+  - user
+  - login
+  region:
+  - 332
+  - 248
+  - 700
+  - 285
+  region_at:
+  - 1920
+  - 1080
+  scale: 1
+  timeout: 180
+  poll: 6
+- name: account - login name
+  at:
+  - 1210
+  - 342
+  type: '{{ user }}'
+  settle: 2
+- name: account - password
+  at:
+  - 1210
+  - 377
+  type: '{{ password }}'
+  settle: 2
+- name: account - confirm password
+  at:
+  - 1210
+  - 412
+  type: '{{ password }}'
+  settle: 3
+- name: autologin
+  at:
+  - 700
+  - 561
+  settle: 4
+- name: default user login
+  at:
+  - 1482
+  - 889
+  settle: 25
+- name: the installer finishes
+  until_any:
+  - - congratulations
+  - - completed
+    - the
+    - installation
+  region:
+  - 0
+  - 0
+  - 1920
+  - 1080
+  region_at:
+  - 1920
+  - 1080
+  scale: 1
+  timeout: 1800
+  poll: 20
+  keep_alive: true
+- name: stop the machine
+  shutdown: kill
+  timeout: 120
+- name: publish the disk
+  compress: '{{ out }}'
+- name: stop recording
+  record: false

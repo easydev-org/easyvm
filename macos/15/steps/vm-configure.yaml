@@ -1,33 +1,7 @@
-# Everything a finished disk needs before the toolchain: the host share, the login hook, and a
-# guest agent that can shut the machine down without a dialog.
-#
-#     python3 lib/steps.py macos/15/steps/vm-configure.yaml --ssh-port 2222
-#
-# WHY THIS STAGE EXISTS AND WHY IT IS NAMED FOR THE VM RATHER THAN THE SHARE
-#
-# It began as `share`, because a directory the guest can mount was the only thing here. It is now
-# where the MACHINE IS CONFIGURED, after ssh works and before a toolchain is installed:
-#
-#     an SMB share on the bridge            a directory the person can put files in
-#     a login hook                          something that runs those files at login
-#     the qemu guest agent                  a shutdown that does not need a dialog
-#
-# The third one is the newest and the reason for the rename. macOS answers an ACPI power button
-# with "Restart / Sleep / Cancel / Shut Down" and waits for a click; on a headless guest nobody
-# clicks, so every stage that wanted a clean shutdown had to use ssh. The agent is the supported
-# answer, and it belongs here - installed once, on a disk that already has sshd, before anything
-# expensive is added to it.
-#
-# WHAT THE LOGIN HOOK RUNS IS `~/shared/bootstrap.sh`, WHICH THE PERSON PUTS THERE. Nothing on
-# this disk is required to make it work - that is the whole point of using the shell the guest
-# already has rather than a toolchain installed two stages later.
-#
-# THIS FILE INSTALLS NO TOOLCHAIN. No package manager, no compiler, no interpreter. If a step here
-# needs something that is not in a stock macOS, it is in the wrong file.
-
 name: macos 15 - configure the vm (share, login hook, guest agent)
-resolution: [1920, 1080]
-
+resolution:
+- 1920
+- 1080
 vars:
   user:
     from: args.user
@@ -35,267 +9,143 @@ vars:
   password:
     from: args.password
     default: admin
-  # THE SERVER, SO THE PROOFS BELOW DO NOT HARD-CODE AN ADDRESS.
-  #
-  # The default below is this container's end of the bridge. A literal typed into an ssh command
-  # would bake the CI network into a published disk, which is the mistake this variable exists to
-  # prevent - so the address is written ONCE, here, and read everywhere.
   host:
     from: args.host
     default: 172.30.0.1
-
 ssh_user: vmuser
 ssh_port: 2222
-
-# THIS STAGE'S DISK COMES FROM THE CALLER, AND THAT IS NOW IN THE FILE RATHER THAN IN THE WORKFLOW.
-#
-# `boot_disk: from_caller` says the `--boot-disk` flag supplies it, because an earlier stage made it.
-# Without the declaration a file that continues from another stage is indistinguishable from one that
-# forgot to create a disk: `boot:` refuses with "booting needs a target disk", and it refuses AFTER
-# every host-side step above it has run - run 43044525517 spent three minutes building an answer CD
-# and resolving a 7.7 GiB installer before the boot said no.
 boot_disk: from_caller
-
 steps:
-  # THE RECORDING IS PART OF THE VERDICT, NOT A CONVENIENCE.
-  #
-  # A FAILURE THAT SAYS "did not advance: read ..." IS A FEW WORDS OF OCR, and the question
-  # it cannot answer is "what was on screen". A recording can, and it is tens of megabytes -
-  # which is why it is its own artifact rather than travelling with the disk.
-  - name: start recording
-    record: macos15-vm-configure.mp4
-    poll: 20
+- name: start recording
+  record: macos15-vm-configure.mp4
+- name: fetch the recovery image
+  fetch: recovery_macos
+  release: '15'
+- name: build OpenCore from the recovery image
+  fetch: opencore
+  release: '15'
+  recovery: recovery_macos
+- name: boot the disk
+  boot: true
+  os: macos
+  timeout: 900
+- name: wait for sshd
+  require_ssh: true
+  timeout: 900
+- name: fetch the guest agent on the host
+  fetch: guest_agent
+  family: macos
+  timeout: 900
+- name: copy the agent into the guest
+  scp:
+  - mac-guest-agent
+  - /tmp/mac-guest-agent
+  requires:
+  - ssh
+  timeout: 300
+- name: install the guest agent
+  ssh: 'chmod +x /tmp/mac-guest-agent &&
 
-  # THE MACHINE IS STARTED HERE, IN THE FILE.
-  #
-  # THIS FILE'S DISK COMES FROM THE PREVIOUS STAGE - `boot_disk: from_caller` says the caller's
-  # `--boot-disk` supplies it - BUT SOMETHING STILL HAS TO START QEMU, and in the Python
-  # implementation that was the stage's own script (macos/15/vm_configure.py), which built the machine and started
-  # it before running the walkthrough. Leaving it there produced the failure the first CI run of this
-  # leg reported:
-  #
-  #     wait for sshd: nothing accepted ssh on 172.30.0.1:2222 within 15m0s: dial tcp
-  #                    172.30.0.1:2222: i/o timeout
-  #
-  # AN `i/o TIMEOUT` RATHER THAN `connection refused`, and the difference is the diagnosis: a refused
-  # connection means the bridge address answered and nothing was listening, while a timeout means the
-  # packet went to a guest that was never started. Fifteen minutes of a wait loop for a machine that
-  # did not exist.
-  # OPENCORE AND THE RECOVERY IMAGE ARE INPUTS EVEN THOUGH THIS STAGE DOES NOT INSTALL.
-  #
-  # The firmware three - a boot image, OVMF's code and a writable variables copy - are built FROM the
-  # recovery image, because Apple's APFS driver lives inside it and OpenCore cannot read an APFS
-  # partition without one. NO `recovery:` ON THE BOOT: that key attaches the image to the GUEST, and
-  # only the setup stage installs from it. An installed disk has no recovery volume, and an extra USB
-  # disk is one more row in Disk Utility's sidebar.
-  - name: fetch the recovery image
-    fetch: recovery_macos
-    release: "15"
-  - name: build OpenCore from the recovery image
-    fetch: opencore
-    release: "15"
-    recovery: recovery_macos
+    printf ''%s\n'' ''{{ password }}'' | sudo -S -p '''' /tmp/mac-guest-agent --install 2>&1 | tail -12 &&
 
-  - name: boot the disk
-    boot: true
-    os: macos
-    timeout: 900
+    sleep 5 &&
 
-  - name: wait for sshd
-    require_ssh: true
-    timeout: 900
+    printf ''%s\n'' ''{{ password }}'' | sudo -S -p '''' launchctl print system/org.mav2287.mac-guest-agent 2>&1 | head -6 ||
 
-  # =========================================================================
-  # THE GUEST AGENT
-  # =========================================================================
-  #
-  # APPLE'S OWN AGENT DOES NOT WORK HERE, AND THAT IS NOT A CONFIGURATION PROBLEM.
-  #
-  # macOS ships /usr/libexec/AppleQEMUGuestAgent, and its IOKit personality matches
-  # AppleVirtIOAgentDevice - a device the applevirtio.console driver creates only under Apple's
-  # Virtualization.framework. Booting through OpenCore means that driver never loads, so the
-  # built-in agent never starts, and /var/log/guestagent.log fills with
-  #
-  #     Error opening serial port: '/dev/tty.org.qemu.guest_agent.0' (No such file or directory)
-  #
-  # So the agent comes from mav2287/mac-guest-agent, which is a native implementation for macOS
-  # under QEMU. It defaults to ISA SERIAL rather than virtio for the same reason: Apple's
-  # Apple16X50Serial.kext has shipped since 10.4 and matches on every macOS, while the virtio
-  # agent device is gated on the framework above.
-  #
-  # The machine therefore gets `-device isa-serial` (see Shape.qga_transport), and this step puts
-  # the binary where its LaunchDaemon expects it.
-  #
-  # THE DOWNLOAD HAPPENS ON THE HOST, so this is a `python:` step and not `script:` - a script
-  # body runs inside the guest, and a curl there would be a download through the guest's own
-  # network to a file the host then has to fetch back.
-  - name: fetch the guest agent on the host
-    fetch: guest_agent
-    family: macos
-    timeout: 900
+    printf ''%s\n'' ''{{ password }}'' | sudo -S -p '''' pgrep -fl mac-guest-agent
 
-  - name: copy the agent into the guest
-    scp: ["mac-guest-agent", "/tmp/mac-guest-agent"]
-    requires: [ssh]
-    timeout: 300
+    '
+  timeout: 600
+- name: prove the guest agent answers
+  ssh: 'printf ''%s\n'' ''{{ password }}'' | sudo -S -p '''' pgrep -fl mac-guest-agent &&
 
-  # INSTALL IT THE WAY ITS OWN TOOL WANTS, THEN PROVE IT ANSWERED.
-  #
-  # `--install` writes a LaunchDaemon, which is what makes it start at boot rather than only when
-  # a person runs it. The check afterwards is a process test, not a file test: a plist on disk
-  # and no running agent is exactly the failure Apple's own agent has.
-  - name: install the guest agent
-    ssh: |
-      chmod +x /tmp/mac-guest-agent &&
-      printf '%s\n' '{{ password }}' | sudo -S -p '' /tmp/mac-guest-agent --install 2>&1 | tail -12 &&
-      sleep 5 &&
-      printf '%s\n' '{{ password }}' | sudo -S -p '' launchctl print system/org.mav2287.mac-guest-agent 2>&1 | head -6 ||
-      printf '%s\n' '{{ password }}' | sudo -S -p '' pgrep -fl mac-guest-agent
-    timeout: 600
+    echo ''--- serial ports the agent can use ---'' &&
 
-  # THE PROCESS AND THE DEVICE NODE, BECAUSE THEY FAIL DIFFERENTLY.
-  #
-  # A running agent with no /dev/cu.serial* is the failure that looks like success: the daemon
-  # started, found no port, and is logging an error it will never recover from. That is exactly
-  # what Apple's own agent does under QEMU, which is why this file uses a different one.
-  - name: prove the guest agent answers
-    ssh: |
-      printf '%s\n' '{{ password }}' | sudo -S -p '' pgrep -fl mac-guest-agent &&
-      echo '--- serial ports the agent can use ---' &&
-      ls -l /dev/cu.serial* 2>/dev/null &&
-      echo '--- what it logged ---' &&
-      printf '%s\n' '{{ password }}' | sudo -S -p '' tail -8 /var/log/mac-guest-agent.log 2>/dev/null || true
-    timeout: 120
+    ls -l /dev/cu.serial* 2>/dev/null &&
 
-  # =========================================================================
-  # THE HOST SHARE
-  # =========================================================================
-  #
-  # SMB rather than 9p or virtiofs for the reason lib/hostshare.py records at length: Windows has
-  # no 9p driver at all and macOS's 9p client is read-only, so SMB is the only protocol both
-  # guests speak natively, read and write, with nothing installed.
-  # TWO STEPS NOW, BECAUSE IT WAS ALWAYS TWO ACTS. "the guest could not mount the share" used to
-  # be the message for a host with no smbd, a credential the guest could not use, and a network
-  # that did not route - three repairs, one sentence.
-  - name: serve the host share
-    share_serve: true
-    timeout: 60
+    echo ''--- what it logged ---'' &&
 
-  - name: mount the host share
-    share_mount: true
-    share_family: macos
-    requires: [share]
-    timeout: 180
+    printf ''%s\n'' ''{{ password }}'' | sudo -S -p '''' tail -8 /var/log/mac-guest-agent.log 2>/dev/null || true
 
-  # A MOUNT THAT REPORTS SUCCESS AND A DIRECTORY THAT IS EMPTY ARE DIFFERENT FACTS.
-  - name: prove the share is readable and writable
-    ssh: |
-      ls -la ~/shared | head -20 && printf 'written-by-%s\n' "$(hostname)" > ~/shared/from-guest.txt && cat ~/shared/from-guest.txt
-    timeout: 120
+    '
+  timeout: 120
+- name: serve the host share
+  share_serve: true
+  timeout: 60
+- name: mount the host share
+  share_mount: true
+  share_family: macos
+  requires:
+  - share
+  timeout: 180
+- name: prove the share is readable and writable
+  ssh: 'ls -la ~/shared | head -20 && printf ''written-by-%s\n'' "$(hostname)" > ~/shared/from-guest.txt && cat ~/shared/from-guest.txt
 
-  # =========================================================================
-  # THE LOGIN HOOK
-  # =========================================================================
-  #
-  # SEVEN STEPS, ONE FILE EACH, BECAUSE "install the bootstrap launcher" WAS FIVE THINGS.
-  #
-  # It used to write the launcher, copy it, write the mount script, copy that, write the daemon's
-  # plist, copy that, and then run an installer - all in one step. When any part failed the log
-  # said `the launcher install exited 1` and named neither the file nor the action, and a copy
-  # that half-worked left a hook that reported success and never ran.
-  #
-  # NOW: three host-side writes, three copies, one install. Every one can fail on its own and say
-  # which file it was.
-  #
-  # THE FILES COME FROM lib/bootstrap_files.py, which only writes them. The `scp:` step after each
-  # is what moves it, and the `ssh:` step at the end is the only thing that runs as root.
-  - name: write the launcher
-    write: launcher
-    family: macos
-    timeout: 60
+    '
+  timeout: 120
+- name: write the launcher
+  write: launcher
+  family: macos
+  timeout: 60
+- name: write the login agent plist
+  write: macos_agent_plist
+  timeout: 60
+- name: write the mount daemon script
+  write: macos_mount_script
+  timeout: 60
+- name: write the mount daemon plist
+  write: macos_mount_plist
+  timeout: 60
+- name: copy the launcher in
+  scp:
+  - bootstrap-launcher.sh
+  - /tmp/bootstrap-launcher.sh
+  timeout: 300
+- name: copy the login agent plist in
+  scp:
+  - org.vm.bootstrap.plist
+  - /tmp/bootstrap.plist
+  timeout: 300
+- name: copy the mount daemon in
+  scp:
+  - vm-smbmount.sh
+  - /tmp/smbmount.sh
+  timeout: 300
+- name: copy the mount daemon plist in
+  scp:
+  - org.vm.smbmount.plist
+  - /tmp/smbmount.plist
+  timeout: 300
+- name: install the login agent and the mount daemon
+  ssh: "set -e\nlaunchd_home=$(eval echo \"~$(id -un)\")\nmkdir -p \"$launchd_home/Library/LaunchAgents\"\ncp /tmp/bootstrap-launcher.sh \"$launchd_home/bootstrap-launcher.sh\"\nchmod +x \"$launchd_home/bootstrap-launcher.sh\"\
+    \nsed 's|__LAUNCHER__|'\"$launchd_home\"'/bootstrap-launcher.sh|' /tmp/bootstrap.plist > \"$launchd_home/Library/LaunchAgents/org.vm.bootstrap.plist\"\nprintf '%s\\n' '{{ password }}' | sudo -S -p ''\
+    \ sh -c '\n  mkdir -p /Library/LaunchDaemons /usr/local/bin\n  cp /tmp/smbmount.sh /usr/local/bin/vm-smbmount.sh\n  chmod 700 /usr/local/bin/vm-smbmount.sh\n  chown root:wheel /usr/local/bin/vm-smbmount.sh\n\
+    \  sed \"s|__SCRIPT__|/usr/local/bin/vm-smbmount.sh|\" /tmp/smbmount.plist > /Library/LaunchDaemons/org.vm.smbmount.plist\n  chmod 644 /Library/LaunchDaemons/org.vm.smbmount.plist\n  chown root:wheel\
+    \ /Library/LaunchDaemons/org.vm.smbmount.plist'\nprintf '%s\\n' '{{ password }}' | sudo -S -p '' launchctl bootout system/org.vm.smbmount 2>/dev/null || true\nprintf '%s\\n' '{{ password }}' | sudo\
+    \ -S -p '' launchctl bootstrap system /Library/LaunchDaemons/org.vm.smbmount.plist\necho INSTALLED_FOR_NEXT_LOGIN\n"
+  timeout: 300
+- name: prove the mount daemon is installed
+  ssh: 'ls -l /Library/LaunchDaemons/org.vm.smbmount.plist /usr/local/bin/vm-smbmount.sh &&
 
-  - name: write the login agent plist
-    write: macos_agent_plist
-    timeout: 60
+    plutil -lint /Library/LaunchDaemons/org.vm.smbmount.plist &&
 
-  - name: write the mount daemon script
-    write: macos_mount_script
-    timeout: 60
+    printf ''%s\n'' ''{{ password }}'' | sudo -S -p '''' launchctl print system/org.vm.smbmount | head -12
 
-  - name: write the mount daemon plist
-    write: macos_mount_plist
-    timeout: 60
+    '
+  timeout: 120
+- name: prove the daemon mounted the share
+  ssh: 'mount | grep '' on /Users/'' && ls -la ~/shared | head -10
 
-  - name: copy the launcher in
-    scp: ["bootstrap-launcher.sh", "/tmp/bootstrap-launcher.sh"]
-    timeout: 300
+    '
+  timeout: 120
+- name: prove the login hook is installed
+  ssh: 'ls -l ~/Library/LaunchAgents/org.vm.bootstrap.plist ~/bootstrap-launcher.sh &&
 
-  - name: copy the login agent plist in
-    scp: ["org.vm.bootstrap.plist", "/tmp/bootstrap.plist"]
-    timeout: 300
+    plutil -lint ~/Library/LaunchAgents/org.vm.bootstrap.plist &&
 
-  - name: copy the mount daemon in
-    scp: ["vm-smbmount.sh", "/tmp/smbmount.sh"]
-    timeout: 300
+    grep -c bootstrap-launcher.sh ~/Library/LaunchAgents/org.vm.bootstrap.plist
 
-  - name: copy the mount daemon plist in
-    scp: ["org.vm.smbmount.plist", "/tmp/smbmount.plist"]
-    timeout: 300
-
-  # THE ONE STEP THAT RUNS AS ROOT, AND ALL IT DOES IS PUT THE FILES WHERE launchd LOOKS.
-  #
-  # A LaunchAgent in ~/Library/LaunchAgents is loaded at the next graphical login - exactly when
-  # this is meant to run, and there is no gui domain to load it into from an ssh session.
-  #
-  # THE MOUNT IS A LAUNCHDAEMON, BECAUSE A USER CANNOT MOUNT A SAMBA SHARE. `mount_smbfs` as a
-  # normal account against Samba answers "Authentication error" while the same credential from
-  # root succeeds; the login hook runs as the user, so it is not the thing that mounts.
-  - name: install the login agent and the mount daemon
-    ssh: |
-      set -e
-      launchd_home=$(eval echo "~$(id -un)")
-      mkdir -p "$launchd_home/Library/LaunchAgents"
-      cp /tmp/bootstrap-launcher.sh "$launchd_home/bootstrap-launcher.sh"
-      chmod +x "$launchd_home/bootstrap-launcher.sh"
-      sed 's|__LAUNCHER__|'"$launchd_home"'/bootstrap-launcher.sh|' /tmp/bootstrap.plist > "$launchd_home/Library/LaunchAgents/org.vm.bootstrap.plist"
-      printf '%s\n' '{{ password }}' | sudo -S -p '' sh -c '
-        mkdir -p /Library/LaunchDaemons /usr/local/bin
-        cp /tmp/smbmount.sh /usr/local/bin/vm-smbmount.sh
-        chmod 700 /usr/local/bin/vm-smbmount.sh
-        chown root:wheel /usr/local/bin/vm-smbmount.sh
-        sed "s|__SCRIPT__|/usr/local/bin/vm-smbmount.sh|" /tmp/smbmount.plist > /Library/LaunchDaemons/org.vm.smbmount.plist
-        chmod 644 /Library/LaunchDaemons/org.vm.smbmount.plist
-        chown root:wheel /Library/LaunchDaemons/org.vm.smbmount.plist'
-      printf '%s\n' '{{ password }}' | sudo -S -p '' launchctl bootout system/org.vm.smbmount 2>/dev/null || true
-      printf '%s\n' '{{ password }}' | sudo -S -p '' launchctl bootstrap system /Library/LaunchDaemons/org.vm.smbmount.plist
-      echo INSTALLED_FOR_NEXT_LOGIN
-    timeout: 300
-
-  # THE MOUNT DAEMON HAS TO HAVE MOUNTED. It unmounts whatever the stage's own proof left behind
-  # first, so what this proves is that the DAEMON mounts - a plist that is valid and loaded and
-  # mounts nothing would otherwise be found at the next boot, on a published disk.
-  - name: prove the mount daemon is installed
-    ssh: |
-      ls -l /Library/LaunchDaemons/org.vm.smbmount.plist /usr/local/bin/vm-smbmount.sh &&
-      plutil -lint /Library/LaunchDaemons/org.vm.smbmount.plist &&
-      printf '%s\n' '{{ password }}' | sudo -S -p '' launchctl print system/org.vm.smbmount | head -12
-    timeout: 120
-
-  # THE PROOF THAT MATTERS MOST: the mount the daemon made is on the system's mount table and
-  # the share is readable through it. A plist that is valid and loaded can still mount nothing.
-  - name: prove the daemon mounted the share
-    ssh: |
-      mount | grep ' on /Users/' && ls -la ~/shared | head -10
-    timeout: 120
-
-  # THE PLIST HAS TO BE VALID AND HAS TO NAME THE LAUNCHER. `plutil -lint` in the install step
-  # catches malformed XML; this catches a plist that is well formed and points at nothing.
-  - name: prove the login hook is installed
-    ssh: |
-      ls -l ~/Library/LaunchAgents/org.vm.bootstrap.plist ~/bootstrap-launcher.sh &&
-      plutil -lint ~/Library/LaunchAgents/org.vm.bootstrap.plist &&
-      grep -c bootstrap-launcher.sh ~/Library/LaunchAgents/org.vm.bootstrap.plist
-    timeout: 60
-
-  - name: stop recording
-    record: false
+    '
+  timeout: 60
+- name: stop recording
+  record: false

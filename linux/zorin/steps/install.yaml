@@ -15,7 +15,6 @@ vars:
 steps:
 - name: start recording
   record: zorin-install.mp4
-  poll: 20
 - name: create the empty disk
   disk: disk.qcow2
   disk_gb: 64

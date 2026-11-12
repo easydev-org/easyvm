@@ -1,42 +1,9 @@
-# Windows 11 stage one: a bare disk to a desktop, unattended.
-#
-#     easyvm run windows/11/steps/install.yaml \
-#         --work /work --boot-disk /work/disk.qcow2 --out /work/windows11.qcow2
-#
-# THIS IS THE STAGE THAT MAKES EVERY OTHER ONE POSSIBLE. `ssh.yaml` boots a disk that already has
-# Windows on it; this file produces that disk. It is the only stage that starts from an INSTALLER
-# rather than from a system, and the only one whose visitor is a person who has never used the
-# machine before - so it is the only one that has to answer a question a disk cannot.
-#
-# WHY IT IS FOUR STEPS AND NOT ONE. `boot:` starts a machine; it does not press keys, wait for a
-# firmware marker, or decide that Setup arrived. Each of those is one fact with one failure, and
-# they are measured separately:
-#
-#     the ISO does not boot by itself        → the boot prompt step
-#     Setup cannot see the virtio disk       → the answer CD's $WinPEDriver$ tree
-#     the answer file was not read           → Setup asks a human, for nine minutes
-#     the install finished                   → a desktop, not a port that answers
-#
-# THE ANSWER CD IS BUILT, NOT DOWNLOADED. `fetch: answer_iso` takes the template in this directory,
-# substitutes the account and the edition index, extracts the virtio drivers out of the vendor ISO
-# into `$WinPEDriver$`, and writes a few hundred KB. The install ISO is never touched: Setup looks
-# for `\Autounattend.xml` at the root of ANY removable drive, so a second CD is enough and rebuilding
-# 7.7 GiB is not.
-#
-# THE DISK IS 128G AND THAT IS FIXED. macOS's Setup Assistant chooses its target by capacity, and
-# this repository measures every coordinate on the disk it actually bakes. A different size moves
-# windows that were measured once.
-
 name: windows 11 - install to a desktop
-resolution: [1920, 1080]
-
+resolution:
+- 1920
+- 1080
 ssh_user: vmuser
 ssh_port: 2222
-# THE BOOT IS SLOW AND THE INSTALL IS SLOWER. The boot timeout is for qemu to be up, which is
-# seconds; the desktop check at the end of this file is the one with the real budget. No
-# `ssh_timeout:` here: this stage never opens a shell - the guest has no sshd until the NEXT stage
-# installs one, which is what windows/11/steps/ssh.yaml exists for.
-
 vars:
   user:
     from: args.user
@@ -44,193 +11,62 @@ vars:
   password:
     from: args.password
     default: admin
-  # THE COMPUTER NAME, WHICH THE ANSWER FILE WRITES INTO THE IMAGE. One place, because it is also
-  # what a later stage's prompts show and what a `rename` would overwrite.
   computer_name:
     from: args.computer_name
     default: sandbox
-  # WHICH EDITION OF THE INSTALL ISO TO INSTALL. Index 6 is "Windows 11 Pro" in the pinned image;
-  # the number lives here because the answer file needs a NUMBER and the pin needs to agree with it.
   windows_image_index:
     from: args.windows_image_index
-    default: "6"
+    default: '6'
   out:
     from: args.out
     default: out/windows11.qcow2
-  # THE RECORDING, BECAUSE A FAILED INSTALL IS DIAGNOSED FROM FRAMES. It is the only stage where
-  # "what was on screen at minute 41" is the whole question.
   boot_timeout:
     from: args.boot_timeout
-    default: "1800"
-
+    default: '1800'
 steps:
-  # THE RECORDING IS PART OF THE VERDICT, NOT A CONVENIENCE.
-  #
-  # A FAILURE THAT SAYS "did not advance: read ..." IS A FEW WORDS OF OCR, and the question
-  # it cannot answer is "what was on screen". A recording can, and it is tens of megabytes -
-  # which is why it is its own artifact rather than travelling with the disk.
-  - name: start recording
-    record: windows11-install.mp4
-    poll: 20
-
-  # =======================================================================================
-  # 0. THE HOST'S WORK, BEFORE ANY MACHINE EXISTS
-  # =======================================================================================
-  #
-  # THE ISO IS NOT IN THIS REPOSITORY. It is 7.7 GiB from Microsoft with a SHA-256 in lib/images.py,
-  # published to ghcr under `iso-windows11` because a run that downloaded it per attempt would spend
-  # nine minutes of every stage on something that has not changed.
-  # THE DRIVER ISO IS PULLED BY THE ANSWER-CD STEP ITSELF - it needs the ISO's contents, so making
-  # it a separate step would mean naming the same file twice.
-  #
-  # THE ANSWER CD CARRIES THE ACCOUNT, THE PASSWORD, THE NAME AND THE EDITION INDEX. All four are
-  # this file's variables, substituted into the template. A placeholder left behind is refused by
-  # name rather than handed to Setup: run 42280638394's predecessor spent nine minutes on "Enter a
-  # product key" because one substitution was missing while the template used it.
-  # THE DISK THE INSTALL WRITES TO, CREATED EMPTY.
-  #
-  # 128G AND NOT A VARIABLE: every coordinate in this file was measured on the disk the job actually
-  # bakes, and the answer file's DiskID refers to the disk Setup sees at index 0. A different size
-  # is a different machine for the purposes of those two facts.
-  #
-  # IT IS THE FIRST STEP BECAUSE `boot:` REFUSES TO START WITHOUT A TARGET: "booting needs a target
-  # disk: a `disk:` step must come first, or pass --boot-disk" - which is exactly what run
-  # 43044525517 reported after the answer CD had been built and the installer named.
-  - name: create the empty disk
-    disk: disk.qcow2
-    disk_gb: 128
-
-  - name: build the answer CD
-    fetch: answer_iso
-    template: windows/11/answer/Autounattend.xml
-
-  # THE INSTALLER ISO, AS A PATH. It is fetched by the workflow (it is 7.7 GiB and the disk pull is
-  # already minutes); this step says which file `boot:` will name. A missing one is a sentence from
-  # `Boot.Validate`, not qemu's message about a drive.
-  - name: name the installer
-    fetch: windows_iso
-
-  # =======================================================================================
-  # 1. THE MACHINE, WITH THREE MEDIA AND ONE DISK
-  # =======================================================================================
-  #
-  # THE ORDER IS THE MEANING, and it is measured rather than chosen:
-  #
-  #     installer ISO    first, so the firmware boots it
-  #     answer CD        second: Setup scans removable media for Autounattend.xml and
-  #                      $WinPEDriver$ at the root
-  #     the disk         third, and STILL DISK 0 - a CD-ROM does not take a disk index, so the
-  #                      answer file's DiskID stays correct
-  #     driver CD        last, for the installed system to pick up network and ballooning
-  #
-  # `discard=unmap` IS OFF HERE AND MUST BE. Measured on the macOS installs, which differ in
-  # nothing else: 41835253323 (no discard) finished in 46 minutes; 42009463444 (discard) wrote
-  # 36774 MiB, dropped to 19761, and never moved again. A stage that is still writing has nothing
-  # to gain from handing blocks back. internal/machine turns it off from `iso:` alone.
-  #
-  # ALSO OFF: the overlay. An install writes a system to a disk this run created, so there is
-  # nothing behind it to protect and a diff would be one more file to flatten.
-  - name: boot the installer
-    boot: true
-    os: windows
-    iso: windows_iso
-    answer_cd: answer_iso
-    driver_cd: driver_iso
-    timeout: 1800
-
-  # =======================================================================================
-  # 2. THE BOOT PROMPT, WHICH IS THE ONE THING A DISK CANNOT ANSWER
-  # =======================================================================================
-  #
-  # A WINDOWS INSTALL ISO DOES NOT BOOT BY ITSELF. Its El Torito boot image prints
-  #
-  #     Press any key to boot from CD or DVD...
-  #
-  # and waits about five seconds. With nothing pressed, the firmware falls through to PXE:
-  #
-  #     BdsDxe: starting Boot0001 "UEFI QEMU DVD-ROM QM00001"
-  #     BdsDxe: failed to start Boot0001 ...: Time out
-  #     >>Start PXE over IPv4.
-  #
-  # and the run ends with four thousand bytes of firmware output and no Windows at all.
-  #
-  # THE MARKER IS THE FIRMWARE'S, NOT THE PROMPT, AND THAT IS WHY THIS READS THE CONSOLE.
-  # `UEFI QEMU ... DVD-ROM` appears seconds BEFORE the prompt and in every UEFI boot, so pressing on
-  # it lands while the loader is still listening. Waiting for the visible prompt instead was tried
-  # and failed: it is on screen for about five seconds, and by the time a screenshot round trip
-  # noticed it the guest had fallen through to PXE.
-  #
-  # OCR IS THE WRONG TOOL FOR THIS ONE STEP and is used deliberately in the next: a screendump plus
-  # a tesseract pass is most of a second against a five-second window, and a misread ("DUD" for
-  # "DVD") is a missed prompt. The console is exact and free.
-  - name: wait for the firmware to offer the DVD
-    until_console: "DVD-ROM"
-    timeout: 180
-    # SOME MEDIA BOOT WITH NO PROMPT AT ALL, so waiting on text alone would wait out the budget on a
-    # guest that was already at Setup. dockur keeps the same blind fallback for the same reason.
-    blind_after: 60
-
-  - name: press a key so the loader takes it
-    key: esc
-    # ESC AND NOT RETURN. Any key is accepted by the boot loader, and the difference is what the key
-    # does if the guest is NOT at the prompt: a Return left in the queue when Windows reaches its
-    # desktop opens the Start menu, and a run that did that ends with a desktop behind a menu.
-    settle: 1
-  - name: press it again, because the prompt is emitted more than once
-    key: esc
-    settle: 1
-  - name: and once more, for a loader that was not listening yet
-    key: esc
-    settle: 2
-
-  # =======================================================================================
-  # 3. SETUP, WHICH HAS TO BE RECOGNISED RATHER THAN TIMED
-  # =======================================================================================
-  #
-  # THIS IS THE STEP OCR IS FOR: it asks what is on the screen, and the answer is a picture of a
-  # particular pane. "Windows Setup" appears on the language pane within a couple of minutes of the
-  # loader taking the key, and it appears NOWHERE ELSE in this sequence - so it is a fair thing to
-  # wait for, and a `until` rather than a `wait`.
-  #
-  # WELL BEFORE THE INSTALL FINISHES. Everything after this point is the installer working on its
-  # own, and the only question left is whether it arrives.
-  - name: Setup is on screen
-    until: [Windows, Setup]
-    timeout: 900
-    poll: 5
-
-  # THE INSTALL RUNS UNATTENDED FROM HERE. The answer file answers the language, the edition, the
-  # disk, the account and the OOBE panes; two reboots happen inside the same machine, which is why
-  # the firmware variables are one file for the whole run.
-  #
-  # NO `optional:` ON THIS STEP, AND THAT IS THE RULE RATHER THAN A STYLE. A desktop that did not
-  # appear is the verdict this stage exists to make; marking it optional would publish a disk nobody
-  # can boot. `optional:` belongs on a check whose NEGATIVE result is information, and this is not.
-  - name: wait for the desktop
-    desktop: windows
-    timeout: 5400
-
-  # =======================================================================================
-  # 4. THE DISK, WHICH IS THE OUTPUT
-  # =======================================================================================
-  #
-  # THE MACHINE STOPS BEFORE THE DISK IS READ, AND THAT ORDER IS NOT OPTIONAL. The first real run of
-  # `compress:` failed with
-  #
-  #     could not flatten the overlay: qemu-img: Could not open 'session-overlay.qcow2':
-  #     Failed to get shared "write" lock
-  #
-  # because the file had no `shutdown:` at all and qemu still held it.
-  #
-  # `acpi` RATHER THAN `kill`: this disk is the artifact, so the filesystem it is about to publish
-  # has to be closed. A killed install leaves a journal to replay, and the next stage boots a disk
-  # that spends its first minute repairing - which is indistinguishable, in a log, from a slow boot.
-  - name: shut the machine down
-    shutdown: acpi
-    timeout: 300
-
-  - name: publish the disk
-    compress: "{{ out }}"
-
-  - name: stop recording
-    record: false
+- name: start recording
+  record: windows11-install.mp4
+- name: create the empty disk
+  disk: disk.qcow2
+  disk_gb: 128
+- name: build the answer CD
+  fetch: answer_iso
+  template: windows/11/answer/Autounattend.xml
+- name: name the installer
+  fetch: windows_iso
+- name: boot the installer
+  boot: true
+  os: windows
+  iso: windows_iso
+  answer_cd: answer_iso
+  driver_cd: driver_iso
+  timeout: 1800
+- name: wait for the firmware to offer the DVD
+  until_console: DVD-ROM
+  timeout: 180
+  blind_after: 60
+- name: press a key so the loader takes it
+  key: esc
+  settle: 1
+- name: press it again, because the prompt is emitted more than once
+  key: esc
+  settle: 1
+- name: and once more, for a loader that was not listening yet
+  key: esc
+  settle: 2
+- name: Setup is on screen
+  until:
+  - Windows
+  - Setup
+  timeout: 900
+  poll: 5
+- name: wait for the desktop
+  desktop: windows
+  timeout: 5400
+- name: shut the machine down
+  shutdown: acpi
+  timeout: 300
+- name: publish the disk
+  compress: '{{ out }}'
+- name: stop recording
+  record: false

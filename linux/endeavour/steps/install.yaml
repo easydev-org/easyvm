@@ -1,45 +1,7 @@
-# EndeavourOS: the live desktop to a written disk, as a sequence.
-#
-#     python3 lib/steps.py linux/endeavour/steps/install.yaml --qmp /work/drive.sock.qmp
-#
-# WHAT THIS REPLACES
-#
-# linux/endeavour/install.py's walk_calamares(). install.py keeps the machine, the
-# frames, the recording and the publish; the walk is here.
-#
-# THE ONE STEP HERE THAT IS NOT A CLICK IS THE LANGUAGE PIN, AND IT IS THE REASON THIS FILE
-# HAS A `run` STEP AT ALL.
-#
-# Calamares asks a geolocation service for the user's country and picks the interface
-# language from the answer. EndeavourOS points that at
-#
-#     /etc/calamares/modules/welcome_offline.conf
-#       geoip:
-#         style:    "xml"
-#         url:      "https://geoip.kde.org/v1/ubiquity"
-#         selector: "CountryCode"
-#
-# so the language is whatever that request returns - and when it fails, Calamares FALLS BACK
-# TO A RANDOM LANGUAGE. Measured, same ISO, three runs:
-#
-#     local machine       Sinhala
-#     CI run 42445140647  Spanish        (`Instalador de EndeavourOS`)
-#     CI run 42454363051  Asturian       (`Açoyida` / `Siguiente`)
-#
-# Every coordinate below is measured on the ENGLISH wizard, so a translated one misses the
-# footer completely: that Asturian run clicked (1340,873) on every pane while `Siguiente` sat
-# at 1406, never advanced past Welcome, and produced a 0 MiB disk.
-#
-# The fix makes the probe FAIL FAST so Calamares keeps its compiled-in default, which is
-# English. Verified on a live session: with the URL below the wizard opens `Welcome to the
-# EndeavourOS Titan-Nova installer` / `American English` instead of `Açoyida` / `asturianu`.
-# `127.0.0.1:9` is the discard port - nothing listens, so the connection is refused at once
-# rather than timing out. It is `run` because the value it changes is inside the image, not
-# on the screen; every other step here is a measured coordinate.
-
 name: endeavour - the Calamares walk
-resolution: [1920, 1080]
-
+resolution:
+- 1920
+- 1080
 vars:
   user:
     from: args.user
@@ -47,306 +9,136 @@ vars:
   password:
     from: args.password
     default: admin
-  # WHERE `compress:` WRITES, AND IT COMES FROM THE WORKFLOW'S `--out`.
-  #
-  # The workflow declares each install leg with `"out": "linux-<distro>.qcow2"` and passes it as
-  # `--out`; a `compress: "{{ out }}"` step names that same file. WITHOUT THE DECLARATION HERE the
-  # variable does not exist and `easyvm check` refuses the file - which is what happened when the step
-  # was first added, and is the vocabulary doing its job.
   out:
     from: args.out
     default: out/distro.qcow2
-
 steps:
-  # THE RECORDING IS PART OF THE VERDICT, NOT A CONVENIENCE.
-  #
-  # A FAILURE THAT SAYS "did not advance: read ..." IS A FEW WORDS OF OCR, and the question
-  # it cannot answer is "what was on screen". A recording can, and it is tens of megabytes -
-  # which is why it is its own artifact rather than travelling with the disk.
-  - name: start recording
-    record: endeavour-install.mp4
-    poll: 20
-
-  # THE MACHINE AND ITS INSTALLER, WHICH USED TO BE THE BAKE SKELETON IN PYTHON.
-  #
-  # THIS FILE IS A DECLARATION OF THE WIZARD STEPS AND NOTHING ELSE. Its own header says so:
-  #
-  #     WHAT THIS FILE IS. It is a DECLARATION, not an implementation. The bake skeleton - disk,
-  #     guest, recording, the QMP driver, the walk, ...
-  #
-  # and in the Python implementation lib/install_skeleton.py built the machine, created the disk and
-  # attached the ISO before running these steps. Reproduced as YAML that skeleton has to be IN the
-  # file, or the first `at:` reports `drive.sock.qmp: no such file` on a machine nobody started.
-  #
-  # 64G IS THE WORKFLOW'S OWN `--disk-size 64G`, not a number chosen here: every coordinate in this
-  # directory was measured on a disk that size, and the installer's partitioning pane reads capacity.
-  - name: create the empty disk
-    disk: disk.qcow2
-    disk_gb: 64
-
-  # THE INSTALLER IMAGE, BY THE TAG THIS REPOSITORY PUBLISHES IT UNDER.
-  - name: fetch the installer image
-    fetch: linux_iso
-    release: endeavour
-
-  - name: boot the installer
-    boot: true
-    os: linux
-    iso: installer_iso
-    timeout: 1800
-  # THE LIVE DESKTOP FIRST, BECAUSE A CLICK ON A SCREEN THAT HAS NOT DRAWN IS A CLICK ON NOTHING.
-  #
-  # `boot:` RETURNS WHEN QEMU IS RUNNING, WHICH IS NOT WHEN THE INSTALLER IS VISIBLE. A live medium
-  # unpacks itself from a multi-gigabyte ISO after that: measured on opensuse-tumbleweed, whose first
-  # click landed on
-  #
-  #	Guest has not initialized the display (yet).
-  #
-  # - the VNC server's own text, meaning the guest had drawn NO FRAME AT ALL.
-  #
-  # `desktop: linux` is a measurement of the panel a booted session draws, which is the honest gate
-  # for every live installer here. The `timeout` is generous because unpacking a 4 GiB image is real
-  # work, and a fixed `settle` would be a guess that is right on a fast runner and wrong on a slow one.
-  # THE INSTALLER'S OWN FIRST SCREEN, READ AS TEXT.
-  #
-  # `desktop: linux` MEASURES A PANEL AND THESE INSTALLERS HAVE NO PANEL: they are
-  # full-screen console UI (subiquity, calamares in text mode, the Debian installer,
-  # anaconda) drawing character cells. Measured on ubuntu-install: fifteen minutes of
-  # `drop=+0.0 ratio=0.0x sat=+0.00` - a black screen - while `console.log` showed the
-  # firmware boot the DVD, GRUB load, and the installer take over. The test was
-  # measuring the wrong thing, which is the fourth time this session.
-  #
-  # AND THE BUDGET IS THE INSTALL'S, NOT A GUI'S: a live medium unpacks itself from a
-  # multi-gigabyte ISO before its first screen exists, and the reference implementation
-  # gives this 5400 seconds rather than guessing a smaller number.
-  # THE DESKTOP, BECAUSE EVERY IMAGE HERE IS A DESKTOP IMAGE AND THE PANES BELOW ARE MEASURED ON IT.
-  #
-  # `desktop: linux` MEASURES A PANEL - a strip of colour along an edge that an installer does not
-  # draw - so it answers "is a live session up". That is the question: the next step clicks or
-  # double-clicks something ON that session, and a session that has not drawn has nothing to click.
-  #
-  # `keep_alive` IS PART OF THE WAIT, not a refinement: it can run for ninety minutes and a live
-  # session's idle timer puts a lock screen up well before that, after which every word on the screen
-  # is the lock screen's and nothing below can match.
-  - name: wait for the live desktop
-    desktop: linux
-    timeout: 5400
-    poll: 5
-    keep_alive: true
-
-  # =======================================================================================
-  # 0. PIN THE LANGUAGE BEFORE THE WIZARD IS STARTED
-  # =======================================================================================
-  #
-  # The config file is read when Calamares starts, so this has to happen first. `run` opens
-  # a terminal with ctrl+alt+t, waits `terminal_wait`, types the line, presses Return and
-  # then waits `settle`.
-  - name: pin the wizard's language to english
-    run: "sudo sed -i 's#https://geoip.kde.org/v1/ubiquity#http://127.0.0.1:9/x#' /etc/calamares/modules/welcome_offline.conf; exit"
-    terminal_wait: 10
-    settle: 8
-
-  - name: close the terminal
-    at: [1402, 310]
-    settle: 6
-
-  # =======================================================================================
-  # 1. THE WELCOME WINDOW'S `Start the Installer`, THEN THE METHOD DIALOG'S `Offline`
-  # =======================================================================================
-  #
-  # ONE CLICK ON EACH, NOT TWO, AND THE SECOND CLICK WAS THE BUG.
-  #
-  # The driver used to press `Start the Installer` twice: the first opened the method
-  # dialog, and the second - a second later, on the SAME coordinate - landed on the Welcome
-  # window behind it, whose row at that height is `Latest release info`. That opened Firefox
-  # on a 404 page, which then covered everything: run 4244... logged
-  #
-  #     installing: 2026-08-15 | a | (c) | 404 | | | Discovery | x | Firefox | Privacy
-  #
-  # for the rest of its life. A coordinate is only right for the screen it was measured on,
-  # and the screen had changed between the two presses.
-  # THE CALAMARES WINDOW, BEFORE ITS FIRST PANE IS PRESSED.
-  #
-  # THE WORDS ARE THE FILE'S OWN, from the welcome/location gate below. `desktop: linux` measures a
-  # panel and Calamares draws over one, so the desktop gate can open before the wizard exists.
-  - name: wait for the calamares window
-    until_any:
-      # THE SAME TRAP AS ubuntu, WHICH IS MEASURED. Calamares's first pane is a welcome screen with a
-      # language list - `American English` is the row it preselects - and the launcher's
-      # `Install EndeavourOS` text belongs to the desktop rather than the wizard.
-      - [american, english]
-      - [erase, disk]
-      - [welcome]
-    timeout: 600
-    poll: 5
-    keep_alive: true
-
-  - name: start the installer
-    at: [735, 425]
-    settle: 20
-
-  - name: offline
-    at: [1069, 590]
-    settle: 55
-    expect_any:
-      - [welcome]
-      - [location]
-
-  # =======================================================================================
-  # 2. THE PANES, ALL ON ONE FOOTER POSITION
-  # =======================================================================================
-  #
-  # Measured on Welcome, Location, Keyboard, Bootloader, Partitions, Users and Summary of
-  # this ISO: y=873 is the same on all of them. (Contrast cachyos, whose window resizes.)
-  #
-  # The default location is kept: it is whatever Calamares detected, and the requirement is a
-  # disk that installs, not a particular country.
-  - name: welcome
-    at: [1406, 873]
-    settle: 20
-  - name: location
-    at: [1406, 873]
-    settle: 20
-  - name: keyboard
-    at: [1406, 873]
-    settle: 20
-  - name: bootloader
-    at: [1406, 873]
-    settle: 20
-
-  # THE RADIO BUTTON'S CIRCLE - the row's text is not a control, and the row below it is
-  # `Manual partitioning`.
-  - name: partitions - erase the disk
-    at: [566, 258]
-    settle: 8
-
-  - name: partitions
-    at: [1406, 873]
-    settle: 22
-
-  # =======================================================================================
-  # 3. THE USERS PANE. FIVE FIELDS; THE ROOT PASSWORD IS REUSED BY DEFAULT.
-  # =======================================================================================
-  - name: users - full name
-    at: [847, 302]
-    type: "{{ user }}"
-    settle: 2
-  - name: users - login name
-    at: [847, 356]
-    type: "{{ user }}"
-    settle: 2
-  # THE HOST NAME IS LEFT AT THE INSTALLER'S DEFAULT, AND THIS STEP USED TO SET IT.
-  #
-  # It typed the account's name here, which made the machine's name a second copy of the login
-  # and had to be kept in step with it by hand - and after the account was renamed it was the one
-  # place a stale name could hide. The name is now set ONCE, after ssh works, by
-  # `steps/vm-configure.yaml`, which is also the only place that knows the disk is finished.
-  #
-  # WHAT THE INSTALLER PUTS HERE IS ITS OWN DEFAULT (`cachyos`, the live medium's name, or the
-  # machine model). It is replaced a stage later, so nothing reads it.
-  - name: users - password
-    at: [700, 513]
-    type: "{{ password }}"
-    settle: 2
-  - name: users - confirm password
-    at: [982, 513]
-    type: "{{ password }}"
-    settle: 3
-
-  - name: users
-    at: [1406, 873]
-    settle: 22
-
-  # =======================================================================================
-  # 4. SUMMARY, THEN THE MODAL
-  # =======================================================================================
-  - name: summary - install
-    at: [1406, 873]
-    settle: 18
-
-  - name: the install confirmation's install now
-    at: [1059, 542]
-    settle: 30
-
-  # =======================================================================================
-  # 5. A MEASURED WAIT, LIKE MINT'S AND OPENSUSE'S, AND THE REASON IS THIS IMAGE
-  # =======================================================================================
-  #
-  # THE WORD TEST WAS TRIED HERE AND IT DOES NOT WORK. Run 42448947052 installed correctly -
-  # every pane visited, the confirmation accepted, the disk being written - and then sat on
-  # the progress pane for seventy-five minutes while its log repeated
-  #
-  #     installing: 2026-08-15 | Instalador | de | EndeavourOS | TITAN | nous | Acoyida | ...
-  #
-  # because the progress pane keeps its own heading and slideshow, and Calamares' Finish pane
-  # never appeared in the reading. The languages made it worse: that runner's wizard was
-  # SPANISH, so even the English sentences were the wrong ones to look for.
-  #
-  # So the duration is the answer, which is what mint and opensuse already do and for
-  # the same reason: a graphical installer's last pane is a font and a layout that OCR reads
-  # badly, and a correct disk must not depend on reading it.
-  #
-  # THE DURATION: from `Install Now` to a written disk, about 20 minutes on this ISO on a
-  # runner. FORTY-FIVE is that with room for a slower one, and `--timeout` bounds it again.
-  #
-  # THE KEEP-ALIVE CLICK IS PART OF THE WAIT: an idle desktop raises its lock screen, and a
-  # locked desktop has no installer on it.
-  - name: the install runs, as measured
-    wait: 2700
-    keep_alive: true
-
-  # THE DISK IS THE ARTIFACT, AND WITHOUT THIS STEP THERE IS NONE.
-  #
-  # THE WORKFLOW ASKS FOR ONE: each install leg is declared with `"out": "linux-<distro>.qcow2"`, and
-  # `--out` is where a `compress:` WRITES - it is not a filename the engine invents. WITH NO
-  # `compress:` STEP NOTHING WAS WRITTEN, and the leg's `-disk` artifact was 518 bytes:
-  #
-  #	linux-zorin-install-disk   518 bytes
-  #	linux-zorin-vm-disk     10,497,859,093 bytes
-  #
-  # A PASSING INSTALL THAT LEAVES NO DISK is a leg that proves the installer works and produces nothing
-  # for the stage after it. `compress:` flattens the overlay's parent chain into one qcow2 with zstd, so
-  # the file it leaves is the install itself.
-  # THE MACHINE IS STOPPED BEFORE THE DISK IS READ, AND THAT IS WHY THIS STEP EXISTS.
-  #
-  # MEASURED ON zorin-install, WHICH ANSWERED ALL 21 STEPS AND THEN FAILED ON THE LAST ONE:
-  #
-  #	publish the disk: qemu-img convert: exit status 1
-  #	(qemu-img: Could not open '/__w/easyvm/easyvm/work/disk.qcow2': Failed to get shared "write" lock
-  #
-  # THE INSTALL WAS COMPLETE AND THE DISK WAS STILL OPEN. `compress:` READS THE FILE, and qemu holds a
-  # write lock on it until the machine is stopped - so a `compress:` before a `shutdown:` cannot work
-  # however good the install was.
-  #
-  # `kill`, NOT `acpi`, AND THE MEASUREMENT IS WHY.
-  #
-  # MEASURED ON zorin-install, WHICH PASSED ALL 21 STEPS AND THEN PRODUCED A 0 MiB DISK:
-  #
-  #	=== stop the machine
-  #	  stopping with method "acpi"
-  #	  pressing the power button
-  #	  the guest did not power off within 5m0s; killing it - the disk will need a journal replay
-  #	=== publish the disk
-  #	  compressing with zstd
-  #	  linux-zorin.qcow2: 0 MiB
-  #
-  # A LIVE INSTALLER DOES NOT ANSWER THE POWER BUTTON. `acpi` pressed it, the guest ignored it, the
-  # wait expired after five minutes, and the kill that followed raced `qemu-img convert` - which read
-  # a disk qemu was still releasing and wrote ZERO BYTES.
-  #
-  # `kill` IS NOT A COMPROMISE HERE, BECAUSE THE INSTALLER HAS ALREADY FINISHED: the step above waits
-  # for the install to complete, and what follows is a disk with a written system on it. The journal
-  # replay the kill costs is paid on the next boot, which is the stage after this one, and it is
-  # cheaper than five minutes of waiting for a button nothing presses.
-  #
-  # THE WAIT IS SHORTENED TOO: 120 seconds, because a kill does not need the five minutes a graceful
-  # request does - and the boot after this one replays the journal either way.
-  - name: stop the machine
-    shutdown: kill
-    timeout: 120
-
-  - name: publish the disk
-    compress: "{{ out }}"
-
-  - name: stop recording
-    record: false
+- name: start recording
+  record: endeavour-install.mp4
+- name: create the empty disk
+  disk: disk.qcow2
+  disk_gb: 64
+- name: fetch the installer image
+  fetch: linux_iso
+  release: endeavour
+- name: boot the installer
+  boot: true
+  os: linux
+  iso: installer_iso
+  timeout: 1800
+- name: wait for the live desktop
+  desktop: linux
+  timeout: 5400
+  poll: 5
+  keep_alive: true
+- name: pin the wizard's language to english
+  run: sudo sed -i 's#https://geoip.kde.org/v1/ubiquity#http://127.0.0.1:9/x#' /etc/calamares/modules/welcome_offline.conf; exit
+  terminal_wait: 10
+  settle: 8
+- name: close the terminal
+  at:
+  - 1402
+  - 310
+  settle: 6
+- name: wait for the calamares window
+  until_any:
+  - - american
+    - english
+  - - erase
+    - disk
+  - - welcome
+  timeout: 600
+  poll: 5
+  keep_alive: true
+- name: start the installer
+  at:
+  - 735
+  - 425
+  settle: 20
+- name: offline
+  at:
+  - 1069
+  - 590
+  settle: 55
+  expect_any:
+  - - welcome
+  - - location
+- name: welcome
+  at:
+  - 1406
+  - 873
+  settle: 20
+- name: location
+  at:
+  - 1406
+  - 873
+  settle: 20
+- name: keyboard
+  at:
+  - 1406
+  - 873
+  settle: 20
+- name: bootloader
+  at:
+  - 1406
+  - 873
+  settle: 20
+- name: partitions - erase the disk
+  at:
+  - 566
+  - 258
+  settle: 8
+- name: partitions
+  at:
+  - 1406
+  - 873
+  settle: 22
+- name: users - full name
+  at:
+  - 847
+  - 302
+  type: '{{ user }}'
+  settle: 2
+- name: users - login name
+  at:
+  - 847
+  - 356
+  type: '{{ user }}'
+  settle: 2
+- name: users - password
+  at:
+  - 700
+  - 513
+  type: '{{ password }}'
+  settle: 2
+- name: users - confirm password
+  at:
+  - 982
+  - 513
+  type: '{{ password }}'
+  settle: 3
+- name: users
+  at:
+  - 1406
+  - 873
+  settle: 22
+- name: summary - install
+  at:
+  - 1406
+  - 873
+  settle: 18
+- name: the install confirmation's install now
+  at:
+  - 1059
+  - 542
+  settle: 30
+- name: the install runs, as measured
+  wait: 2700
+  keep_alive: true
+- name: stop the machine
+  shutdown: kill
+  timeout: 120
+- name: publish the disk
+  compress: '{{ out }}'
+- name: stop recording
+  record: false

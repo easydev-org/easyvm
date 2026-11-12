@@ -1,39 +1,7 @@
-# Stage three for linux-fedora-workstation: put sshd on THIS disk and prove ssh works.
-#
-#     python3 lib/steps.py linux/fedora-workstation/steps/ssh.yaml --qmp /work/drive.sock.qmp --ssh-port 2222
-#
-# WHY THIS FILE IS PER-DISTRIBUTION AND NOT ONE SHARED WALK
-#
-# Because the four things it does differ on every image, and a shared file would have to be
-# written as a table of exceptions - which is what a per-distribution file already is, only
-# with the exceptions where a reader can see them.
-#
-# WHAT DIFFERS, FOR THIS ONE
-#
-#     terminal    ctrl+alt+t, the session's own emulator
-#     install    dnf install -y openssh-server
-#     enable     systemctl enable --now sshd
-#     firewall   firewalld may be active; port 22 must be opened explicitly
-#
-# Fedora ships firewalld too, so this walk opens ssh the same way openSUSE's does - and it
-# did NOT, which is what run 42579801145's `Connection refused` was measured against. The
-# command now runs `firewall-cmd` explicitly; `|| true` because a disk with firewalld
-# stopped is a disk where the command fails harmlessly and the tunnel still works.
-#
-# THE THREE ACTIONS ARE THE SAME EVERYWHERE, WHICH IS WHY THE SHAPE IS THE SAME:
-#
-#     run:          open this session's terminal and type the install
-#     require_ssh:  wait for the daemon it enabled (the step macOS's own ssh.yaml added)
-#     ssh:          run a command IN THE GUEST over the forwarded port - an exit status
-#
-# THE TRANSPORT IS THE DESKTOP. These disks have no getty on ttyS0 - measured on run
-# 42551299241, whose console said `BdsDxe: starting Boot0001` and then nothing - so `run:`
-# is the only way in.
-
 name: linux-fedora-workstation - sshd
-
-resolution: [1920, 1080]
-
+resolution:
+- 1920
+- 1080
 vars:
   password:
     from: args.password
@@ -41,280 +9,88 @@ vars:
   user:
     from: args.user
     default: vmuser
-
 steps:
-  # THE RECORDING IS PART OF THE VERDICT, NOT A CONVENIENCE.
-  #
-  # A FAILURE THAT SAYS "did not advance: read ..." IS A FEW WORDS OF OCR, and the question
-  # it cannot answer is "what was on screen". A recording can, and it is tens of megabytes -
-  # which is why it is its own artifact rather than travelling with the disk.
-  - name: start recording
-    record: fedora-workstation-ssh.mp4
-    poll: 20
-
-  # THE MACHINE IS STARTED HERE, IN THE FILE, AND IT WAS NOT BEFORE.
-  #
-  # THIS STAGE'S DISK COMES FROM THE PREVIOUS ONE - so `boot_disk: from_caller` says the caller's
-  # `--boot-disk` supplies it - but SOMETHING STILL HAS TO START QEMU. In the Python implementation
-  # that something was lib/ssh_step.py, which built the machine, started it, and only then ran this
-  # file. The first CI run of these thirteen legs proved the cost of leaving it there:
-  #
-  #     error: open the terminal: key "ctrl+alt+t": qmp .../drive.sock.qmp: dial unix
-  #            .../drive.sock.qmp: connect: no such file or directory (waited 30s)
-  #
-  # - the first GUI step of a file whose machine had never been started. The launcher pulled the
-  # disk, started the daemon, asked for the run, and the run had nothing to click on.
-  #
-  # `os: linux` IS THE WHOLE MACHINE DESCRIPTION: UEFI firmware, a virtio disk, `-vga std` at
-  # 1920x1080, and the OVMF variable store that makes the installed system bootable. Every field of
-  # it was in lib/ssh_step.py's `vm.Shape(...)` call, and none of it was in the file.
-  - name: boot the disk
-    boot: true
-    os: linux
-    timeout: 900
-
-
-  # =======================================================================================
-  # 0. GET PAST THE GREETER, WHEN THIS DISK DOES NOT AUTOLOGIN
-  # =======================================================================================
-  #
-  # MEASURED ON RUN 42557318416, AND IT IS THE REASON THE FIRST ssh STAGE INSTALLED NOTHING.
-  # Pop!_OS' launch screenshot is not a desktop at all - it is COSMIC's LOCK SCREEN with
-  # `VM User` and a `Password:` box. `frame_is_painted` is right that something drew, but
-  # ctrl+alt+t does NOTHING on a greeter, so the terminal never opened and the install was
-  # typed into nothing.
-  #
-  # So the greeter is answered first: click the password box, type the account's password,
-  # press Return. The box's position is this greeter's own - GDM.
-  #
-  # `optional` because a disk that DOES autologin never shows this page, and on one of those
-  # the click lands on the desktop and the typing goes to nothing that matters.
-  # MEASURED ON THIS GREETER: THE ENTRY'S INTERIOR IS y=614..643, x=776..1096, so its
-  # centre is (936, 628). The previous (960, 640) was three pixels above the box's BOTTOM
-  # BORDER - run 42575602052's frame shows the caret on the field and the placeholder
-  # `Password` still in it after the password had been typed, because the click had put
-  # focus on the border rather than inside the entry.
-  # CLICK AND TYPE IN ONE STEP, BECAUSE GDM DROPS THE TYPING OTHERWISE.
-  #
-  # Runs 42575602052 and 42577685826 both ended on this screen with the placeholder
-  # `Password` still in the entry and the caret beside it, after the `type:` step had run -
-  # so GDM had the focus but had not taken the characters. The two-step form (click here,
-  # `type:` into whatever has focus next) gives the greeter a settle window in between and
-  # this one does not honour it.
-  #
-  # `clear: false` because the field is empty and a ctrl+a on a GDM entry selects nothing
-  # useful; the password is typed straight in.
-  # WAKE THE SCREEN BEFORE TOUCHING THE KEYBOARD.
-  #
-  # The launch stage's verdict for this same disk is PASS and its frame is a DESKTOP
-  # (`42519158623`, `VERDICT PASS kind=fedora`) - so the session is already logged in and
-  # what the ssh stage photographs is the LOCK SCREEN, not a greeter. An idle lock screen
-  # ignores synthetic keys until it has been woken, which is why three runs typed a password
-  # at (936,628), showed the caret in the entry, and left `Password` in it.
-  #
-  # Escape wakes it. The pause after it is the one the screen needs to raise the lock dialog
-  # and give the entry focus.
-  - name: greeter - wake the screen
-    key: esc
-    settle: 5
-    optional: true
-
-  # THE USER TILE FIRST: GDM ASKS WHO, THEN FOR THE PASSWORD.
-  #
-  # THIS IS THE WHOLE ROOT CAUSE, MEASURED ON A LOCAL KVM GUEST (Zorin, 2026-11-09).
-  #
-  # What the greeter shows before anything is clicked is a USER CHOOSER, not a password
-  # prompt:
-  #
-  #     [ (avatar)  docker ]        <- a rounded tile at x=800..1115, y=448..528
-  #     Not listed?
-  #
-  # The password entry does not exist until that tile is clicked. Every earlier attempt
-  # clicked (936,628) or (960,627) - the entry's position on the SECOND screen - while the
-  # FIRST screen was showing, so the click landed on empty wallpaper, the typing went to no
-  # widget, and the recording showed a greeter that "ignored the keyboard".
-  #
-  # Proven by doing both clicks in one session on that guest: after the tile click the entry
-  # appeared, five bullets went into it (`admin`), Return logged in, and `ctrl+alt+t` then
-  # produced a `docker@docker:~$` terminal. Frame by frame:
-  #
-  #     click (960,488)      -> the entry appears
-  #     click (960,627)      -> caret in it
-  #     type admin           -> ●●●●●
-  #     Return               -> "Welcome to Zorin OS 18"
-  #
-  # (960,488) is the tile's centre on 1920x1080; it is the same rounded tile every GDM here
-  # draws, which is why one coordinate serves the four images that use GDM.
-  - name: greeter - the user tile
-    at: [960, 488]
-    settle: 4
-    optional: true
-
-  - name: greeter - the password box
-    at: [936, 628]
-    type: "{{ password }}"
-    clear: false
-    settle: 4
-    optional: true
-
-  - name: greeter - submit
-    key: ret
-    settle: 12
-    optional: true
-
-  # =======================================================================================
-  # 1. THE INSTALL, TYPED INTO THIS SESSION'S OWN TERMINAL
-  # =======================================================================================
-  #
-  # `run:` presses ctrl+alt+t to open the terminal, waits `terminal_wait`, types the text,
-  # presses Return and waits `settle`. Every number here is this image's: a desktop that has
-  # just painted has not started its session yet, so the wait comes before the shortcut.
-  # =======================================================================================
-  # 0b. THE TERMINAL, AND ON THIS IMAGE ctrl+alt+t IS NOT A SHORTCUT AT ALL
-  # =======================================================================================
-  #
-  # FEDORA 43 HAS NO ctrl+alt+t BINDING AND NO TERMINAL ON ITS DOCK. Measured on the real
-  # disk in a local pod: after a successful GDM login the frame is the Fedora desktop, its
-  # dock carries Firefox, Calendar, Files, Software, Text Editor, Calculator and the app grid
-  # - no terminal - and pressing ctrl+alt+t opens GNOME's overview instead of a shell.
-  #
-  # What DOES work, measured in the same session:
-  #
-  #     click the wallpaper   (960,700)   give the shell focus; without this the next
-  #                                       keystroke goes nowhere and the overview never
-  #                                       takes the typing
-  #     Super                             the overview with its search field
-  #     type "terminal"                   918x132 result tile at (960,178)
-  #     click (960,178)                   a Terminal window opens
-  #
-  # and then the install ran and answered `ssh: 0 docker / fedora`.
-  #
-  # The wallpaper click is not decoration: pressing Super straight after login left the
-  # desktop unchanged in two attempts, and only focusing the shell first made the overview
-  # accept `terminal`.
-  - name: desktop - give the shell focus
-    at: [960, 700]
-    settle: 2
-
-  - name: open the overview
-    key: meta_l
-    settle: 4
-
-  - name: search for the terminal
-    type: terminal
-    settle: 4
-
-  - name: open the terminal
-    at: [960, 178]
-    settle: 20
-
-  # `systemctl enable` IS NOT `systemctl start`, AND ONLY THE SECOND ONE OPENS PORT 22.
-  #
-  # Runs 42573078551 and 42577844686 (opensuse) both show a Konsole whose install had
-  # clearly worked - `Created symlink /etc/systemd/system/multi-user.target.wants/
-  # sshd.service` - and NOTHING after it. `enable --now` was supposed to start the unit as
-  # well as enable it, and the recording never showed whether it did; `tail -5` cut the
-  # answer off, so the stage waited ten minutes against a port that may never have opened.
-  #
-  # So the three actions are separate and each one reports: enable (boot), restart (now),
-  # is-active (the answer). `tail -12` so the status line survives in the recording.
-  # FIVE ACTS, FIVE STEPS. This was one `run:` doing all of them, and the comment above already
-  # insisted the three "are separate" - the command disagreed with the prose. A failure in any
-  # of them reported `install sshd failed` and named none, which is the same complaint macOS'
-  # and Windows' vm-configure files were split for (commit 96596c2).
-  #
-  # `terminal_wait: 0` ON EACH: the terminal is opened by the step above and stays open, so
-  # these are five commands typed into ONE shell - which is what makes the split cheap.
-  - name: install openssh-server
-    run: echo {{ password }} | sudo -S dnf install -y openssh-server 2>&1 | tail -5
-    terminal_wait: 0
-    settle: 45
-
-  # PASSWORD AUTHENTICATION BEFORE THE DAEMON STARTS, WHICH IS THE ONLY ORDER THAT WORKS.
-  #
-  # A DROP-IN IS ONLY READ IF THE MAIN CONFIG INCLUDES THE DIRECTORY, AND SSHD READS IT ONCE AT START.
-  # Measured: the setting was written and manjaro still refused the same handshake
-  #
-  #	wait for sshd: the port is open but no shell answers: ssh: handshake failed:
-  #	ssh: unable to authenticate, attempted methods [none password], no supported methods remain
-  #
-  # - because that release's `/etc/ssh/sshd_config` has no `Include /etc/ssh/sshd_config.d/*.conf`,
-  # and because the write happened AFTER the daemon had already started.
-  #
-  # SO BOTH FILES, BEFORE THE START: the drop-in (right where the directory is included, and it
-  # survives a package update that rewrites the main file) and an append to the main file itself,
-  # guarded by a grep so a second run adds no second line.
-  - name: allow password authentication
-  # ONE LINE, BECAUSE `run:` TYPES EACH LINE AND PRESSES RETURN AFTER IT.
-  #
-  # A MULTI-LINE BODY IS NOT ONE COMMAND. This step was a nine-line `sh -c '...'` block, and `doRun`
-  # typed line 1, pressed Return, line 2, Return - so the shell received an UNTERMINATED QUOTE,
-  # submitted it, and ran every following line as its own command. THE COMMENT LINES RAN AS COMMANDS.
-  #
-  # MEASURED ON endeavour-ssh, step 11 of 13, on the run where the typing was first proven to happen:
-  #
-  #	=== allow password authentication
-  #	  running 19 line(s), 1020 character(s): echo admin | sudo -S sh -c ' ; ...
-  #	  wait for sshd: ... ssh: unable to authenticate, attempted methods [none password]
-  #
-  # NINETEEN LINES, 1020 CHARACTERS, NONE OF IT RUN AS ONE SCRIPT. The log line that proves the typing
-  # also proves the bug - which is why that line was worth adding.
-  #
-  # SO IT IS ONE LINE JOINED WITH `;`, which is what the reference implementation does and says:
-  # "Each statement is typed, so each is one line."
-  #
-  # THE COMMENTED `#PasswordAuthentication yes` IS REPLACED rather than appended beside, so sshd
-  # reads ONE uncommented setting; and /etc/ssh/sshd_config itself is written because Arch's copy
-  # has no `Include /etc/ssh/sshd_config.d/*.conf`.
-    run: echo {{ password }} | sudo -S -p '' sh -c 'mkdir -p /etc/ssh/sshd_config.d; printf "PasswordAuthentication yes\n" > /etc/ssh/sshd_config.d/99-vm.conf; sed -i "s/^#\?\s*PasswordAuthentication.*/PasswordAuthentication yes/" /etc/ssh/sshd_config; grep -q "^PasswordAuthentication yes" /etc/ssh/sshd_config || printf "PasswordAuthentication yes\n" >> /etc/ssh/sshd_config' 2>&1 | tail -3
-    terminal_wait: 0
-    settle: 3
-
-  - name: enable sshd at boot
-    run: echo {{ password }} | sudo -S systemctl enable sshd 2>&1 | tail -3
-    terminal_wait: 0
-    settle: 8
-  - name: prove the setting took
-    run: echo {{ password }} | sudo -S sh -c 'sshd -T 2>/dev/null | grep -i "^passwordauthentication" || echo PASSWORDAUTH-UNREADABLE' 2>&1 | tail -3
-    terminal_wait: 0
-    settle: 3
-
-
-  - name: start sshd
-    run: echo {{ password }} | sudo -S systemctl restart sshd 2>&1 | tail -3
-    terminal_wait: 0
-    settle: 10
-
-  - name: prove sshd is active
-    run: systemctl is-active sshd
-    terminal_wait: 0
-    settle: 5
-
-  - name: open the firewall for ssh
-    run: echo {{ password }} | sudo -S sh -c "firewall-cmd --add-service=ssh --permanent; firewall-cmd --reload; firewall-cmd --list-services" 2>&1 | tail -5
-    terminal_wait: 0
-    settle: 8
-
-  # =======================================================================================
-  # 2. WAIT FOR THE DAEMON THAT STEP ENABLED
-  # =======================================================================================
-  #
-  # NO FIXED `wait:` - the number would be a guess about a package install and a
-  # `nixos-rebuild` that share nothing. `require_ssh` asks the only question that matters.
-  - name: wait for sshd
-    require_ssh: true
-    timeout: 600
-
-  # =======================================================================================
-  # 3. THE PROOF, AND IT IS THIS GUEST ANSWERING OVER THE FORWARDED PORT
-  # =======================================================================================
-  - name: prove the kernel over ssh
-    ssh: uname -a
-    timeout: 120
-
-  - name: prove the account over ssh
-    ssh: id -un; hostname
-    timeout: 120
-
-  - name: stop recording
-    record: false
+- name: start recording
+  record: fedora-workstation-ssh.mp4
+- name: boot the disk
+  boot: true
+  os: linux
+  timeout: 900
+- name: greeter - wake the screen
+  key: esc
+  settle: 5
+  optional: true
+- name: greeter - the user tile
+  at:
+  - 960
+  - 488
+  settle: 4
+  optional: true
+- name: greeter - the password box
+  at:
+  - 936
+  - 628
+  type: '{{ password }}'
+  clear: false
+  settle: 4
+  optional: true
+- name: greeter - submit
+  key: ret
+  settle: 12
+  optional: true
+- name: desktop - give the shell focus
+  at:
+  - 960
+  - 700
+  settle: 2
+- name: open the overview
+  key: meta_l
+  settle: 4
+- name: search for the terminal
+  type: terminal
+  settle: 4
+- name: open the terminal
+  at:
+  - 960
+  - 178
+  settle: 20
+- name: install openssh-server
+  run: echo {{ password }} | sudo -S dnf install -y openssh-server 2>&1 | tail -5
+  terminal_wait: 0
+  settle: 45
+- name: allow password authentication
+  run: echo {{ password }} | sudo -S -p '' sh -c 'mkdir -p /etc/ssh/sshd_config.d; printf "PasswordAuthentication yes\n" > /etc/ssh/sshd_config.d/99-vm.conf; sed -i "s/^#\?\s*PasswordAuthentication.*/PasswordAuthentication
+    yes/" /etc/ssh/sshd_config; grep -q "^PasswordAuthentication yes" /etc/ssh/sshd_config || printf "PasswordAuthentication yes\n" >> /etc/ssh/sshd_config' 2>&1 | tail -3
+  terminal_wait: 0
+  settle: 3
+- name: enable sshd at boot
+  run: echo {{ password }} | sudo -S systemctl enable sshd 2>&1 | tail -3
+  terminal_wait: 0
+  settle: 8
+- name: prove the setting took
+  run: echo {{ password }} | sudo -S sh -c 'sshd -T 2>/dev/null | grep -i "^passwordauthentication" || echo PASSWORDAUTH-UNREADABLE' 2>&1 | tail -3
+  terminal_wait: 0
+  settle: 3
+- name: start sshd
+  run: echo {{ password }} | sudo -S systemctl restart sshd 2>&1 | tail -3
+  terminal_wait: 0
+  settle: 10
+- name: prove sshd is active
+  run: systemctl is-active sshd
+  terminal_wait: 0
+  settle: 5
+- name: open the firewall for ssh
+  run: echo {{ password }} | sudo -S sh -c "firewall-cmd --add-service=ssh --permanent; firewall-cmd --reload; firewall-cmd --list-services" 2>&1 | tail -5
+  terminal_wait: 0
+  settle: 8
+- name: wait for sshd
+  require_ssh: true
+  timeout: 600
+- name: prove the kernel over ssh
+  ssh: uname -a
+  timeout: 120
+- name: prove the account over ssh
+  ssh: id -un; hostname
+  timeout: 120
+- name: stop recording
+  record: false

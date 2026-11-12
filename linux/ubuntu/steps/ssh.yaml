@@ -12,7 +12,6 @@ vars:
 steps:
 - name: start recording
   record: ubuntu-ssh.mp4
-  poll: 20
 - name: boot the disk
   boot: true
   os: linux

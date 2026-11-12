@@ -1419,3 +1419,44 @@ func TestNoCompletionWaitIsASingleShortWord(t *testing.T) {
 	}
 	t.Logf("checked %d one-word alternatives across the walkthroughs", checked)
 }
+
+// A `poll:` ON A `record:` STEP IS DEAD CONFIGURATION, AND IT MISLEADS.
+//
+// `doRecord` NEVER READS `poll:`; the sampler ticks once a second in `publish.go`. But every
+// walkthrough carried `record: ... poll: 20`, so a reader - and this session's own investigation -
+// took 20 seconds per frame as fact and tried to explain a 909-frame video of a 20-minute run as a
+// 20-second cadence rather than as a quarter of the ticks being dropped by a failed screendump.
+//
+// THE TICK IS ONE SECOND AND THE MISSES ARE NOW COUNTED. Neither was visible while the file said
+// `poll: 20`, so the key is refused rather than ignored.
+func TestARecordStepDoesNotCarryAPoll(t *testing.T) {
+	root := filepath.Join("..", "..")
+	files, err := filepath.Glob(filepath.Join(root, "*", "*", "steps", "*.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked := 0
+	for _, path := range files {
+		doc, err := Load(path, nil)
+		if err != nil {
+			continue
+		}
+		rel, _ := filepath.Rel(root, path)
+		for _, s := range doc.Steps {
+			if !s.Has("record") {
+				continue
+			}
+			checked++
+			if s.Has("poll") {
+				t.Errorf("%s: %q is a `record:` step and carries `poll:`. The sampler ticks once a "+
+					"second and `doRecord` never reads `poll:`, so the value is dead - and a reader "+
+					"takes it as the frame interval, which is how a 909-frame video of a 20-minute "+
+					"run was read as a 20-second cadence", rel, s.Name)
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no `record:` steps were found, so this test checks nothing")
+	}
+	t.Logf("checked %d record step(s)", checked)
+}

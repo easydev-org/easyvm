@@ -1,69 +1,7 @@
-# macOS 15 stage four: the developer toolchain, on a disk that already answers ssh.
-#
-#     python3 lib/steps.py macos/15/steps/dev.yaml --qmp /work/drive.sock.qmp --ssh-port 2222
-#
-# WHY THIS STAGE CAN BE ALL ssh: AND THE EARLIER ONES COULD NOT
-#
-# The ssh stage could not, because sshd was what it was creating. By this point the disk
-# answers on a forwarded port, so everything below is ordinary remote work: no keyboard, no
-# coordinates, no frames to read. That is the entire reason the stages are ordered
-# desktop -> ssh -> dev.
-#
-# WHAT IS HERE, AND WHY NONE OF IT IS HOMEBREW
-#
-# THIS DISK IS x86_64 - qemu presents Skylake-Client-v4 - AND HOMEBREW NO LONGER SUPPORTS IT.
-#
-#     Homebrew on macOS is only supported on Apple Silicon processors!
-#
-# install.sh, lines 170-173: `if [[ "${UNAME_MACHINE}" != "arm64" ]]; then abort ...`.
-# Run 42644304192 reached that after Xcode had expanded successfully, and the stage stopped
-# there. So every tool comes from the publisher that still ships an Intel build:
-#
-#     Xcode       archive.org, sha1-pinned   - the IDE, swift, clang, and git
-#     Node.js     nodejs.org, x64 .pkg       - /usr/local/bin/node, npm, npx
-#     Python      python.org, macos11 .pkg   - /usr/local/bin/python3, pip3
-#
-# GIT IS NOT A SEPARATE INSTALL. Xcode's command line tools include it, and
-# `xcodebuild -runFirstLaunch` installs them - so the disk has a git maintained by the same
-# thing that maintains clang. A second one is how "which git" becomes a question.
-#
-# XCODE IS FIRST FOR TWO REASONS. The command line tools it provides are what the .pkg
-# installers expect to find, and a bad archive stops the stage in ten minutes instead of after
-# two downloads of a toolchain that could not be used.
-#
-# WHY XCODE IS NOT `brew install --cask xcode`
-#
-# Because Apple's download endpoint refuses an unauthenticated request:
-#
-#     HTTP/2 302   location: https://developer.apple.com/unauthorized/
-#
-# measured on 2026-11-09, and the cookie trick that used to mint an `ADCDownloadAuth` now
-# returns 403 as well. A CI job that needs a person's Apple ID and a 2FA code is a job that
-# cannot run unattended, so the .xip comes from archive.org - which keeps Apple's own file
-# byte for byte, and whose recorded sha1 is the same number Apple's release index publishes:
-#
-#     Xcode 26.3 Universal   sha1 cebf05ec2920111830af5e08a45f07961e36bfd6
-#
-# lib/xcode_asset.py refuses the download unless the bytes match, which is what makes this
-# "Apple's file from an archive" rather than "a mirror, hopefully".
-#
-# WHY 26.3 AND NOT THE NEWEST
-#
-# Apple raises Xcode's minimum macOS with almost every release and the installer enforces
-# it. 26.3 requires macOS 15.6; 26.4 requires macOS 26.2. This disk is Sequoia, so 26.3 is
-# its ceiling - a later one would download 2.7 GiB and then refuse to install.
-#
-# WHY THE XIP IS COPIED IN RATHER THAN DOWNLOADED IN THE GUEST
-#
-# The guest reaches the internet through this container's NAT, and this container's
-# outbound HTTPS goes through a proxy the guest knows nothing about. Downloading on the
-# host means the proxy, the sha1 check and the retry all happen where they are already
-# solved, and the guest only ever sees bytes that were verified. `xcode_fetch` is the
-# step that does it; `scp` is the step that copies it; both name their numbers.
-
 name: macos 15 - developer toolchain
-resolution: [1920, 1080]
-
+resolution:
+- 1920
+- 1080
 vars:
   user:
     from: args.user
@@ -71,428 +9,100 @@ vars:
   password:
     from: args.password
     default: admin
-  # THE SHUTDOWN METHOD IS A FACT ABOUT THE RUN, NOT ABOUT THE SCREEN. `kill` when the stage
-  # handed this file a throwaway overlay (nothing it wrote survives), `ssh` when the guest owns
-  # the real disk (its filesystem is what gets published, and macOS answers the power button
-  # with a dialog). Same var, same reasoning as macos/15/steps/ssh.yaml.
   shutdown:
     from: args.shutdown
     default: ssh
-
 ssh_user: vmuser
 ssh_port: 2222
-
-# THIS STAGE'S DISK COMES FROM THE CALLER, AND THAT IS NOW IN THE FILE RATHER THAN IN THE WORKFLOW.
-#
-# `boot_disk: from_caller` says the `--boot-disk` flag supplies it, because an earlier stage made it.
-# Without the declaration a file that continues from another stage is indistinguishable from one that
-# forgot to create a disk: `boot:` refuses with "booting needs a target disk", and it refuses AFTER
-# every host-side step above it has run - run 43044525517 spent three minutes building an answer CD
-# and resolving a 7.7 GiB installer before the boot said no.
 boot_disk: from_caller
-
 steps:
-  # THE RECORDING IS PART OF THE VERDICT, NOT A CONVENIENCE.
-  #
-  # A FAILURE THAT SAYS "did not advance: read ..." IS A FEW WORDS OF OCR, and the question
-  # it cannot answer is "what was on screen". A recording can, and it is tens of megabytes -
-  # which is why it is its own artifact rather than travelling with the disk.
-  - name: start recording
-    record: macos15-dev.mp4
-    poll: 20
-
-  # --- 0. THE MACHINE, IN THE FILE -------------------------------------------------------
-  #
-  # THIS STAGE STARTED QEMU ITSELF, like the other three, and the drive layout it spelled out by
-  # hand was the fourth copy of "what a macOS guest is" - see lib/vm_session.py's _start_machine,
-  # which is the one that also carries the qga device and the discard rule. The boot is a step.
-  #
-  # BOOT IS OVER WHEN QEMU IS RUNNING. The disk this stage is given answers ssh already, but
-  # asking the machine for it is `require_ssh:` below, which is a different fact with its own
-  # timeout.
-  # NO `recovery:` HERE, AND THAT IS THE POINT.
-  #
-  # macOS installs FROM removable media, so only the setup stage attaches the recovery image as a
-  # USB disk. This stage boots a system that is already installed, and an installed macOS has no
-  # recovery volume - an extra USB disk would be one more row the guest can pick in Disk Utility,
-  # where setup.yaml's "choose the target disk by capacity" reads the sidebar. Attaching it where
-  # nothing is being installed is at best a row nobody looks at and at worst the row that gets
-  # picked.
-  #
-  # THE RECOVERY IMAGE IS STILL AN INPUT to the step that builds OpenCore - the APFS driver comes
-  # out of that image - and that is host work on a file, not a device handed to the guest. The
-  # two are separate facts: opencore.build() reads it, `boot:` does not attach it.
-  #
-  # WHAT IS ALWAYS THERE, because macOS always boots through OpenCore:
-  #
-  #     boot.img   OpenCore, bootindex=0   a disk with no bootindex is not in the boot order at
-  #                                        all, which is what "failed to load Boot0001" meant for
-  #                                        six runs
-  #     disk       the target, bootindex=1 OpenCore finds the installed system here
-  #
-  # And discard is ON: this disk is finished, and a guest's TRIMs are what keep the published
-  # qcow2 small.
-  # OPENCORE AND THE RECOVERY IMAGE ARE INPUTS EVEN THOUGH THIS STAGE DOES NOT INSTALL.
-  #
-  # The firmware three - a boot image, OVMF's code and a writable variables copy - are built FROM the
-  # recovery image, because Apple's APFS driver lives inside it (usr/standalone/i386/apfs.efi) and
-  # OpenCore cannot read an APFS partition without one. EnableJumpstart=true does not supply a
-  # driver; it HOOKS one the firmware is expected to have, and OVMF has none. The symptom is silent:
-  # a picker that lists only Reset NVRAM and Toggle SIP.
-  #
-  # NO `recovery:` ON THE BOOT, THOUGH. That key attaches the image to the GUEST as removable media,
-  # and only the setup stage installs from it. An installed disk has no recovery volume, and an extra
-  # USB disk is one more row in Disk Utility's sidebar - which is what `choose the target disk by
-  # capacity` reads. Two facts, two places: this step reads the image, the boot does not give it away.
-  - name: fetch the recovery image
-    fetch: recovery_macos
-    release: "15"
-  - name: build OpenCore from the recovery image
-    fetch: opencore
-    release: "15"
-    recovery: recovery_macos
-
-  - name: boot the disk
-    boot: true
-    os: macos
-    timeout: 900
-
-  # --- 1. THE DISK HAS TO ANSWER BEFORE ANY OF THIS IS WORTH DOING ---------------------
-  #
-  # A banner is not a login: session.wait_for_ssh runs a command, because a socket that
-  # accepts a connection and then refuses authentication is a different failure and has
-  # been one here before.
-  - name: wait for sshd
-    require_ssh: true
-    timeout: 900
-
-  # --- 2. XCODE FIRST, BECAUSE EVERYTHING ELSE IS BUILT ON WHAT IT INSTALLS --------------
-  #
-  # The command line tools it provides - git, clang, swift, make - are the ones the .pkg
-  # installers below expect to find, and a disk without them cannot compile anything at all.
-  # `xcodebuild -runFirstLaunch` is what installs them, and it is in the step below.
-  #
-  # IT ALSO PUTS THE BEST FAILURE FIRST. A bad archive stops the stage in ten minutes instead
-  # of after two .pkg downloads and a toolchain that could not be used.
-  #
-  # Fetched and verified on the host, then copied in. The sha1 is Apple's own number for this
-  # build (see lib/xcode_asset.py); a byte that differs stops the step before 2.7 GiB has been
-  # moved into a guest.
-  #
-  # THE DESTINATION IS THE USER'S HOME, not /tmp: this is a 2.7 GiB file on a disk that is
-  # about to be published, and the step after it deletes the .xip once the app is expanded.
-  - name: fetch xcode on the host
-    fetch: xcode
-    # IT NEVER LOOKS AT THE SCREEN. This downloads and verifies the .xip in the CONTAINER, and
-    # the next step copies it in over ssh - so declaring it saves this walkthrough from being
-    # refused a HeadlessDriver on the grounds that some `python:` step might need one.
-
-  # THIS WAS A `copy_in: xcode` PRIMITIVE AND IT IS NOW TWO STEPS THAT ALREADY EXISTED.
-  #
-  # `copy_in:` did three things: find the fetched file, copy it, and CHECK ITS SIZE ON BOTH SIDES.
-  # The third is the interesting one, and it did not belong inside a copy step - it belongs to every
-  # copy. The note it came with:
-  #
-  #     THE SIZES ARE CHECKED ON BOTH SIDES. scp over a forwarded port through a container proxy is
-  #     the sort of transfer that can finish "successfully" with a short file when a middlebox cuts
-  #     it, and a truncated .xip fails at `xip -x` twenty minutes later with a message about a
-  #     corrupt archive.
-  #
-  # So `scp:` now compares the local stat, the write count AND the remote stat, and fails here. A
-  # that size check lives in the transport, every copy in every file gets it.
-  # THE NAME IS THE ONE `fetch: xcode` WRITES, NOT A SHORTER NAME THAT READS BETTER.
-  #
-  # MEASURED ON macos-dev, step 7 of 19:
-  #
-  #	copy xcode into the guest: no file to copy at /__w/easyvm/easyvm/work/Xcode.xip ...
-  #	stat /__w/easyvm/easyvm/work/Xcode.xip: no such file or directory
-  #
-  # `fetch: xcode` PINDS A SPECIFIC RELEASE and writes it under that release's own filename -
-  # `Xcode_26.3_Universal.xip` - because that name is part of the identity: the sha1 in `internal/
-  # asset/xcode.go` is Apple's hash OF THAT FILE. A shorter name here means the copy names a file
-  # nothing produced, and the pin becomes decoration.
-  #
-  # IT IS COPIED TO `/tmp/Xcode.xip` IN THE GUEST, which is fine: the guest does not care what the
-  # archive is called, and `/tmp/Xcode.xip` is what every later step of this file names.
-  - name: copy xcode into the guest
-    scp:
-      - "{{ work }}/Xcode_26.3_Universal.xip"
-      - "/tmp/Xcode.xip"
-
-  # EXPANDING AND SELECTING IS ONE SCRIPT BECAUSE IT IS ONE OPERATION. `xip -x` prints nothing
-  # for twenty minutes, `xcodebuild -license accept` must come before anything asks Xcode a
-  # question, and `-runFirstLaunch` installs the SDKs (another ten). Split into steps, a
-  # failure in the middle leaves a selected Xcode with no SDK - which answers --version and
-  # cannot build, the worst of both.
-  #
-  # AND IT IS ONE SCRIPT WITH NOTHING OUTSIDE IT, WHICH IT WAS NOT BEFORE:
-  #
-  #	script run-xcode-install.sh (sh) -> 1
-  #	(no output at all)
-  #
-  # THE BODY CALLED `bash /Users/{{ user }}/xcode-install.sh ...` - A FILE NOTHING EVER CREATED. The
-  # `scp:` above copies the .xip and only the .xip, so the only line of this step ran a script that
-  # does not exist, `bash` exited 1 with its complaint on stderr, and the step reported `exited 1`
-  # with no output because there was nothing on stdout.
-  #
-  # It also passed `Xcode.xip` as the argument while the file is `/tmp/Xcode.xip` - a second wrong
-  # name in the same line.
-  #
-  # SO THE WHOLE OPERATION IS HERE. `xip -x` expands, the app is moved into /Applications, the licence
-  # is accepted BEFORE anything asks Xcode a question, and `-runFirstLaunch` installs the SDKs - all
-  # three in one script because a failure between them leaves a selected Xcode with no SDK, which
-  # answers --version and cannot build.
-  - name: expand and select xcode
-    script: |
-      #!/bin/bash
-      set -euo pipefail
-
-      # THE PASSWORD IS AN ARGUMENT BECAUSE SUDO OVER SSH HAS NO TTY: `sudo` on this channel answers
-      # "a password is required" and has nowhere to read it from.
-      PASSWORD='{{ password }}'
-      XIP=/tmp/Xcode.xip
-      DEST=/Applications
-      WORK=/Users/{{ user }}/xcode-expand
-
-      # `xip -x` WRITES THE EXPANDED BUNDLE BESIDE A DIRECTORY, so the working directory decides
-      # where 15 GiB lands. It goes in the user's home, not /tmp, whose volume is small on macOS.
-      rm -rf "$WORK"
-      mkdir -p "$WORK"
-      cd "$WORK"
-      echo "expanding $XIP (this prints nothing for about twenty minutes)"
-      xip -x "$XIP"
-      echo "expanded"
-
-      APP="$(/usr/bin/find "$WORK" -maxdepth 2 -name 'Xcode*.app' -type d | head -1)"
-      if [ -z "$APP" ]; then
-        echo "NO Xcode.app in $WORK after xip -x" >&2
-        ls -la "$WORK" >&2
-        exit 1
-      fi
-      echo "found $APP"
-
-      # MOVED WITH `ditto`, which preserves the code signature and the extended attributes that a
-      # plain `mv` across volumes can drop.
-      rm -rf "$DEST/Xcode.app"
-      /usr/bin/ditto "$APP" "$DEST/Xcode.app"
-
-      # THE LICENCE FIRST, BECAUSE EVERYTHING ELSE ASKS XCODE A QUESTION.
-      if [ -x /usr/bin/sudo ]; then
-        printf '%s\n' "$PASSWORD" | sudo -S -p '' /usr/bin/xcode-select -s "$DEST/Xcode.app/Contents/Developer"
-        printf '%s\n' "$PASSWORD" | sudo -S -p '' /usr/bin/xcodebuild -license accept
-        printf '%s\n' "$PASSWORD" | sudo -S -p '' /usr/bin/xcodebuild -runFirstLaunch
-      else
-        /usr/bin/xcode-select -s "$DEST/Xcode.app/Contents/Developer"
-        /usr/bin/xcodebuild -license accept
-        /usr/bin/xcodebuild -runFirstLaunch
-      fi
-      echo "selected: $(/usr/bin/xcode-select -p)"
-
-      # AND THE DISK IT WAS EXPANDED INTO IS REMOVED, because it is 15 GiB and nothing reads it again.
-      rm -rf "$WORK"
-    script_shell: sh
-    script_name: run-xcode-install.sh
-    timeout: 7200
-
-  # THE .XIP IS 2.7 GiB AND THE DISK IS PUBLISHED. Leaving it behind makes every later artifact
-  # bigger for a file nothing reads again.
-  - name: remove the xip
-    ssh: rm -f /Users/{{ user }}/Xcode.xip && df -h / | tail -1
-    timeout: 300
-
-  # --- 3. THE TOOLS, FROM THEIR OWN PUBLISHERS ------------------------------------------
-  #
-  # HOMEBREW CANNOT INSTALL ANY OF THIS ON THIS DISK, AND THAT IS MEASURED, NOT PREDICTED.
-  #
-  # This guest is x86_64 - qemu presents Skylake-Client-v4 - and Homebrew's installer now
-  # refuses that outright:
-  #
-  #     Homebrew on macOS is only supported on Apple Silicon processors!
-  #
-  # install.sh, lines 170-173: `if [[ "${UNAME_MACHINE}" != "arm64" ]]; then abort ...`.
-  # Run 42644304192 got there after Xcode had expanded successfully, and the stage stopped.
-  #
-  # So each tool comes from the publisher that still ships an Intel build. It is a longer list
-  # than `brew install node python git`, and every line of it names a URL and a hash.
-  #
-  # GIT IS NOT HERE. Xcode's command line tools include it - `xcodebuild -runFirstLaunch`
-  # installed them - so the disk already has a working git, maintained by the same thing that
-  # maintains clang. Installing a second one is how "which git" becomes a question.
-  #
-  # THE PACKAGES ARE DOWNLOADED ON THE HOST AND COPIED IN, like the Xcode archive: the guest
-  # reaches the internet through this container's NAT, and this container's outbound HTTPS
-  # already works (see the note about the proxy that was reverted - it never was needed).
-  - name: fetch the packages on the host
-    fetch: dev_packages
-
-  # THIS WAS A `copy_in: xcode` PRIMITIVE AND IT IS NOW TWO STEPS THAT ALREADY EXISTED.
-  #
-  # `copy_in:` did three things: find the fetched file, copy it, and CHECK ITS SIZE ON BOTH SIDES.
-  # The third is the interesting one, and it did not belong inside a copy step - it belongs to every
-  # copy. The note it came with:
-  #
-  #     THE SIZES ARE CHECKED ON BOTH SIDES. scp over a forwarded port through a container proxy is
-  #     the sort of transfer that can finish "successfully" with a short file when a middlebox cuts
-  #     it, and a truncated .xip fails at `xip -x` twenty minutes later with a message about a
-  #     corrupt archive.
-  #
-  # So `scp:` now compares the local stat, the write count AND the remote stat, and fails here. A
-  # that size check lives in the transport, every copy in every file gets it.
-  - name: copy the packages into the guest
-    scp:
-      - "{{ work }}/packages.tar"
-      - "/tmp/packages.tar"
-
-  - name: install node
-    script: |
-      #!/bin/bash
-      # NODE FROM nodejs.org, x64 .pkg. The official installer puts it in
-      # /usr/local/bin and links node/npm/npx there, which is on the default PATH.
-      set -uo pipefail
-      if command -v node >/dev/null 2>&1; then
-        echo "node is already installed: $(node --version)"
-        exit 0
-      fi
-      PKG=/tmp/node.pkg
-      if [ ! -f "$PKG" ]; then
-        echo "=== NO NODE PACKAGE AT $PKG ==="
-        exit 1
-      fi
-      export PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
-      printf '%s\n' '{{ password }}' | sudo -S -p '' installer -pkg "$PKG" -target / 2>&1 | tail -5
-      rm -f "$PKG"
-      hash -r 2>/dev/null || true
-      command -v node && node --version && npm --version
-    script_shell: sh
-    script_name: install-node.sh
-    timeout: 1800
-
-  - name: install python
-    script: |
-      #!/bin/bash
-      # PYTHON FROM python.org, macos11 .pkg - the Intel-capable build. It installs into
-      # /Library/Frameworks/Python.framework and links python3 into /usr/local/bin.
-      set -uo pipefail
-      if /usr/local/bin/python3 -c 'import sys; print(sys.version)' >/dev/null 2>&1; then
-        echo "python3 is already installed: $(/usr/local/bin/python3 --version)"
-        exit 0
-      fi
-      PKG=/tmp/python.pkg
-      if [ ! -f "$PKG" ]; then
-        echo "=== NO PYTHON PACKAGE AT $PKG ==="
-        exit 1
-      fi
-      export PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
-      printf '%s\n' '{{ password }}' | sudo -S -p '' installer -pkg "$PKG" -target / 2>&1 | tail -5
-      rm -f "$PKG"
-      hash -r 2>/dev/null || true
-      /usr/local/bin/python3 --version && /usr/local/bin/pip3 --version
-    script_shell: sh
-    script_name: install-python.sh
-    timeout: 1800
-
-  # --- 5. THE PROOFS ------------------------------------------------------------------
-  #
-  # A package installer's exit code says an installer ran. These ask the disk.
-  #
-  # THE CHECK IS THE PATH, NOT THE VERSION, AND THAT IS THE WHOLE POINT OF THIS STEP.
-  # `/usr/bin/python3` exists on every macOS and answers `--version` perfectly - it is the
-  # one Xcode's command line tools install, and its pip refuses to write. A stage that only
-  # printed a version number would report success while leaving a disk whose python cannot
-  # install anything. So every tool has to resolve where its own publisher put it.
-  - name: prove the toolchain
-    script: |
-      #!/bin/bash
-      # THE CHECK IS THE PATH, NOT THE VERSION.
-      #
-      # /usr/bin/python3 exists on every macOS and answers --version perfectly - it is the one
-      # Xcode's command line tools install, and its pip refuses to write. A check that only
-      # read a version would pass on a disk whose python cannot install anything.
-      #
-      # WITH HOMEBREW OUT, THE EXPECTED PREFIX IS DIFFERENT: node and python come from
-      # publishers' .pkg files and land in /usr/local, while git and the compilers come from
-      # Xcode and live under /Applications/Xcode.app or /usr/bin.
-      set -uo pipefail
-      export PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
-      bad=0
-
-      # FROM THE PUBLISHERS' PACKAGES: /usr/local.
-      for t in node npm python3 pip3; do
-        path=$(command -v "$t" 2>/dev/null || true)
-        if [ -z "$path" ]; then
-          echo "MISSING  $t"
-          bad=1
-          continue
-        fi
-        case "$path" in
-          /usr/local/*) echo "ok       $t -> $path" ;;
-          *) echo "WRONG    $t -> $path (not from /usr/local)"; bad=1 ;;
-        esac
-      done
-
-      # FROM XCODE'S COMMAND LINE TOOLS: /usr/bin, but only after the dev dir is selected.
-      for t in git clang swift; do
-        path=$(command -v "$t" 2>/dev/null || true)
-        if [ -z "$path" ]; then
-          echo "MISSING  $t"
-          bad=1
-        else
-          echo "ok       $t -> $path"
-        fi
-      done
-
-      if [ "$bad" -ne 0 ]; then
-        echo "=== THE TOOLCHAIN IS NOT COMPLETE ==="
-        exit 1
-      fi
-      node --version
-      python3 --version
-      git --version
-      echo "TOOLCHAIN_OK"
-    script_shell: sh
-    script_name: prove-toolchain.sh
-    timeout: 300
-
-  - name: prove xcode is selected
-    ssh: xcode-select -p && xcodebuild -version
-    timeout: 300
-
-  # SWIFT IS THE REASON XCODE IS HERE RATHER THAN THE COMMAND LINE TOOLS. A selected Xcode
-  # with no SDK answers `swift --version` and cannot compile; this compiles.
-  - name: prove swift compiles
-    script: |
-      #!/bin/bash
-      set -uo pipefail
-      work=$(mktemp -d)
-      cat > "$work/hello.swift" <<'SWIFT'
-      print("hello-from-swift")
-      SWIFT
-      if ! swiftc "$work/hello.swift" -o "$work/hello"; then
-        echo "SWIFT_COMPILE_FAILED"
-        exit 1
-      fi
-      "$work/hello" || exit 1
-      echo "SWIFT_OK"
-      rm -rf "$work"
-    script_shell: sh
-    script_name: swift-check.sh
-    timeout: 1800
-
-  - name: note what is present
-    ssh: export PATH=/usr/local/bin:$PATH; echo "node=$(node --version)"; echo "python=$(python3 --version)"; echo "git=$(git --version)"; echo "swift=$(swift --version 2>&1 | head -1)"; echo "xcode=$(xcodebuild -version | head -1)"
-    timeout: 300
-
-  # --- 3. THE MACHINE IS STOPPED BY THE FILE THAT STARTED IT -----------------------------
-  #
-  # Same two modes as the ssh stage, for the same reason: an overlay is killed because nothing
-  # it wrote survives (the artifact is the flatten), and a real disk is closed with
-  # `shutdown -h now` because its filesystem is what gets published.
-  #
-  # THE METHOD ARRIVES AS A VAR because it is a fact about how the stage was started, not about
-  # the screen - see `vars:` at the top of this file.
-  - name: stop the machine
-    shutdown: "{{ shutdown }}"
-    timeout: 300
-
-  - name: stop recording
-    record: false
+- name: start recording
+  record: macos15-dev.mp4
+- name: fetch the recovery image
+  fetch: recovery_macos
+  release: '15'
+- name: build OpenCore from the recovery image
+  fetch: opencore
+  release: '15'
+  recovery: recovery_macos
+- name: boot the disk
+  boot: true
+  os: macos
+  timeout: 900
+- name: wait for sshd
+  require_ssh: true
+  timeout: 900
+- name: fetch xcode on the host
+  fetch: xcode
+- name: copy xcode into the guest
+  scp:
+  - '{{ work }}/Xcode_26.3_Universal.xip'
+  - /tmp/Xcode.xip
+- name: expand and select xcode
+  script: "#!/bin/bash\nset -euo pipefail\n\n# THE PASSWORD IS AN ARGUMENT BECAUSE SUDO OVER SSH HAS NO TTY: `sudo` on this channel answers\n# \"a password is required\" and has nowhere to read it from.\n\
+    PASSWORD='{{ password }}'\nXIP=/tmp/Xcode.xip\nDEST=/Applications\nWORK=/Users/{{ user }}/xcode-expand\n\n# `xip -x` WRITES THE EXPANDED BUNDLE BESIDE A DIRECTORY, so the working directory decides\n\
+    # where 15 GiB lands. It goes in the user's home, not /tmp, whose volume is small on macOS.\nrm -rf \"$WORK\"\nmkdir -p \"$WORK\"\ncd \"$WORK\"\necho \"expanding $XIP (this prints nothing for about\
+    \ twenty minutes)\"\nxip -x \"$XIP\"\necho \"expanded\"\n\nAPP=\"$(/usr/bin/find \"$WORK\" -maxdepth 2 -name 'Xcode*.app' -type d | head -1)\"\nif [ -z \"$APP\" ]; then\n  echo \"NO Xcode.app in $WORK\
+    \ after xip -x\" >&2\n  ls -la \"$WORK\" >&2\n  exit 1\nfi\necho \"found $APP\"\n\n# MOVED WITH `ditto`, which preserves the code signature and the extended attributes that a\n# plain `mv` across volumes\
+    \ can drop.\nrm -rf \"$DEST/Xcode.app\"\n/usr/bin/ditto \"$APP\" \"$DEST/Xcode.app\"\n\n# THE LICENCE FIRST, BECAUSE EVERYTHING ELSE ASKS XCODE A QUESTION.\nif [ -x /usr/bin/sudo ]; then\n  printf '%s\\\
+    n' \"$PASSWORD\" | sudo -S -p '' /usr/bin/xcode-select -s \"$DEST/Xcode.app/Contents/Developer\"\n  printf '%s\\n' \"$PASSWORD\" | sudo -S -p '' /usr/bin/xcodebuild -license accept\n  printf '%s\\n'\
+    \ \"$PASSWORD\" | sudo -S -p '' /usr/bin/xcodebuild -runFirstLaunch\nelse\n  /usr/bin/xcode-select -s \"$DEST/Xcode.app/Contents/Developer\"\n  /usr/bin/xcodebuild -license accept\n  /usr/bin/xcodebuild\
+    \ -runFirstLaunch\nfi\necho \"selected: $(/usr/bin/xcode-select -p)\"\n\n# AND THE DISK IT WAS EXPANDED INTO IS REMOVED, because it is 15 GiB and nothing reads it again.\nrm -rf \"$WORK\"\n"
+  script_shell: sh
+  script_name: run-xcode-install.sh
+  timeout: 7200
+- name: remove the xip
+  ssh: rm -f /Users/{{ user }}/Xcode.xip && df -h / | tail -1
+  timeout: 300
+- name: fetch the packages on the host
+  fetch: dev_packages
+- name: copy the packages into the guest
+  scp:
+  - '{{ work }}/packages.tar'
+  - /tmp/packages.tar
+- name: install node
+  script: "#!/bin/bash\n# NODE FROM nodejs.org, x64 .pkg. The official installer puts it in\n# /usr/local/bin and links node/npm/npx there, which is on the default PATH.\nset -uo pipefail\nif command -v\
+    \ node >/dev/null 2>&1; then\n  echo \"node is already installed: $(node --version)\"\n  exit 0\nfi\nPKG=/tmp/node.pkg\nif [ ! -f \"$PKG\" ]; then\n  echo \"=== NO NODE PACKAGE AT $PKG ===\"\n  exit\
+    \ 1\nfi\nexport PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin\nprintf '%s\\n' '{{ password }}' | sudo -S -p '' installer -pkg \"$PKG\" -target / 2>&1 | tail -5\nrm -f \"$PKG\"\nhash -r 2>/dev/null\
+    \ || true\ncommand -v node && node --version && npm --version\n"
+  script_shell: sh
+  script_name: install-node.sh
+  timeout: 1800
+- name: install python
+  script: "#!/bin/bash\n# PYTHON FROM python.org, macos11 .pkg - the Intel-capable build. It installs into\n# /Library/Frameworks/Python.framework and links python3 into /usr/local/bin.\nset -uo pipefail\n\
+    if /usr/local/bin/python3 -c 'import sys; print(sys.version)' >/dev/null 2>&1; then\n  echo \"python3 is already installed: $(/usr/local/bin/python3 --version)\"\n  exit 0\nfi\nPKG=/tmp/python.pkg\n\
+    if [ ! -f \"$PKG\" ]; then\n  echo \"=== NO PYTHON PACKAGE AT $PKG ===\"\n  exit 1\nfi\nexport PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin\nprintf '%s\\n' '{{ password }}' | sudo -S -p '' installer\
+    \ -pkg \"$PKG\" -target / 2>&1 | tail -5\nrm -f \"$PKG\"\nhash -r 2>/dev/null || true\n/usr/local/bin/python3 --version && /usr/local/bin/pip3 --version\n"
+  script_shell: sh
+  script_name: install-python.sh
+  timeout: 1800
+- name: prove the toolchain
+  script: "#!/bin/bash\n# THE CHECK IS THE PATH, NOT THE VERSION.\n#\n# /usr/bin/python3 exists on every macOS and answers --version perfectly - it is the one\n# Xcode's command line tools install, and\
+    \ its pip refuses to write. A check that only\n# read a version would pass on a disk whose python cannot install anything.\n#\n# WITH HOMEBREW OUT, THE EXPECTED PREFIX IS DIFFERENT: node and python\
+    \ come from\n# publishers' .pkg files and land in /usr/local, while git and the compilers come from\n# Xcode and live under /Applications/Xcode.app or /usr/bin.\nset -uo pipefail\nexport PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin\n\
+    bad=0\n\n# FROM THE PUBLISHERS' PACKAGES: /usr/local.\nfor t in node npm python3 pip3; do\n  path=$(command -v \"$t\" 2>/dev/null || true)\n  if [ -z \"$path\" ]; then\n    echo \"MISSING  $t\"\n  \
+    \  bad=1\n    continue\n  fi\n  case \"$path\" in\n    /usr/local/*) echo \"ok       $t -> $path\" ;;\n    *) echo \"WRONG    $t -> $path (not from /usr/local)\"; bad=1 ;;\n  esac\ndone\n\n# FROM XCODE'S\
+    \ COMMAND LINE TOOLS: /usr/bin, but only after the dev dir is selected.\nfor t in git clang swift; do\n  path=$(command -v \"$t\" 2>/dev/null || true)\n  if [ -z \"$path\" ]; then\n    echo \"MISSING\
+    \  $t\"\n    bad=1\n  else\n    echo \"ok       $t -> $path\"\n  fi\ndone\n\nif [ \"$bad\" -ne 0 ]; then\n  echo \"=== THE TOOLCHAIN IS NOT COMPLETE ===\"\n  exit 1\nfi\nnode --version\npython3 --version\n\
+    git --version\necho \"TOOLCHAIN_OK\"\n"
+  script_shell: sh
+  script_name: prove-toolchain.sh
+  timeout: 300
+- name: prove xcode is selected
+  ssh: xcode-select -p && xcodebuild -version
+  timeout: 300
+- name: prove swift compiles
+  script: "#!/bin/bash\nset -uo pipefail\nwork=$(mktemp -d)\ncat > \"$work/hello.swift\" <<'SWIFT'\nprint(\"hello-from-swift\")\nSWIFT\nif ! swiftc \"$work/hello.swift\" -o \"$work/hello\"; then\n  echo\
+    \ \"SWIFT_COMPILE_FAILED\"\n  exit 1\nfi\n\"$work/hello\" || exit 1\necho \"SWIFT_OK\"\nrm -rf \"$work\"\n"
+  script_shell: sh
+  script_name: swift-check.sh
+  timeout: 1800
+- name: note what is present
+  ssh: export PATH=/usr/local/bin:$PATH; echo "node=$(node --version)"; echo "python=$(python3 --version)"; echo "git=$(git --version)"; echo "swift=$(swift --version 2>&1 | head -1)"; echo "xcode=$(xcodebuild
+    -version | head -1)"
+  timeout: 300
+- name: stop the machine
+  shutdown: '{{ shutdown }}'
+  timeout: 300
+- name: stop recording
+  record: false

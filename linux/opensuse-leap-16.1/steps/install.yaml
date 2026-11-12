@@ -1,45 +1,7 @@
-# openSUSE Leap 16.1: THE AGAMA INSTALLER'S walk, and it is NOT Tumbleweed's.
-#
-# WHAT THIS FILE WAS: `openSUSE Tumbleweed KDE: YaST2's walk`, a sequence of coordinate clicks onto
-# YaST2 running on a live KDE desktop. Tumbleweed ships that live desktop; LEAP 16.1 DOES NOT.
-#
-# VERIFIED AGAINST `get.opensuse.org/leap/16.1`, which publishes exactly four x86_64 images:
-#
-#	Leap-16.1-offline-installer-x86_64.install.iso   Agama - the installer this file now drives
-#	Leap-16.1-online-installer-x86_64.install.iso    the same, fetching packages as it goes
-#	Leap-16.1-OEM.x86_64-KDE.iso                     an OEM image; first boot is already installed
-#	Leap-16.1-Immutable.x86_64-Base-SelfInstall.iso  a self-installing image
-#
-# and NO KDE-Live or GNOME-Live. So there is no live desktop to click on, and every coordinate below
-# is measured on Agama's own screens - which is why this is a rewrite rather than a rename.
-#
-# THE PANES BELOW ARE STILL TUMBLEWEED'S until Agama's are measured; this header records that so the
-# next run is read as a measurement rather than as a regression.
-#
-#     python3 lib/steps.py linux/opensuse-tumbleweed/steps/install.yaml --qmp /work/drive.sock.qmp
-#
-# WHAT THIS REPLACES
-#
-# linux/opensuse-tumbleweed/install.py's walk_yast2(). install.py keeps the machine, the frames,
-# the recording and the publish.
-#
-# YAST2, NOT CALAMARES. YaST2 is one window with a navigation list down the left that can be
-# entered at any point, and its footer does not move with its content: measured at 1920x1080
-# on Welcome, System Role, Suggested Partitioning, Clock and Time Zone and Local User, `Next`
-# is (1596,859) on all of them.
-#
-# WHAT A DETECTOR COST HERE, AND WHY THE STEPS BELOW DO NOT READ
-#
-# The first version of this driver skipped the Online Repositories pane and the Suggested
-# Partitioning pane whenever its text was not read - so on a slow frame it silently
-# configured a different install. Later it tested `if "installation settings" in drv.text()`
-# after the Install click, which is TRUE with the confirmation modal correctly on screen (the
-# pane is still drawn behind it), and every run "recovered" from a click that had worked by
-# pressing Return - which on this installer is BACK, dismissing the confirmation. See step 6.
-
 name: opensuse-tumbleweed - the YaST2 walk
-resolution: [1920, 1080]
-
+resolution:
+- 1920
+- 1080
 vars:
   user:
     from: args.user
@@ -47,370 +9,133 @@ vars:
   password:
     from: args.password
     default: admin
-  # WHERE `compress:` WRITES, AND IT COMES FROM THE WORKFLOW'S `--out`.
-  #
-  # The workflow declares each install leg with `"out": "linux-<distro>.qcow2"` and passes it as
-  # `--out`; a `compress: "{{ out }}"` step names that same file. WITHOUT THE DECLARATION HERE the
-  # variable does not exist and `easyvm check` refuses the file - which is what happened when the step
-  # was first added, and is the vocabulary doing its job.
   out:
     from: args.out
     default: out/distro.qcow2
-
 steps:
-  # THE RECORDING IS PART OF THE VERDICT, NOT A CONVENIENCE.
-  #
-  # A FAILURE THAT SAYS "did not advance: read ..." IS A FEW WORDS OF OCR, and the question
-  # it cannot answer is "what was on screen". A recording can, and it is tens of megabytes -
-  # which is why it is its own artifact rather than travelling with the disk.
-  - name: start recording
-    record: opensuse-tumbleweed-install.mp4
-    poll: 20
-
-  # THE MACHINE AND ITS INSTALLER, WHICH USED TO BE THE BAKE SKELETON IN PYTHON.
-  #
-  # THIS FILE IS A DECLARATION OF THE WIZARD STEPS AND NOTHING ELSE. Its own header says so:
-  #
-  #     WHAT THIS FILE IS. It is a DECLARATION, not an implementation. The bake skeleton - disk,
-  #     guest, recording, the QMP driver, the walk, ...
-  #
-  # and in the Python implementation lib/install_skeleton.py built the machine, created the disk and
-  # attached the ISO before running these steps. Reproduced as YAML that skeleton has to be IN the
-  # file, or the first `at:` reports `drive.sock.qmp: no such file` on a machine nobody started.
-  #
-  # 64G IS THE WORKFLOW'S OWN `--disk-size 64G`, not a number chosen here: every coordinate in this
-  # directory was measured on a disk that size, and the installer's partitioning pane reads capacity.
-  - name: create the empty disk
-    disk: disk.qcow2
-    disk_gb: 64
-
-  # THE INSTALLER IMAGE, BY THE TAG THIS REPOSITORY PUBLISHES IT UNDER.
-  - name: fetch the installer image
-    fetch: linux_iso
-    release: opensuse-leap-16.1
-
-  - name: boot the installer
-    boot: true
-    os: linux
-    iso: installer_iso
-    timeout: 1800
-
-  # =======================================================================================
-  # 1. THE ICON, THROUGH kdesu
-  # =======================================================================================
-  #
-  # The live session's icon is
-  #
-  #     /usr/share/applications/live-installation.desktop
-  #     Exec=kdesu -u root /usr/sbin/start-install.sh
-  #
-  # SO IT HAS TO BE STARTED THROUGH kdesu. The first attempt ran that script from a terminal
-  # and YaST2 came up in TEXT mode - `Your computer does not fulfill all requirements for a
-  # graphical installation` - because that shell carried no way to reach the X server it did
-  # not start under. Double-clicking the icon goes through kdesu and the same binary opens
-  # graphically.
-  #
-  # TRIED TWICE, BECAUSE A CLICK INTO A STILL-DRAWING DESKTOP DOES NOTHING AND SAYS NOTHING.
-  # The wait before this is 240 s against a measured 180, so the first attempt should land -
-  # but a desktop that answered by merely selecting the icon looks exactly like one that
-  # ignored it, and a second attempt costs 40 s. The `expect_any` is a log line, not a gate:
-  # the retry below is a separate step so a miss costs one more click, not a failed walk.
-  # THE LIVE DESKTOP FIRST, BECAUSE A DOUBLE-CLICK ON A SCREEN THAT HAS NOT DRAWN IS A CLICK ON NOTHING.
-  #
-  # Measured twice: `open yast2` reported
-  #
-  #	did not advance: wanted "language" or "welcome", read "Guest has not initialized the display
-  #	(yet)."
-  #
-  # "GUEST HAS NOT INITIALIZED THE DISPLAY" IS THE VNC SERVER'S OWN TEXT while the guest has drawn no
-  # frame at all - so the double-click landed on a black screen forty seconds after qemu started,
-  # while the live medium was still unpacking from a 4 GiB ISO.
-  #
-  # A DESKTOP IS THE HONEST GATE, and this installer is the one distribution here whose live image
-  # takes long enough that a `settle` is a guess. `desktop: linux` is a measurement of the panel that
-  # the booted session draws - the same test every other Linux walkthrough ends on.
-  # THE INSTALLER'S OWN FIRST SCREEN, READ AS TEXT.
-  #
-  # `desktop: linux` MEASURES A PANEL AND THESE INSTALLERS HAVE NO PANEL: they are
-  # full-screen console UI (subiquity, calamares in text mode, the Debian installer,
-  # anaconda) drawing character cells. Measured on ubuntu-install: fifteen minutes of
-  # `drop=+0.0 ratio=0.0x sat=+0.00` - a black screen - while `console.log` showed the
-  # firmware boot the DVD, GRUB load, and the installer take over. The test was
-  # measuring the wrong thing, which is the fourth time this session.
-  #
-  # AND THE BUDGET IS THE INSTALL'S, NOT A GUI'S: a live medium unpacks itself from a
-  # multi-gigabyte ISO before its first screen exists, and the reference implementation
-  # gives this 5400 seconds rather than guessing a smaller number.
-  # THE DESKTOP, BECAUSE THIS INSTALLER IS AN ICON ON IT.
-  #
-  # `open yast2` DOUBLE-CLICKS a launcher on the live session's desktop, so a
-  # screen that has not drawn is a screen with nothing to click - the failure that cost
-  # this stage three runs: five `run:` steps finishing in a tenth of a second because
-  # the keystrokes reached no session at all.
-  #
-  # `desktop: linux` is the right measurement HERE and the wrong one for ubuntu, whose
-  # subiquity takes over the whole screen and draws no panel. THE TWO ARE NOT THE SAME
-  # WAIT: one asks whether a session is up, the other asks whether a console UI is.
-  #
-  # AND THE BUDGET IS 5400 SECONDS, because a live medium unpacks itself from a
-  # multi-gigabyte ISO before any of this exists.
-  - name: wait for the live desktop
-    desktop: linux
-    timeout: 5400
-    poll: 5
-    # THE SESSION IS KEPT AWAKE, AND THAT IS NOT A REFINEMENT.
-    #
-    # This wait can run for ninety minutes - a live medium unpacks itself from a multi-gigabyte ISO
-    # and an installer copies a system - and the live session's idle timer puts a LOCK SCREEN up
-    # well before that. The reference implementation says the same thing in the same place:
-    #
-    #   THE KEEP-ALIVE CLICK IS PART OF THE WAIT - a real click, not a pointer move, because the
-    #   session's idle timer is what puts the lock screen up and it does not count synthetic
-    #   motion. The click lands on the progress page, where there is no control to disturb.
-    #
-    keep_alive: true
-
-  # THE WORDS THIS STEP WAITS FOR ARE THE ONES OCR CAN ACTUALLY READ OFF THIS INSTALLER.
-  #
-  # MEASURED ON opensuse-tumbleweed-install: the double-click WORKED and YaST drew, and the check then
-  # failed on its OWN vocabulary:
-  #
-  #	open yast2: did not advance: wanted "language" or "welcome", read
-  #	"1 i 1 , im | a | es (o) Wesn Home} installation) Wpgrade) mm co ..."
-  #
-  # THAT IS YaST's WELCOME PANE, READ IMPERFECTLY. `Welcome` came back as `Wesn Home`, and `Installation`
-  # and `Upgrade` came back correctly - the vocabulary beside them (larger, centred, against a coloured
-  # header) is what tesseract struggles with on this pane.
-  #
-  # A CHECK THAT ASKS FOR A WORD THE READER CANNOT PRODUCE IS A CHECK THAT ALWAYS FAILS, and the fix is
-  # to ask for a word it demonstrably DOES produce on this screen - not to loosen the match, which would
-  # let a wrong pane pass.
-  - name: open yast2
-    double: [267, 34]
-    settle: 40
-    expect_any:
-      - [installation]
-      - [upgrade]
-      - [language]
-
-  # THE RETRY USES THE SAME VOCABULARY AS THE CHECK IT FOLLOWS, or it re-clicks a pane that is already
-  # open - a second double-click on the Installer icon is harmless to YaST and forty-five seconds of a
-  # sixty-minute budget.
-  - name: open yast2 (once more, if it did not)
-    unless_any:
-      - [installation]
-      - [upgrade]
-      - [language]
-    double: [267, 34]
-    settle: 45
-
-  # =======================================================================================
-  # 2. WELCOME -> SYSTEM PROBING -> ONLINE REPOSITORIES
-  # =======================================================================================
-  #
-  # The probe is not instant, so the wait after the first click is 30 s; the question about
-  # online repositories comes up on its own and `No` is pressed at its measured place whether
-  # or not its words were read.
-  - name: welcome
-    at: [1596, 859]
-    settle: 30
-
-  - name: online repositories - no
-    at: [1004, 614]
-    settle: 20
-
-  # =======================================================================================
-  # 3. SYSTEM ROLE: THE RADIO BUTTON, NOT THE ROW
-  # =======================================================================================
-  #
-  # The pane lists five roles and `Desktop with KDE Plasma` looks highlighted, but Continue
-  # answers
-  #
-  #     Select one of the available roles to continue.
-  #
-  # until the radio button itself is clicked. The highlight is the row the mouse is over.
-  - name: role - desktop with kde plasma
-    at: [588, 333]
-    settle: 6
-
-  - name: system role
-    at: [1596, 859]
-    settle: 30
-
-  # =======================================================================================
-  # 4. SUGGESTED PARTITIONING AND TIME ZONE, BOTH DEFAULTS
-  # =======================================================================================
-  #
-  # The suggested layout is the right one: GPT, a BIOS boot partition, btrfs for / and swap.
-  # Accepting it is one click; changing it is several screens.
-  #
-  # The time zone default is kept exactly as on every other installer here - it is already a
-  # US zone on this cluster and the requirement is a booting disk.
-  - name: suggested partitioning
-    at: [1596, 859]
-    settle: 25
-
-  - name: clock and time zone
-    at: [1596, 859]
-    settle: 22
-
-  # =======================================================================================
-  # 5. THE LOCAL USER - FOUR FIELDS, IN THE ORDER THE PAGE DRAWS THEM
-  # =======================================================================================
-  - name: local user - full name
-    at: [1106, 418]
-    type: "{{ user }}"
-    settle: 2
-
-  # THE USER NAME FIELD IS ALREADY FILLED BY YAST, AND TYPING INTO IT APPENDS.
-  #
-  # MEASURED, TWICE. YaST derives the login name from the full name as it is typed, and the
-  # walk then typed the same value into the derived field - so the disk carried `vmuservmuser`
-  # (run 42573078551's prompt, and again on 2b2f81f's ssh stage: `id -un` returned
-  # `vmuservmuser`). The install worked and sshd was up; `ssh docker@` was refused for an
-  # account that did not exist.
-  #
-  # THIS IS MINT'S HOST-NAME BUG IN A DIFFERENT FIELD, so it gets the same three presses: the
-  # field is click, ctrl+a, backspace, and only then typed. One `type_into` is what produced
-  # `vmuservmuser` - the clear has to be its own steps with a settle between them.
-  - name: local user - user name, select all
-    at: [1106, 483]
-    settle: 2
-
-  - name: local user - user name, clear it
-    key: ctrl+a
-    settle: 2
-
-  - name: local user - user name, delete the selection
-    key: backspace
-    settle: 2
-
-  - name: local user - user name
-    type: "{{ user }}"
-    settle: 2
-  - name: local user - password
-    at: [1106, 548]
-    type: "{{ password }}"
-    settle: 2
-  - name: local user - confirm password
-    at: [1106, 614]
-    type: "{{ password }}"
-    settle: 3
-
-  # THE WEAK-PASSWORD DIALOG TAKES THE KEYBOARD, AND ONLY THE KEYBOARD.
-  #
-  # `admin` trips YaST2's strength check, which asks `Really use this password?` in a modal.
-  # Clicking its `Yes` did nothing twice in a row - measured - while Return accepted it,
-  # because Yes is the default button OF THAT DIALOG. This is the one key press in this
-  # walk, and the dialog itself is what makes it the accept button.
-  - name: local user
-    at: [1596, 859]
-    settle: 18
-
-  - name: accept the weak password
-    key: ret
-    settle: 22
-
-  # =======================================================================================
-  # 6. INSTALL, THEN THE CONFIRMATION DIALOG'S OWN INSTALL
-  # =======================================================================================
-  #
-  # THE FOOTER'S `Install` OPENS A MODAL, AND THE MODAL'S DEFAULT IS BACK. Measured on a live
-  # Tumbleweed KDE session, frame by frame:
-  #
-  #     click (1587, 859)   -> `Confirm Installation`, Install white at (922, 707),
-  #                            Back green - the modal's default
-  #     Return              -> modal gone, Installation Settings again
-  #     click (922, 707)    -> Performing Installation, 24%, 2273 packages remaining
-  #
-  # So the modal is answered by its OWN button at its OWN place, and the keyboard is never
-  # used near it: `Back` being the default is exactly why.
-  - name: install
-    at: [1587, 859]
-    settle: 15
-
-  - name: the confirm installation dialog's install
-    at: [922, 707]
-    settle: 25
-
-  # =======================================================================================
-  # 7. A MEASURED WAIT, BECAUSE YAST2 DOES NOT STAY TO SAY IT IS DONE - IT CLOSES
-  # =======================================================================================
-  #
-  # Measured on a local run: 23:35 the install starts, 23:41 it is at `Installing
-  # Packages... (Remaining: 1.566 GiB, ...)`, and by 23:50 the wizard WINDOW IS GONE and the
-  # screen is the live KDE desktop again - `Install`, `Home`, `Upgrade` icons, the panel
-  # clock. No `Congratulations` pane, no `Installation complete`, no prompt.
-  #
-  # Every CI run showed the same thing in its log and could not name it:
-  #
-  #     installing: in | to | ome
-  #
-  # which is tesseract's reading of that desktop's three icon labels, once per poll. So the
-  # completion test was one this installer can never satisfy, and a finished disk would have
-  # been thrown away at the timeout - the same failure mint had for the same reason.
-  #
-  # THE DURATION IS THE MEASUREMENT. From the confirmation dialog's Install to the wizard
-  # closing: about 15 minutes on this ISO. Thirty minutes is that with room for a slower
-  # runner, and `--timeout` bounds it again.
-  #
-  # THE KEEP-ALIVE CLICK IS PART OF THE WAIT: a locked screen has no installer on it.
-  - name: the install runs, as measured
-    wait: 1800
-    keep_alive: true
-
-  # THE DISK IS THE ARTIFACT, AND WITHOUT THIS STEP THERE IS NONE.
-  #
-  # THE WORKFLOW ASKS FOR ONE: each install leg is declared with `"out": "linux-<distro>.qcow2"`, and
-  # `--out` is where a `compress:` WRITES - it is not a filename the engine invents. WITH NO
-  # `compress:` STEP NOTHING WAS WRITTEN, and the leg's `-disk` artifact was 518 bytes:
-  #
-  #	linux-zorin-install-disk   518 bytes
-  #	linux-zorin-vm-disk     10,497,859,093 bytes
-  #
-  # A PASSING INSTALL THAT LEAVES NO DISK is a leg that proves the installer works and produces nothing
-  # for the stage after it. `compress:` flattens the overlay's parent chain into one qcow2 with zstd, so
-  # the file it leaves is the install itself.
-  # THE MACHINE IS STOPPED BEFORE THE DISK IS READ, AND THAT IS WHY THIS STEP EXISTS.
-  #
-  # MEASURED ON zorin-install, WHICH ANSWERED ALL 21 STEPS AND THEN FAILED ON THE LAST ONE:
-  #
-  #	publish the disk: qemu-img convert: exit status 1
-  #	(qemu-img: Could not open '/__w/easyvm/easyvm/work/disk.qcow2': Failed to get shared "write" lock
-  #
-  # THE INSTALL WAS COMPLETE AND THE DISK WAS STILL OPEN. `compress:` READS THE FILE, and qemu holds a
-  # write lock on it until the machine is stopped - so a `compress:` before a `shutdown:` cannot work
-  # however good the install was.
-  #
-  # `kill`, NOT `acpi`, AND THE MEASUREMENT IS WHY.
-  #
-  # MEASURED ON zorin-install, WHICH PASSED ALL 21 STEPS AND THEN PRODUCED A 0 MiB DISK:
-  #
-  #	=== stop the machine
-  #	  stopping with method "acpi"
-  #	  pressing the power button
-  #	  the guest did not power off within 5m0s; killing it - the disk will need a journal replay
-  #	=== publish the disk
-  #	  compressing with zstd
-  #	  linux-zorin.qcow2: 0 MiB
-  #
-  # A LIVE INSTALLER DOES NOT ANSWER THE POWER BUTTON. `acpi` pressed it, the guest ignored it, the
-  # wait expired after five minutes, and the kill that followed raced `qemu-img convert` - which read
-  # a disk qemu was still releasing and wrote ZERO BYTES.
-  #
-  # `kill` IS NOT A COMPROMISE HERE, BECAUSE THE INSTALLER HAS ALREADY FINISHED: the step above waits
-  # for the install to complete, and what follows is a disk with a written system on it. The journal
-  # replay the kill costs is paid on the next boot, which is the stage after this one, and it is
-  # cheaper than five minutes of waiting for a button nothing presses.
-  #
-  # THE WAIT IS SHORTENED TOO: 120 seconds, because a kill does not need the five minutes a graceful
-  # request does - and the boot after this one replays the journal either way.
-  - name: stop the machine
-    shutdown: kill
-    timeout: 120
-
-  - name: publish the disk
-    compress: "{{ out }}"
-
-  - name: stop recording
-    record: false
+- name: start recording
+  record: opensuse-tumbleweed-install.mp4
+- name: create the empty disk
+  disk: disk.qcow2
+  disk_gb: 64
+- name: fetch the installer image
+  fetch: linux_iso
+  release: opensuse-leap-16.1
+- name: boot the installer
+  boot: true
+  os: linux
+  iso: installer_iso
+  timeout: 1800
+- name: wait for the live desktop
+  desktop: linux
+  timeout: 5400
+  poll: 5
+  keep_alive: true
+- name: open yast2
+  double:
+  - 267
+  - 34
+  settle: 40
+  expect_any:
+  - - installation
+  - - upgrade
+  - - language
+- name: open yast2 (once more, if it did not)
+  unless_any:
+  - - installation
+  - - upgrade
+  - - language
+  double:
+  - 267
+  - 34
+  settle: 45
+- name: welcome
+  at:
+  - 1596
+  - 859
+  settle: 30
+- name: online repositories - no
+  at:
+  - 1004
+  - 614
+  settle: 20
+- name: role - desktop with kde plasma
+  at:
+  - 588
+  - 333
+  settle: 6
+- name: system role
+  at:
+  - 1596
+  - 859
+  settle: 30
+- name: suggested partitioning
+  at:
+  - 1596
+  - 859
+  settle: 25
+- name: clock and time zone
+  at:
+  - 1596
+  - 859
+  settle: 22
+- name: local user - full name
+  at:
+  - 1106
+  - 418
+  type: '{{ user }}'
+  settle: 2
+- name: local user - user name, select all
+  at:
+  - 1106
+  - 483
+  settle: 2
+- name: local user - user name, clear it
+  key: ctrl+a
+  settle: 2
+- name: local user - user name, delete the selection
+  key: backspace
+  settle: 2
+- name: local user - user name
+  type: '{{ user }}'
+  settle: 2
+- name: local user - password
+  at:
+  - 1106
+  - 548
+  type: '{{ password }}'
+  settle: 2
+- name: local user - confirm password
+  at:
+  - 1106
+  - 614
+  type: '{{ password }}'
+  settle: 3
+- name: local user
+  at:
+  - 1596
+  - 859
+  settle: 18
+- name: accept the weak password
+  key: ret
+  settle: 22
+- name: install
+  at:
+  - 1587
+  - 859
+  settle: 15
+- name: the confirm installation dialog's install
+  at:
+  - 922
+  - 707
+  settle: 25
+- name: the install runs, as measured
+  wait: 1800
+  keep_alive: true
+- name: stop the machine
+  shutdown: kill
+  timeout: 120
+- name: publish the disk
+  compress: '{{ out }}'
+- name: stop recording
+  record: false

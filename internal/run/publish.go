@@ -25,6 +25,8 @@ import (
 type recorder struct {
 	mu     sync.Mutex
 	frames []string
+	// missed counts ticks whose `Frame()` failed, so a video that is short says why.
+	missed int
 	ready  bool
 }
 
@@ -196,8 +198,18 @@ func (e *Executor) sampler(dir string) error {
 			case <-e.recDone:
 				return
 			case <-ticker.C:
+				// ONE FRAME A SECOND, AND A FAILED ONE IS COUNTED RATHER THAN SILENTLY DROPPED.
+				//
+				// THE TICK IS ONE SECOND AND ALWAYS HAS BEEN - it is `record:`'s `poll:` that is a
+				// different number, and that belongs to `doDiskSettle`. MEASURED: a 20-minute
+				// macos-setup produced a 909-frame video, so ONE IN FOUR TICKS WAS LOST to a failed
+				// `Frame()` during the recovery boot, and nothing said so. The video then reads as if
+				// the machine spent those minutes doing nothing.
 				f, err := e.Driver.Frame()
 				if err != nil {
+					e.pendingRecorder().mu.Lock()
+					e.pendingRecorder().missed++
+					e.pendingRecorder().mu.Unlock()
 					continue
 				}
 				e.pendingRecorder().mu.Lock()
@@ -320,6 +332,14 @@ func (e *Executor) finishRecording() {
 	}
 	if !filepath.IsAbs(video) {
 		video = filepath.Join(e.Work, video)
+	}
+	if rec.missed > 0 {
+		// A SHORT VIDEO SAYS WHY. Without this the count is only visible by comparing the frame count
+		// against the wall clock, which is what took a session to notice: 909 frames for a 20-minute
+		// run looked like a 1 fps encode of a 15-minute recording rather than a quarter of the ticks
+		// being dropped.
+		e.Driver.Log(fmt.Sprintf("  recording: %d frame(s) captured, %d tick(s) lost to a failed "+
+			"screendump - the video is that much shorter than the run", len(rec.frames), rec.missed))
 	}
 	if err := rec.encode(video, e.Driver.Log); err != nil {
 		e.Driver.Log(fmt.Sprintf("  recording NOT written: %v", err))

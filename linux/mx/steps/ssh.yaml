@@ -1,38 +1,7 @@
-# Stage three for linux-mx: put sshd on THIS disk and prove ssh works.
-#
-#     python3 lib/steps.py linux/mx/steps/ssh.yaml --qmp /work/drive.sock.qmp --ssh-port 2222
-#
-# WHY THIS FILE IS PER-DISTRIBUTION AND NOT ONE SHARED WALK
-#
-# Because the four things it does differ on every image, and a shared file would have to be
-# written as a table of exceptions - which is what a per-distribution file already is, only
-# with the exceptions where a reader can see them.
-#
-# WHAT DIFFERS, FOR THIS ONE
-#
-#     terminal    ctrl+alt+t, the session's own emulator
-#     install    DEBIAN_FRONTEND=noninteractive apt-get install -y openssh-server
-#     enable     update-rc.d ssh enable; service ssh start   (SysVinit, not systemd)
-#     firewall   ufw IS installed, and its default policy DROPS port 22
-#
-# Debian family, but MX is antiX-based: it boots SysVinit, so the service is enabled with
-# `update-rc.d` and started with `service`, not `systemctl --now`. See the note on the install
-# step, which is where `--now` refused.
-#
-# THE THREE ACTIONS ARE THE SAME EVERYWHERE, WHICH IS WHY THE SHAPE IS THE SAME:
-#
-#     run:          open this session's terminal and type the install
-#     require_ssh:  wait for the daemon it enabled (the step macOS's own ssh.yaml added)
-#     ssh:          run a command IN THE GUEST over the forwarded port - an exit status
-#
-# THE TRANSPORT IS THE DESKTOP. These disks have no getty on ttyS0 - measured on run
-# 42551299241, whose console said `BdsDxe: starting Boot0001` and then nothing - so `run:`
-# is the only way in.
-
 name: linux-mx - sshd
-
-resolution: [1920, 1080]
-
+resolution:
+- 1920
+- 1080
 vars:
   password:
     from: args.password
@@ -40,227 +9,68 @@ vars:
   user:
     from: args.user
     default: vmuser
-
 steps:
-  # THE RECORDING IS PART OF THE VERDICT, NOT A CONVENIENCE.
-  #
-  # A FAILURE THAT SAYS "did not advance: read ..." IS A FEW WORDS OF OCR, and the question
-  # it cannot answer is "what was on screen". A recording can, and it is tens of megabytes -
-  # which is why it is its own artifact rather than travelling with the disk.
-  - name: start recording
-    record: mx-ssh.mp4
-    poll: 20
-
-  # THE MACHINE IS STARTED HERE, IN THE FILE, AND IT WAS NOT BEFORE.
-  #
-  # THIS STAGE'S DISK COMES FROM THE PREVIOUS ONE - so `boot_disk: from_caller` says the caller's
-  # `--boot-disk` supplies it - but SOMETHING STILL HAS TO START QEMU. In the Python implementation
-  # that something was lib/ssh_step.py, which built the machine, started it, and only then ran this
-  # file. The first CI run of these thirteen legs proved the cost of leaving it there:
-  #
-  #     error: open the terminal: key "ctrl+alt+t": qmp .../drive.sock.qmp: dial unix
-  #            .../drive.sock.qmp: connect: no such file or directory (waited 30s)
-  #
-  # - the first GUI step of a file whose machine had never been started. The launcher pulled the
-  # disk, started the daemon, asked for the run, and the run had nothing to click on.
-  #
-  # `os: linux` IS THE WHOLE MACHINE DESCRIPTION: UEFI firmware, a virtio disk, `-vga std` at
-  # 1920x1080, and the OVMF variable store that makes the installed system bootable. Every field of
-  # it was in lib/ssh_step.py's `vm.Shape(...)` call, and none of it was in the file.
-  - name: boot the disk
-    boot: true
-    os: linux
-    timeout: 900
-
-
-  # =======================================================================================
-  # 0. GET PAST THE GREETER, WHEN THIS DISK DOES NOT AUTOLOGIN
-  # =======================================================================================
-  #
-  # MEASURED ON RUN 42557318416, AND IT IS THE REASON THE FIRST ssh STAGE INSTALLED NOTHING.
-  # Pop!_OS' launch screenshot is not a desktop at all - it is COSMIC's LOCK SCREEN with
-  # `VM User` and a `Password:` box. `frame_is_painted` is right that something drew, but
-  # ctrl+alt+t does NOTHING on a greeter, so the terminal never opened and the install was
-  # typed into nothing.
-  #
-  # So the greeter is answered first: click the password box, type the account's password,
-  # press Return. The box's position is this greeter's own - LightDM.
-  #
-  # `optional` because a disk that DOES autologin never shows this page, and on one of those
-  # the click lands on the desktop and the typing goes to nothing that matters.
-  # LIGHTDM DRAWS A COMPACT GREETER IN THE TOP-LEFT CORNER, AND (960,640) MISSED IT.
-  #
-  # Measured on run 42573050688's own recording (mint) and run 42573082305's (ghostbsd), the
-  # password entry's white interior is x=96..423, y=550..587 - a centre of (259, 568). The
-  # press at (960,640) landed on wallpaper, so the typed password went nowhere and the greeter
-  # answered `Invalid password, please try again` on the next frame.
-  #
-  # GDM (fedora, ubuntu, kubuntu, cachyos...) centres its entry at (936,628), which is why the
-  # same constant worked there and only the LightDM images failed.
-  - name: greeter - the password box
-    at: [259, 568]
-    settle: 2
-    optional: true
-
-  - name: greeter - log in
-    type: "{{ password }}"
-    settle: 3
-    optional: true
-
-  - name: greeter - submit
-    key: ret
-    settle: 12
-    optional: true
-
-  # =======================================================================================
-  # 1. THE INSTALL, TYPED INTO THIS SESSION'S OWN TERMINAL
-  # =======================================================================================
-  #
-  # `run:` presses ctrl+alt+t to open the terminal, waits `terminal_wait`, types the text,
-  # presses Return and waits `settle`. Every number here is this image's: a desktop that has
-  # just painted has not started its session yet, so the wait comes before the shortcut.
-  # =======================================================================================
-  # 0b. THE TERMINAL, WHICH IS WHERE THE INSTALL IS TYPED
-  # =======================================================================================
-  #
-  # ctrl+alt+t is this desktop's own shortcut. The step EXISTS on its own - rather than being
-  # folded into the `run:` - because "did the terminal open" is the first question when an
-  # install produces nothing, and the recording now answers it.
-  - name: open the terminal
-    key: ctrl+alt+t
-    settle: 20
-
-  # `apt-get update` IS NOT OPTIONAL, AND RUN 42567710130 PROVED IT.
-  #
-  # The first version went straight to `apt-get install`, and the disk's own package index -
-  # frozen at the moment the installer wrote it - named a version that had since left the
-  # mirror:
-  #
-  #     E: Failed to fetch http://apt.pop-os.org/ubuntu/pool/main/o/openssh/\
-  #        openssh-server_9.6p1-3ubuntu13.4_amd64.deb 404 Not Found [IP: 99.86.101.11 80]
-  #     E: Unable to fetch some archives, maybe run apt-get update or try with --fix-missing?
-  #
-  # sudo was fine, the terminal was fine, the command ran exactly as written - the one thing
-  # missing was a refresh of the index that names what the mirror actually has. Every Debian
-  # derivative here has the same frozen index, so the update is part of the install.
-  #
-  # `tail -12` rather than `-5` because an update prints its own opinion, and a failure in the
-  # update must be as visible in the recording as a failure in the install.
-  # MX IS SysVinit, NOT SYSTEMD, AND `systemctl` SAYS SO ITSELF.
-  #
-  # Run 42575585242's own recording, with a command this repository had already corrected for
-  # the shift bug, shows the install running correctly and then:
-  #
-  #     Created symlink /etc/systemd/system/sshd.service -> .../ssh.service
-  #     Executing: /usr/lib/systemd/systemd-sysv-install enable ssh
-  #     --now cannot be used when systemd is not running or in conjunction with
-  #     --root/--global, refusing.
-  #
-  # `systemctl enable` worked - it wrote the symlinks - but `--now` REFUSED, because MX-25
-  # boots SysVinit and systemd is not PID 1. Nothing started the daemon.
-  #
-  # THIS FILE'S OWN HEADER ALREADY SAID SO ("MX is antiX-based: it uses sysvinit for some
-  # units"), and the command ignored it. The service is started the way this distribution
-  # starts services: `service ssh start`, with `systemctl start` as the fallback for a disk
-  # that does boot systemd.
-  # ATOMIC STEPS, the shape macOS' and Windows' vm-configure files were split into
-  # (commit 96596c2): one act per step, so a failure names the act. This was a single `run:`
-  # that installed, enabled, started and verified in one line.
-  - name: install openssh-server
-    run: echo {{ password }} | sudo -S sh -c "export DEBIAN_FRONTEND=noninteractive; apt-get update -o DPkg::Lock::Timeout=600 && apt-get install -y -o DPkg::Lock::Timeout=600 openssh-server" 2>&1 | tail -6
-    terminal_wait: 0
-    settle: 90
-
-  # PASSWORD AUTHENTICATION BEFORE THE DAEMON STARTS, WHICH IS THE ONLY ORDER THAT WORKS.
-  #
-  # A DROP-IN IS ONLY READ IF THE MAIN CONFIG INCLUDES THE DIRECTORY, AND SSHD READS IT ONCE AT START.
-  # Measured: the setting was written and manjaro still refused the same handshake
-  #
-  #	wait for sshd: the port is open but no shell answers: ssh: handshake failed:
-  #	ssh: unable to authenticate, attempted methods [none password], no supported methods remain
-  #
-  # - because that release's `/etc/ssh/sshd_config` has no `Include /etc/ssh/sshd_config.d/*.conf`,
-  # and because the write happened AFTER the daemon had already started.
-  #
-  # SO BOTH FILES, BEFORE THE START: the drop-in (right where the directory is included, and it
-  # survives a package update that rewrites the main file) and an append to the main file itself,
-  # guarded by a grep so a second run adds no second line.
-  - name: allow password authentication
-  # ONE LINE, BECAUSE `run:` TYPES EACH LINE AND PRESSES RETURN AFTER IT.
-  #
-  # A MULTI-LINE BODY IS NOT ONE COMMAND. This step was a nine-line `sh -c '...'` block, and `doRun`
-  # typed line 1, pressed Return, line 2, Return - so the shell received an UNTERMINATED QUOTE,
-  # submitted it, and ran every following line as its own command. THE COMMENT LINES RAN AS COMMANDS.
-  #
-  # MEASURED ON endeavour-ssh, step 11 of 13, on the run where the typing was first proven to happen:
-  #
-  #	=== allow password authentication
-  #	  running 19 line(s), 1020 character(s): echo admin | sudo -S sh -c ' ; ...
-  #	  wait for sshd: ... ssh: unable to authenticate, attempted methods [none password]
-  #
-  # NINETEEN LINES, 1020 CHARACTERS, NONE OF IT RUN AS ONE SCRIPT. The log line that proves the typing
-  # also proves the bug - which is why that line was worth adding.
-  #
-  # SO IT IS ONE LINE JOINED WITH `;`, which is what the reference implementation does and says:
-  # "Each statement is typed, so each is one line."
-  #
-  # THE COMMENTED `#PasswordAuthentication yes` IS REPLACED rather than appended beside, so sshd
-  # reads ONE uncommented setting; and /etc/ssh/sshd_config itself is written because Arch's copy
-  # has no `Include /etc/ssh/sshd_config.d/*.conf`.
-    run: echo {{ password }} | sudo -S -p '' sh -c 'mkdir -p /etc/ssh/sshd_config.d; printf "PasswordAuthentication yes\n" > /etc/ssh/sshd_config.d/99-vm.conf; sed -i "s/^#\?\s*PasswordAuthentication.*/PasswordAuthentication yes/" /etc/ssh/sshd_config; grep -q "^PasswordAuthentication yes" /etc/ssh/sshd_config || printf "PasswordAuthentication yes\n" >> /etc/ssh/sshd_config' 2>&1 | tail -3
-    terminal_wait: 0
-    settle: 3
-
-  - name: enable ssh at boot (SysVinit)
-    run: echo {{ password }} | sudo -S update-rc.d ssh enable 2>&1 | tail -3
-    terminal_wait: 0
-    settle: 8
-  - name: prove the setting took
-    run: echo {{ password }} | sudo -S sh -c 'sshd -T 2>/dev/null | grep -i "^passwordauthentication" || echo PASSWORDAUTH-UNREADABLE' 2>&1 | tail -3
-    terminal_wait: 0
-    settle: 3
-
-
-  - name: start ssh (SysVinit)
-    run: echo {{ password }} | sudo -S service ssh start 2>&1 | tail -3
-    terminal_wait: 0
-    settle: 10
-
-  - name: prove ssh is running
-    run: echo {{ password }} | sudo -S service ssh status 2>&1 | tail -3
-    terminal_wait: 0
-    settle: 5
-
-  - name: open the firewall for ssh
-    run: echo {{ password }} | sudo -S sh -c "ufw allow 22/tcp; ufw status | head -6" 2>&1 | tail -8
-    terminal_wait: 0
-    settle: 8
-
-  # THE SECOND HALF, FOR THE SYSTEMS WHERE THE FIRST COULD NOT RUN AS ROOT. `sudo -S` is what
-  # a Debian/Fedora/Arch/suse desktop needs; FreeBSD has no sudo, and NixOS' rebuild must run
-  # as root by design. This step is `optional` so on a disk where the first one worked its only
-  # effect is one harmless line in the same terminal.
-
-  # =======================================================================================
-  # 2. WAIT FOR THE DAEMON THAT STEP ENABLED
-  # =======================================================================================
-  #
-  # NO FIXED `wait:` - the number would be a guess about a package install and a
-  # `nixos-rebuild` that share nothing. `require_ssh` asks the only question that matters.
-  - name: wait for sshd
-    require_ssh: true
-    timeout: 600
-
-  # =======================================================================================
-  # 3. THE PROOF, AND IT IS THIS GUEST ANSWERING OVER THE FORWARDED PORT
-  # =======================================================================================
-  - name: prove the kernel over ssh
-    ssh: uname -a
-    timeout: 120
-
-  - name: prove the account over ssh
-    ssh: id -un; hostname
-    timeout: 120
-
-  - name: stop recording
-    record: false
+- name: start recording
+  record: mx-ssh.mp4
+- name: boot the disk
+  boot: true
+  os: linux
+  timeout: 900
+- name: greeter - the password box
+  at:
+  - 259
+  - 568
+  settle: 2
+  optional: true
+- name: greeter - log in
+  type: '{{ password }}'
+  settle: 3
+  optional: true
+- name: greeter - submit
+  key: ret
+  settle: 12
+  optional: true
+- name: open the terminal
+  key: ctrl+alt+t
+  settle: 20
+- name: install openssh-server
+  run: echo {{ password }} | sudo -S sh -c "export DEBIAN_FRONTEND=noninteractive; apt-get update -o DPkg::Lock::Timeout=600 && apt-get install -y -o DPkg::Lock::Timeout=600 openssh-server" 2>&1 | tail
+    -6
+  terminal_wait: 0
+  settle: 90
+- name: allow password authentication
+  run: echo {{ password }} | sudo -S -p '' sh -c 'mkdir -p /etc/ssh/sshd_config.d; printf "PasswordAuthentication yes\n" > /etc/ssh/sshd_config.d/99-vm.conf; sed -i "s/^#\?\s*PasswordAuthentication.*/PasswordAuthentication
+    yes/" /etc/ssh/sshd_config; grep -q "^PasswordAuthentication yes" /etc/ssh/sshd_config || printf "PasswordAuthentication yes\n" >> /etc/ssh/sshd_config' 2>&1 | tail -3
+  terminal_wait: 0
+  settle: 3
+- name: enable ssh at boot (SysVinit)
+  run: echo {{ password }} | sudo -S update-rc.d ssh enable 2>&1 | tail -3
+  terminal_wait: 0
+  settle: 8
+- name: prove the setting took
+  run: echo {{ password }} | sudo -S sh -c 'sshd -T 2>/dev/null | grep -i "^passwordauthentication" || echo PASSWORDAUTH-UNREADABLE' 2>&1 | tail -3
+  terminal_wait: 0
+  settle: 3
+- name: start ssh (SysVinit)
+  run: echo {{ password }} | sudo -S service ssh start 2>&1 | tail -3
+  terminal_wait: 0
+  settle: 10
+- name: prove ssh is running
+  run: echo {{ password }} | sudo -S service ssh status 2>&1 | tail -3
+  terminal_wait: 0
+  settle: 5
+- name: open the firewall for ssh
+  run: echo {{ password }} | sudo -S sh -c "ufw allow 22/tcp; ufw status | head -6" 2>&1 | tail -8
+  terminal_wait: 0
+  settle: 8
+- name: wait for sshd
+  require_ssh: true
+  timeout: 600
+- name: prove the kernel over ssh
+  ssh: uname -a
+  timeout: 120
+- name: prove the account over ssh
+  ssh: id -un; hostname
+  timeout: 120
+- name: stop recording
+  record: false

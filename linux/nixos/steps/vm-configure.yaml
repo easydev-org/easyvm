@@ -1,36 +1,7 @@
-# Stage four for linux-nixos: everything a finished disk needs before the
-# toolchain - a name, the host share, and an agent that can shut the machine down.
-#
-#     python3 lib/steps.py linux/fedora-workstation/steps/vm-configure.yaml \
-#         --qmp /work/drive.sock.qmp --ssh-port 2222
-#
-# WHY THIS STAGE EXISTS, AND WHY IT COMES AFTER ssh
-#
-# It is macOS' stage four, for the same three reasons and in the same order. Before ssh there is
-# no way in that is not a keyboard and a screen; after it, everything here is ordinary remote
-# work. So the stages are ordered install -> ssh -> vm-configure -> dev, and nothing in this
-# file clicks anything.
-#
-# WHAT IT DOES
-#
-#     the machine's name        `vm`, set with the system's own tool
-#     the host share            ~/shared, mounted from the smbd `share_serve:` starts
-#     the qemu guest agent      a shutdown that is a request, not a power button
-#
-# THE NAME IS `vm` AND NOT THE ACCOUNT'S NAME. Every distribution in this repository answers
-# `hostname` with something different today - `fedora`, `nixos`, `mx`, `pop-os`,
-# `localhost.localdomain`, `vmuser`, `vmuser-ghostbsd` - because each installer has its own idea
-# of what to derive one from, and the account rename moved some of them and not others. One name
-# for the machine makes `ssh vm` and a prompt that means the same thing on all thirteen, and it
-# is set HERE rather than in each installer so there is one place that decides it.
-#
-# WHAT THIS FILE INSTALLS IS NOT A TOOLCHAIN. No compiler, no interpreter, no package that a
-# person would use. If a step here needs something that is not in a stock desktop, it belongs in
-# `dev.yaml`.
-
 name: linux-nixos - configure the vm (name, share, guest agent)
-resolution: [1920, 1080]
-
+resolution:
+- 1920
+- 1080
 vars:
   user:
     from: args.user
@@ -38,389 +9,192 @@ vars:
   password:
     from: args.password
     default: admin
-  # THE MACHINE'S NAME, IN ONE PLACE. Written once here and read by every step below that has
-  # to prove it, so a stage cannot disagree with itself about what it set.
-  # THE MACHINE'S NAME. `args.hostname` is filled by the engine with `easyvm-<8 hex>` unless the
-  # caller names one, so two disks on one bridge never answer to the same name. It is printed by
-  # the step below so the workflow can record it without re-deriving the rule.
   hostname:
     from: args.hostname
     default: easyvm-vm
-  # THE SERVER, SO NO PROOF BELOW HARD-CODES AN ADDRESS. Same var, same reason, as macOS'
-  # vm-configure.yaml: a literal typed into an ssh command bakes the CI network into a disk.
   host:
     from: args.host
     default: 172.30.0.1
-  # WHERE THIS STAGE'S DISK GOES, AND HOW LONG THE GUEST MAY TAKE TO COME UP. Both arrive on
-  # the command line because both are facts about this run.
   out:
     from: args.out
     default: out/vm-configure.qcow2
   boot_timeout:
     from: args.boot_timeout
-    default: "1800"
-
+    default: '1800'
 ssh_user: vmuser
 ssh_port: 2222
-
 steps:
+- name: start recording
+  record: vm-configure.mp4
+- name: take the input disk
+  disk: disk.qcow2
+- name: boot the disk
+  boot: true
+  os: linux
+  timeout: '{{ boot_timeout }}'
+- name: wait for sshd
+  require_ssh: true
+  timeout: '{{ boot_timeout }}'
+- name: announce the machine's name
+  ssh: echo "this machine will be named '{{ hostname }}'"
+  timeout: 60
+- name: declare the machine's name
+  ssh: "printf '%s\\n' '{{ password }}' | sudo -S -p '' awk -v name='{{ hostname }}' '\n  # PASS ONE: remember every line, and where the closing brace is.\n  { line[NR] = $0 }\n  $0 ~ /networking\\.hostName/\
+    \ { skip[NR] = 1 }\n  $0 == \"}\" { closing = NR }\n  END {\n    if (closing == 0) { print \"no closing brace in configuration.nix\" > \"/dev/stderr\"; exit 1 }\n    for (i = 1; i <= NR; i++) {\n  \
+    \    if (i == closing) printf \"  networking.hostName = \\\"%s\\\";\\n\", name\n      if (!skip[i]) print line[i]\n    }\n  }' /etc/nixos/configuration.nix > /tmp/configuration.nix.new\nprintf '%s\\\
+    n' '{{ password }}' | sudo -S -p '' mv /tmp/configuration.nix.new /etc/nixos/configuration.nix\nprintf '%s\\n' '{{ password }}' | sudo -S -p '' grep -n 'networking.hostName' /etc/nixos/configuration.nix\n"
+  timeout: 300
+- name: prove the name is declared
+  ssh: 'set -e
 
-  # =======================================================================================
-  # 0. THE MACHINE, WHICH IS FIVE STEPS AND WAS 200 LINES OF PYTHON
-  # =======================================================================================
-  #
-  # THE FILE OWNS ITS OWN GUEST NOW. Until this was moved, every one of the twelve Linux
-  # distributions had a `vm_configure.py` whose entire job was:
-  #
-  #     copy or move the input disk            -> `disk:`
-  #     build the qemu command line            -> `boot:`
-  #     wait for sshd                          -> `require_ssh:`
-  #     ... the walk ...
-  #     shut the machine down over ssh         -> `shutdown:`
-  #     compress the result into the artifact  -> `compress:`
-  #     start and stop the recording           -> `record:`
-  #
-  # and only the middle line is a walkthrough. The other six are properties of THE RUN, and they
-  # are now steps that `windows/11/steps/ssh.yaml` and `macos/15/steps/ssh.yaml` already use. That
-  # is why this file can be the whole stage: `lib/steps.py file.yaml` needs no Python beside it.
-  #
-  # STARTED BEFORE ANYTHING ELSE, because the sampler waits for the record socket and the boot is
-  # the part that used to be invisible when a stage failed early.
-  - name: start recording
-    record: vm-configure.mp4
-    poll: 20
+    grep -n "networking.hostName" /etc/nixos/configuration.nix
 
-  # `disk:` MOVES THE INPUT HERE. The default is move rather than copy because the disk came from
-  # ghcr and the registry still has it - and a failed stage that consumed it costs a re-download,
-  # which `disk_overlay:` avoids; this stage REPLACES its input, so a move is the honest one.
-  - name: take the input disk
-    disk: disk.qcow2
+    grep -q ''networking.hostName.*{{ hostname }}'' /etc/nixos/configuration.nix
 
-  # `os:` IS THE FACT THAT DECIDES THE MACHINE, and `linux` is what every distribution here is: a
-  # UEFI firmware, an OVMF variable store and a virtio disk. lib/vm_session.py expands the name.
-  - name: boot the disk
-    boot: true
-    os: linux
-    timeout: "{{ boot_timeout }}"
+    '
+  timeout: 60
+- name: declare the guest agent and the cifs client
+  ssh: "printf '%s\\n' '{{ password }}' | sudo -S -p '' awk '\n  { line[NR] = $0 }\n  $0 ~ /environment\\.systemPackages/ { skip[NR] = 1 }\n  $0 ~ /services\\.qemuGuest\\.enable/ { skip[NR] = 1 }\n  $0\
+    \ == \"}\" { closing = NR }\n  END {\n    if (closing == 0) { print \"no closing brace in configuration.nix\" > \"/dev/stderr\"; exit 1 }\n    for (i = 1; i <= NR; i++) {\n      if (i == closing) {\n\
+    \        printf \"  environment.systemPackages = [ pkgs.cifs-utils ];\\n\"\n        printf \"  services.qemuGuest.enable = true;\\n\"\n      }\n      if (!skip[i]) print line[i]\n    }\n  }' /etc/nixos/configuration.nix\
+    \ > /tmp/configuration.nix.new\nprintf '%s\\n' '{{ password }}' | sudo -S -p '' mv /tmp/configuration.nix.new /etc/nixos/configuration.nix\nprintf '%s\\n' '{{ password }}' | sudo -S -p '' grep -n -e\
+    \ environment.systemPackages -e services.qemuGuest /etc/nixos/configuration.nix\n"
+  timeout: 300
+- name: rebuild
+  ssh: 'printf ''%s\n'' ''{{ password }}'' | sudo -S -p '''' nixos-rebuild switch 2>&1 | tail -8
 
-  # "QEMU IS RUNNING" AND "THE GUEST ANSWERS" ARE DIFFERENT FACTS. `boot:` is over when qemu
-  # started; this is the wait for the daemon the ssh stage installed.
-  - name: wait for sshd
-    require_ssh: true
-    timeout: "{{ boot_timeout }}"
+    '
+  timeout: 1800
+- name: enable the guest agent
+  ssh: 'printf ''%s\n'' ''{{ password }}'' | sudo -S -p '''' systemctl enable --now qemu-guest-agent 2>&1 | tail -3
 
-  # THE NAME IS ANNOUNCED BEFORE IT IS SET, so the workflow can read it out of this log with one
-  # grep and record it as the job's output. `easyvm-<8 hex>` is generated by lib/steps.py, which is
-  # the only place that decides it.
-  - name: announce the machine's name
-    ssh: echo "this machine will be named '{{ hostname }}'"
-    timeout: 60
+    '
+  timeout: 120
+- name: prove the name
+  ssh: 'echo "static:   $(hostnamectl --static)"
 
-  # =======================================================================================
-  # 1. THE MACHINE'S NAME
-  # =======================================================================================
-  #
-  # `hostnamectl set-hostname` IS THE SYSTEM'S OWN TOOL on every systemd distribution here, and
-  # it writes /etc/hostname as well as calling the kernel - so the name survives a reboot, which
-  # a bare `hostname` does not. It needs root, and the password goes through `sudo -S` on STDIN.
-  #
-  # THE NAME IS ALSO PUT IN /etc/hosts. systemd's own man page says to: `hostnamectl` sets the
-  # static name and leaves the loopback line alone, and some programs resolve the local name
-  # through /etc/hosts and then fail to find it. Replacing the `127.0.1.1` line rather than
-  # appending is what keeps the file from growing a line per boot.
-  # /etc/hostname IS A SYMLINK INTO THE NIX STORE ON THIS SYSTEM, SO IT CANNOT BE WRITTEN - AND
-  # `hostnamectl` SAID SO IN AS MANY WORDS ON RUN c3fe4d3:
-  #
-  #     Could not set static hostname: /etc/hostname is in a read-only filesystem.
-  #     Hint: use --transient option when /etc/hostname or /etc/machine-info cannot be modified
-  #
-  # `--transient` WOULD BE THE WRONG ANSWER: it sets the name until the next boot and nothing
-  # more, so the disk would answer `easyvm-...` for exactly one run - this one - and go back to
-  # `nixos` at every boot after it. The name has to be DECLARED, like everything else here.
-  #
-  # SO IT GOES IN THE SAME configuration.nix THAT THE REBUILD ALREADY TOUCHES. The agent and the
-  # cifs client are declared in the step below this one, and one rebuild delivers all three -
-  # which is why `networking.hostName` is written here and the rebuild is there: the two have to
-  # land together or the disk carries a name its configuration disagrees with.
-  #
-  # AND THE EDIT DOES NOT ASSUME THE CLOSING BRACE IS THE LAST LINE.
-  #
-  # The first version was `sed -i "$ d"` - delete the last line, then append the declaration and a
-  # `}`. THAT IS ONLY CORRECT IF configuration.nix ENDS WITH `}`, and NixOS's own default does not:
-  # `nixos-generate-config` leaves the closing brace followed by blank lines and a comment block, so
-  # "the last line" is a COMMENT. Deleting it left TWO closing braces, the file stopped parsing, and
-  # `nixos-rebuild` refused it - which this stage reported only as `the command exited 1` at step 11
-  # of 22, with no clue which of the three checks had failed.
-  #
-  # `awk` RATHER THAN `python3`, because python3 is NOT part of a NixOS minimal installation and this
-  # step must not depend on a package the guest may not have. awk is in the base system everywhere
-  # this project runs.
-  #
-  # THE DECLARATION GOES IMMEDIATELY BEFORE THE LAST LINE THAT IS EXACTLY `}` - found by scanning
-  # backwards, not by assuming the file's shape - and a previous `networking.hostName` line is dropped
-  # first, so a second run is idempotent.
-  - name: declare the machine's name
-    ssh: |
-      printf '%s\n' '{{ password }}' | sudo -S -p '' awk -v name='{{ hostname }}' '
-        # PASS ONE: remember every line, and where the closing brace is.
-        { line[NR] = $0 }
-        $0 ~ /networking\.hostName/ { skip[NR] = 1 }
-        $0 == "}" { closing = NR }
-        END {
-          if (closing == 0) { print "no closing brace in configuration.nix" > "/dev/stderr"; exit 1 }
-          for (i = 1; i <= NR; i++) {
-            if (i == closing) printf "  networking.hostName = \"%s\";\n", name
-            if (!skip[i]) print line[i]
-          }
-        }' /etc/nixos/configuration.nix > /tmp/configuration.nix.new
-      printf '%s\n' '{{ password }}' | sudo -S -p '' mv /tmp/configuration.nix.new /etc/nixos/configuration.nix
-      printf '%s\n' '{{ password }}' | sudo -S -p '' grep -n 'networking.hostName' /etc/nixos/configuration.nix
-    timeout: 300
+    echo "kernel:   $(hostname)"
 
-  # THE PROOF IS THE VALUE, READ BACK FROM THE SYSTEM THAT HOLDS IT. A `hostnamectl` that
-  # answered 0 and a name that did not change is exactly the failure this catches.
-  #
-  # NO `expect:` ON AN ssh STEP, and that is a rule of this engine rather than a preference: a
-  # pure-ssh walkthrough runs headless, and `HeadlessDriver.says()` raises rather than reading a
-  # screen that does not exist. The verdict here is the shell's own exit status, so the comparison
-  # is inside the command - `test ... || exit 1` is what makes a wrong name a failed step.
-  # THE PROOF RUNS AFTER THE REBUILD, NOT HERE - see the note on `prove the name` below.
-  # What this step can say now is that the DECLARATION is on the disk, which is the fact the
-  # rebuild is about to act on.
-  - name: prove the name is declared
-    ssh: |
-      set -e
-      grep -n "networking.hostName" /etc/nixos/configuration.nix
-      grep -q 'networking.hostName.*{{ hostname }}' /etc/nixos/configuration.nix
-    timeout: 60
+    echo "declared: $(grep -c ''networking.hostName'' /etc/nixos/configuration.nix || true) line(s)"
 
-  # =======================================================================================
-  # 2. THE QEMU GUEST AGENT
-  # =======================================================================================
-  #
-  # WHY A GUEST AGENT AT ALL, WHEN ssh ALREADY WORKS.
-  #
-  # Because a clean shutdown is a different operation from a command. qmp's
-  # `system_powerdown` is an ACPI event, and a desktop answers it with whatever its session
-  # policy says - on macOS a dialog nobody clicks, on GNOME a confirmation the user has to
-  # accept. `guest-shutdown` over qga is a REQUEST the guest's own agent executes, and it is
-  # acknowledged, which is what lets a stage say "the disk was closed" instead of "qemu was
-  # killed".
-  #
+    grep -n ''networking.hostName'' /etc/nixos/configuration.nix || echo "no networking.hostName line"
 
-  # =======================================================================================
-  # 3. THE HOST SHARE
-  # =======================================================================================
-  #
-  # THE SAME SERVER macOS AND WINDOWS USE, THROUGH THE KERNEL CLIENT THIS FAMILY HAS. SMB is
-  # what `share_serve:` starts; Linux reaches it with `mount.cifs`, which is in `cifs-utils` -
-  # NOT installed on a stock desktop, so the first step here puts it there.
-  #
-  # NIXOS HAS NO `install` FOR THIS, AND THAT IS THE WHOLE DIFFERENCE IN THIS FILE.
-  #
-  # `cifs-utils` here is an attribute of the system's own configuration, not a package to fetch:
-  # declaring it and running `nixos-rebuild switch` is what puts `mount.cifs` on the disk. The
-  # same rebuild is what makes the agent permanent rather than installed-until-reboot, so ONE
-  # step declares both and one rebuild delivers them - a rebuild is minutes, and two of them
-  # would leave the disk between them.
-  #
-  # AND THIS EDIT HAS THE SAME SHAPE AS THE HOSTNAME ONE, WITH THE SAME FIX - BECAUSE IT HAD THE SAME BUG.
-  #
-  # `sed -i "$ d"` DELETES THE LAST LINE AND ASSUMES IT IS `}`, and NixOS's default configuration.nix
-  # ends with blank lines and a comment block. The result was a file with TWO closing braces and a
-  # duplicate attribute, which `nixos-rebuild` refuses:
-  #
-  #	error: attribute 'environment.systemPackages' already defined at
-  #	       /etc/nixos/configuration.nix:138:3
-  #
-  # I FIXED THE HOSTNAME EDIT AND NOT THIS ONE, so the same defect survived in the second place it was
-  # written. Both now insert before the LAST LINE THAT IS EXACTLY `}`, found by scanning backwards, and
-  # both drop a previous declaration first so a second run is idempotent.
-  - name: declare the guest agent and the cifs client
-    ssh: |
-      printf '%s\n' '{{ password }}' | sudo -S -p '' awk '
-        { line[NR] = $0 }
-        $0 ~ /environment\.systemPackages/ { skip[NR] = 1 }
-        $0 ~ /services\.qemuGuest\.enable/ { skip[NR] = 1 }
-        $0 == "}" { closing = NR }
-        END {
-          if (closing == 0) { print "no closing brace in configuration.nix" > "/dev/stderr"; exit 1 }
-          for (i = 1; i <= NR; i++) {
-            if (i == closing) {
-              printf "  environment.systemPackages = [ pkgs.cifs-utils ];\n"
-              printf "  services.qemuGuest.enable = true;\n"
-            }
-            if (!skip[i]) print line[i]
-          }
-        }' /etc/nixos/configuration.nix > /tmp/configuration.nix.new
-      printf '%s\n' '{{ password }}' | sudo -S -p '' mv /tmp/configuration.nix.new /etc/nixos/configuration.nix
-      printf '%s\n' '{{ password }}' | sudo -S -p '' grep -n -e environment.systemPackages -e services.qemuGuest /etc/nixos/configuration.nix
-    timeout: 300
+    echo "--- the tail of configuration.nix ---"
 
-  - name: rebuild
-    ssh: |
-      printf '%s\n' '{{ password }}' | sudo -S -p '' nixos-rebuild switch 2>&1 | tail -8
-    timeout: 1800
+    tail -5 /etc/nixos/configuration.nix
 
-  # `services.qemuGuest.enable` IS THE WHOLE INSTALL ON THIS SYSTEM: the attribute was written
-  # above and the rebuild delivered the unit, so this is the check rather than an install.
-  - name: enable the guest agent
-    ssh: |
-      printf '%s\n' '{{ password }}' | sudo -S -p '' systemctl enable --now qemu-guest-agent 2>&1 | tail -3
-    timeout: 120
+    echo "--- the verdict ---"
 
-  # THE NAME, NOW THAT THE SYSTEM THAT OWNS IT HAS BEEN REBUILT.
-  #
-  # `hostnamectl --static` IS THE ONE THAT HAS TO MATCH, AND `hostname` IS THE ONE THAT DOES NOT YET.
-  # Run 222a0da measured both in the same command:
-  #
-  #     static:   easyvm-bd8daeb2     <- the name the system carries
-  #     kernel:   nixos               <- the name this boot's kernel is still answering
-  #     declared: 1 line(s)
-  #
-  # A rebuild writes /etc/hostname through the store and does not re-run the boot-time `hostname`
-  # call, so the kernel keeps the old name until the next boot - which is the NEXT stage, and the
-  # only place the two can disagree. Requiring them to match here would fail every healthy disk.
-  #
-  # `--static` matching is also what rules out `--transient`, the shortcut the error message
-  # suggests: a transient name answers in `hostname` and never reaches `/etc/hostname`, so it would
-  # pass a kernel check and fail this one.
-  #
-  # AND THE PROOF PRINTS EVERY FACT IT JUDGES, BEFORE IT JUDGES. `set -e` with a bare `test` reports
-  # `the command exited 1` and nothing else - measured on nixos-vm, where the step failed at step 11 of
-  # 22 and the log said exactly that:
-  #
-  #	error:   prove the name: the command exited 1
-  #
-  # WHICH OF THE THREE THINGS IS WRONG - the static name, the kernel's name, or the declaration in
-  # configuration.nix - IS THE WHOLE QUESTION, and the answer was thrown away by the exit status. Each is
-  # printed first and the judgement is the LAST line, so a failure carries its own evidence.
-  - name: prove the name
-    ssh: |
-      echo "static:   $(hostnamectl --static)"
-      echo "kernel:   $(hostname)"
-      echo "declared: $(grep -c 'networking.hostName' /etc/nixos/configuration.nix || true) line(s)"
-      grep -n 'networking.hostName' /etc/nixos/configuration.nix || echo "no networking.hostName line"
-      echo "--- the tail of configuration.nix ---"
-      tail -5 /etc/nixos/configuration.nix
-      echo "--- the verdict ---"
-      test "$(hostnamectl --static)" = "{{ hostname }}"
-    timeout: 60
+    test "$(hostnamectl --static)" = "{{ hostname }}"
 
-  # THE DEVICE AND THE PROCESS, BECAUSE THEY FAIL DIFFERENTLY - the same pair macOS' file
-  # checks. A unit that is active with no /dev/virtio-ports/... behind it is an agent that will
-  # never answer, and `systemctl is-active` would call that success.
-  - name: prove the guest agent is running
-    ssh: |
-      systemctl is-active qemu-guest-agent &&
-      ls -l /dev/virtio-ports/org.qemu.guest_agent.0 2>&1 &&
-      systemctl show -p MainPID --value qemu-guest-agent
-    timeout: 120
+    '
+  timeout: 60
+- name: prove the guest agent is running
+  ssh: 'systemctl is-active qemu-guest-agent &&
+
+    ls -l /dev/virtio-ports/org.qemu.guest_agent.0 2>&1 &&
+
+    systemctl show -p MainPID --value qemu-guest-agent
+
+    '
+  timeout: 120
+- name: serve the host share
+  share_serve: true
+  timeout: 60
+- name: mount the host share
+  share_mount: true
+  share_family: linux
+  requires:
+  - share
+  timeout: 180
+- name: prove the share is readable and writable
+  ssh: 'sh -c ''
+
+    echo "--- what is mounted ---"
+
+    /sbin/mount | grep -i "cifs\|smb" || echo "(no cifs/smb line in mount output)"
+
+    echo "--- the mount point ---"
+
+    ls -la ~/shared || echo "(~/shared is not readable)"
+
+    echo "--- the round trip ---"
+
+    printf "written-by-the-guest\n" > ~/shared/from-guest.txt
+
+    got=$(cat ~/shared/from-guest.txt)
+
+    echo "read back: $got"
+
+    test "$got" = "written-by-the-guest"
+
+    echo "round trip ok"
+
+    ''
+
+    '
+  timeout: 120
+- name: write the launcher
+  write: launcher
+  family: linux
+  timeout: 60
+- name: copy the launcher in
+  scp:
+  - bootstrap-launcher.sh
+  - /tmp/bootstrap-launcher.sh
+  timeout: 300
+- name: install the launcher
+  ssh: 'set -e
+
+    install -m 0755 /tmp/bootstrap-launcher.sh ~/bootstrap-launcher.sh
+
+    mkdir -p ~/.config/systemd/user
+
+    cat > ~/.config/systemd/user/org.vm.bootstrap.service <<''UNIT''
+
+    [Unit]
+
+    Description=Run ~/shared/bootstrap.sh at login
 
 
-  - name: serve the host share
-    share_serve: true
-    timeout: 60
+    [Service]
 
-  - name: mount the host share
-    share_mount: true
-    share_family: linux
-    requires: [share]
-    timeout: 180
+    Type=oneshot
 
-  # A MOUNT THAT REPORTS SUCCESS AND A DIRECTORY THAT IS EMPTY ARE DIFFERENT FACTS. Writing a
-  # file and reading it back is the only proof that the share is the one the host is serving and
-  # that it is writable - a read-only mount answers `ls` happily.
-  # THE WHOLE SCRIPT RUNS UNDER `sh`, BECAUSE `ssh host command` USES THE USER'S LOGIN SHELL.
-  #
-  # MEASURED ON cachyos-vm, step 16 of 23, AND IT TOOK THREE ROUNDS TO SEE BECAUSE EACH SPELLING FAILED
-  # IN A DIFFERENT PLACE:
-  #
-  #	1. `PATH="$PATH:/sbin:..."`      -> fish: Unsupported use of '='.
-  #	2. `/sbin/mount` instead         -> got as far as the round trip, then
-  #	                                    fish: Unsupported use of '='. got=$(cat ...)
-  #
-  # CACHYOS LOGS IN WITH FISH. `ssh host command` RUNS THE LOGIN SHELL, so every POSIX construct in this
-  # body - `VAR=$(...)`, `test`, `&&` - is a fish syntax error, and the step reports `exited 127` with
-  # the fish complaint sitting above it in the same buffer.
-  #
-  # `sh -c '...'` NAMES THE INTERPRETER INSTEAD OF INHERITING ONE, which is the only spelling that is
-  # right on every guest here: bash, dash, zsh and fish all have `/bin/sh`, and none of them rewrites
-  # what is inside the single quotes.
-  - name: prove the share is readable and writable
-    ssh: |
-      sh -c '
-      echo "--- what is mounted ---"
-      /sbin/mount | grep -i "cifs\|smb" || echo "(no cifs/smb line in mount output)"
-      echo "--- the mount point ---"
-      ls -la ~/shared || echo "(~/shared is not readable)"
-      echo "--- the round trip ---"
-      printf "written-by-the-guest\n" > ~/shared/from-guest.txt
-      got=$(cat ~/shared/from-guest.txt)
-      echo "read back: $got"
-      test "$got" = "written-by-the-guest"
-      echo "round trip ok"
-      '
-    timeout: 120
+    ExecStart=%h/bootstrap-launcher.sh
 
-  - name: write the launcher
-    write: launcher
-    family: linux
-    timeout: 60
 
-  - name: copy the launcher in
-    scp: ["bootstrap-launcher.sh", "/tmp/bootstrap-launcher.sh"]
-    timeout: 300
+    [Install]
 
-  - name: install the launcher
-    ssh: |
-      set -e
-      install -m 0755 /tmp/bootstrap-launcher.sh ~/bootstrap-launcher.sh
-      mkdir -p ~/.config/systemd/user
-      cat > ~/.config/systemd/user/org.vm.bootstrap.service <<'UNIT'
-      [Unit]
-      Description=Run ~/shared/bootstrap.sh at login
+    WantedBy=default.target
 
-      [Service]
-      Type=oneshot
-      ExecStart=%h/bootstrap-launcher.sh
+    UNIT
 
-      [Install]
-      WantedBy=default.target
-      UNIT
-      systemctl --user daemon-reload
-      systemctl --user enable org.vm.bootstrap.service
-      echo INSTALLED_FOR_NEXT_LOGIN
-    timeout: 300
+    systemctl --user daemon-reload
 
-  # THE UNIT HAS TO BE ENABLED AND HAS TO NAME THE LAUNCHER. A unit file that is well formed and
-  # points at nothing is found at the next boot, on a published disk - which is the failure this
-  # catches while the disk is still here.
-  - name: prove the launcher is installed
-    ssh: |
-      set -e
-      ls -l ~/bootstrap-launcher.sh ~/.config/systemd/user/org.vm.bootstrap.service
-      grep -q bootstrap-launcher.sh ~/.config/systemd/user/org.vm.bootstrap.service
-      systemctl --user is-enabled org.vm.bootstrap.service
-      test "$(systemctl --user is-enabled org.vm.bootstrap.service)" = "enabled"
-    timeout: 60
+    systemctl --user enable org.vm.bootstrap.service
 
-  # =======================================================================================
-  # 5. THE MACHINE GOES BACK TO ITS DISK, AND THE DISK BECOMES THE ARTIFACT
-  # =======================================================================================
-  #
-  # `ssh` RATHER THAN `kill`. These steps answered a real disk, and its filesystem is what gets
-  # published - a kill leaves the last writes in the page cache of a disk somebody is about to
-  # boot. `lib/vm_session.py`'s SHUTDOWN_COMMAND has the linux line for exactly this, and it is
-  # the same `shutdown -h now` that systemd, SysVinit and FreeBSD all accept.
-  - name: stop the machine
-    shutdown: ssh
-    timeout: 300
+    echo INSTALLED_FOR_NEXT_LOGIN
 
-  # THE LAST THING A STAGE DOES. `compress:` writes the working disk to `{{ out }}` and refuses to
-  # write onto its own input - which is why `--out` is a command-line argument and not a literal.
-  - name: publish the disk
-    compress: "{{ out }}"
+    '
+  timeout: 300
+- name: prove the launcher is installed
+  ssh: 'set -e
 
-  - name: stop recording
-    record: false
+    ls -l ~/bootstrap-launcher.sh ~/.config/systemd/user/org.vm.bootstrap.service
+
+    grep -q bootstrap-launcher.sh ~/.config/systemd/user/org.vm.bootstrap.service
+
+    systemctl --user is-enabled org.vm.bootstrap.service
+
+    test "$(systemctl --user is-enabled org.vm.bootstrap.service)" = "enabled"
+
+    '
+  timeout: 60
+- name: stop the machine
+  shutdown: ssh
+  timeout: 300
+- name: publish the disk
+  compress: '{{ out }}'
+- name: stop recording
+  record: false

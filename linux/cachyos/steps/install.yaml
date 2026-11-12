@@ -1,39 +1,7 @@
-# CachyOS KDE: Calamares' eleven panes, as a sequence.
-#
-#     python3 lib/steps.py linux/cachyos/steps/install.yaml --qmp /work/drive.sock.qmp
-#
-# WHAT THIS REPLACES
-#
-# linux/cachyos/install.py's walk_calamares(). Every number and every reason below came
-# from it; install.py keeps the machine, the frames, the recording and the publish.
-#
-# WHY A SEQUENCE, AND NOT A DETECTOR
-#
-# Calamares draws its panes in one measured order and does not skip any, so a list of clicks
-# is the whole truth. And two detectors were tried here and both were worse than none - which
-# is what the original driver's docstring records, and is why the steps below CLICK AND WAIT
-# rather than read:
-#
-#   a word per pane        `expect="boot loader"` - Calamares' panes carry image headings and
-#                          tesseract reads them unevenly; this pane came back as
-#                          `vax grub limine refind refind + ai` while it had advanced
-#                          correctly, and run 42413733562 stopped there
-#
-#   before-against-after   prose does not read identically twice, so `current != before` is
-#                          true while standing still; run 42413739470 reported every step from
-#                          Welcome onwards as an advance while it never left Users
-#
-# THE FOOTER IS NOT IN ONE PLACE, AND THAT IS THE ONE FACT THIS FILE IS REALLY ABOUT:
-#
-#   Welcome                    y 747   the window is at its smallest - no map, no overview
-#   Location .. Users          y 796   the window has grown for the map and stays there
-#   Summary                    y 902   it grew again for the overview text
-#
-# A single constant is wrong by 106 pixels on Summary and by 49 on Welcome.
-
 name: cachyos - the Calamares walk
-resolution: [1920, 1080]
-
+resolution:
+- 1920
+- 1080
 vars:
   user:
     from: args.user
@@ -41,349 +9,169 @@ vars:
   password:
     from: args.password
     default: admin
-  # WHERE `compress:` WRITES, AND IT COMES FROM THE WORKFLOW'S `--out`.
-  #
-  # The workflow declares each install leg with `"out": "linux-<distro>.qcow2"` and passes it as
-  # `--out`; a `compress: "{{ out }}"` step names that same file. WITHOUT THE DECLARATION HERE the
-  # variable does not exist and `easyvm check` refuses the file - which is what happened when the step
-  # was first added, and is the vocabulary doing its job.
   out:
     from: args.out
     default: out/distro.qcow2
-
 steps:
-  # THE RECORDING IS PART OF THE VERDICT, NOT A CONVENIENCE.
-  #
-  # A FAILURE THAT SAYS "did not advance: read ..." IS A FEW WORDS OF OCR, and the question
-  # it cannot answer is "what was on screen". A recording can, and it is tens of megabytes -
-  # which is why it is its own artifact rather than travelling with the disk.
-  - name: start recording
-    record: cachyos-install.mp4
-    poll: 20
-
-  # THE MACHINE AND ITS INSTALLER, WHICH USED TO BE THE BAKE SKELETON IN PYTHON.
-  #
-  # THIS FILE IS A DECLARATION OF THE WIZARD STEPS AND NOTHING ELSE. Its own header says so:
-  #
-  #     WHAT THIS FILE IS. It is a DECLARATION, not an implementation. The bake skeleton - disk,
-  #     guest, recording, the QMP driver, the walk, ...
-  #
-  # and in the Python implementation lib/install_skeleton.py built the machine, created the disk and
-  # attached the ISO before running these steps. Reproduced as YAML that skeleton has to be IN the
-  # file, or the first `at:` reports `drive.sock.qmp: no such file` on a machine nobody started.
-  #
-  # 64G IS THE WORKFLOW'S OWN `--disk-size 64G`, not a number chosen here: every coordinate in this
-  # directory was measured on a disk that size, and the installer's partitioning pane reads capacity.
-  - name: create the empty disk
-    disk: disk.qcow2
-    disk_gb: 64
-
-  # THE INSTALLER IMAGE, BY THE TAG THIS REPOSITORY PUBLISHES IT UNDER.
-  - name: fetch the installer image
-    fetch: linux_iso
-    release: cachyos
-
-  - name: boot the installer
-    boot: true
-    os: linux
-    iso: installer_iso
-    timeout: 1800
-  # THE LIVE DESKTOP FIRST, BECAUSE A CLICK ON A SCREEN THAT HAS NOT DRAWN IS A CLICK ON NOTHING.
-  #
-  # `boot:` RETURNS WHEN QEMU IS RUNNING, WHICH IS NOT WHEN THE INSTALLER IS VISIBLE. A live medium
-  # unpacks itself from a multi-gigabyte ISO after that: measured on opensuse-tumbleweed, whose first
-  # click landed on
-  #
-  #	Guest has not initialized the display (yet).
-  #
-  # - the VNC server's own text, meaning the guest had drawn NO FRAME AT ALL.
-  #
-  # `desktop: linux` is a measurement of the panel a booted session draws, which is the honest gate
-  # for every live installer here. The `timeout` is generous because unpacking a 4 GiB image is real
-  # work, and a fixed `settle` would be a guess that is right on a fast runner and wrong on a slow one.
-  # THE INSTALLER'S OWN FIRST SCREEN, READ AS TEXT.
-  #
-  # `desktop: linux` MEASURES A PANEL AND THESE INSTALLERS HAVE NO PANEL: they are
-  # full-screen console UI (subiquity, calamares in text mode, the Debian installer,
-  # anaconda) drawing character cells. Measured on ubuntu-install: fifteen minutes of
-  # `drop=+0.0 ratio=0.0x sat=+0.00` - a black screen - while `console.log` showed the
-  # firmware boot the DVD, GRUB load, and the installer take over. The test was
-  # measuring the wrong thing, which is the fourth time this session.
-  #
-  # AND THE BUDGET IS THE INSTALL'S, NOT A GUI'S: a live medium unpacks itself from a
-  # multi-gigabyte ISO before its first screen exists, and the reference implementation
-  # gives this 5400 seconds rather than guessing a smaller number.
-  # THE DESKTOP, BECAUSE THIS INSTALLER IS AN ICON ON IT.
-  #
-  # `open the installer` DOUBLE-CLICKS a launcher on the live session's desktop, so a
-  # screen that has not drawn is a screen with nothing to click - the failure that cost
-  # this stage three runs: five `run:` steps finishing in a tenth of a second because
-  # the keystrokes reached no session at all.
-  #
-  # `desktop: linux` is the right measurement HERE and the wrong one for ubuntu, whose
-  # subiquity takes over the whole screen and draws no panel. THE TWO ARE NOT THE SAME
-  # WAIT: one asks whether a session is up, the other asks whether a console UI is.
-  #
-  # AND THE BUDGET IS 5400 SECONDS, because a live medium unpacks itself from a
-  # multi-gigabyte ISO before any of this exists.
-  - name: wait for the live desktop
-    desktop: linux
-    timeout: 5400
-    poll: 5
-    # THE SESSION IS KEPT AWAKE, AND THAT IS NOT A REFINEMENT.
-    #
-    # This wait can run for ninety minutes - a live medium unpacks itself from a multi-gigabyte ISO
-    # and an installer copies a system - and the live session's idle timer puts a LOCK SCREEN up
-    # well before that. The reference implementation says the same thing in the same place:
-    #
-    #   THE KEEP-ALIVE CLICK IS PART OF THE WAIT - a real click, not a pointer move, because the
-    #   session's idle timer is what puts the lock screen up and it does not count synthetic
-    #   motion. The click lands on the progress page, where there is no control to disturb.
-    #
-    keep_alive: true
-
-  # =======================================================================================
-  # 1. THE INSTALLER, FROM THE DESKTOP
-  # =======================================================================================
-  #
-  # TWO SEPARATE PRESSES, NOT A DOUBLE-CLICK: this desktop's launcher takes a press to focus
-  # and a second to activate, and `repeat` is exactly that shape - the first at once, the
-  # second after `settle`.
-  # THE DESKTOP HAS TO HAVE SETTLED BEFORE ITS ICON IS PRESSED.
-  #
-  # `desktop: linux` MEASURES A PANEL, AND A PANEL IS DRAWN BEFORE THE ICONS ARE. Measured on
-  # zorin-install, the same failure with a recording: its launcher was an EMPTY PANEL at 60s and drew
-  # its cards at 100s, so the press at 10s hit nothing.
-  #
-  # THE LAST RESORT IS A FIXED PAUSE, NOT A WORD - a live desktop's first frames have no words on them
-  # at all, and a gate that waited for one would hang on the run it was meant to protect. Fifteen
-  # seconds is longer than the measured 40-second gap between "panel up" and "cards drawn" ONLY when
-  # combined with the `settle:` on the press; what it really buys is that the compositor has finished
-  # the frame the icons land in.
-  - name: let the desktop settle
-    wait: 15
-    keep_alive: true
-
-  - name: open the installer
-    at: [960, 743]
-    repeat: [2, 0.8]
-    settle: 35
-    # A LOG LINE, NOT A GATE, AND `optional` IS WHAT MAKES IT ONE. The original driver retried
-    # once and only failed if the wizard was still not up after that; an `expect_any` that can
-    # fail the whole walk would lose that retry. See the next step.
-    expect_any:
-      - [welcome]
-      - [location]
-
-  # THE RETRY, AND IT IS CONDITIONAL: a second pair of presses is right only when the wizard
-  # has not opened, because when it has they land inside it.
-  - name: open the installer (once more, if it did not)
-    unless: [welcome]
-    at: [960, 743]
-    repeat: [2, 0.8]
-    settle: 40
-
-  # =======================================================================================
-  # 2. WELCOME, ON ITS OWN FOOTER
-  # =======================================================================================
-  - name: welcome
-    at: [1352, 747]
-    settle: 20
-
-  # =======================================================================================
-  # 3. LOCATION THROUGH USERS, ALL ON y=796
-  # =======================================================================================
-  #
-  # The default location is kept: it is whatever Calamares detected, and the requirement is a
-  # disk that installs, not a particular country.
-  - name: location
-    at: [1352, 796]
-    settle: 20
-
-  # GRUB goes to the disk Calamares chose; no change.
-  - name: keyboard
-    at: [1352, 796]
-    settle: 22
-
-  - name: bootloader
-    at: [1352, 796]
-    settle: 22
-
-  # THE RADIO BUTTON'S CIRCLE, NOT THE ROW. (465,367) is `Erase disk`; the row's text selects
-  # nothing, and 36 px lower is `Manual partitioning`, which produces a disk nobody asked for.
-  - name: partitions - erase the disk
-    at: [465, 367]
-    settle: 10
-
-  - name: partitions
-    at: [1352, 796]
-    settle: 20
-
-  # NO CONFIRMATION IS SHOWN HERE ON THIS ISO - measured, Next goes straight to Desktop. The
-  # press is kept for builds that do ask: on this one it lands on the Desktop pane's blank
-  # space and selects nothing, which is the same shape as the "dismiss it whether or not it is
-  # up" clicks in mx and mint.
-  - name: the erase confirmation's continue (if it is shown)
-    at: [1010, 640]
-    settle: 3
-
-  # The ISO's own profile (Plasma Desktop) is kept, as is the default package set.
-  - name: desktop
-    at: [1352, 796]
-    settle: 22
-
-  - name: packages
-    at: [1352, 796]
-    settle: 25
-
-  # =======================================================================================
-  # 4. THE USERS PANE. FIVE FIELDS, MEASURED ON THIS ISO'S OWN FRAME.
-  # =======================================================================================
-  - name: users - full name
-    at: [516, 348]
-    type: "{{ user }}"
-    settle: 2
-  - name: users - login name
-    at: [516, 413]
-    type: "{{ user }}"
-    settle: 2
-  # THE HOST NAME IS LEFT AT THE INSTALLER'S DEFAULT, AND THIS STEP USED TO SET IT.
-  #
-  # It typed the account's name here, which made the machine's name a second copy of the login
-  # and had to be kept in step with it by hand - and after the account was renamed it was the one
-  # place a stale name could hide. The name is now set ONCE, after ssh works, by
-  # `steps/vm-configure.yaml`, which is also the only place that knows the disk is finished.
-  #
-  # WHAT THE INSTALLER PUTS HERE IS ITS OWN DEFAULT (`cachyos`, the live medium's name, or the
-  # machine model). It is replaced a stage later, so nothing reads it.
-  - name: users - password
-    at: [516, 546]
-    type: "{{ password }}"
-    settle: 2
-  - name: users - confirm password
-    at: [729, 546]
-    type: "{{ password }}"
-    settle: 3
-
-  - name: users
-    at: [1352, 796]
-    settle: 25
-
-  # =======================================================================================
-  # 5. SUMMARY: ITS OWN FOOTER, THEN THE MODAL
-  # =======================================================================================
-  - name: summary - install
-    at: [1365, 902]
-    settle: 18
-
-  - name: the install confirmation's install now
-    at: [1018, 620]
-    settle: 30
-
-  # =======================================================================================
-  # 6. UNTIL IT SAYS SO
-  # =======================================================================================
-  #
-  # Completion is TERMINAL, so reading it cannot miss a pane - which is why this reading is
-  # safe where the per-pane ones were not.
-  #
-  # THE HEADING IS NOT RELIABLE, THE SENTENCE IS: `All done.` is a large font tesseract skips,
-  # and the body under it reads cleanly.
-  #
-  # AND IT IS CHECKED IN EVERY LANGUAGE THE WIZARD ACTUALLY COMES UP IN: on the runners it is
-  # English, and on a machine whose egress reports China it is Simplified Chinese - measured,
-  # a completed install there reads `安装成功！` with `CachyOS 已安装在您的电脑上了。` under
-  # it. A completion test that knew only English would throw that disk away at the timeout.
-  # THE INSTALLER'S LAST PAGE, AND NOTHING EARLIER THAN IT.
-  #
-  # MEASURED FROM cachyos-install's OWN RECORDING, at the moment this step reported success:
-  #
-  #	=== the installer finishes
-  #	  saw "安装成功" (1s)          <- ONE SECOND after the step began
-  #	=== stop the machine  stopping with method "kill"
-  #	=== publish the disk  linux-cachyos.qcow2: 0 MiB
-  #
-  # and the frame at that moment shows the installer still at
-  #
-  #	initialize pacman ... ranking mirrors ... 11%
-  #
-  # SO THE MATCH WAS A FALSE POSITIVE. A ONE-WORD ALTERNATIVE - `安装成功`, `现在重启` - is satisfied by
-  # any pane that happens to contain those characters, and this installer's own UI is labelled in
-  # Chinese on a locale where tesseract renders fragments of it. The walk then killed a machine that
-  # had just started copying packages, and the disk it published had no system on it.
-  #
-  # EVERY ALTERNATIVE IS NOW A PHRASE THE FINISHED INSTALLER SAYS AND NO EARLIER PANE DOES. The
-  # Chinese ones are dropped entirely rather than lengthened: this walk pins its own language to
-  # English in an earlier step, so a Chinese completion page is not a page this run can reach, and
-  # keeping a guess about one is how the false positive got in.
-  - name: the installer finishes
-    until_any:
-      - [all, done]
-      - [you, may, now]
-      - [installation, complete]
-      - [reboot, now]
-      - [restart, now]
-      - [todo, listo]
-      - [instalación, completada]
-    region: [0, 0, 1920, 1080]
-    region_at: [1920, 1080]
-    scale: 1
-    timeout: 3600
-    poll: 20
-    keep_alive: true
-
-  # THE DISK IS THE ARTIFACT, AND WITHOUT THIS STEP THERE IS NONE.
-  #
-  # THE WORKFLOW ASKS FOR ONE: each install leg is declared with `"out": "linux-<distro>.qcow2"`, and
-  # `--out` is where a `compress:` WRITES - it is not a filename the engine invents. WITH NO
-  # `compress:` STEP NOTHING WAS WRITTEN, and the leg's `-disk` artifact was 518 bytes:
-  #
-  #	linux-zorin-install-disk   518 bytes
-  #	linux-zorin-vm-disk     10,497,859,093 bytes
-  #
-  # A PASSING INSTALL THAT LEAVES NO DISK is a leg that proves the installer works and produces nothing
-  # for the stage after it. `compress:` flattens the overlay's parent chain into one qcow2 with zstd, so
-  # the file it leaves is the install itself.
-  # THE MACHINE IS STOPPED BEFORE THE DISK IS READ, AND THAT IS WHY THIS STEP EXISTS.
-  #
-  # MEASURED ON zorin-install, WHICH ANSWERED ALL 21 STEPS AND THEN FAILED ON THE LAST ONE:
-  #
-  #	publish the disk: qemu-img convert: exit status 1
-  #	(qemu-img: Could not open '/__w/easyvm/easyvm/work/disk.qcow2': Failed to get shared "write" lock
-  #
-  # THE INSTALL WAS COMPLETE AND THE DISK WAS STILL OPEN. `compress:` READS THE FILE, and qemu holds a
-  # write lock on it until the machine is stopped - so a `compress:` before a `shutdown:` cannot work
-  # however good the install was.
-  #
-  # `kill`, NOT `acpi`, AND THE MEASUREMENT IS WHY.
-  #
-  # MEASURED ON zorin-install, WHICH PASSED ALL 21 STEPS AND THEN PRODUCED A 0 MiB DISK:
-  #
-  #	=== stop the machine
-  #	  stopping with method "acpi"
-  #	  pressing the power button
-  #	  the guest did not power off within 5m0s; killing it - the disk will need a journal replay
-  #	=== publish the disk
-  #	  compressing with zstd
-  #	  linux-zorin.qcow2: 0 MiB
-  #
-  # A LIVE INSTALLER DOES NOT ANSWER THE POWER BUTTON. `acpi` pressed it, the guest ignored it, the
-  # wait expired after five minutes, and the kill that followed raced `qemu-img convert` - which read
-  # a disk qemu was still releasing and wrote ZERO BYTES.
-  #
-  # `kill` IS NOT A COMPROMISE HERE, BECAUSE THE INSTALLER HAS ALREADY FINISHED: the step above waits
-  # for the install to complete, and what follows is a disk with a written system on it. The journal
-  # replay the kill costs is paid on the next boot, which is the stage after this one, and it is
-  # cheaper than five minutes of waiting for a button nothing presses.
-  #
-  # THE WAIT IS SHORTENED TOO: 120 seconds, because a kill does not need the five minutes a graceful
-  # request does - and the boot after this one replays the journal either way.
-  - name: stop the machine
-    shutdown: kill
-    timeout: 120
-
-  - name: publish the disk
-    compress: "{{ out }}"
-
-  - name: stop recording
-    record: false
+- name: start recording
+  record: cachyos-install.mp4
+- name: create the empty disk
+  disk: disk.qcow2
+  disk_gb: 64
+- name: fetch the installer image
+  fetch: linux_iso
+  release: cachyos
+- name: boot the installer
+  boot: true
+  os: linux
+  iso: installer_iso
+  timeout: 1800
+- name: wait for the live desktop
+  desktop: linux
+  timeout: 5400
+  poll: 5
+  keep_alive: true
+- name: let the desktop settle
+  wait: 15
+  keep_alive: true
+- name: open the installer
+  at:
+  - 960
+  - 743
+  repeat:
+  - 2
+  - 0.8
+  settle: 35
+  expect_any:
+  - - welcome
+  - - location
+- name: open the installer (once more, if it did not)
+  unless:
+  - welcome
+  at:
+  - 960
+  - 743
+  repeat:
+  - 2
+  - 0.8
+  settle: 40
+- name: welcome
+  at:
+  - 1352
+  - 747
+  settle: 20
+- name: location
+  at:
+  - 1352
+  - 796
+  settle: 20
+- name: keyboard
+  at:
+  - 1352
+  - 796
+  settle: 22
+- name: bootloader
+  at:
+  - 1352
+  - 796
+  settle: 22
+- name: partitions - erase the disk
+  at:
+  - 465
+  - 367
+  settle: 10
+- name: partitions
+  at:
+  - 1352
+  - 796
+  settle: 20
+- name: the erase confirmation's continue (if it is shown)
+  at:
+  - 1010
+  - 640
+  settle: 3
+- name: desktop
+  at:
+  - 1352
+  - 796
+  settle: 22
+- name: packages
+  at:
+  - 1352
+  - 796
+  settle: 25
+- name: users - full name
+  at:
+  - 516
+  - 348
+  type: '{{ user }}'
+  settle: 2
+- name: users - login name
+  at:
+  - 516
+  - 413
+  type: '{{ user }}'
+  settle: 2
+- name: users - password
+  at:
+  - 516
+  - 546
+  type: '{{ password }}'
+  settle: 2
+- name: users - confirm password
+  at:
+  - 729
+  - 546
+  type: '{{ password }}'
+  settle: 3
+- name: users
+  at:
+  - 1352
+  - 796
+  settle: 25
+- name: summary - install
+  at:
+  - 1365
+  - 902
+  settle: 18
+- name: the install confirmation's install now
+  at:
+  - 1018
+  - 620
+  settle: 30
+- name: the installer finishes
+  until_any:
+  - - all
+    - done
+  - - you
+    - may
+    - now
+  - - installation
+    - complete
+  - - reboot
+    - now
+  - - restart
+    - now
+  - - todo
+    - listo
+  - - instalación
+    - completada
+  region:
+  - 0
+  - 0
+  - 1920
+  - 1080
+  region_at:
+  - 1920
+  - 1080
+  scale: 1
+  timeout: 3600
+  poll: 20
+  keep_alive: true
+- name: stop the machine
+  shutdown: kill
+  timeout: 120
+- name: publish the disk
+  compress: '{{ out }}'
+- name: stop recording
+  record: false

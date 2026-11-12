@@ -1,45 +1,7 @@
-# GhostBSD MATE: gbi's nine panes, as a sequence.
-#
-#     python3 lib/steps.py bsd/ghostbsd/steps/install.yaml --qmp /work/drive.sock.qmp
-#
-# WHAT THIS REPLACES
-#
-# bsd/ghostbsd/install.py's install_to_disk(), and the desktop-icon press in main(). install.py
-# keeps the machine, the OVMF firmware, the loader step, the frames, the recording and the
-# publish.
-#
-# NOTHING IS READ TO DECIDE ANYTHING. Every step is a number and a duration; the screen is read
-# afterwards and the reading goes into the log, where it is useful for a post-mortem and
-# dangerous as a decision.
-#
-# THE WHOLE FLOW WAS MEASURED ON A LIVE SESSION, one frame per pane. The wizard is a fixed-size
-# window at (557,271)..(1360,802) and its footer does not move:
-#
-#     Back (1025,781)   Cancel (1150,781)   Next/Install (1293,781)
-#
-#     Welcome To GhostBSD!      Language                      Next
-#     Keyboard Setup            layout + model                Next
-#     Time Zone Selection       continent + city              Next
-#     Installation Type         Full disk configuration       Next
-#     ZFS Configuration         THE DISK CHECKBOX             Next
-#     Boot Option               FreeBSD UEFI loader only      Next
-#     User Admin Setup          four fields                   Install
-#     Installation in progress  (the installer writes the disk)
-#     (window closes)
-#
-# THE FIRST STEP IS `python:` AND IT HAS TO BE
-#
-# The desktop puts `Install GhostBSD` and `Trash` in EITHER ORDER - measured on two runs of
-# this same image - so a fixed coordinate double-clicks `Trash` half the time and opens Caja
-# instead of the wizard. The instruction is "double-click the installer's ICON", which a
-# coordinate cannot say; steps/panes.py finds it by the teal disc it draws. See that file.
-#
-# AND THIS DRIVER USED TO STOP AFTER THE FIRST PANE. It double-clicked the icon, read
-# `gbi welcome`, and returned True - so every run produced a 0 MiB disk and "succeeded".
-
 name: ghostbsd-mate - the gbi walk
-resolution: [1920, 1080]
-
+resolution:
+- 1920
+- 1080
 vars:
   user:
     from: args.user
@@ -47,217 +9,101 @@ vars:
   password:
     from: args.password
     default: admin
-  # WHERE `compress:` WRITES, AND IT COMES FROM THE WORKFLOW'S `--out`.
-  #
-  # The workflow declares each install leg with `"out": "linux-<distro>.qcow2"` and passes it as
-  # `--out`; a `compress: "{{ out }}"` step names that same file. WITHOUT THE DECLARATION HERE the
-  # variable does not exist and `easyvm check` refuses the file - which is what happened when the step
-  # was first added, and is the vocabulary doing its job.
   out:
     from: args.out
     default: out/distro.qcow2
-
 steps:
-  # THE RECORDING IS PART OF THE VERDICT, NOT A CONVENIENCE.
-  #
-  # A FAILURE THAT SAYS "did not advance: read ..." IS A FEW WORDS OF OCR, and the question
-  # it cannot answer is "what was on screen". A recording can, and it is tens of megabytes -
-  # which is why it is its own artifact rather than travelling with the disk.
-  - name: start recording
-    record: ghostbsd-install.mp4
-    poll: 20
-
-  # THE MACHINE IS STARTED HERE, FROM THE LIVEMEDIA THE CALLER PROVIDES.
-  #
-  # `gbi.yaml` INSTALLS GHOSTBSD; this file is its second half - the nine panes of gbi after the
-  # welcome screen. Separate files because the first is a wizard and this is a fixed pane grid, but
-  # they run against ONE machine, so this file boots the same live media rather than making a disk.
-  #
-  # `boot_disk: from_caller` IS WHAT MAKES THAT TRUE: the caller passes `--boot-disk`, which is the
-  # disk `gbi.yaml` created, and the `iso:` names the medium the wizard runs from. A file that
-  # created a second disk here would be installing onto a different machine.
-  - name: boot the installer
-    boot: true
-    os: bsd
-    timeout: 1800
-
-  # =======================================================================================
-  # 1. THE INSTALLER, FROM THE DESKTOP ICON - FOUND BY ITS OWN PIXELS
-  # =======================================================================================
-  # THE ICON IS FOUND BY ITS TEAL DISC, AND THE FALLBACK IS KEPT BECAUSE IT IS THE RIGHT SHAPE.
-  #
-  # The driver this replaces scans `COLUMN = (30, 160)` between rows 40 and 420 for the disc's teal -
-  # r<110, g>95, b>95, g>r+30, b>r+25 - then groups the matching rows into bands and takes the
-  # SHORTEST band's centre, because the icon's disc is the small one. `at_button:` searches for a
-  # saturated fill in a region and takes the dominant colour's centre, which is the same measurement
-  # with the band-grouping done by colour rather than by row runs.
-  #
-  # `at_fallback: [88, 240]` IS THE MEASURED ROW THIS DRIVER ITSELF FALLS BACK TO (`INSTALL_ICON_ROWS
-  # = (240, 340)`, x fixed at 88). It exists so a frame whose teal does not match - a different
-  # wallpaper, a theme - behaves exactly as the old fixed constant did rather than pressing nothing.
-  #
-  # `double: true` because a desktop icon opens on a double-click.
-  # THE DESKTOP, BEFORE ITS ICON IS PRESSED.
-  #
-  # THIS FILE HAD NO GATE HERE AND EVERY OTHER INSTALL DOES. `desktop:` is the linux/windows/macos
-  # measurement and there is no BSD branch for it - the family would be refused at dispatch - so the
-  # wait has to be spelled differently rather than omitted.
-  #
-  # `until_any:` ON THE INSTALLER'S OWN FIRST PANE, because `boot:` RETURNS WHEN QEMU IS RUNNING,
-  # which is several minutes before a live medium has finished unpacking itself. `at_button:` measures
-  # the frame it is given, so pressing too early does not press the wrong thing - it presses a frame
-  # that has no teal disc in it and falls back to the recorded row, which on an unfinished desktop is
-  # wallpaper.
-  #
-  # AND A FIXED WAIT AFTER IT, because the pane's words can arrive while the icon set is still being
-  # drawn. `keep_alive` is part of both: a live BSD session's screen saver races everything here.
-  - name: wait for the live desktop
-    wait: 45
-    keep_alive: true
-
-  - name: install ghostbsd
-    at_button: [30, 40, 160, 420]
-    at_fallback: [88, 240]
-    double: true
-    settle: 25
-
-  # =======================================================================================
-  # 2. THE SEVEN PANES BEFORE THE DISK IS TOUCHED
-  # =======================================================================================
-  #
-  # English is preselected on the first two; `America/Adak` on the third is the installer's own
-  # default and the requirement is a disk that boots, not a particular region;
-  # `Full disk configuration` is preselected on the fourth.
-  - name: welcome
-    at: [1293, 781]
-    settle: 12
-
-  - name: keyboard setup
-    at: [1293, 781]
-    settle: 12
-
-  - name: time zone selection
-    at: [1293, 781]
-    settle: 12
-
-  - name: installation type
-    at: [1293, 781]
-    settle: 14
-
-  # THE DISK MUST BE TICKED OR `Next` STAYS DISABLED - measured: the button is grey at
-  # 01:25:07 and black at 01:25:20, one click apart.
-  - name: zfs configuration - tick the disk
-    at: [592, 495]
-    settle: 5
-
-  - name: zfs configuration
-    at: [1293, 781]
-    settle: 14
-
-  # `FreeBSD UEFI loader only` is preselected - the right answer on OVMF.
-  - name: boot option
-    at: [1293, 781]
-    settle: 14
-
-  # =======================================================================================
-  # 3. USER ADMIN SETUP. FOUR FIELDS; THE INSTALLER SETS ROOT'S PASSWORD TO THE SAME ONE.
-  # =======================================================================================
-  - name: user admin - real name
-    at: [959, 457]
-    type: "{{ user }}"
-    settle: 2
-
-  - name: user admin - user name
-    at: [959, 503]
-    type: "{{ user }}"
-    settle: 2
-
-  - name: user admin - password
-    at: [959, 595]
-    type: "{{ password }}"
-    settle: 2
-
-  - name: user admin - verify password
-    at: [959, 643]
-    type: "{{ password }}"
-    settle: 3
-
-  # The same footer button, whose label has changed to `Install`.
-  - name: user admin - install
-    at: [1293, 781]
-    settle: 25
-
-  # =======================================================================================
-  # 4. A MEASURED WAIT. THE PROGRESS PANE IS A SLIDESHOW AND A PROGRESS BAR, SO MEASURING
-  #    "IS IT DONE" WOULD BE A DETECTOR - THE DURATION IS THE ANSWER.
-  # =======================================================================================
-  #
-  # MEASURED: from `Install` to the window closing is about 8 minutes on this ISO. THIRTY
-  # MINUTES is that with room for a slower runner.
-  #
-  # THE KEEP-ALIVE CLICK IS PART OF THE WAIT, AND HERE IT MATTERS: MATE BLANKS ITS OWN DISPLAY
-  # WHEN IDLE - the frame goes solid black, which is what a manual session showed after ten
-  # minutes - and a blanked display reads as an empty screen for every later step.
-  #
-  # Unlike a `until`, this step cannot tell slow from stopped, so the empty-disk check behind
-  # it is the verdict: a written system is gigabytes and an unwritten sparse image is
-  # kilobytes.
-  - name: the install runs, as measured
-    wait: 1800
-    keep_alive: true
-
-  # THE DISK IS THE ARTIFACT, AND WITHOUT THIS STEP THERE IS NONE.
-  #
-  # THE WORKFLOW ASKS FOR ONE: each install leg is declared with `"out": "linux-<distro>.qcow2"`, and
-  # `--out` is where a `compress:` WRITES - it is not a filename the engine invents. WITH NO
-  # `compress:` STEP NOTHING WAS WRITTEN, and the leg's `-disk` artifact was 518 bytes:
-  #
-  #	linux-zorin-install-disk   518 bytes
-  #	linux-zorin-vm-disk     10,497,859,093 bytes
-  #
-  # A PASSING INSTALL THAT LEAVES NO DISK is a leg that proves the installer works and produces nothing
-  # for the stage after it. `compress:` flattens the overlay's parent chain into one qcow2 with zstd, so
-  # the file it leaves is the install itself.
-  # THE MACHINE IS STOPPED BEFORE THE DISK IS READ, AND THAT IS WHY THIS STEP EXISTS.
-  #
-  # MEASURED ON zorin-install, WHICH ANSWERED ALL 21 STEPS AND THEN FAILED ON THE LAST ONE:
-  #
-  #	publish the disk: qemu-img convert: exit status 1
-  #	(qemu-img: Could not open '/__w/easyvm/easyvm/work/disk.qcow2': Failed to get shared "write" lock
-  #
-  # THE INSTALL WAS COMPLETE AND THE DISK WAS STILL OPEN. `compress:` READS THE FILE, and qemu holds a
-  # write lock on it until the machine is stopped - so a `compress:` before a `shutdown:` cannot work
-  # however good the install was.
-  #
-  # `kill`, NOT `acpi`, AND THE MEASUREMENT IS WHY.
-  #
-  # MEASURED ON zorin-install, WHICH PASSED ALL 21 STEPS AND THEN PRODUCED A 0 MiB DISK:
-  #
-  #	=== stop the machine
-  #	  stopping with method "acpi"
-  #	  pressing the power button
-  #	  the guest did not power off within 5m0s; killing it - the disk will need a journal replay
-  #	=== publish the disk
-  #	  compressing with zstd
-  #	  linux-zorin.qcow2: 0 MiB
-  #
-  # A LIVE INSTALLER DOES NOT ANSWER THE POWER BUTTON. `acpi` pressed it, the guest ignored it, the
-  # wait expired after five minutes, and the kill that followed raced `qemu-img convert` - which read
-  # a disk qemu was still releasing and wrote ZERO BYTES.
-  #
-  # `kill` IS NOT A COMPROMISE HERE, BECAUSE THE INSTALLER HAS ALREADY FINISHED: the step above waits
-  # for the install to complete, and what follows is a disk with a written system on it. The journal
-  # replay the kill costs is paid on the next boot, which is the stage after this one, and it is
-  # cheaper than five minutes of waiting for a button nothing presses.
-  #
-  # THE WAIT IS SHORTENED TOO: 120 seconds, because a kill does not need the five minutes a graceful
-  # request does - and the boot after this one replays the journal either way.
-  - name: stop the machine
-    shutdown: kill
-    timeout: 120
-
-  - name: publish the disk
-    compress: "{{ out }}"
-
-  - name: stop recording
-    record: false
+- name: start recording
+  record: ghostbsd-install.mp4
+- name: boot the installer
+  boot: true
+  os: bsd
+  timeout: 1800
+- name: wait for the live desktop
+  wait: 45
+  keep_alive: true
+- name: install ghostbsd
+  at_button:
+  - 30
+  - 40
+  - 160
+  - 420
+  at_fallback:
+  - 88
+  - 240
+  double: true
+  settle: 25
+- name: welcome
+  at:
+  - 1293
+  - 781
+  settle: 12
+- name: keyboard setup
+  at:
+  - 1293
+  - 781
+  settle: 12
+- name: time zone selection
+  at:
+  - 1293
+  - 781
+  settle: 12
+- name: installation type
+  at:
+  - 1293
+  - 781
+  settle: 14
+- name: zfs configuration - tick the disk
+  at:
+  - 592
+  - 495
+  settle: 5
+- name: zfs configuration
+  at:
+  - 1293
+  - 781
+  settle: 14
+- name: boot option
+  at:
+  - 1293
+  - 781
+  settle: 14
+- name: user admin - real name
+  at:
+  - 959
+  - 457
+  type: '{{ user }}'
+  settle: 2
+- name: user admin - user name
+  at:
+  - 959
+  - 503
+  type: '{{ user }}'
+  settle: 2
+- name: user admin - password
+  at:
+  - 959
+  - 595
+  type: '{{ password }}'
+  settle: 2
+- name: user admin - verify password
+  at:
+  - 959
+  - 643
+  type: '{{ password }}'
+  settle: 3
+- name: user admin - install
+  at:
+  - 1293
+  - 781
+  settle: 25
+- name: the install runs, as measured
+  wait: 1800
+  keep_alive: true
+- name: stop the machine
+  shutdown: kill
+  timeout: 120
+- name: publish the disk
+  compress: '{{ out }}'
+- name: stop recording
+  record: false
