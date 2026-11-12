@@ -967,3 +967,47 @@ func (e *Executor) doDemoScript(s walk.Step) error {
 	}
 	return notImplemented(s, "demo_script")
 }
+
+// --- the compound action ------------------------------------------------------------------
+//
+// `do:` IS A LIST OF ACTIONS THAT BELONG TO ONE STEP, and it exists for a step whose NAME is the
+// thing being done - "dismiss the overlays macOS puts up on a first login" is three clicks four
+// seconds apart, and splitting it into three named steps would name the clicks rather than the deed.
+//
+// IT IS NOT A LANE OR A PANE. Those are the four-key state machines (`when`/`once`/`end`/`panes:`) for
+// a GUI that has to be answered until it stops asking; this is one step, run once, whose actions
+// happen in order.
+//
+// MEASURED ON macos-ssh, step 10 of 33:
+//
+//	error:   dismiss the overlays macOS puts up on a first login: no implementation for this step's keys
+//
+// The key was declared in the vocabulary and had no dispatcher branch - the exact failure the
+// vocabulary exists to refuse, arriving from the one direction it does not cover: a key that IS
+// declared, IS valid YAML, and does nothing.
+func (e *Executor) doActions(s walk.Step) error {
+	raw, ok := s.Spec["do"].([]any)
+	if !ok || len(raw) == 0 {
+		return fail(s.Name, "`do:` must be a list of actions")
+	}
+	for i, item := range raw {
+		spec, ok := item.(map[string]any)
+		if !ok {
+			return fail(s.Name, "`do:` item %d is not a mapping", i+1)
+		}
+		// EACH ACTION IS A STEP WITH THE PARENT'S NAME AND ITS OWN KEYS, so `at:`, `settle:`, `key:`,
+		// `type:`, `until:` and the rest all work without a second dispatcher.
+		sub := walk.Step{
+			Index: s.Index,
+			Name:  fmt.Sprintf("%s [%d]", s.Name, i+1),
+			Spec:  make(map[string]any, len(spec)+1),
+		}
+		for k, v := range spec {
+			sub.Spec[k] = v
+		}
+		if err := e.runOne(sub); err != nil {
+			return err
+		}
+	}
+	return e.settle(s)
+}

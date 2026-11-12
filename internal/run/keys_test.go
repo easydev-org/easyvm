@@ -181,3 +181,53 @@ func TestRunIsDispatchedBeforeExpect(t *testing.T) {
 			"in the trace to say so")
 	}
 }
+
+// `do:` IS DECLARED AND MUST BE DISPATCHED, BECAUSE A DECLARED KEY WITH NO BRANCH IS A STEP THAT DOES
+// NOTHING AND REPORTS SUCCESS.
+//
+// MEASURED ON macos-ssh, STEP 10 OF 33:
+//
+//	error:   dismiss the overlays macOS puts up on a first login: no implementation for this step's keys
+//
+// THE VOCABULARY CAUGHT IT, which is what it is for - but only at RUNTIME, on a guest, thirty minutes
+// into a stage. `TestEveryExecutableKeyHasADispatchBranch` should have caught it before the push, and
+// the reason it did not is that `do` is a LIST key whose value is a set of actions rather than an
+// action of its own, so it looked like a container.
+//
+// IT IS AN ACTION: the step exists to perform those clicks. `doActions` runs each as a step.
+func TestDoRunsItsActions(t *testing.T) {
+	body, err := os.ReadFile("actions.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(body)
+	i := strings.Index(src, "func (e *Executor) doActions(")
+	if i < 0 {
+		t.Fatal("no doActions - a `do:` step has nothing to run it")
+	}
+	rest := src[i:]
+	if end := strings.Index(rest[1:], "\nfunc "); end > 0 {
+		rest = rest[:end+1]
+	}
+	code := stripCommentsForTest(rest)
+	// EACH ACTION GOES BACK THROUGH THE DISPATCHER, so `at:`, `key:`, `until:` and the rest all work.
+	if !strings.Contains(code, "e.runOne(sub)") {
+		t.Fatal("`doActions` does not dispatch its actions, so each one would need its own copy of " +
+			"every action's logic")
+	}
+	// AND THE SUB-STEP CARRIES THE PARENT'S NAME, so a failure says which step it was part of.
+	if !strings.Contains(code, "s.Name") {
+		t.Fatal("`doActions` loses the parent's name, so a failure would name an anonymous sub-step")
+	}
+
+	// AND THE DISPATCHER REACHES IT.
+	ex, err := os.ReadFile("executor.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exSrc := stripCommentsForTest(string(ex))
+	if !strings.Contains(exSrc, `case hasKey(s, "do"):`) {
+		t.Fatal("the dispatcher has no `do` branch, so the step reports `no implementation for this " +
+			"step's keys` - measured on macos-ssh")
+	}
+}

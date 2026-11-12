@@ -215,6 +215,8 @@ func (e *Executor) runOne(s walk.Step) error {
 		return e.doDiskSettle(s)
 	case hasKey(s, "host_log"):
 		return e.doHostLog(s)
+	case hasKey(s, "do"):
+		return e.doActions(s)
 	case hasKey(s, "at_button"):
 		return e.doAtButton(s)
 	case s.Has("at_window"):

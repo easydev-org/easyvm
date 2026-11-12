@@ -231,7 +231,20 @@ func (d *Driver) mountOnce(client *guest.Client, family, dir string) error {
 		//
 		// `-f 0666 -d 0777` makes the mount usable by the unprivileged user whose files these are: an
 		// SMB mount is owned by root by default.
-		cmd = `printf '%s\n' ` + shellQuote(d.pass) +
+		//
+		// AND THE MOUNT POINT IS MADE AND UNMOUNTED FIRST, BECAUSE A RETRY ON A STALE MOUNT FAILS
+		// WITH A MESSAGE ABOUT THE DIRECTORY RATHER THAN ABOUT THE SHARE:
+		//
+		//	mount_smbfs: mount error: /Users/vmuser/shared: File exists
+		//
+		// MEASURED ON macos-vm-configure, step 11 of 23, on the SECOND attempt of the retry loop: the
+		// first attempt had created the directory and started a mount that did not complete, so the
+		// second saw a path that already existed and reported it as the error. THE POSIX BRANCH HAS
+		// HAD `mkdir -p` AND A TOLERATED `umount` SINCE THE REWRITE; the macOS branch never got them,
+		// because I wrote the Windows and POSIX branches and added macOS afterwards from a message.
+		cmd = `mkdir -p ~/shared; ` +
+			`printf '%s\n' ` + shellQuote(d.pass) + ` | sudo -S -p '' umount ~/shared 2>/dev/null; ` +
+			`printf '%s\n' ` + shellQuote(d.pass) +
 			` | sudo -S -p '' mount_smbfs -f 0666 -d 0777 '//guest:@172.30.0.1/shared' ~/shared`
 	default:
 		// `mount -t cifs` WITH THE CREDENTIALS ON THE COMMAND LINE, because a credentials FILE would

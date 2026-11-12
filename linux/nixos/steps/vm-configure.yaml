@@ -147,19 +147,6 @@ steps:
   #
   # The first version was `sed -i "$ d"` - delete the last line, then append the declaration and a
   # `}`. THAT IS ONLY CORRECT IF configuration.nix ENDS WITH `}`, and NixOS's own default does not:
-  # its last lines are the closing brace followed by blank lines and the comment block the
-  # installer's `nixos-generate-config` leaves behind. Deleting "the last line" then removed a
-  # COMMENT and left TWO closing braces, so the file no longer parsed - and `nixos-rebuild` refused
-  # it with a syntax error that this stage reported only as `the command exited 1` at step 11.
-  #
-  # A PROGRAM THAT UNDERSTANDS THE FILE IS THE RIGHT TOOL FOR EDITING IT. The declaration is written
-  # INSIDE the attribute set - immediately before the LAST line that is exactly `}` - and any
-  # previous `networking.hostName` line is removed first, so a second run is idempotent.
-  #
-  # AND THE EDIT DOES NOT ASSUME THE CLOSING BRACE IS THE LAST LINE.
-  #
-  # The first version was `sed -i "$ d"` - delete the last line, then append the declaration and a
-  # `}`. THAT IS ONLY CORRECT IF configuration.nix ENDS WITH `}`, and NixOS's own default does not:
   # `nixos-generate-config` leaves the closing brace followed by blank lines and a comment block, so
   # "the last line" is a COMMENT. Deleting it left TWO closing braces, the file stopped parsing, and
   # `nixos-rebuild` refused it - which this stage reported only as `the command exited 1` at step 11
@@ -236,11 +223,38 @@ steps:
   # same rebuild is what makes the agent permanent rather than installed-until-reboot, so ONE
   # step declares both and one rebuild delivers them - a rebuild is minutes, and two of them
   # would leave the disk between them.
+  #
+  # AND THIS EDIT HAS THE SAME SHAPE AS THE HOSTNAME ONE, WITH THE SAME FIX - BECAUSE IT HAD THE SAME BUG.
+  #
+  # `sed -i "$ d"` DELETES THE LAST LINE AND ASSUMES IT IS `}`, and NixOS's default configuration.nix
+  # ends with blank lines and a comment block. The result was a file with TWO closing braces and a
+  # duplicate attribute, which `nixos-rebuild` refuses:
+  #
+  #	error: attribute 'environment.systemPackages' already defined at
+  #	       /etc/nixos/configuration.nix:138:3
+  #
+  # I FIXED THE HOSTNAME EDIT AND NOT THIS ONE, so the same defect survived in the second place it was
+  # written. Both now insert before the LAST LINE THAT IS EXACTLY `}`, found by scanning backwards, and
+  # both drop a previous declaration first so a second run is idempotent.
   - name: declare the guest agent and the cifs client
     ssh: |
-      printf '%s\n' '{{ password }}' | sudo -S -p '' sh -c '
-        sed -i "$ d" /etc/nixos/configuration.nix
-        printf "  environment.systemPackages = [ pkgs.cifs-utils ];\n  services.qemuGuest.enable = true;\n}\n" >> /etc/nixos/configuration.nix'
+      printf '%s\n' '{{ password }}' | sudo -S -p '' awk '
+        { line[NR] = $0 }
+        $0 ~ /environment\.systemPackages/ { skip[NR] = 1 }
+        $0 ~ /services\.qemuGuest\.enable/ { skip[NR] = 1 }
+        $0 == "}" { closing = NR }
+        END {
+          if (closing == 0) { print "no closing brace in configuration.nix" > "/dev/stderr"; exit 1 }
+          for (i = 1; i <= NR; i++) {
+            if (i == closing) {
+              printf "  environment.systemPackages = [ pkgs.cifs-utils ];\n"
+              printf "  services.qemuGuest.enable = true;\n"
+            }
+            if (!skip[i]) print line[i]
+          }
+        }' /etc/nixos/configuration.nix > /tmp/configuration.nix.new
+      printf '%s\n' '{{ password }}' | sudo -S -p '' mv /tmp/configuration.nix.new /etc/nixos/configuration.nix
+      printf '%s\n' '{{ password }}' | sudo -S -p '' grep -n -e environment.systemPackages -e services.qemuGuest /etc/nixos/configuration.nix
     timeout: 300
 
   - name: rebuild
