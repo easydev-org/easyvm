@@ -262,7 +262,25 @@ func (d *Driver) mountOnce(client *guest.Client, family, dir string) error {
 	for _, line := range headTail(res.Combined(), 12, 4) {
 		d.logf("    " + line)
 	}
-	return err
+	// A NON-ZERO EXIT IS THE COMMAND SAYING IT FAILED, AND `err` DOES NOT CARRY IT.
+	//
+	// `client.Run` RETURNS `err` ONLY FOR A TRANSPORT OR SESSION FAILURE; an ordinary non-zero exit is
+	// in `res.Status` and `err` is nil. THIS FUNCTION RETURNED `err` ALONE, so a `net use` that exited
+	// 1 was retried thirty times and then reported as a successful mount:
+	//
+	//	share: net use "%USERPROFILE%\shared" \\172.30.0.1\shared /user:guest "" /persistent:no -> 1
+	//	share: ... the windows guest does not list //172.30.0.1/shared in its mount table after a
+	//	       successful mount; the table is: There are no entries in the list.
+	//
+	// "A SUCCESSFUL MOUNT" OVER A TABLE WITH NO ENTRIES - the message was the guard doing its job on a
+	// retry loop that had never once seen a failure.
+	if err != nil {
+		return err
+	}
+	if res.Status != 0 {
+		return fmt.Errorf("exit %d: %s", res.Status, firstLineOf(res.Combined()))
+	}
+	return nil
 }
 
 // oneLine flattens a command for a log line without hiding that it was shortened.

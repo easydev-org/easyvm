@@ -548,3 +548,42 @@ func TestTheShareProofReadsWithTheGuestsOwnCommand(t *testing.T) {
 		t.Fatal("the POSIX proof no longer reads with `cat`")
 	}
 }
+
+// A NON-ZERO EXIT IS THE COMMAND SAYING IT FAILED, AND THE RETRY LOOP NEVER SAW IT.
+//
+// MEASURED ON windows-vm-configure, STEP 13 OF 20:
+//
+//	share: net use "%USERPROFILE%\shared" \\172.30.0.1\shared /user:guest "" /persistent:no -> 1
+//	share: ... the windows guest does not list //172.30.0.1/shared in its mount table after a
+//	       successful mount; the table is: There are no entries in the list.
+//
+// "A SUCCESSFUL MOUNT" OVER A TABLE WITH NO ENTRIES. `client.Run` RETURNS `err` ONLY FOR A TRANSPORT
+// OR SESSION FAILURE - an ordinary non-zero exit is in `res.Status` and `err` is nil - and `mountOnce`
+// returned `err` alone. So the thirty-attempt retry loop ran thirty failing `net use` calls and called
+// each one a success.
+//
+// The mount table check is what surfaced it, which is the argument for keeping a check that can be
+// fooled by nothing.
+func TestTheMountRetriesOnANonZeroExit(t *testing.T) {
+	body, err := os.ReadFile("share.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := stripGoComments(string(body))
+	i := strings.Index(src, "func (d *Driver) mountOnce(")
+	if i < 0 {
+		t.Fatal("no mountOnce")
+	}
+	rest := src[i:]
+	if end := strings.Index(rest[1:], "\nfunc "); end > 0 {
+		rest = rest[:end+1]
+	}
+	if !strings.Contains(rest, "res.Status != 0") {
+		t.Fatal("`mountOnce` does not check `res.Status`, so a command that exited non-zero is " +
+			"reported as a successful mount - measured on Windows as thirty failed `net use` calls " +
+			"described as one success")
+	}
+	if !strings.Contains(rest, "return fmt.Errorf") {
+		t.Fatal("`mountOnce` never returns an error of its own, so nothing can retry")
+	}
+}

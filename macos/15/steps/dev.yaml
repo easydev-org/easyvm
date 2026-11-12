@@ -200,9 +200,23 @@ steps:
   #
   # So `scp:` now compares the local stat, the write count AND the remote stat, and fails here. A
   # that size check lives in the transport, every copy in every file gets it.
+  # THE NAME IS THE ONE `fetch: xcode` WRITES, NOT A SHORTER NAME THAT READS BETTER.
+  #
+  # MEASURED ON macos-dev, step 7 of 19:
+  #
+  #	copy xcode into the guest: no file to copy at /__w/easyvm/easyvm/work/Xcode.xip ...
+  #	stat /__w/easyvm/easyvm/work/Xcode.xip: no such file or directory
+  #
+  # `fetch: xcode` PINDS A SPECIFIC RELEASE and writes it under that release's own filename -
+  # `Xcode_26.3_Universal.xip` - because that name is part of the identity: the sha1 in `internal/
+  # asset/xcode.go` is Apple's hash OF THAT FILE. A shorter name here means the copy names a file
+  # nothing produced, and the pin becomes decoration.
+  #
+  # IT IS COPIED TO `/tmp/Xcode.xip` IN THE GUEST, which is fine: the guest does not care what the
+  # archive is called, and `/tmp/Xcode.xip` is what every later step of this file names.
   - name: copy xcode into the guest
     scp:
-      - "{{ work }}/Xcode.xip"
+      - "{{ work }}/Xcode_26.3_Universal.xip"
       - "/tmp/Xcode.xip"
 
   # EXPANDING AND SELECTING IS ONE SCRIPT BECAUSE IT IS ONE OPERATION. `xip -x` prints nothing
