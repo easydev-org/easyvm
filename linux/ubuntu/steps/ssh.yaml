@@ -48,6 +48,20 @@ steps:
   - 6
   - 3
   settle: 12
+- name: the Ubuntu Pro page is up, when this build shows one
+  until_any:
+  - - ubuntu
+    - pro
+  timeout: 120
+  poll: 3
+- name: skip Ubuntu Pro
+  at:
+  - 1471
+  - 180
+  repeat:
+  - 3
+  - 2
+  settle: 6
 - name: the wizard is finished
   until_any:
   - - software
