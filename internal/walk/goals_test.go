@@ -981,3 +981,66 @@ func stripHashComments(body string) string {
 	}
 	return strings.Join(out, "\n")
 }
+
+// A DROP-IN IS A FILE NOTHING READS UNLESS THE MAIN CONFIG INCLUDES THE DIRECTORY.
+//
+// MEASURED ON endeavour-ssh, STEP 11 OF 13, WITH THE DROP-IN WRITTEN AND `sshd` RESTARTED:
+//
+//	wait for sshd: the port is open but no shell answers: ssh: handshake failed: ssh: unable to
+//	authenticate, attempted methods [none password], no supported methods remain
+//
+// THE DROP-IN WAS THERE AND CORRECT. Arch's own /etc/ssh/sshd_config has NO
+// `Include /etc/ssh/sshd_config.d/*.conf`, so /etc/ssh/sshd_config.d/99-vm.conf was a file the daemon
+// never opened - and it therefore authenticated exactly as it had before.
+//
+// SO THE LINE IS SET IN THE MAIN FILE TOO, by REPLACING the commented `#PasswordAuthentication yes` the
+// package ships rather than appending a second line beside it - `^#?\s*PasswordAuthentication` matches
+// both forms, so the result is one uncommented line.
+func TestThePasswordSettingReachesTheMainConfig(t *testing.T) {
+	root := filepath.Join("..", "..")
+	files, err := filepath.Glob(filepath.Join(root, "linux", "*", "steps", "ssh.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) == 0 {
+		t.Skip("no Linux ssh walkthroughs here")
+	}
+	var checked int
+	for _, path := range files {
+		rel, _ := filepath.Rel(root, path)
+		doc, err := Load(path, nil)
+		if err != nil {
+			continue
+		}
+		for _, s := range doc.Steps {
+			body := s.Get("run")
+			if !strings.Contains(body, "PasswordAuthentication") {
+				continue
+			}
+			checked++
+			// NIXOS DECLARES ITS SSHD IN configuration.nix AND HAS NO /etc/ssh/sshd_config TO EDIT -
+			// the file is generated from the store at activation. Its step is correct as written.
+			if strings.Contains(body, "services.openssh") {
+				continue
+			}
+			// THE MAIN FILE IS WRITTEN, not only the drop-in directory.
+			if !strings.Contains(body, "/etc/ssh/sshd_config ") &&
+				!strings.Contains(body, "/etc/ssh/sshd_config\n") &&
+				!strings.Contains(body, "/etc/ssh/sshd_config\\") {
+				t.Errorf("%s: %q writes the setting but not /etc/ssh/sshd_config itself, and an image "+
+					"whose main config has no `Include` reads only that file", rel, s.Name)
+				continue
+			}
+			// AND IT REPLACES THE COMMENTED LINE, or the file ends up with two settings and the
+			// FIRST one wins in sshd's own reading order - the package's, which says no.
+			if !strings.Contains(body, "sed -i") {
+				t.Errorf("%s: %q appends without replacing the commented `#PasswordAuthentication` "+
+					"line, so an image that has one ends up with both", rel, s.Name)
+			}
+		}
+	}
+	if checked == 0 {
+		t.Skip("no password-authentication steps here")
+	}
+	t.Logf("checked %d password step(s)", checked)
+}

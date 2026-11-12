@@ -240,8 +240,20 @@ steps:
       echo {{ password }} | sudo -S sh -c '
         mkdir -p /etc/ssh/sshd_config.d
         printf "PasswordAuthentication yes\n" > /etc/ssh/sshd_config.d/99-vm.conf
+        # THE MAIN FILE TOO, REPLACING THE COMMENTED LINE THE PACKAGE SHIPS.
+        #
+        # Arch's /etc/ssh/sshd_config has NO `Include /etc/ssh/sshd_config.d/*.conf`, so the drop-in
+        # above is a file nothing reads. MEASURED ON endeavour-ssh, step 11 of 13, with the drop-in
+        # written and sshd restarted:
+        #
+        #     unable to authenticate, attempted methods [none password], no supported methods remain
+        #
+        # `^#?\s*PasswordAuthentication` MATCHES THE COMMENTED FORM, so this REPLACES it rather than
+        # adding a second line beside it - and the `grep -q ... ||` append below is the fallback for
+        # an image whose file has no such line at all.
+        sed -i "s/^#\?\s*PasswordAuthentication.*/PasswordAuthentication yes/" /etc/ssh/sshd_config
         grep -q "^PasswordAuthentication yes" /etc/ssh/sshd_config || \
-          printf "\nPasswordAuthentication yes\n" >> /etc/ssh/sshd_config
+          printf "PasswordAuthentication yes\n" >> /etc/ssh/sshd_config
       ' 2>&1 | tail -3
     terminal_wait: 0
     settle: 3

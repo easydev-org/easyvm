@@ -793,5 +793,27 @@ func (e *Executor) doRun(s walk.Step) error {
 			time.Sleep(between)
 		}
 	}
-	return e.settle(s)
+	if err := e.settle(s); err != nil {
+		return err
+	}
+
+	// A `run:` MAY CARRY ITS OWN `expect:`/`expect_any:`, AND THE DISPATCHER MUST NOT SWALLOW THE TYPING.
+	//
+	// MEASURED ON manjaro-ssh, step 9 of 23:
+	//
+	//	=== install openssh
+	//	status: failed step 9/23 "install openssh"
+	//	error:   install openssh: did not advance: wanted "pacman" or "sudo", read "_ io"
+	//
+	// `install openssh` HAD NO `running N line(s)` LINE AT ALL - the trace this project added precisely
+	// so a silent `run:` could be told from an empty one. THE CAUSE IS THE DISPATCH ORDER: `expect_any`
+	// is checked BEFORE `run` in the executor's switch, so a step with both went to `doExpectAny` and
+	// THE TYPEWRITER NEVER RAN. It read the screen, found nothing, and reported a screen that had not
+	// advanced - which is exactly what a step that did nothing would report.
+	//
+	// The check is the SAME ONE `doExpectAny` makes, run after the typing it is about.
+	if s.Has("expect") || s.Has("expect_any") {
+		return e.doExpectAny(s)
+	}
+	return nil
 }

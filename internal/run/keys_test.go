@@ -5,6 +5,7 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -94,3 +95,52 @@ func unquote(s string) string {
 }
 
 var _ = os.Getenv
+
+// A `run:` THAT ALSO CARRIES `expect_any:` MUST STILL TYPE THE COMMAND.
+//
+// MEASURED ON manjaro-ssh, step 9 of 23 - and the evidence is the ABSENCE of a log line:
+//
+//	=== install openssh
+//	status: failed step 9/23 "install openssh"
+//	error:   install openssh: did not advance: wanted "pacman" or "sudo", read "_ io"
+//
+// NO `running N line(s), M character(s)` LINE, WHICH `doRun` ALWAYS PRINTS. The step has both keys, and
+// the executor's switch tested `expect_any` BEFORE `run`, so it went to `doExpectAny` and THE TYPEWRITER
+// NEVER RAN. The step read the screen, found nothing, and reported "did not advance" - precisely what a
+// step that did nothing would report.
+//
+// THE FIX IS NOT AN ORDERING IN THE SWITCH, because a step's keys are not a priority list - they are a
+// description of ONE action plus its check. `doRun` performs the check itself, after the typing it is
+// about, so no ordering can separate them again.
+func TestARunStepStillTypesWhenItAlsoExpects(t *testing.T) {
+	body, err := os.ReadFile("text.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(body)
+	i := strings.Index(src, "func (e *Executor) doRun(")
+	if i < 0 {
+		t.Fatal("no doRun")
+	}
+	rest := src[i:]
+	if end := strings.Index(rest[1:], "\nfunc "); end > 0 {
+		rest = rest[:end+1]
+	}
+
+	// THE TYPING IS THE ACTION AND MUST NOT BE CONDITIONAL ON ANYTHING BUT THE BODY.
+	if !strings.Contains(rest, "e.Driver.Type(line, gap)") {
+		t.Fatal("`doRun` no longer types the command")
+	}
+	// AND THE CHECK, WHEN THE STEP HAS ONE, RUNS AFTER IT - not instead of it.
+	if !strings.Contains(rest, `s.Has("expect")`) || !strings.Contains(rest, "e.doExpectAny(s)") {
+		t.Fatal("`doRun` ignores a step's `expect:`/`expect_any:`, so the check would have to be " +
+			"dispatched separately - and the dispatcher checks `expect_any` BEFORE `run`, which is " +
+			"how the typing was skipped entirely")
+	}
+	// AND THE CHECK IS AFTER THE LAST KEYSTROKE, not before the first.
+	typeAt := strings.Index(rest, "e.Driver.Type(line, gap)")
+	expectAt := strings.Index(rest, "e.doExpectAny(s)")
+	if expectAt < typeAt {
+		t.Fatal("`doRun` checks the screen before typing")
+	}
+}
