@@ -142,12 +142,52 @@ steps:
   # cifs client are declared in the step below this one, and one rebuild delivers all three -
   # which is why `networking.hostName` is written here and the rebuild is there: the two have to
   # land together or the disk carries a name its configuration disagrees with.
+  #
+  # AND THE EDIT DOES NOT ASSUME THE CLOSING BRACE IS THE LAST LINE.
+  #
+  # The first version was `sed -i "$ d"` - delete the last line, then append the declaration and a
+  # `}`. THAT IS ONLY CORRECT IF configuration.nix ENDS WITH `}`, and NixOS's own default does not:
+  # its last lines are the closing brace followed by blank lines and the comment block the
+  # installer's `nixos-generate-config` leaves behind. Deleting "the last line" then removed a
+  # COMMENT and left TWO closing braces, so the file no longer parsed - and `nixos-rebuild` refused
+  # it with a syntax error that this stage reported only as `the command exited 1` at step 11.
+  #
+  # A PROGRAM THAT UNDERSTANDS THE FILE IS THE RIGHT TOOL FOR EDITING IT. The declaration is written
+  # INSIDE the attribute set - immediately before the LAST line that is exactly `}` - and any
+  # previous `networking.hostName` line is removed first, so a second run is idempotent.
+  #
+  # AND THE EDIT DOES NOT ASSUME THE CLOSING BRACE IS THE LAST LINE.
+  #
+  # The first version was `sed -i "$ d"` - delete the last line, then append the declaration and a
+  # `}`. THAT IS ONLY CORRECT IF configuration.nix ENDS WITH `}`, and NixOS's own default does not:
+  # `nixos-generate-config` leaves the closing brace followed by blank lines and a comment block, so
+  # "the last line" is a COMMENT. Deleting it left TWO closing braces, the file stopped parsing, and
+  # `nixos-rebuild` refused it - which this stage reported only as `the command exited 1` at step 11
+  # of 22, with no clue which of the three checks had failed.
+  #
+  # `awk` RATHER THAN `python3`, because python3 is NOT part of a NixOS minimal installation and this
+  # step must not depend on a package the guest may not have. awk is in the base system everywhere
+  # this project runs.
+  #
+  # THE DECLARATION GOES IMMEDIATELY BEFORE THE LAST LINE THAT IS EXACTLY `}` - found by scanning
+  # backwards, not by assuming the file's shape - and a previous `networking.hostName` line is dropped
+  # first, so a second run is idempotent.
   - name: declare the machine's name
     ssh: |
-      printf '%s\n' '{{ password }}' | sudo -S -p '' sh -c '
-        sed -i "/networking.hostName/d" /etc/nixos/configuration.nix
-        sed -i "\$ d" /etc/nixos/configuration.nix
-        printf "  networking.hostName = \"%s\";\n}\n" "{{ hostname }}" >> /etc/nixos/configuration.nix'
+      printf '%s\n' '{{ password }}' | sudo -S -p '' awk -v name='{{ hostname }}' '
+        # PASS ONE: remember every line, and where the closing brace is.
+        { line[NR] = $0 }
+        $0 ~ /networking\.hostName/ { skip[NR] = 1 }
+        $0 == "}" { closing = NR }
+        END {
+          if (closing == 0) { print "no closing brace in configuration.nix" > "/dev/stderr"; exit 1 }
+          for (i = 1; i <= NR; i++) {
+            if (i == closing) printf "  networking.hostName = \"%s\";\n", name
+            if (!skip[i]) print line[i]
+          }
+        }' /etc/nixos/configuration.nix > /tmp/configuration.nix.new
+      printf '%s\n' '{{ password }}' | sudo -S -p '' mv /tmp/configuration.nix.new /etc/nixos/configuration.nix
+      printf '%s\n' '{{ password }}' | sudo -S -p '' grep -n 'networking.hostName' /etc/nixos/configuration.nix
     timeout: 300
 
   # THE PROOF IS THE VALUE, READ BACK FROM THE SYSTEM THAT HOLDS IT. A `hostnamectl` that
@@ -231,12 +271,25 @@ steps:
   # `--static` matching is also what rules out `--transient`, the shortcut the error message
   # suggests: a transient name answers in `hostname` and never reaches `/etc/hostname`, so it would
   # pass a kernel check and fail this one.
+  #
+  # AND THE PROOF PRINTS EVERY FACT IT JUDGES, BEFORE IT JUDGES. `set -e` with a bare `test` reports
+  # `the command exited 1` and nothing else - measured on nixos-vm, where the step failed at step 11 of
+  # 22 and the log said exactly that:
+  #
+  #	error:   prove the name: the command exited 1
+  #
+  # WHICH OF THE THREE THINGS IS WRONG - the static name, the kernel's name, or the declaration in
+  # configuration.nix - IS THE WHOLE QUESTION, and the answer was thrown away by the exit status. Each is
+  # printed first and the judgement is the LAST line, so a failure carries its own evidence.
   - name: prove the name
     ssh: |
-      set -e
       echo "static:   $(hostnamectl --static)"
       echo "kernel:   $(hostname)"
-      echo "declared: $(grep -c 'networking.hostName.*{{ hostname }}' /etc/nixos/configuration.nix) line(s)"
+      echo "declared: $(grep -c 'networking.hostName' /etc/nixos/configuration.nix || true) line(s)"
+      grep -n 'networking.hostName' /etc/nixos/configuration.nix || echo "no networking.hostName line"
+      echo "--- the tail of configuration.nix ---"
+      tail -5 /etc/nixos/configuration.nix
+      echo "--- the verdict ---"
       test "$(hostnamectl --static)" = "{{ hostname }}"
     timeout: 60
 

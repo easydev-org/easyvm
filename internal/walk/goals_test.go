@@ -856,3 +856,56 @@ func TestAnInstallerIsWaitedForTheWayItAppears(t *testing.T) {
 	}
 	t.Logf("checked %d installer wait(s)", checked)
 }
+
+// A FILE EDIT MUST NOT ASSUME THE LAST LINE IS THE CLOSING BRACE.
+//
+// MEASURED ON nixos-vm, STEP 11 OF 22:
+//
+//	error:   prove the name: the command exited 1
+//
+// THE CAUSE WAS ONE STEP EARLIER, in `declare the machine's name`:
+//
+//	sed -i "/networking.hostName/d" /etc/nixos/configuration.nix
+//	sed -i "\$ d"                     /etc/nixos/configuration.nix
+//	printf "  networking.hostName = \"%s\";\n}\n" ... >> /etc/nixos/configuration.nix
+//
+// `$ d` DELETES THE LAST LINE AND ASSUMES IT IS `}`. NixOS's own default configuration.nix ends with
+// the brace followed by blank lines and the comment block `nixos-generate-config` leaves, so the line
+// deleted was a COMMENT and the file ended up with TWO closing braces - a file that no longer parses,
+// which `nixos-rebuild` refused with a syntax error. The step after it then reported a bare
+// `exited 1`.
+//
+// AND `python3` WOULD HAVE BEEN THE WRONG REPLACEMENT: it is not part of a NixOS minimal
+// installation, so a fix written in Python trades a parse error for `command not found`. `awk` is in
+// the base system.
+func TestTheNixOSConfigurationEditDoesNotAssumeItsShape(t *testing.T) {
+	root := filepath.Join("..", "..")
+	path := filepath.Join(root, "linux", "nixos", "steps", "vm-configure.yaml")
+	doc, err := Load(path, nil)
+	if err != nil {
+		t.Skipf("no nixos vm-configure here (%v)", err)
+	}
+	var edit string
+	for _, s := range doc.Steps {
+		if strings.Contains(s.Name, "declare the machine") {
+			edit = s.Get("ssh")
+			break
+		}
+	}
+	if edit == "" {
+		t.Fatal("nixos has no step that declares the machine's name")
+	}
+	// THE SHAPE ASSUMPTION ITSELF.
+	if strings.Contains(edit, "sed -i \"$ d\"") || strings.Contains(edit, `sed -i "\$ d"`) {
+		t.Fatal("the step deletes configuration.nix's LAST LINE, which is a comment on a default " +
+			"NixOS install - the result is two closing braces and a file nixos-rebuild refuses")
+	}
+	// AND NO PYTHON, because a NixOS minimal installation has none.
+	if strings.Contains(edit, "python3") {
+		t.Fatal("the step runs python3, which a NixOS minimal installation does not carry")
+	}
+	// AND IT FINDS THE BRACE RATHER THAN ASSUMING ITS POSITION.
+	if !strings.Contains(edit, "awk") || !strings.Contains(edit, `$0 == "}"`) {
+		t.Fatal("the step does not locate the closing brace by content")
+	}
+}
