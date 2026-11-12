@@ -397,6 +397,27 @@ jobs:
             ls -l "$GITHUB_WORKSPACE/work/" || true
             exit 0
           fi
+
+          # A DISK THAT WAS NEVER WRITTEN IS NOT A DISK, AND `-s` CANNOT TELL THE DIFFERENCE.
+          #
+          # `qemu-img create` writes a 197,632-BYTE qcow2 - a header and nothing else - so a walk whose
+          # every click landed on the wrong pane still produces a file that `-s` accepts. MEASURED ON
+          # linux-zorin: the install leg reported success, `oras push` published it, and `windows11`
+          # / `linux-opensuse-tumbleweed` sat beside a `linux-zorin` of 0 MiB in the package. The next
+          # stage then pulled a disk with no system on it and failed somewhere unrelated.
+          #
+          # THE FLOOR IS 512 MiB: the smallest real install here - ghostbsd at 2.7 GiB, popos at 2.5 -
+          # is several times that, and a bare qcow2 header is three orders of magnitude below it.
+          size=$(stat -c %s "$out")
+          if [ "$size" -lt $((512 * 1024 * 1024)) ]; then
+            echo "::error::$out is $size bytes, below the 512 MiB floor for an installed system."
+            echo "::error::This is a qcow2 header with nothing written to it - the walk's clicks did"
+            echo "::error::not reach the installer's disk. Publishing it would put a disk with no"
+            echo "::error::system behind a tag the next stage pulls."
+            ls -l "$GITHUB_WORKSPACE/work/" || true
+            exit 1
+          fi
+          echo "  publishing $out: $(( size >> 20 )) MiB"
           # `matrix.publish` IS THE TAG, AND `matrix.name` IS ONLY THE JOB'S NAME.
           #
           # THEY WERE THE SAME THING AND THEY MUST NOT BE. Each leg pulls the disk the PREVIOUS stage

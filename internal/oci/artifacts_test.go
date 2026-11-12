@@ -305,3 +305,53 @@ func TestEveryOrasPushLogsInFirst(t *testing.T) {
 	}
 	t.Logf("checked %d pushing step(s)", pushed)
 }
+
+// A QCOW2 HEADER IS NOT AN INSTALLED SYSTEM, AND `-s` CANNOT TELL.
+//
+// `qemu-img create` writes 197,632 bytes - a header and nothing else - so a walk whose every click
+// landed on the wrong pane still produces a file the old check accepted. MEASURED ON linux-zorin: the
+// install leg reported success, `oras push` published it, and the package held a `linux-zorin` of
+// 0 MiB beside a real `windows11`. The next stage pulled a disk with no system on it.
+//
+// THE PUBLISH STEP NOW REFUSES ANYTHING UNDER 512 MiB and names the reason, because the alternative is
+// a tag that looks like a disk and is not one.
+func TestThePublishStepRefusesAnEmptyQcow2(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "stage.yml"))
+	if err != nil {
+		t.Skipf("no stage.yml here (%v)", err)
+	}
+	var doc struct {
+		Jobs map[string]struct {
+			Steps []struct {
+				Name string `yaml:"name"`
+				Run  string `yaml:"run"`
+			} `yaml:"steps"`
+		} `yaml:"jobs"`
+	}
+	if err := yaml.Unmarshal(body, &doc); err != nil {
+		t.Fatalf("stage.yml does not parse: %v", err)
+	}
+	var pub string
+	for _, job := range doc.Jobs {
+		for _, st := range job.Steps {
+			if st.Name == "publish the disk" {
+				pub = st.Run
+			}
+		}
+	}
+	if pub == "" {
+		t.Fatal("stage.yml has no `publish the disk` step")
+	}
+	if !strings.Contains(pub, "512 * 1024 * 1024") {
+		t.Error("the publish step has no size floor, so a 197,632-byte qcow2 header - what " +
+			"`qemu-img create` writes and a walk that clicked nothing leaves behind - is published " +
+			"as if it were an installed system")
+	}
+	if !strings.Contains(pub, "below the 512 MiB floor") {
+		t.Error("the publish step refuses a small disk without saying why; the sentence is what " +
+			"tells the next reader this is a walk problem rather than a storage one")
+	}
+	if !strings.Contains(pub, `size=$(stat -c %s "$out")`) {
+		t.Error("the publish step does not measure the output; `-s` only tells zero from non-zero")
+	}
+}
