@@ -253,10 +253,35 @@ jobs:
           fi
           pgrep -a qemu-system-x86_64 || true
 
+      # THE RECORDING IS ITS OWN ARTIFACT, AND IT IS THE FIRST ONE TO OPEN AFTER A FAILURE.
+      #
+      # MEASURED: `linux-cachyos-vm` was ONE artifact of 7,362,380,205 bytes - the recording, the
+      # daemon log, the console log AND the 128 GiB qcow2 in one zip. GITHUB'S ARTIFACT API CANNOT
+      # EXTRACT A SINGLE MEMBER, so watching the video meant downloading the disk. That is the
+      # opposite of what a post-mortem needs: the video is tens of megabytes and answers "what was on
+      # screen", while the disk is the file nobody looks at until a leg passes.
+      #
+      # THREE ARTIFACTS, AND EACH HAS ONE REASON TO EXIST:
+      #
+      #   <leg>-video   the recording                      open it first, always
+      #   <leg>-logs    daemon.log and console.log          the guest's own words
+      #   <leg>-disk    the qcow2                           only a PASSING leg's disk matters
+      #
+      # THE DISK IS NOT HOW A DOWNSTREAM STAGE GETS ITS INPUT: that is `easyvm push`/`pull` through
+      # ghcr, which is why this artifact is archive rather than transport.
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: ${{ matrix.name }}
+          name: ${{ matrix.name }}-video
+          path: |
+            work/*.mp4
+          if-no-files-found: warn
+          retention-days: 7
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ${{ matrix.name }}-logs
           path: |
             work/daemon.log
             # THE GUEST'S OWN SERIAL CONSOLE, WHICH IS THE ONLY RECORD OF WHAT THE FIRMWARE DID.
@@ -267,7 +292,14 @@ jobs:
             # away. The step's failure said `drop=+0.0 ... on a 1920x1080 frame`, which is a black
             # screen and no reason.
             work/console.log
-            work/*.mp4
+          if-no-files-found: warn
+          retention-days: 7
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ${{ matrix.name }}-disk
+          path: |
             work/*.qcow2
           if-no-files-found: warn
           retention-days: 7

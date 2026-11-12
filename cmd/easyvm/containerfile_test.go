@@ -401,3 +401,65 @@ func TestEveryWorkflowThatPublishesDeclaresConcurrency(t *testing.T) {
 	}
 	t.Logf("checked %d push-triggered workflow(s)", checked)
 }
+
+// THE RECORDING MUST NOT SHARE AN ARTIFACT WITH THE DISK, BECAUSE THE ARTIFACT API CANNOT EXTRACT ONE
+// MEMBER AND THE DISK IS GIGABYTES.
+//
+// MEASURED: `linux-cachyos-vm` WAS ONE ARTIFACT OF 7,362,380,205 BYTES - the recording, the daemon log,
+// the console log AND the 128 GiB qcow2 in a single zip. Watching a sixty-second video meant downloading
+// a seven-gigabyte disk, through a proxy, and the download was still running when the question it was
+// meant to answer had already been guessed at twice.
+//
+// THE VIDEO IS THE FILE THAT ANSWERS "what was on screen when it failed". It is tens of megabytes. The
+// disk is the file nobody looks at until a leg PASSES, and the disk is not even how a downstream stage
+// gets its input - that is `easyvm push`/`pull` through ghcr.
+//
+// SO THEY ARE SEPARATE ARTIFACTS AND THE TEST REFUSES THE MIXED FORM BY READING THE UPLOAD STEPS.
+func TestTheVideoIsNotBundledWithTheDisk(t *testing.T) {
+	body, err := os.ReadFile("../../.github/workflows/stage.yml")
+	if err != nil {
+		t.Skipf("no stage.yml here (%v)", err)
+	}
+	src := string(body)
+
+	// EVERY upload-artifact STEP IS ONE BLOCK: name, path, and whatever else.
+	var blocks []string
+	for _, part := range strings.Split(src, "uses: actions/upload-artifact@v4")[1:] {
+		end := strings.Index(part, "retention-days:")
+		if end < 0 {
+			continue
+		}
+		blocks = append(blocks, part[:end+len("retention-days:")])
+	}
+	if len(blocks) == 0 {
+		t.Fatal("no upload-artifact steps found; this test would pass on a workflow that uploads nothing")
+	}
+
+	var sawVideo, sawDisk bool
+	for _, b := range blocks {
+		hasMP4 := strings.Contains(b, "*.mp4")
+		hasQcow := strings.Contains(b, "*.qcow2")
+		if hasMP4 && hasQcow {
+			t.Fatal("one artifact carries BOTH `*.mp4` and `*.qcow2`. The artifact API cannot extract a " +
+				"single member, so reading the video costs the whole disk - measured at 7.4 GiB for one " +
+				"leg, which is the opposite of what a failure needs")
+		}
+		if hasMP4 {
+			sawVideo = true
+			// AND THE VIDEO'S OWN ARTIFACT CARRIES NOTHING ELSE BIG - a log is fine, a disk is not.
+			if !strings.Contains(b, "-video") {
+				t.Errorf("the artifact holding the recording is not named `-video`; a person looking " +
+					"for it after a failure should not have to guess which of three zips it is")
+			}
+		}
+		if hasQcow {
+			sawDisk = true
+		}
+	}
+	if !sawVideo {
+		t.Fatal("no artifact carries `*.mp4` at all, so a failing leg leaves no recording")
+	}
+	if !sawDisk {
+		t.Fatal("no artifact carries `*.qcow2`, so a passing leg's disk is thrown away")
+	}
+}
