@@ -587,3 +587,41 @@ func TestTheMountRetriesOnANonZeroExit(t *testing.T) {
 		t.Fatal("`mountOnce` never returns an error of its own, so nothing can retry")
 	}
 }
+
+// THE macOS MOUNT TABLE SPELLS THE SHARE WITH A COLON AFTER THE USER, AND THE CHECK DID NOT.
+//
+// MEASURED ON macos-vm-configure, STEP 11 OF 25 - AND THE MOUNT HAD SUCCEEDED:
+//
+//	//guest:@172.30.0.1/shared on /Users/vmuser/shared (smbfs, noowners)
+//	... the macos guest does not list //172.30.0.1/shared in its mount table after a successful mount
+//
+// THE TABLE IS PRINTED IN THE ERROR MESSAGE AND CONTRADICTS IT. `mount_smbfs` writes the user with a
+// TRAILING COLON because the colon separates user from password in its own URL syntax - the same
+// `user:` the command line uses to mean "this user, no password" - and the check asked for
+// `//guest@...` without it.
+//
+// A GUARD WHOSE OWN OUTPUT REFUTES IT IS THE WORST KIND, because the message reads as a broken mount
+// and the table above it says the mount is there.
+func TestTheMacOSMountCheckMatchesTheRealSpelling(t *testing.T) {
+	body, err := os.ReadFile("share.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := stripGoComments(string(body))
+	i := strings.Index(src, "func mountsShare(")
+	if i < 0 {
+		t.Fatal("no mountsShare")
+	}
+	rest := src[i:]
+	if end := strings.Index(rest[1:], "\nfunc "); end > 0 {
+		rest = rest[:end+1]
+	}
+	// THE COLON IS PART OF THE SPELLING.
+	if !strings.Contains(rest, "//guest:@172.30.0.1/shared") {
+		t.Fatal("the macOS mount check does not look for `//guest:@172.30.0.1/shared`, which is what " +
+			"`mount` prints - measured on macos-vm-configure as a working mount reported missing")
+	}
+	if strings.Contains(rest, `"//guest@172.30.0.1/shared"`) {
+		t.Fatal("the check still looks for the form without the colon")
+	}
+}

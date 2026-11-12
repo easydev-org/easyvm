@@ -323,7 +323,17 @@ func mountsShare(family, table string) bool {
 		return strings.Contains(strings.ToLower(table), `\\172.30.0.1\shared`) ||
 			strings.Contains(table, "172.30.0.1")
 	case "macos":
-		return strings.Contains(table, "//guest@172.30.0.1/shared")
+		// THE COLON AFTER THE USER IS PART OF THE SPELLING, AND OMITTING IT IS WHY THIS CHECK
+		// REPORTED A WORKING MOUNT AS MISSING.
+		//
+		// MEASURED ON macos-vm-configure, step 11 of 25 - the mount HAD SUCCEEDED:
+		//
+		//	//guest:@172.30.0.1/shared on /Users/vmuser/shared (smbfs, noowners)
+		//
+		// and the check asked for `//guest@172.30.0.1/shared`. `mount_smbfs` writes the user with a
+		// TRAILING COLON because the colon separates user from password in its own URL syntax - the
+		// same `user:` the command line uses to mean "this user, no password".
+		return strings.Contains(table, "//guest:@172.30.0.1/shared")
 	default:
 		return strings.Contains(table, "//172.30.0.1/shared")
 	}
