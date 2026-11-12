@@ -265,7 +265,21 @@ func run(name string, args ...string) (string, error) {
 // The message is still the only way to tell the cases apart - exit 2 is all `ip` says otherwise -
 // so the text is what is matched, from the place the text actually is.
 func alreadyExists(output string) bool {
-	for _, needle := range []string{"File exists", "already exists", "RTNETLINK answers: File exists"} {
+	// `Address already assigned` IS THE ONE A SECOND RUN HITS AND THE ONE THAT WAS MISSING.
+	//
+	// `ip addr add` on a bridge that already carries the address fails with
+	// `Error: ipv4: Address already assigned.` - a different sentence from the `File exists` the
+	// bridge creation produces - so a run after a failed one refused to start with
+	//
+	//	boot the disk: boot: ip address add 172.30.0.1/24 dev qemubr0:
+	//	exit status 2 (Error: ipv4: Address already assigned.)
+	//
+	// Measured here: the guest had already been configured by the previous attempt, and the retry
+	// could not get past its own leftovers. Idempotence is the whole point of the check.
+	for _, needle := range []string{
+		"File exists", "already exists", "RTNETLINK answers: File exists",
+		"Address already assigned", "Cannot assign requested address",
+	} {
 		if strings.Contains(output, needle) {
 			return true
 		}

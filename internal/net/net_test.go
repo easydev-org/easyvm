@@ -319,3 +319,27 @@ func TestDownRemovesTheJumpsBeforeTheChain(t *testing.T) {
 		}
 	}
 }
+
+// A SECOND RUN MUST NOT BE REFUSED BY THE FIRST ONE'S LEFTOVERS.
+//
+// MEASURED HERE, after a boot step failed partway:
+//
+//	boot the disk: boot: ip address add 172.30.0.1/24 dev qemubr0:
+//	exit status 2 (Error: ipv4: Address already assigned.)
+//
+// `alreadyExists` KNEW `File exists` - the sentence `ip link add` uses for a bridge that is already
+// there - AND NOT THE ONE `ip addr add` USES. So the retry could not get past its own leftovers, and
+// the only way forward was to delete the bridge by hand. Idempotence is the whole reason that check
+// exists.
+func TestTheAddressAlreadyAssignedMessageCountsAsAlreadyThere(t *testing.T) {
+	for _, msg := range []string{
+		"Error: ipv4: Address already assigned.",
+		"RTNETLINK answers: File exists",
+		"Cannot find device \"qemubr0\"",
+	} {
+		want := msg != "Cannot find device \"qemubr0\""
+		if got := alreadyExists(msg); got != want {
+			t.Errorf("alreadyExists(%q) = %v, want %v", msg, got, want)
+		}
+	}
+}
