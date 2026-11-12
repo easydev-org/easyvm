@@ -150,6 +150,13 @@ var Keys = map[string]Key{
 	"compress": {Name: "compress", Kind: KindString,
 		Summary: "flatten the overlay into this artifact; the path is relative to the repository " +
 			"root, not to the work directory"},
+	"snapshot": {Name: "snapshot", Kind: KindString,
+		Summary: "write the running machine's whole state - memory, devices and UEFI variables - to " +
+			"this file. It is a migration stream, NOT `savevm`: a UEFI guest's variable store is a " +
+			"pflash device and `savevm` refuses every writable device that cannot hold a snapshot"},
+	"boot_from": {Name: "boot_from", Kind: KindString,
+		Summary: "start the machine from a `snapshot:` file instead of running a boot loader. The " +
+			"cpu, machine type and device set must match the ones the snapshot was taken with"},
 
 	// --- the disk ----------------------------------------------------------------------
 	"disk": {Name: "disk", Kind: KindMapping,

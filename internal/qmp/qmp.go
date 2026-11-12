@@ -486,7 +486,11 @@ func (c *Conn) MigrateToFile(path string, timeout time.Duration) error {
 			case raw.MigrationStatusCompleted:
 				return nil
 			case raw.MigrationStatusFailed, raw.MigrationStatusCancelled:
-				return fmt.Errorf("the migration %s: %s", info.Status, info.ErrorDesc)
+				desc := ""
+				if info.ErrorDesc != nil {
+					desc = *info.ErrorDesc
+				}
+				return fmt.Errorf("the migration %s: %s", *info.Status, desc)
 			}
 		}
 		if time.Now().After(deadline) {

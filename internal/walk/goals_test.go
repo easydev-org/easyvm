@@ -950,17 +950,34 @@ func TestTheShareProofSetsThePathItNeeds(t *testing.T) {
 			// line it used to begin with, so a check over raw text finds a `mount` ABOVE the PATH line
 			// that in fact sits below it - the same trap three other tests in this project hit.
 			code := stripHashComments(body)
-			// THE PATH IS EXTENDED BEFORE `mount` IS CALLED, not after.
+			// `mount` MUST BE NAMED IN A WAY THAT FINDS IT, AND THERE ARE TWO WAYS.
+			//
+			// THE FIRST WAS `PATH="$PATH:/sbin:..."`, AND IT IS WRONG ON ANY GUEST WHOSE LOGIN SHELL IS
+			// NOT POSIX - measured on cachyos, where fish answers
+			//
+			//	Unsupported use of '='. In fish, please use 'set PATH ...'
+			//
+			// and the whole script exits 127. THE SECOND IS `/sbin/mount` BY PATH, which works in every
+			// shell because it needs no variable at all.
+			hasAbsolute := strings.Contains(code, "/sbin/mount")
 			pathAt := strings.Index(code, `PATH="$PATH:/sbin`)
 			mountAt := strings.Index(code, "mount |")
-			if pathAt < 0 {
-				t.Errorf("%s: %q calls `mount` without extending PATH, and `mount` is in /sbin which "+
-					"a non-interactive ssh command does not have - the step reports 127, \"command "+
-					"not found\", with no output at all", rel, s.Name)
-				continue
-			}
-			if mountAt >= 0 && pathAt > mountAt {
-				t.Errorf("%s: %q sets PATH after it calls `mount`, which is too late", rel, s.Name)
+			if !hasAbsolute {
+				if pathAt < 0 {
+					t.Errorf("%s: %q calls `mount` without extending PATH AND without naming "+
+						"`/sbin/mount`, so a guest whose PATH lacks /sbin reports 127, \"command not "+
+						"found\", with no output at all", rel, s.Name)
+					continue
+				}
+				// THE VARIABLE FORM MUST COME FIRST, and it must not be the `VAR=value` spelling that
+				// fish refuses.
+				if mountAt >= 0 && pathAt > mountAt {
+					t.Errorf("%s: %q sets PATH after it calls `mount`, which is too late", rel, s.Name)
+				}
+				if strings.Contains(code, `PATH="$PATH:`) && !strings.Contains(code, "export PATH=") {
+					t.Errorf("%s: %q assigns PATH with `VAR=value`, which fish refuses as a syntax "+
+						"error - and cachyos logs in with fish", rel, s.Name)
+				}
 			}
 		}
 	}

@@ -9,7 +9,7 @@ package run
 func ExecutableKeys() []string {
 	return []string{
 		// acted on by runOne's switch
-		"boot", "shutdown", "reboot",
+		"boot", "boot_from", "shutdown", "reboot",
 		"disk",
 		"record", "compress", "snapshot",
 		"require_ssh", "ssh", "scp", "script", "write", "fetch",

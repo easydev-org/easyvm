@@ -30,6 +30,22 @@ func (e *Executor) doBoot(s walk.Step) error {
 		return fail(s.Name, "a boot step must name `os:` (windows, linux or macos)")
 	}
 
+	// `boot_from:` IS A RESUME, AND IT IS A SEPARATE KEY FROM `boot:` ON PURPOSE.
+	//
+	// A step that says `boot: true` asks for a boot loader to run; one that says `boot_from:` asks for
+	// a machine whose memory is already decided. They produce the same running guest by different
+	// means, and a file that meant one and got the other would take minutes to notice - the guest
+	// boots happily from the wrong state and the failure appears as "my data is missing".
+	resumeFrom := s.Get("boot_from")
+	if resumeFrom != "" && !filepath.IsAbs(resumeFrom) {
+		resumeFrom = filepath.Join(e.Work, resumeFrom)
+	}
+	if resumeFrom != "" {
+		if _, err := os.Stat(resumeFrom); err != nil {
+			return fail(s.Name, "no snapshot at %s: %v. A `boot_from:` names a file an earlier "+
+				"`snapshot:` wrote", resumeFrom, err)
+		}
+	}
 	spec := BootSpec{
 		OS:       osName,
 		Disk:     e.bootDisk(),
@@ -37,6 +53,7 @@ func (e *Executor) doBoot(s walk.Step) error {
 		AnswerCD: e.assetPath(s.Get("answer_cd")),
 		DriverCD: e.assetPath(s.Get("driver_cd")),
 		Recovery: e.assetPath(s.Get("recovery")),
+		Incoming: resumeFrom,
 	}
 	// THE OPENCORE FILES ARE NEEDED BY EVERY MACOS BOOT, AND ONLY SOME OF THEM ATTACH THE
 	// RECOVERY IMAGE. They are built from it - Apple's APFS driver comes out of that image - but

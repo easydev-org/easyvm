@@ -560,3 +560,67 @@ func stripCommentsForTest(src string) string {
 	}
 	return string(out)
 }
+
+// A SNAPSHOT IS A MIGRATION AND NOT `savevm`, AND THE GUEST IS WHY.
+//
+// `savevm` writes the machine state INTO a block device and requires every writable one to support
+// internal snapshots. Every guest here boots UEFI, and UEFI's variable store is a pflash device - a
+// firmware chip, not a qcow2 - so it refuses:
+//
+//	savevm s1  ->  Error: Device 'pflash1' is writable but does not support snapshots
+//
+// A migration stream is a file of its own and asks nothing of the devices. MEASURED on Linux, Windows
+// and macOS guests; the macOS one additionally needs `tsc-frequency=` on the cpu or the invtsc blocker
+// refuses the migration before it starts.
+func TestASnapshotIsAMigrationNotSavevm(t *testing.T) {
+	body, err := os.ReadFile("../qmp/qmp.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(body)
+	if !strings.Contains(src, "func (c *Conn) MigrateToFile(") {
+		t.Fatal("there is no migration-to-file primitive, so a snapshot has nowhere to go")
+	}
+	// AND IT WAITS, because `migrate` returns as soon as it starts and a caller that returned early
+	// would let the next step delete a half-written file.
+	if !strings.Contains(src, "QueryMigrate()") {
+		t.Fatal("the migration is started and never waited for; `migrate` answers immediately")
+	}
+	// AND THE STATE FILE IS REMOVED FIRST: qemu appends to an existing one rather than truncating it.
+	if !strings.Contains(src, "os.Remove(path)") {
+		t.Fatal("an existing state file is not removed before writing, and qemu appends to it - a " +
+			"second snapshot of a smaller guest would carry the first one's tail")
+	}
+	// AND IT REFUSES `savevm`, so nobody reintroduces it on the belief that it would work.
+	if strings.Contains(src, "savevm") && strings.Contains(src, `raw.Savevm(`) {
+		t.Fatal("`savevm` is used, and it cannot work on a UEFI guest")
+	}
+}
+
+// `snapshot:` AND `boot_from:` ARE TWO KEYS BECAUSE THEY ANSWER TWO QUESTIONS.
+//
+// `boot: true` asks for a boot loader; `boot_from:` asks for a machine whose memory is already
+// decided. A file that meant one and got the other takes minutes to notice - the guest boots happily
+// from the wrong state and the failure reads as "my data is missing".
+func TestSnapshotAndBootFromAreBothDispatched(t *testing.T) {
+	body, err := os.ReadFile("executor.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(body)
+	for _, key := range []string{`s.Has("snapshot")`, `s.Has("boot_from")`} {
+		if !strings.Contains(src, key) {
+			t.Fatalf("%s has no dispatch branch, so the step reports success and does nothing", key)
+		}
+	}
+	// AND A MISSING SNAPSHOT IS REFUSED BY NAME rather than handed to qemu, whose message names a
+	// path and not the step that was supposed to produce it.
+	actions, err := os.ReadFile("actions.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(actions), "no snapshot at %s") {
+		t.Fatal("`boot_from:` does not check that the file exists, so a typo becomes qemu's " +
+			"`-incoming` error")
+	}
+}

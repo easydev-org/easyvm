@@ -518,6 +518,20 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 	}
 	args = append(args, boot.FirmwareArgs(ovmfCode, ovmfVars)...)
 
+	// A RESUME LOADS INSTEAD OF BOOTING, and `-incoming` is what says so.
+	//
+	// IT GOES LAST BECAUSE IT IS NOT A DEVICE - qemu reads the whole machine first and then loads the
+	// state into it, so the device set must already be described. That is also why the arguments
+	// before this line must match the ones the snapshot was taken with: a different cpu, a different
+	// machine type or a different device set is refused with
+	//
+	//	load of migration failed: Unknown section or instance 'apic' 2
+	//
+	// which names a section rather than the argument that differed.
+	if boot.Incoming != "" {
+		args = append(args, "-incoming", "file:"+boot.Incoming)
+	}
+
 	// THE NETWORK BEFORE THE MACHINE, because qemu opens the tap itself: a tap that does not exist
 	// is `qemu: could not configure /dev/net/tun`, which reads as a qemu problem.
 	//

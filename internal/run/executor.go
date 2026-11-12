@@ -159,7 +159,9 @@ func hasKey(s walk.Step, key string) bool {
 
 func (e *Executor) runOne(s walk.Step) error {
 	switch {
-	case s.Has("boot"):
+	case s.Has("boot"), s.Has("boot_from"):
+		// BOTH START A MACHINE; ONLY THE STARTING STATE DIFFERS. `doBoot` reads `boot_from:` and
+		// passes it as the migration stream, so the two keys were never two implementations.
 		return e.doBoot(s)
 	case s.Has("shutdown"):
 		return e.doShutdown(s)
