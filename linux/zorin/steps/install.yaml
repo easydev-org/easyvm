@@ -86,22 +86,28 @@ steps:
   # AND THE BUDGET IS THE INSTALL'S, NOT A GUI'S: a live medium unpacks itself from a
   # multi-gigabyte ISO before its first screen exists, and the reference implementation
   # gives this 5400 seconds rather than guessing a smaller number.
-  - name: wait for the installer's first screen
-    until_any:
-      - [zorin]
-      - [install]
+  # THE DESKTOP, BECAUSE THIS IS A DESKTOP IMAGE AND THE PANES BELOW WERE MEASURED ON IT.
+  #
+  # `ubuntu` USED TO RESOLVE TO `iso-ubuntu`, WHICH IS THE *SERVER* LIVE IMAGE (2,792 MiB): its GRUB
+  # entry reads "Try or Install Ubuntu Server" and its installer takes over the whole screen with no
+  # panel, so `desktop: linux` could never pass and neither could the coodinate panes that follow.
+  #
+  # `ubuntu: iso-ubuntu-desktop` IS 6,182 MiB - Desktop 26.04.1 exactly - and it boots to a live
+  # desktop with a panel, an install launcher, and the Ubiquity-style panes these files click.
+  #
+  # THE SAME CORRECTION APPLIES TO FOUR MORE, and the SIZES are what say so rather than a guess:
+  #
+  #	nixos     iso-nixos 1,665 MiB          -> iso-nixos-graphical 3,708   (minimal has NO desktop)
+  #	popos     iso-popos 3,753 MiB          -> iso-popos-desktop   2,568
+  #	manjaro   iso-manjaro 4,969 MiB        -> iso-manjaro-kde     5,278
+  #	zorin     iso-zorin 3,728 MiB          -> iso-zorin-core      3,612
+  #
+  # `keep_alive` IS PART OF THE WAIT: it can run for ninety minutes and a live session's idle timer
+  # puts a lock screen up well before that, after which every word on the screen is the lock screen's.
+  - name: wait for the live desktop
+    desktop: linux
     timeout: 5400
     poll: 5
-    # THE SESSION IS KEPT AWAKE, AND THAT IS NOT A REFINEMENT.
-    #
-    # This wait can run for ninety minutes - a live medium unpacks itself from a multi-gigabyte ISO
-    # and an installer copies a system - and the live session's idle timer puts a LOCK SCREEN up
-    # well before that. The reference implementation says the same thing in the same place:
-    #
-    #   THE KEEP-ALIVE CLICK IS PART OF THE WAIT - a real click, not a pointer move, because the
-    #   session's idle timer is what puts the lock screen up and it does not count synthetic
-    #   motion. The click lands on the progress page, where there is no control to disturb.
-    #
     keep_alive: true
 
   # =======================================================================================

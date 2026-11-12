@@ -99,22 +99,19 @@ steps:
   # AND THE BUDGET IS THE INSTALL'S, NOT A GUI'S: a live medium unpacks itself from a
   # multi-gigabyte ISO before its first screen exists, and the reference implementation
   # gives this 5400 seconds rather than guessing a smaller number.
-  - name: wait for the installer's first screen
-    until_any:
-      - [mx]
-      - [linux]
+  # THE DESKTOP, BECAUSE EVERY IMAGE HERE IS A DESKTOP IMAGE AND THE PANES BELOW ARE MEASURED ON IT.
+  #
+  # `desktop: linux` MEASURES A PANEL - a strip of colour along an edge that an installer does not
+  # draw - so it answers "is a live session up". That is the question: the next step clicks or
+  # double-clicks something ON that session, and a session that has not drawn has nothing to click.
+  #
+  # `keep_alive` IS PART OF THE WAIT, not a refinement: it can run for ninety minutes and a live
+  # session's idle timer puts a lock screen up well before that, after which every word on the screen
+  # is the lock screen's and nothing below can match.
+  - name: wait for the live desktop
+    desktop: linux
     timeout: 5400
     poll: 5
-    # THE SESSION IS KEPT AWAKE, AND THAT IS NOT A REFINEMENT.
-    #
-    # This wait can run for ninety minutes - a live medium unpacks itself from a multi-gigabyte ISO
-    # and an installer copies a system - and the live session's idle timer puts a LOCK SCREEN up
-    # well before that. The reference implementation says the same thing in the same place:
-    #
-    #   THE KEEP-ALIVE CLICK IS PART OF THE WAIT - a real click, not a pointer move, because the
-    #   session's idle timer is what puts the lock screen up and it does not count synthetic
-    #   motion. The click lands on the progress page, where there is no control to disturb.
-    #
     keep_alive: true
 
   # =======================================================================================

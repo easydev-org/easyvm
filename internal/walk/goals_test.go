@@ -799,70 +799,56 @@ func TestAnInstallerIsWaitedForTheWayItAppears(t *testing.T) {
 		t.Skip("no Linux install walkthroughs here")
 	}
 
-	// THE INSTALLERS THAT ARE DESKTOP ICONS, named because it is a fact about each distribution's live
-	// session rather than something derivable from the file.
-	iconBased := map[string]bool{
-		"opensuse-tumbleweed": true, // YaST is launched from the desktop
-		"cachyos":             true,
-		"manjaro":             true,
-	}
-
 	var checked int
 	for _, path := range files {
 		rel, _ := filepath.Rel(root, path)
-		distro := filepath.Base(filepath.Dir(filepath.Dir(path)))
 		doc, err := Load(path, nil)
 		if err != nil {
 			continue
 		}
-		// FIND THE WAIT, AND WHAT THE STEP AFTER IT DOES.
 		waitAt := -1
 		for i, s := range doc.Steps {
-			if strings.Contains(strings.ToLower(s.Name), "wait for the") &&
-				(strings.Contains(strings.ToLower(s.Name), "desktop") ||
-					strings.Contains(strings.ToLower(s.Name), "installer")) {
+			name := strings.ToLower(s.Name)
+			if strings.Contains(name, "wait for the") &&
+				(strings.Contains(name, "desktop") || strings.Contains(name, "installer")) {
 				waitAt = i
 				break
 			}
 		}
 		if waitAt < 0 {
-			t.Errorf("%s has no step that waits for its installer to appear", rel)
+			t.Errorf("%s has no step that waits for its live session to draw", rel)
 			continue
 		}
 		checked++
 		wait := doc.Steps[waitAt]
-		hasText := wait.Has("until") || wait.Has("until_any")
-		hasDesktop := wait.Get("desktop") != ""
 
-		if iconBased[distro] {
-			// AN ICON-BASED INSTALLER NEEDS THE DESKTOP, because the next step double-clicks a launcher
-			// and a launcher does not exist until the session has drawn.
-			if !hasDesktop {
-				t.Errorf("%s: %s waits for text, but its installer is a launcher on the desktop - "+
-					"the next step double-clicks one and a session that has not drawn has none", rel,
-					wait.Name)
-			}
-			continue
-		}
-		// EVERY OTHER INSTALLER TAKES OVER THE SCREEN, so text is the only thing that appears.
-		if hasDesktop {
-			t.Errorf("%s: %s uses `desktop: %s`, which measures a PANEL. This installer is a "+
-				"full-screen console UI with no panel, so the gate cannot pass however long it waits - "+
-				"measured on ubuntu as fifteen minutes of drop=+0.0 against a booted installer",
-				rel, wait.Name, wait.Get("desktop"))
-		}
-		if !hasText {
-			t.Errorf("%s: %s has neither `desktop:` nor `until_any:`, so it is not a wait at all",
-				rel, wait.Name)
+		// A PANEL, NOT A WORD. Every image here is a DESKTOP image and the step after this one clicks
+		// something on that desktop, so the question is "is a live session up" - which is what a panel
+		// answers and what a word does not.
+		//
+		// THIS WAS WRITTEN THE OTHER WAY FOR FIVE FILES WHEN `iso-ubuntu` TURNED OUT TO BE THE SERVER
+		// IMAGE (2,792 MiB, "Try or Install Ubuntu Server", an installer with no panel). THE IMAGES ARE
+		// DESKTOP ONES NOW - `iso-ubuntu-desktop` is 6,182 MiB, Desktop 26.04.1 exactly - so the panel
+		// is the honest measurement again, and the same correction applied to nixos (minimal has no
+		// desktop at all), popos, manjaro and zorin.
+		if wait.Get("desktop") != "linux" {
+			t.Errorf("%s: %s waits on %q rather than `desktop: linux`. These are desktop images and "+
+				"the next step clicks a control on the session, so the wait must ask whether a session "+
+				"is up", rel, wait.Name, wait.Get("desktop"))
 		}
 		// AND THE SESSION IS KEPT AWAKE. This wait can run for ninety minutes, and a live session's
-		// idle timer puts a LOCK SCREEN up well before that - after which every word on the screen is
-		// the lock screen's and the wait can never succeed. The reference implementation makes the
-		// same point: "a real click, not a pointer move, because the session's idle timer is what
-		// puts the lock screen up and it does not count synthetic motion".
+		// idle timer puts a lock screen up well before that - after which nothing below can match.
+		// The reference implementation says the same: "a real click, not a pointer move, because the
+		// session's idle timer is what puts the lock screen up".
 		if !wait.Has("keep_alive") {
 			t.Errorf("%s: %s does not set `keep_alive: true`, and this wait runs long enough for "+
 				"the live session to lock its screen", rel, wait.Name)
+		}
+		// AND THE BUDGET IS THE INSTALL'S. A live medium unpacks itself from a multi-gigabyte ISO
+		// before its desktop exists; a fifteen-minute number was a guess that was wrong four times.
+		if got := wait.Get("timeout"); got != "5400" {
+			t.Errorf("%s: %s waits %q seconds; a live medium unpacks itself before its desktop "+
+				"exists and the reference budget is 5400", rel, wait.Name, got)
 		}
 	}
 	if checked == 0 {

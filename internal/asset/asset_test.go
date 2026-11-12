@@ -20,17 +20,28 @@ import (
 // THESE WERE VERIFIED AGAINST THE REGISTRY, which is the only way to know a name rather than infer one.
 // The test pins them so a rename in the packaging is a failure here rather than a 404 on a leg.
 func TestTheLinuxISOTagsThatAreNotTheDistributionName(t *testing.T) {
+	//
+	// FIVE OF THESE ARE THE DESKTOP IMAGE RATHER THAN THE OBVIOUS TAG, AND THE SIZES ARE THE PROOF:
+	//
+	//	ubuntu  iso-ubuntu 2,792 MiB IS THE *SERVER* LIVE IMAGE - its GRUB entry reads "Try or
+	//	        Install Ubuntu Server" and its installer has no panel, so `desktop: linux` could
+	//	        never pass. `iso-ubuntu-desktop` is 6,182 MiB, Desktop 26.04.1 exactly.
+	//	nixos   iso-nixos 1,665 MiB IS MINIMAL and carries no desktop at all;
+	//	        `iso-nixos-graphical` is 3,708.
+	//	popos   3,753 against 2,568 - different images, and the panes are the desktop one's.
+	//	manjaro 4,969 against 5,278 - the reference's entry is `manjaro-kde`.
+	//	zorin   3,728 against 3,612 - the reference's entry is `zorin-core`.
 	cases := map[string]string{
-		"ubuntu":              "iso-ubuntu",
+		"ubuntu":              "iso-ubuntu-desktop",
 		"kubuntu":             "iso-kubuntu",
 		"fedora-workstation":  "iso-fedora-workstation",
 		"mint":                "iso-mint",
 		"cachyos":             "iso-cachyos",
-		"manjaro":             "iso-manjaro",
-		"zorin":               "iso-zorin",
+		"manjaro":             "iso-manjaro-kde",
+		"zorin":               "iso-zorin-core",
 		"mx":                  "iso-mx",
-		"popos":               "iso-popos",
-		"nixos":               "iso-nixos",
+		"popos":               "iso-popos-desktop",
+		"nixos":               "iso-nixos-graphical",
 		"opensuse-tumbleweed": "iso-opensuse-tumbleweed-kde",
 		"endeavour":           "iso-endeavouros",
 		"ghostbsd":            "iso-ghostbsd-mate",

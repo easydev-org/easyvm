@@ -366,6 +366,36 @@ var linuxISOAliases = map[string]string{
 	"opensuse-tumbleweed": "opensuse-tumbleweed-kde",
 	"endeavour":           "endeavouros",
 	"ghostbsd":            "ghostbsd-mate",
+	// `ubuntu` MEANS THE DESKTOP IMAGE, AND THE TAG SAYS SO BECAUSE PUBLISHING BOTH UNDER ONE NAME IS
+	// NOT POSSIBLE. The registry carries `iso-ubuntu-desktop` (6,482,409,472 bytes - Desktop 26.04.1
+	// exactly) and used to carry `iso-ubuntu` alone, which was the SERVER live image.
+	//
+	// THE SERVER IMAGE'S INSTALLER IS NOT THE ONE THIS STAGE DRIVES. Its GRUB entry reads
+	//
+	//	*Try or Install Ubuntu Server
+	//
+	// and its installer is subiquity, whose first screen is a console UI with no live desktop behind
+	// it - so `desktop: linux`, which measures a panel, could never pass, and neither could the
+	// coordinate-click panes that follow, which were measured against the desktop installer.
+	//
+	// MOSLTY THOUGH: A DESKTOP ISO IS THE ONE WITH A DESKTOP, a panel, and the Ubiquity-style panes
+	// these files click. The size is the evidence: 6.04 GiB against the server's 2.79.
+	"ubuntu": "ubuntu-desktop",
+	// THE GRAPHICAL VARIANT, NOT THE MINIMAL ONE. `iso-nixos` is 1,665 MiB and carries NO DESKTOP: it
+	// boots to a console menu, so `desktop: linux` (a panel) can never see it and every click after it
+	// lands on a text screen. `iso-nixos-graphical` is 3,708 MiB and is the image the coordinate-click
+	// panes were measured against.
+	"nixos": "nixos-graphical",
+	// THE DESKTOP FLAVOUR, AND THE SIZES ARE THE PROOF: `iso-popos` is 3,753 MiB while
+	// `iso-popos-desktop` is 2,568. They are different images, and the file clicks panes that only
+	// exist in the second.
+	"popos": "popos-desktop",
+	// KDE, WHICH IS THE `manjaro` ENTRY IN THE REFERENCE'S DESKTOP TABLE (5,277 MiB against the 4,969
+	// MiB of the plain tag). The panes are KDE's.
+	"manjaro": "manjaro-kde",
+	// CORE, NOT PRO. `iso-zorin` is 3,728 MiB and `iso-zorin-core` is 3,612; the reference's
+	// `zorin-core` entry is the measured one.
+	"zorin": "zorin-core",
 }
 
 // linuxISOTag is the ghcr tag a Linux installer image is published under.
