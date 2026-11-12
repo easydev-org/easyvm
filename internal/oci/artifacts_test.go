@@ -250,3 +250,58 @@ func TestThePublisherInstallsOrasItself(t *testing.T) {
 		}
 	}
 }
+
+// ORAS NEEDS ITS OWN LOGIN, AND `GITHUB_TOKEN` ALONE IS NOT ONE.
+//
+// `easyvm push` read the token from the environment and did the exchange itself. oras does not: it
+// keeps a session, and with none it pushes ANONYMOUSLY. MEASURED ON iso-popos-desktop, where the
+// download and the hash had both already succeeded:
+//
+//	got:  2583691264 bytes
+//	sha64: verified
+//	Error response from registry: HEAD ".../manifests/sha256:dd6c..." :
+//	  denied: requested access to the resource is denied
+//
+// THE MESSAGE NAMES THE PACKAGE, so it reads as a permissions problem - the same trap as the missing
+// `GITHUB_TOKEN` before it. The token has to be EXCHANGED, and `oras login` is the exchange.
+//
+// EVERY STEP THAT PUSHES MUST LOG IN FIRST, which is why this checks each `oras push` has an
+// `oras login` above it in the same step rather than anywhere in the file.
+func TestEveryOrasPushLogsInFirst(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "artifacts-publish.yml"))
+	if err != nil {
+		t.Skipf("no artifacts-publish.yml here (%v)", err)
+	}
+	var doc struct {
+		Jobs map[string]struct {
+			Steps []struct {
+				Name string `yaml:"name"`
+				Run  string `yaml:"run"`
+			} `yaml:"steps"`
+		} `yaml:"jobs"`
+	}
+	if err := yaml.Unmarshal(body, &doc); err != nil {
+		t.Fatalf("artifacts-publish.yml does not parse: %v", err)
+	}
+	pushed := 0
+	for _, job := range doc.Jobs {
+		for _, st := range job.Steps {
+			if !strings.Contains(st.Run, "oras push") {
+				continue
+			}
+			pushed++
+			login := strings.Index(st.Run, "oras login")
+			push := strings.Index(st.Run, "oras push")
+			if login < 0 || login > push {
+				t.Errorf("artifacts-publish.yml: step %q runs `oras push` without an `oras login` "+
+					"before it. oras keeps a session of its own, so an unauthenticated push is "+
+					"ANONYMOUS and the registry answers `denied` - which reads as a permission "+
+					"problem on the package", st.Name)
+			}
+		}
+	}
+	if pushed == 0 {
+		t.Fatal("no `oras push` was found, so this test checks nothing")
+	}
+	t.Logf("checked %d pushing step(s)", pushed)
+}

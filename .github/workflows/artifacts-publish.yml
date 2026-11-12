@@ -143,6 +143,11 @@ jobs:
           # THE SOURCE IS THE PUBLISHER'S OWN PACKAGE. It is public, so the token is not what reads
           # it - but every tag this build consumes then lives in this repository's package, and the
           # stage code has ONE place to look.
+          # ORAS NEEDS ITS OWN LOGIN. `GITHUB_TOKEN` in the environment is not a credential oras
+          # reads; it has to be exchanged once, and without this every push is anonymous and is
+          # answered `denied: requested access to the resource is denied` - measured on
+          # iso-popos-desktop, whose 2.4 GiB download and sha256 BOTH succeeded first.
+          oras login ghcr.io -u "${{ github.actor }}" --password-stdin <<< "$GITHUB_TOKEN"
           for tag in macos-recovery-sequoia; do
             echo "=== $tag"
             dest="$RUNNER_TEMP/$tag.dmg"
@@ -210,6 +215,10 @@ jobs:
           dev-node-pkg	macos	https://nodejs.org/dist/v26.13.0/node-v26.13.0.pkg	445b202997c959dddbd54ad8c82956371b495b03c73d56044a6f82dfb3249c46	105205394
           dev-python-pkg	macos	https://www.python.org/ftp/python/3.13.9/python-3.13.9-macos11.pkg	dafebf62b8737f341f6b7eca2d6d1153a50a6b1bfbfa4b8aaf0e62adc73e5017	70163313
           CATALOGUE
+
+          # THE LOGIN, ONCE, BEFORE ANY PUSH. See the note in the mirror step above: an unauthenticated
+          # oras answers `denied` and the message names the package rather than the missing session.
+          oras login ghcr.io -u "${{ github.actor }}" --password-stdin <<< "$GITHUB_TOKEN"
 
           echo "=== the catalogue ==="
           awk -F'\t' '{printf "  %-34s %-8s %s\n", $1, $2, ($4==""?"(unpinned - size floor only)":"sha256 "+substr($4,1,16))}' /tmp/catalogue.tsv
