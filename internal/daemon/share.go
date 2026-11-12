@@ -215,39 +215,48 @@ func (d *Driver) mountOnce(client *guest.Client, family, dir string) error {
 	var cmd string
 	switch family {
 	case "windows":
-		// `New-SmbMapping`, NOT `net use`, BECAUSE AN EMPTY PASSWORD SHIFTS THE ARGUMENT LIST.
+		// WINDOWS 11 BLOCKS GUEST SMB BY POLICY, AND THE POLICY IS A REGISTRY KEY.
 		//
-		// MEASURED ON windows-vm-configure, STEP 13 OF 20, AND THE REFERENCE IMPLEMENTATION HAD ALREADY
-		// WRITTEN THIS DOWN:
+		// MEASURED ON windows-vm-configure, STEP 13 OF 20 - TWO ERRORS IN ONE CALL:
 		//
-		//	net use \\172.30.0.1\shared "" /user:guest /persistent=no
-		//	The option /PERSISTENT=NO is unknown.
+		//	New-SmbMapping : You can't access this shared folder because your organization's
+		//	                 security policies block...
+		//	New-SmbMapping : The network path was not found.
 		//
-		// `net use` TAKES THE PASSWORD AS A POSITIONAL ARGUMENT. The account has no password, so the
-		// argument is `""` - cmd drops it, EVERY ARGUMENT AFTER IT MOVES LEFT, and the switch that was
-		// meant to be `/persistent` is read as the password. cmd then answers with its help text:
+		// THE FIRST IS Windows 11's default: `AllowInsecureGuestAuth` is 0, so a share with NO PASSWORD
+		// is refused before a packet is sent. THE SECOND IS THE SAME REFUSAL FROM ANOTHER ANGLE -
+		// PowerShell reports a blocked policy as "the path was not found" when the redirector declines
+		// to resolve it at all.
 		//
-		//	The syntax of this command is:
-		//	NET USE
-		//	[devicename | *] [\\computername\sharename[\volume] [password | *]]
+		// SO THE POLICY IS SET FIRST, IN THE SAME COMMAND, because a separate step could fail and leave
+		// a mount that never had a chance. `LanmanWorkstation` has to restart for the key to take
+		// effect, and that is what `Restart-Service` is for.
 		//
-		// A POWERSHELL CREDENTIAL IS AN OBJECT, so there is no list for anything to shift in:
+		// AND THE LAST LINE IS A PROBE RATHER THAN A HOPE: if the mapping still fails, `Test-NetConnection`
+		// says whether 445 was reachable, so the next failure names its own cause instead of arriving as
+		// "the path was not found" twice.
 		//
-		//	New-SmbMapping -RemotePath \\server\share -UserName guest -Password '' -Persistent $false
-		//
-		// `-Password ''` IS AN EMPTY STRING THAT STAYS AN EMPTY STRING, and `null passwords = yes` on
-		// the Samba side accepts it - which is the pair the reference implementation settled on.
-		//
-		// `-Persistent $false` REPLACES `/persistent:no`: a mapping that outlives the run would make
-		// the next one fail with "already connected", and the share is per-run.
-		//
-		// AND `-ErrorAction Stop` MAKES A REFUSAL AN EXCEPTION, so the exit status is not 0 over a
-		// warning - the same reason `mountOnce` checks `res.Status` rather than trusting an empty error.
+		// `-Password ''` STAYS AN EMPTY STRING, which is the pair `null passwords = yes` accepts - and
+		// `New-SmbMapping` rather than `net use` because a POSITIONAL empty password shifts the whole
+		// argument list, which was the previous failure.
+		share := `\\172.30.0.1\shared`
 		cmd = `powershell -NoProfile -ExecutionPolicy Bypass -Command "` +
-			`$m = Get-SmbMapping -RemotePath '\\172.30.0.1\shared' -ErrorAction SilentlyContinue; ` +
-			`if ($m) { Remove-SmbMapping -RemotePath '\\172.30.0.1\shared' -Force -ErrorAction SilentlyContinue | Out-Null }; ` +
-			`New-SmbMapping -RemotePath '\\172.30.0.1\shared' -UserName guest -Password '' -Persistent $false -ErrorAction Stop | Out-Null; ` +
-			`Write-Output 'SMB_MAPPED'"`
+			`$k='HKLM:\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters'; ` +
+			`New-ItemProperty -Path $k -Name 'AllowInsecureGuestAuth' -Value 1 -PropertyType DWORD -Force | Out-Null; ` +
+			`New-ItemProperty -Path $k -Name 'RequireSecuritySignature' -Value 0 -PropertyType DWORD -Force | Out-Null; ` +
+			`Restart-Service LanmanWorkstation -Force -ErrorAction SilentlyContinue; ` +
+			`$m = Get-SmbMapping -RemotePath '` + share + `' -ErrorAction SilentlyContinue; ` +
+			`if ($m) { Remove-SmbMapping -RemotePath '` + share + `' -Force -ErrorAction SilentlyContinue | Out-Null }; ` +
+			`try { ` +
+			`  New-SmbMapping -RemotePath '` + share + `' -UserName guest -Password '' -Persistent $false -ErrorAction Stop | Out-Null; ` +
+			`  Write-Output 'SMB_MAPPED' ` +
+			`} catch { ` +
+			`  Write-Output ('SMB_FAILED: ' + $_.Exception.Message); ` +
+			`  $t = Test-NetConnection -ComputerName 172.30.0.1 -Port 445 -InformationLevel Quiet -WarningAction SilentlyContinue; ` +
+			`  if ($t) { Write-Output 'PORT_445_REACHABLE - the network is fine, so this is the POLICY or the CREDENTIAL' } ` +
+			`  else { Write-Output 'PORT_445_UNREACHABLE - the guest cannot reach 172.30.0.1 at all' }; ` +
+			`  exit 1 ` +
+			`}"`
 	case "macos":
 		// `mount_smbfs`, NOT `mount -t cifs`: macOS has no cifs filesystem type.
 		//
