@@ -66,3 +66,41 @@ func TestAFailedWalkStillWritesItsRecording(t *testing.T) {
 			"written")
 	}
 }
+
+// A `record:` VALUE IS A NAME, NOT A PATH, AND THE FILE MUST LAND IN THE WORK DIRECTORY.
+//
+// MEASURED ON zorin-install, WHICH PASSED AND LEFT NO VIDEO:
+//
+//	=== stop recording
+//	  recording: 2643 frame(s) -> zorin-install.mp4
+//	path: work/*.mp4
+//	##[warning]No files were found with the provided path: work/*.mp4
+//
+// THE ENCODE SUCCEEDED - 2643 frames - AND WROTE TO THE PROCESS'S OWN DIRECTORY. The artifact step
+// uploads `work/*.mp4`, so it found nothing, and the run reported a recording that does not exist.
+//
+// `record: zorin-install.mp4` is a NAME. Everything the daemon writes goes in `work/`, because that is
+// the directory the artifact step and every other step in the workflow look at.
+func TestARecordingLandsInTheWorkDirectory(t *testing.T) {
+	for _, name := range []string{"actions.go", "publish.go"} {
+		body, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		src := stripCommentsForTest(string(body))
+		// EVERY PLACE THAT DECIDES THE VIDEO PATH MUST JOIN IT ONTO e.Work.
+		for _, marker := range []string{"e.recVideo", `"install.mp4"`} {
+			i := strings.Index(src, marker)
+			if i < 0 {
+				continue
+			}
+			// The join must appear within the next 400 characters, which is where the path is built.
+			window := src[i:min(i+400, len(src))]
+			if !strings.Contains(window, "filepath.Join(e.Work") {
+				t.Errorf("%s: the video path built from %q is not joined onto the work directory, so "+
+					"the file lands beside the daemon's cwd and `work/*.mp4` finds nothing - measured "+
+					"on zorin-install as a successful 2643-frame encode with no artifact", name, marker)
+			}
+		}
+	}
+}

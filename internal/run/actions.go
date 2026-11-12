@@ -605,9 +605,25 @@ func (e *Executor) doRecord(s walk.Step) error {
 		// `s.Get("_video")` READ THE STOP STEP'S OWN SPEC and was therefore ALWAYS EMPTY - so every
 		// recording was written to the fallback `install.mp4` whatever `record:` had said at the start.
 		// A file with two `record:` steps produced a video named for neither.
+		// THE NAME IS JOINED ONTO THE WORK DIRECTORY, WHICH IS WHAT THE FILES SAY.
+		//
+		// `record: zorin-install.mp4` IS A NAME, NOT A PATH: the artifact step uploads `work/*.mp4`, and
+		// the daemon's cwd is not the work directory. MEASURED ON zorin-install:
+		//
+		//	=== stop recording
+		//	  recording: 2643 frame(s) -> zorin-install.mp4
+		//	  path: work/*.mp4
+		//	  ##[warning]No files were found with the provided path: work/*.mp4
+		//
+		// THE ENCODE SUCCEEDED AND THE FILE WAS IN THE WRONG PLACE - 2643 frames, written to the
+		// process's own directory instead of `work/`, so the artifact step found nothing and the run
+		// reported a successful recording that does not exist.
 		video := e.recVideo
 		if video == "" {
-			video = filepath.Join(e.Work, "install.mp4")
+			video = "install.mp4"
+		}
+		if !filepath.IsAbs(video) {
+			video = filepath.Join(e.Work, video)
 		}
 		if err := e.rec.encode(video, e.Driver.Log); err != nil {
 			return fail(s.Name, "%v", err)

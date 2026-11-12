@@ -244,7 +244,10 @@ func (e *Executor) finishRecording() {
 		return
 	}
 	if video == "" {
-		video = filepath.Join(e.Work, "install.mp4")
+		video = "install.mp4"
+	}
+	if !filepath.IsAbs(video) {
+		video = filepath.Join(e.Work, video)
 	}
 	if err := rec.encode(video, e.Driver.Log); err != nil {
 		e.Driver.Log(fmt.Sprintf("  recording NOT written: %v", err))
