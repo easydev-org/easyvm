@@ -356,6 +356,27 @@ steps:
   # A PASSING INSTALL THAT LEAVES NO DISK is a leg that proves the installer works and produces nothing
   # for the stage after it. `compress:` flattens the overlay's parent chain into one qcow2 with zstd, so
   # the file it leaves is the install itself.
+  # THE MACHINE IS STOPPED BEFORE THE DISK IS READ, AND THAT IS WHY THIS STEP EXISTS.
+  #
+  # MEASURED ON zorin-install, WHICH ANSWERED ALL 21 STEPS AND THEN FAILED ON THE LAST ONE:
+  #
+  #	publish the disk: qemu-img convert: exit status 1
+  #	(qemu-img: Could not open '/__w/easyvm/easyvm/work/disk.qcow2': Failed to get shared "write" lock
+  #
+  # THE INSTALL WAS COMPLETE AND THE DISK WAS STILL OPEN. `compress:` READS THE FILE, and qemu holds a
+  # write lock on it until the machine is stopped - so a `compress:` before a `shutdown:` cannot work
+  # however good the install was.
+  #
+  # `acpi`, NOT `ssh`: AN INSTALL LEG HAS NO ssh AT ALL - the guest it drives is an installer, and
+  # `require_ssh` never appears in this file. `shutdown: ssh` needs a connection and would fail here
+  # with "no connection, and there is none".
+  #
+  # `acpi` IS THE POWER BUTTON, WHICH EVERY INSTALLER ANSWERS: it is a request the guest's own init
+  # handles, so the filesystem is unmounted and the disk is closed before the process exits - which is
+  # what makes the read below possible and the published disk clean.
+  - name: stop the machine
+    shutdown: acpi
+    timeout: 600
   - name: publish the disk
     compress: "{{ out }}"
 

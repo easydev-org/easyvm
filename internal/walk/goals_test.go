@@ -1274,3 +1274,74 @@ func TestAnInstallLegPublishesItsDisk(t *testing.T) {
 	}
 	t.Logf("checked %d install walkthrough(s)", checked)
 }
+
+// A `compress:` BEFORE A `shutdown:` CANNOT WORK, BECAUSE QEMU HOLDS THE DISK OPEN.
+//
+// MEASURED ON zorin-install, WHICH ANSWERED ALL 21 STEPS AND FAILED ON THE LAST ONE:
+//
+//	publish the disk: qemu-img convert: exit status 1
+//	(qemu-img: Could not open '/__w/easyvm/easyvm/work/disk.qcow2': Failed to get shared "write" lock
+//
+// THE INSTALL WAS COMPLETE. `compress:` READS THE FILE, and qemu holds a write lock on it until the
+// machine is stopped - so the disk a passing install produced could not be published, and a `-disk`
+// artifact of 518 bytes was the visible result.
+//
+// AND THE SHUTDOWN IS `acpi`, NOT `ssh`: AN INSTALL LEG HAS NO ssh AT ALL, because the guest it drives
+// is an installer. `shutdown: ssh` would fail with "no connection, and there is none".
+func TestAnInstallStopsTheMachineBeforePublishingTheDisk(t *testing.T) {
+	root := filepath.Join("..", "..")
+	var files []string
+	for _, pat := range []string{
+		filepath.Join(root, "linux", "*", "steps", "install.yaml"),
+		filepath.Join(root, "bsd", "*", "steps", "install.yaml"),
+	} {
+		got, err := filepath.Glob(pat)
+		if err != nil {
+			t.Fatal(err)
+		}
+		files = append(files, got...)
+	}
+	if len(files) == 0 {
+		t.Skip("no install walkthroughs here")
+	}
+	var checked int
+	for _, path := range files {
+		rel, _ := filepath.Rel(root, path)
+		doc, err := Load(path, nil)
+		if err != nil {
+			continue
+		}
+		checked++
+		shutdownAt, compressAt := -1, -1
+		for i, s := range doc.Steps {
+			if s.Has("shutdown") {
+				shutdownAt = i
+			}
+			if s.Has("compress") {
+				compressAt = i
+			}
+		}
+		if compressAt < 0 {
+			t.Errorf("%s has no `compress:` step, so `--out` writes nothing", rel)
+			continue
+		}
+		if shutdownAt < 0 {
+			t.Errorf("%s publishes its disk without stopping the machine first - qemu holds a write "+
+				"lock and `qemu-img convert` answers \"Failed to get shared write lock\"", rel)
+			continue
+		}
+		if shutdownAt > compressAt {
+			t.Errorf("%s stops the machine AFTER compressing the disk, which is backwards", rel)
+		}
+		// AND IT IS `acpi`, BECAUSE THERE IS NO ssh ON AN INSTALL LEG.
+		shutdown := doc.Steps[shutdownAt].Get("shutdown")
+		if shutdown == "ssh" {
+			t.Errorf("%s uses `shutdown: ssh`, but an install leg has no ssh - the guest is an "+
+				"installer and `require_ssh` never appears in the file", rel)
+		}
+	}
+	if checked == 0 {
+		t.Skip("no install walkthroughs loaded")
+	}
+	t.Logf("checked %d install walkthrough(s)", checked)
+}
