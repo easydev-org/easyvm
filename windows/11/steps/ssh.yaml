@@ -54,25 +54,29 @@ steps:
   key: ret
   settle: 3
 - name: install openssh
-  type: winget install --id Microsoft.OpenSSH.Preview --exact --source winget --accept-source-agreements --accept-package-agreements --disable-interactivity; 'WINGET_EXIT=' + $LASTEXITCODE; 'WINGET_LOW='
-    + ($LASTEXITCODE -band 0xFF)
-  type_gap: 0.15
+  type: winget install --id Microsoft.OpenSSH.Preview --exact --source winget --accept-source-agreements --accept-package-agreements --disable-interactivity; 'WINGET_EXIT=' + $LASTEXITCODE; 'WINGET_LOW=' + ($LASTEXITCODE -band 0xFF)
+  type_gap: 0.3
   settle: 2
 - name: run the install
   key: ret
   settle: 120
-- name: configure sshd
-  type: 'try { Set-Service sshd -StartupType Automatic -ErrorAction Stop; ''STEP1=ok'' } catch { ''STEP1=FAILED: '' + $_.Exception.Message }; try { $c = ''C:\ProgramData\ssh\sshd_config''; if (Test-Path
-    $c) { (Get-Content $c) -replace ''^#?\s*PasswordAuthentication\s+.*'', ''PasswordAuthentication yes'' -replace ''^#?\s*Port\s+.*'', ''Port 22'' | Set-Content $c; ''STEP2=ok'' } else { ''STEP2=FAILED:
-    no sshd_config'' } } catch { ''STEP2=FAILED: '' + $_.Exception.Message }; try { Start-Service sshd -ErrorAction Stop; ''STEP3=ok'' } catch { ''STEP3=FAILED: '' + $_.Exception.Message }; try { Get-NetFirewallRule
-    -Name sshd-22 -ErrorAction SilentlyContinue | Remove-NetFirewallRule -ErrorAction SilentlyContinue; New-NetFirewallRule -Name sshd-22 -DisplayName ''OpenSSH 22'' -Enabled True -Direction Inbound -Protocol
-    TCP -Action Allow -LocalPort 22 -ErrorAction Stop | Out-Null; ''STEP4=ok'' } catch { ''STEP4=FAILED: '' + $_.Exception.Message }; Get-NetTCPConnection -State Listen -LocalPort 22 -ErrorAction SilentlyContinue
-    | Select-Object -First 1 -ExpandProperty LocalPort'
-  type_gap: 0.15
-  settle: 2
-- name: run the sshd configuration
-  key: ret
-  settle: 25
+- name: sshd starts automatically
+  run: powershell -Command "Set-Service sshd -StartupType Automatic; (Get-Service sshd).StartType"
+  terminal_wait: 20
+  settle: 3
+- name: sshd takes passwords and port 22
+  run: powershell -Command "$c='C:\ProgramData\ssh\sshd_config'; (Get-Content $c) -replace '^#?\s*PasswordAuthentication\s+.*','PasswordAuthentication yes' -replace '^#?\s*Port\s+.*','Port 22' | Set-Content $c; Select-String -Path $c -Pattern 'PasswordAuthentication','^Port'"
+  terminal_wait: 30
+  settle: 4
+- name: sshd is running
+  run: powershell -Command "Start-Service sshd; (Get-Service sshd).Status"
+  terminal_wait: 30
+  settle: 4
+- name: the firewall allows 22
+  run: powershell -Command "Get-NetFirewallRule -Name sshd-22 -ErrorAction SilentlyContinue | Remove-NetFirewallRule; New-NetFirewallRule -Name sshd-22 -DisplayName 'OpenSSH 22' -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22
+    | Out-Null; 'FIREWALL-OK'"
+  terminal_wait: 30
+  settle: 4
 - name: wait for sshd
   require_ssh: true
   ssh_probe: echo ok
@@ -85,8 +89,8 @@ steps:
   ssh: powershell -Command "powercfg -h off"
   timeout: 120
 - name: hold windows update
-  ssh: powershell -Command "New-Item -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU' -Force | Out-Null; Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU'
-    -Name NoAutoRebootWithLoggedOnUsers -Value 1 -Type DWord -Force; Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU' -Name NoAutoUpdate -Value 1 -Type DWord -Force"
+  ssh: powershell -Command "New-Item -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU' -Force | Out-Null; Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU' -Name NoAutoRebootWithLoggedOnUsers -Value 1
+    -Type DWord -Force; Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU' -Name NoAutoUpdate -Value 1 -Type DWord -Force"
   timeout: 120
 - name: turn off restore points
   ssh: powershell -Command "Disable-ComputerRestore -Drive 'C:\' -ErrorAction SilentlyContinue"
@@ -96,8 +100,8 @@ steps:
   timeout: 3600
   optional: true
 - name: prove the power settings took
-  ssh: powershell -Command "$m = (powercfg /query SCHEME_CURRENT SUB_VIDEO VIDEOIDLE 2>$null | Select-String 'Current AC Power Setting').ToString().Split(':')[-1].Trim(); $s = (powercfg /query SCHEME_CURRENT
-    SUB_SLEEP STANDBYIDLE 2>$null | Select-String 'Current AC Power Setting').ToString().Split(':')[-1].Trim(); 'MONITOR=' + $m + ' STANDBY=' + $s + ' HIBER=' + (Test-Path C:\hiberfil.sys)"
+  ssh: powershell -Command "$m = (powercfg /query SCHEME_CURRENT SUB_VIDEO VIDEOIDLE 2>$null | Select-String 'Current AC Power Setting').ToString().Split(':')[-1].Trim(); $s = (powercfg /query SCHEME_CURRENT SUB_SLEEP STANDBYIDLE 2>$null | Select-String
+    'Current AC Power Setting').ToString().Split(':')[-1].Trim(); 'MONITOR=' + $m + ' STANDBY=' + $s + ' HIBER=' + (Test-Path C:\hiberfil.sys)"
   timeout: 180
 - name: prove sshd is automatic
   ssh: powershell -Command "(Get-Service sshd).StartupType"
