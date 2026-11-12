@@ -151,6 +151,20 @@ jobs:
             oras_arch=$(dpkg --print-architecture)
             oras_url="https://github.com/oras-project/oras/releases/download/v${ORAS_VERSION}/oras_${ORAS_VERSION}_linux_${oras_arch}.tar.gz"
             echo "  oras: fetching $oras_url"
+            # THE TOOL IS NAMED BEFORE IT IS USED, BECAUSE ITS ABSENCE WAS A 127 RATHER THAN A
+            # SENTENCE:
+            #
+            #	/__w/_temp/....sh: 53: curl: not found
+            #	Process completed with exit code 127
+            #
+            # `curl` is now in the Containerfile - it was the one tool this image did not have, and
+            # `prepare` is where every other one is assumed. `command -v` first so a future image that
+            # drops it fails here with a name instead of a shell error code.
+            command -v curl > /dev/null || {
+              echo "::error::curl is not in this image, and `prepare` needs it to fetch oras."
+              echo "::error::Add it to the Containerfile's apt list."
+              exit 1
+            }
             curl -fsSL --retry 5 --retry-all-errors -o /tmp/oras.tgz "$oras_url"
             echo "${ORAS_SHA256}  /tmp/oras.tgz" | sha256sum -c -
             tar -xzf /tmp/oras.tgz -C /usr/local/bin oras

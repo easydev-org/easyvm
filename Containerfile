@@ -106,12 +106,32 @@ ARG DEBIAN_SNAPSHOT="20260819T142328Z"
 #   net-tools, iputils-ping, ipcalc, ethtool, netcat-openbsd
 #                                   none of these is called anywhere in the Go code, and each was
 #                                   named by qemux's image for its own purposes
+# CURL IS HERE BECAUSE `prepare` FETCHES ORAS WITH IT, AND THIS IMAGE HAD NO CURL AT ALL. Measured:
+#
+#	/__w/_temp/....sh: 53: curl: not found
+#	Process completed with exit code 127
+#
+# It is 250 KiB and it is the one tool every fetch in the workflows assumes. aria2 was the
+# alternative - it is already here for the macOS recovery image - but its flags differ between
+# versions enough that writing one blind is how a download silently produces nothing.
+#
+# THE NOTE IS OUT HERE AND NOT INSIDE THE `RUN` FOR A REASON THAT COST A DEBUGGING ROUND: inside a
+# backslash-continued command a `#` line is not a shell comment, it is part of the argument list.
+# Verified:
+#
+#	apt-get install \
+#	    # a comment \
+#	    curl \
+#	    iproute2
+#	+ curl iproute2            <- apt never ran; the comment ate the continuation
+#
 RUN set -eux; \
     # non-free is where some qemu firmware blobs live; the snapshot below is official Debian.
     echo "deb https://deb.debian.org/debian trixie non-free" > /etc/apt/sources.list.d/non-free.list; \
     apt-get update; \
     apt-get -y --no-install-recommends install \
         ca-certificates \
+        curl \
         iproute2 \
         iptables \
         dnsmasq \
