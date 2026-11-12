@@ -123,6 +123,41 @@ jobs:
 
           easyvm versions
           qemu-img --version | head -1
+
+          # ORAS, HERE RATHER THAN IN THE IMAGE, AND THE REASON IS THE IMAGE'S OWN RULE.
+          #
+          # PUBLISHING A FINISHED DISK IS A REGISTRY TRANSFER, NOT SOMETHING THIS PROGRAM DOES. That
+          # is why `easyvm push` is gone and `oras push` replaced it: one caller, a real artifact
+          # format, and no second registry implementation to keep correct.
+          #
+          # IT IS INSTALLED PER JOB, NOT PER IMAGE, even though baking it into the Containerfile would
+          # work and saves a download. The image is built from source on every push and rebuilding it
+          # to add a tool means every leg waits for a new image before it can run - the same trade the
+          # reference implementation made when it put this in `lib/ci.py install-oras` instead of its
+          # Dockerfile. A three-second download in `prepare` is cheaper than a ten-minute rebuild, and
+          # a version bump here does not invalidate the layer everything else is cached behind.
+          #
+          # THE VERSION AND HASH ARE PINNED, because the tool that writes a tag must be a known tool:
+          # the tags it writes are what later stages pull.
+          #
+          # IT IS SKIPPED WHEN ALREADY PRESENT, so a runner that ships oras - or an image that later
+          # bakes it in - pays nothing. `oras version` rather than `command -v` because a binary on
+          # PATH that cannot run is the same failure one line later.
+          if oras version > /dev/null 2>&1; then
+            echo "  oras: already present ($(oras version | head -1))"
+          else
+            ORAS_VERSION=1.2.2
+            ORAS_SHA256=bff970346470e5ef888e9f2c0bf7f8ee47283f5a45207d6e7a037da1fb0eae0d
+            oras_arch=$(dpkg --print-architecture)
+            oras_url="https://github.com/oras-project/oras/releases/download/v${ORAS_VERSION}/oras_${ORAS_VERSION}_linux_${oras_arch}.tar.gz"
+            echo "  oras: fetching $oras_url"
+            curl -fsSL --retry 5 --retry-all-errors -o /tmp/oras.tgz "$oras_url"
+            echo "${ORAS_SHA256}  /tmp/oras.tgz" | sha256sum -c -
+            tar -xzf /tmp/oras.tgz -C /usr/local/bin oras
+            chmod 0755 /usr/local/bin/oras
+            rm -f /tmp/oras.tgz
+            oras version
+          fi
           # THE HOST-SIDE TOOLS THE FILES USE, named so a missing one is this step rather than a
           # failure forty minutes into an install that needed `xorriso` to build an answer CD.
           for tool in qemu-img 7z xorriso unzip mformat mcopy mdir; do

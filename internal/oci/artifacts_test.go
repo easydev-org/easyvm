@@ -120,3 +120,66 @@ func TestEveryStageKeepsItsVideoAndLogs(t *testing.T) {
 		t.Error("stage.yml names a `-disk` artifact again; the qcow2 is transport, not evidence")
 	}
 }
+
+// ORAS IS INSTALLED BY `prepare`, NOT BAKED INTO THE IMAGE.
+//
+// Both work. The image is built from source on every push, so baking oras in would mean every leg
+// waits for a new image before it can publish - and a version bump would invalidate the layer
+// everything else is cached behind. `prepare` already proves the runner can run a guest; installing a
+// three-second download there is the same step doing one more thing.
+//
+// MEASURED LOCALLY BEFORE IT WAS WRITTEN: the download's sha256 verifies, `oras version` prints 1.2.2,
+// and a second run on a PATH that already has it prints "already present" and downloads nothing.
+//
+// THE PIN MATTERS MORE THAN THE INSTALL. The tags oras writes are what later stages pull, so an
+// unpinned download is a build where the tool that wrote a tag can change without a commit.
+func TestPrepareInstallsOrasAndSkipsWhenPresent(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "stage.yml"))
+	if err != nil {
+		t.Skipf("no stage.yml here (%v)", err)
+	}
+	var doc struct {
+		Jobs map[string]struct {
+			Steps []struct {
+				Name string `yaml:"name"`
+				Run  string `yaml:"run"`
+			} `yaml:"steps"`
+		} `yaml:"jobs"`
+	}
+	if err := yaml.Unmarshal(body, &doc); err != nil {
+		t.Fatalf("stage.yml does not parse: %v", err)
+	}
+	var prep string
+	for _, job := range doc.Jobs {
+		for _, st := range job.Steps {
+			if st.Name == "prepare" {
+				prep = st.Run
+			}
+		}
+	}
+	if prep == "" {
+		t.Fatal("stage.yml has no `prepare` step, so this test checks nothing")
+	}
+
+	// IT PROBES BEFORE DOWNLOADING, so a runner or image that already has oras pays nothing.
+	if !strings.Contains(prep, "if oras version") {
+		t.Error("`prepare` does not check whether oras is already there. `oras version` rather than " +
+			"`command -v` because a binary on PATH that cannot run is the same failure one line later")
+	}
+	// AND IT INSTALLS WHEN IT IS NOT, WITH A PINNED VERSION AND HASH.
+	for _, want := range []string{"ORAS_VERSION=", "ORAS_SHA256=", "sha256sum -c -", "/usr/local/bin/oras"} {
+		if !strings.Contains(prep, want) {
+			t.Errorf("`prepare` installs oras without %q, so the tool that writes the tags later "+
+				"stages pull is not a known tool", want)
+		}
+	}
+	// AND THE IMAGE DOES NOT ALSO INSTALL IT - one place, or a version bump is two commits.
+	containerfile, err := os.ReadFile(filepath.Join("..", "..", "Containerfile"))
+	if err != nil {
+		t.Skipf("no Containerfile here (%v)", err)
+	}
+	if strings.Contains(string(containerfile), "ORAS_VERSION") {
+		t.Error("the Containerfile also installs oras. One place installs it: `prepare`. Two places " +
+			"means a version bump is two commits and one of them gets forgotten")
+	}
+}
