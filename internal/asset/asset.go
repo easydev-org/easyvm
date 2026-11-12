@@ -419,14 +419,11 @@ var linuxISOAliases = map[string]string{
 	"kubuntu": "kubuntu-desktop",
 	"mint":    "mint-cinnamon",
 	"mx":      "mx-xfce",
-	// LEAP 16.1, NOT TUMBLEWEED. Tumbleweed is a rolling release and its KDE Live image is the one
-	// this file's YaST2 walkthrough was measured on; Leap 16.1 SHIPS NO LIVE DESKTOP AT ALL, only an
-	// Agama installer, an OEM image and an Immutable self-install image. The release name stays
-	// `opensuse-tumbleweed` in the walkthrough path and the tag carries the version, because the
-	// images are different products with different installers.
-	"opensuse-tumbleweed": "opensuse-leap-16.1",
-	"endeavour":           "endeavouros",
-	"ghostbsd":            "ghostbsd-mate",
+	// (opensuse NEEDS NO ALIAS ANY MORE. It was `opensuse-tumbleweed -> opensuse-leap-16.1` while the
+	// walkthrough directory still carried the old name; the directory is `linux/opensuse-leap-16.1`
+	// now, so `iso-<release>` already names the tag the publisher writes.)
+	"endeavour": "endeavouros",
+	"ghostbsd":  "ghostbsd-mate",
 	// `ubuntu` MEANS THE DESKTOP IMAGE, AND THE TAG SAYS SO BECAUSE PUBLISHING BOTH UNDER ONE NAME IS
 	// NOT POSSIBLE. The registry carries `iso-ubuntu-desktop` (6,482,409,472 bytes - Desktop 26.04.1
 	// exactly) and used to carry `iso-ubuntu` alone, which was the SERVER live image.

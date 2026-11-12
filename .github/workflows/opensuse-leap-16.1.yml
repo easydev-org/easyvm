@@ -1,12 +1,20 @@
-name: opensuse-tumbleweed
+name: opensuse-leap-16.1
 
-# # OPENSUSE-TUMBLEWEED, ONE STAGE: its `ssh.yaml`.
+# # OPENSUSE LEAP 16.1, ONE STAGE: its `ssh.yaml`.
+#
+# THIS WAS `opensuse-tumbleweed` AND THE PRODUCT CHANGED. Tumbleweed is the rolling release whose KDE
+# Live image the old walkthrough's YaST2 coordinates were measured on. Leap 16.1 SHIPS NO LIVE DESKTOP
+# AT ALL - `get.opensuse.org/leap/16.1` publishes Agama, an OEM image and an Immutable self-install -
+# so the walkthrough in `linux/opensuse-leap-16.1/` is a NEW measurement, not a rename.
+#
+# THE TAG MOVED WITH IT. `linux-opensuse-tumbleweed` in ghcr was a 3921 MiB disk of the wrong release
+# and was DELETED, so nothing pulls a Tumbleweed system under a Leap name.
 #
 # THAT IS THE STAGE THAT PROVES THE MACHINE - the disk boots, the guest reaches a desktop, sshd
 # answers, and the bootstrap chain can be checked - without paying for an install that is 20 to 40
 # minutes of clicking through a wizard.
 #
-# ITS TAG IS `linux-opensuse-tumbleweed-ssh`, NOT THE `opensuse-tumbleweed-ssh` SHAPE WINDOWS AND MACOS USE. Discovered rather
+# ITS TAG IS `linux-opensuse-leap-16.1-ssh`, NOT THE `opensuse-tumbleweed-ssh` SHAPE WINDOWS AND MACOS USE. Discovered rather
 # than assumed: a wrong tag is a 404 at pull time that reads like a registry problem.
 #
 # THE NAME IS THE DISTRIBUTION, AND THAT IS THE POINT OF THE SPLIT.
@@ -28,7 +36,7 @@ on:
         default: "easydev-org/easyvm"
 
 concurrency:
-  group: opensuse-tumbleweed
+  group: opensuse-leap-16.1
   cancel-in-progress: true
 
 # THE CALLED WORKFLOW CANNOT ASK FOR MORE THAN ITS CALLER GRANTS.
@@ -52,32 +60,32 @@ jobs:
     uses: ./.github/workflows/stage.yml
     secrets: inherit
     with:
-      group: opensuse-tumbleweed
+      group: opensuse-leap-16.1
       disks_repository: ${{ inputs.disks_repository }}
       # THE LEGS, AS JSON. `fromJSON` in the called workflow turns this back into a matrix.
       stages: |
         [
           {
-            "name": "linux-opensuse-tumbleweed-ssh",
-            "file": "linux/opensuse-tumbleweed/steps/ssh.yaml",
-            "pull": "linux-opensuse-tumbleweed",
-            "out": "linux-opensuse-tumbleweed-ssh.qcow2",
+            "name": "linux-opensuse-leap-16.1-ssh",
+            "file": "linux/opensuse-leap-16.1/steps/ssh.yaml",
+            "pull": "linux-opensuse-leap-16.1",
+            "out": "linux-opensuse-leap-16.1-ssh.qcow2",
             "timeout": 60
           },
           {
-            "name": "linux-opensuse-tumbleweed-install",
-            "file": "linux/opensuse-tumbleweed/steps/install.yaml",
+            "name": "linux-opensuse-leap-16.1-install",
+            "file": "linux/opensuse-leap-16.1/steps/install.yaml",
             "pull": "",
-            "out": "linux-opensuse-tumbleweed.qcow2",
-            "publish": "linux-opensuse-tumbleweed",
+            "out": "linux-opensuse-leap-16.1.qcow2",
+            "publish": "linux-opensuse-leap-16.1",
             "timeout": 90
           },
           {
-            "name": "linux-opensuse-tumbleweed-vm",
-            "file": "linux/opensuse-tumbleweed/steps/vm-configure.yaml",
-            "pull": "linux-opensuse-tumbleweed-ssh",
-            "fallback": "linux-opensuse-tumbleweed",
-            "out": "linux-opensuse-tumbleweed-vm.qcow2",
+            "name": "linux-opensuse-leap-16.1-vm",
+            "file": "linux/opensuse-leap-16.1/steps/vm-configure.yaml",
+            "pull": "linux-opensuse-leap-16.1-ssh",
+            "fallback": "linux-opensuse-leap-16.1",
+            "out": "linux-opensuse-leap-16.1-vm.qcow2",
             "timeout": 60
           }
         ]

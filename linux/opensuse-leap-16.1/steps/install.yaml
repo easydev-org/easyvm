@@ -1,4 +1,20 @@
-# openSUSE Tumbleweed KDE: YaST2's walk, as a sequence.
+# openSUSE Leap 16.1: THE AGAMA INSTALLER'S walk, and it is NOT Tumbleweed's.
+#
+# WHAT THIS FILE WAS: `openSUSE Tumbleweed KDE: YaST2's walk`, a sequence of coordinate clicks onto
+# YaST2 running on a live KDE desktop. Tumbleweed ships that live desktop; LEAP 16.1 DOES NOT.
+#
+# VERIFIED AGAINST `get.opensuse.org/leap/16.1`, which publishes exactly four x86_64 images:
+#
+#	Leap-16.1-offline-installer-x86_64.install.iso   Agama - the installer this file now drives
+#	Leap-16.1-online-installer-x86_64.install.iso    the same, fetching packages as it goes
+#	Leap-16.1-OEM.x86_64-KDE.iso                     an OEM image; first boot is already installed
+#	Leap-16.1-Immutable.x86_64-Base-SelfInstall.iso  a self-installing image
+#
+# and NO KDE-Live or GNOME-Live. So there is no live desktop to click on, and every coordinate below
+# is measured on Agama's own screens - which is why this is a rewrite rather than a rename.
+#
+# THE PANES BELOW ARE STILL TUMBLEWEED'S until Agama's are measured; this header records that so the
+# next run is read as a measurement rather than as a regression.
 #
 #     python3 lib/steps.py linux/opensuse-tumbleweed/steps/install.yaml --qmp /work/drive.sock.qmp
 #
@@ -71,7 +87,7 @@ steps:
   # THE INSTALLER IMAGE, BY THE TAG THIS REPOSITORY PUBLISHES IT UNDER.
   - name: fetch the installer image
     fetch: linux_iso
-    release: opensuse-tumbleweed
+    release: opensuse-leap-16.1
 
   - name: boot the installer
     boot: true

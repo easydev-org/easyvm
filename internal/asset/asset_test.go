@@ -38,19 +38,19 @@ func TestTheLinuxISOTagsThatAreNotTheDistributionName(t *testing.T) {
 	// agreed with the code and both were wrong, which is what a test written from the code always
 	// does - so these four now come from `images.all_images()`, the table that actually publishes.
 	cases := map[string]string{
-		"ubuntu":              "iso-ubuntu-desktop",
-		"kubuntu":             "iso-kubuntu-desktop",
-		"fedora-workstation":  "iso-fedora-workstation",
-		"mint":                "iso-mint-cinnamon",
-		"cachyos":             "iso-cachyos-desktop",
-		"manjaro":             "iso-manjaro-kde",
-		"zorin":               "iso-zorin-core",
-		"mx":                  "iso-mx-xfce",
-		"popos":               "iso-popos-desktop",
-		"nixos":               "iso-nixos-graphical",
-		"opensuse-tumbleweed": "iso-opensuse-leap-16.1",
-		"endeavour":           "iso-endeavouros",
-		"ghostbsd":            "iso-ghostbsd-mate",
+		"ubuntu":             "iso-ubuntu-desktop",
+		"kubuntu":            "iso-kubuntu-desktop",
+		"fedora-workstation": "iso-fedora-workstation",
+		"mint":               "iso-mint-cinnamon",
+		"cachyos":            "iso-cachyos-desktop",
+		"manjaro":            "iso-manjaro-kde",
+		"zorin":              "iso-zorin-core",
+		"mx":                 "iso-mx-xfce",
+		"popos":              "iso-popos-desktop",
+		"nixos":              "iso-nixos-graphical",
+		"opensuse-leap-16.1": "iso-opensuse-leap-16.1",
+		"endeavour":          "iso-endeavouros",
+		"ghostbsd":           "iso-ghostbsd-mate",
 	}
 	for release, want := range cases {
 		if got := linuxISOTag(release); got != want {
