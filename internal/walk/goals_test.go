@@ -1503,3 +1503,54 @@ func TestOnlyOneTerminalWaitPerFile(t *testing.T) {
 	}
 	t.Logf("checked %d terminal-opening step(s)", checked)
 }
+
+// A TYPED WINDOWS COMMAND MUST NOT CARRY A BACKSLASH OR A PIPE.
+//
+// `run:` TYPES THE LINE ONE CHARACTER AT A TIME, and both of these are lost on the way:
+//
+//	measured 1   `echo admin | sudo -S` arrived as `ecadmn`          (the pipe vanished)
+//	measured 2   `C:\ProgramData\ssh\sshd_config` arrived broken      (the backslash broke the path)
+//	measured 3   `-replace '^#?\s*Password...'` arrived as `^#?artio` (JS regex escapes)
+//
+// EACH ONE LEAVES POWERSHELL OR BASH WAITING: `>>` is the continuation prompt, and the step's timeout
+// then reports a service that never started.
+//
+// `$env:ProgramData` and `Join-Path` reach the same directory with no separator characters; `*` and
+// `?` are literal in `-Pattern` rather than regex syntax. A file that needs a backslash should use a
+// `type:` with a slower `type_gap`, or `ssh:` once sshd exists.
+func TestTypedWindowsCommandsCarryNoBackslashOrPipe(t *testing.T) {
+	root := filepath.Join("..", "..")
+	files, err := filepath.Glob(filepath.Join(root, "windows", "*", "steps", "*.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked := 0
+	for _, path := range files {
+		doc, err := Load(path, nil)
+		if err != nil {
+			continue
+		}
+		rel, _ := filepath.Rel(root, path)
+		for _, s := range doc.Steps {
+			body := s.Get("run")
+			if body == "" {
+				continue
+			}
+			checked++
+			if strings.Contains(body, `\`) {
+				t.Errorf("%s: %q has a backslash in a typed `run:`. Measured: "+
+					"`C:\\ProgramData\\ssh\\sshd_config` arrived with the separator lost and PowerShell "+
+					"answered with its `>>` continuation prompt. Use `$env:ProgramData` and `Join-Path`",
+					rel, s.Name)
+			}
+			if strings.Contains(body, "|") {
+				t.Errorf("%s: %q has a pipe in a typed `run:`. Measured: `echo admin | sudo` arrived "+
+					"as `ecadmn` - the pipe is what a typed line loses first", rel, s.Name)
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no typed windows `run:` steps were found")
+	}
+	t.Logf("checked %d typed windows command(s)", checked)
+}

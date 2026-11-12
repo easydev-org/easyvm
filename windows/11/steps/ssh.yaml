@@ -64,7 +64,7 @@ steps:
   run: powershell -Command "Set-Service sshd -StartupType Automatic; (Get-Service sshd).StartType"
   settle: 4
 - name: sshd takes passwords and port 22
-  run: powershell -Command "Add-Content C:\ProgramData\ssh\sshd_config 'PasswordAuthentication yes'; (Select-String -Path C:\ProgramData\ssh\sshd_config -Pattern PasswordAuthentication).Line"
+  run: powershell -Command "$f = Join-Path $env:ProgramData 'ssh/sshd_config'; Add-Content $f 'PasswordAuthentication yes'; (Select-String -Path $f -Pattern PasswordAuthentication).Line"
   settle: 4
 - name: sshd is running
   run: powershell -Command "Start-Service sshd; (Get-Service sshd).Status"
