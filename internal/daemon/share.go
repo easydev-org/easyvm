@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/easydev-org/easyvm/internal/guest"
 )
 
 // --- the host share -------------------------------------------------------------------
@@ -132,90 +134,158 @@ func (d *Driver) ShareDir() string {
 func (d *Driver) MountShare(family string) error {
 	d.mu.Lock()
 	share := d.share
-	user := d.pass
 	d.mu.Unlock()
 	if share == nil {
 		return fmt.Errorf("no share is being served; a `share_serve:` step must come first")
 	}
-	_ = user
 
 	client := d.Guest()
 	if client == nil {
 		return fmt.Errorf("no ssh connection; a `require_ssh:` step must come first")
 	}
 
-	// THE MOUNT POINT IS THE GUEST'S, AND SO IS THE COMMAND: this is a `ssh:` wearing a key's name,
-	// because "mount it" is one action and giving it a name is what lets a file say WHAT it wants
-	// rather than HOW.
+	// ONE COMMAND PER CALL, AND THE DECISIONS ARE IN GO.
 	//
-	// `sudo -S` AND THE PASSWORD ON STDIN, BECAUSE AN SSH EXEC HAS NO TERMINAL. Measured:
+	// THIS USED TO BE A SHELL SCRIPT PER PLATFORM - `sh -c` with `&&` chains and a `while` loop for
+	// macOS, a `&`-separated cmd.exe line for Windows. Every one of those was a small program whose
+	// control flow lived in a STRING, and each had already produced a bug that took a run to find:
 	//
-	//	share: sudo: a terminal is required to read the password; either use ssh's -t option
-	//	       or configure an askpass helper
-	//	share: sudo: a password is required
-	//	share: the guest mounted //172.30.0.1/shared at ~/shared     <- AND SAID IT WORKED
+	//	the POSIX one reported success after a failed mount, because the last command in its `&&`
+	//	chain was `ls` on an empty directory
 	//
-	// The mount never ran and this function reported success, because it only checked the error of a
-	// shell whose LAST command was `ls` on an empty directory - which succeeds.
+	//	a `&&` chain with a `while` loop inside it re-groups as `((a && b) || c) && d` in cmd and as
+	//	`(a || true && b); while` in sh, so the loop's failure decided nothing
 	//
-	// `sudo -S` reads the password from standard input and `-p ''` suppresses the prompt, so the
-	// password is a line in the script rather than a terminal nobody has.
-	// TWO COMMANDS, BECAUSE A GUEST'S SHELL IS PART OF ITS PLATFORM.
-	//
-	// MEASURED ON windows-vm-configure, after the sentinel was in place:
-	//
-	//	mount the host share: the guest cannot see a file this host wrote into /github/home/shared:
-	//	the mount is not in place ... read "'cat' is not recognized as an internal or external command"
-	//
-	// THE WHOLE COMMAND WAS POSIX - `cat`, `mkdir -p`, `sudo`, `mount -t cifs` - and a Windows guest
-	// has none of them. THE SENTINEL IS WHAT FOUND THIS: the guest-side round trip it replaced would
-	// have "passed" against a local directory, exactly as it did on manjaro.
-	var cmd string
-	if family == "windows" {
-		// `net use` IS WINDOWS'S MOUNT, and an empty password is spelled `""` because cmd's argument
-		// splitting would otherwise drop it.
-		//
-		// THE STATEMENTS ARE SEPARATED BY `&`, NOT `&&`, AND EACH CHECKS ITS OWN ERROR.
-		// cmd's `&&` and `||` bind left to right with EQUAL precedence, so `a && b || c && d` means
-		// `((a && b) || c) && d` - the recovery branch would run after a SUCCESS as well as a
-		// failure. One `&` between statements and an explicit `if errorlevel` after each removes
-		// the question.
-		cmd = strings.Join([]string{
-			`if not exist "%USERPROFILE%\shared" mkdir "%USERPROFILE%\shared"`,
-			`net use "%USERPROFILE%\shared" \\\\172.30.0.1\\shared /user:guest "" /persistent:no`,
-			// THE MOUNT IS PROVEN HERE. `net use` with no arguments lists the connections, and its
-			// absence is the previous line having failed.
-			`net use | findstr /C:"172.30.0.1" >nul`,
-			`if errorlevel 1 (echo MOUNT_NOT_PRESENT & exit /b 1)`,
-			`dir "%USERPROFILE%\shared"`,
-		}, " & ")
-	} else {
-		cmd = "sh -c " + shellQuote(strings.Join([]string{
-			"set -e",
-			"mkdir -p ~/shared",
-			"printf '%s\\n' " + shellQuote(d.pass) + " | sudo -S -p '' umount ~/shared 2>/dev/null || true",
-			"printf '%s\\n' " + shellQuote(d.pass) + " | sudo -S -p '' mount -t cifs //172.30.0.1/shared ~/shared -o username=guest,password=,vers=3.0,uid=$(id -u),gid=$(id -g),iocharset=utf8",
-			// THE MOUNT IS PROVEN HERE, NOT BY THE STEP AFTER. `mount` lists the device it was given,
-			// so its absence is the fact that the previous line did not work - and this is the only
-			// place that can still return an error about it.
-			"mount | grep -q '//172.30.0.1/shared' || { echo 'MOUNT_NOT_PRESENT'; exit 1; }",
-			"ls -la ~/shared | head -5",
-		}, " && "))
+	// RETRY IS A LOOP IN GO. A failed mount is a RESULT, not a shell exit status, so `if` is Go's.
+	const attempts = 30
+	var last error
+	for i := 0; i < attempts; i++ {
+		if i > 0 {
+			time.Sleep(2 * time.Second)
+		}
+		if err := d.mountOnce(client, family, share.dir); err == nil {
+			last = nil
+			break
+		} else {
+			last = err
+		}
 	}
-	res, err := client.Run(cmd, 120*time.Second)
-	// THE GUEST'S OWN WORDS ARE LOGGED EITHER WAY. A mount that reported success and a share that
-	// lists nothing are different facts, and the `ls` in the command above is the only place the
-	// second is visible - throwing it away is what made the next step's `-> 1` unexplainable.
-	if out := strings.TrimSpace(res.Combined()); out != "" {
+	if last != nil {
+		return fmt.Errorf("mounting %s in the %s guest: %w", share.dir, family, last)
+	}
+
+	// AND THE MOUNT IS PROVEN HERE, BECAUSE THE SHELL THAT USED TO PROVE IT COULD NOT BE TRUSTED.
+	//
+	// The old script ended with `mount | grep -q ... || { echo MOUNT_NOT_PRESENT; exit 1; }`, and that
+	// check has two failure modes of its own: the grep's pattern has to match the platform's own
+	// spelling of the mount - `//172.30.0.1/shared` on Linux, `//guest@172.30.0.1/shared` on macOS,
+	// `\\172.30.0.1\shared` on Windows - and a pattern that does not match reports a mount that IS
+	// there as missing.
+	//
+	// SO THE TABLE IS READ AND MATCHED IN GO, where the three spellings are three constants and a
+	// mistake is a compile-time neighbour rather than a string inside a shell.
+	table, err := client.Run(tableCommand(family), 60*time.Second)
+	if err != nil {
+		return fmt.Errorf("reading the %s guest's mount table: %w", family, err)
+	}
+	if !mountsShare(family, table.Combined()) {
+		return fmt.Errorf("the %s guest does not list //172.30.0.1/shared in its mount table after "+
+			"a successful mount; the table is:\n%s", family, firstLines(table.Combined(), 10))
+	}
+
+	listed, err := client.Run(listCommand(family), 60*time.Second)
+	if out := strings.TrimSpace(listed.Combined()); out != "" {
 		for _, line := range strings.Split(out, "\n") {
 			d.logf("  share: " + line)
 		}
 	}
 	if err != nil {
-		return fmt.Errorf("mounting the share in the guest: %w", err)
+		return fmt.Errorf("listing the mount in the %s guest: %w", family, err)
 	}
-	d.logf("  share: the guest mounted //172.30.0.1/shared at ~/shared")
+	d.logf(fmt.Sprintf("  share: the %s guest mounted //172.30.0.1/shared", family))
 	return nil
+}
+
+// mountOnce makes one attempt at mounting the share, as ONE command in the guest's own vocabulary.
+//
+// NO SHELL SYNTAX BEYOND WHAT THE PROGRAM ITSELF NEEDS: no `&&`, no `||`, no loops. The single
+// exception is `sudo -S` on POSIX, because an ssh exec has no terminal and sudo requires a password on
+// stdin - and that is a PIPE, not a control structure.
+func (d *Driver) mountOnce(client *guest.Client, family, dir string) error {
+	var cmd string
+	switch family {
+	case "windows":
+		// `net use` IS WINDOWS'S MOUNT. An empty password is spelled `""` because cmd's argument
+		// splitting would otherwise drop it, and Samba then answers NT_STATUS_LOGON_FAILURE, which
+		// reads as a wrong password rather than a missing argument.
+		cmd = `net use "%USERPROFILE%\shared" \\172.30.0.1\shared /user:guest "" /persistent:no`
+	case "macos":
+		// `mount_smbfs`, NOT `mount -t cifs`: macOS has no cifs filesystem type.
+		//
+		// THE EMPTY PASSWORD IS THE ONLY THING THAT WORKS, and the Python implementation's note says
+		// why in full: mount_smbfs sends one and cannot be made to send anything else from a script -
+		// not from the URL, not from nsmb.conf (no `password` keyword exists), not from a pipe (a pipe
+		// is not a tty, so the prompt reads EOF), not through `-N`. So the ACCOUNT has no password and
+		// `null passwords = yes` makes smbd accept it. `user:` with the colon and nothing after it is
+		// the man page's own spelling for "this user, no password".
+		//
+		// `-f 0666 -d 0777` makes the mount usable by the unprivileged user whose files these are: an
+		// SMB mount is owned by root by default.
+		cmd = `printf '%s\n' ` + shellQuote(d.pass) +
+			` | sudo -S -p '' mount_smbfs -f 0666 -d 0777 '//guest:@172.30.0.1/shared' ~/shared`
+	default:
+		// `mount -t cifs` WITH THE CREDENTIALS ON THE COMMAND LINE, because a credentials FILE would
+		// have to be copied into the guest first and that is a second thing that can fail. The share
+		// account has no password, so there is no secret to leak in argv.
+		cmd = `printf '%s\n' ` + shellQuote(d.pass) +
+			` | sudo -S -p '' mount -t cifs //172.30.0.1/shared ~/shared -o ` +
+			`username=guest,password=,vers=3.0,uid=$(id -u),gid=$(id -g),iocharset=utf8`
+	}
+	_, err := client.Run(cmd, 120*time.Second)
+	return err
+}
+
+// tableCommand reports the system's own view of the mounts, as one command per platform.
+func tableCommand(family string) string {
+	if family == "windows" {
+		return "net use"
+	}
+	return "mount"
+}
+
+// mountsShare reports whether the platform's own mount table names the share.
+//
+// THE THREE SPELLINGS SIT TOGETHER HERE ON PURPOSE: Linux prints the DEVICE as `//172.30.0.1/shared`,
+// macOS prints it as `//guest@172.30.0.1/shared` because mount_smbfs includes the user, and Windows
+// prints an UNC path with backslashes. A check that knew only one of them reported a working mount as
+// missing on the other two.
+func mountsShare(family, table string) bool {
+	switch family {
+	case "windows":
+		return strings.Contains(strings.ToLower(table), `\\172.30.0.1\shared`) ||
+			strings.Contains(table, "172.30.0.1")
+	case "macos":
+		return strings.Contains(table, "//guest@172.30.0.1/shared")
+	default:
+		return strings.Contains(table, "//172.30.0.1/shared")
+	}
+}
+
+// firstLines is the head of a command's output, for an error message that must stay readable.
+func firstLines(s string, n int) string {
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	if len(lines) > n {
+		lines = lines[:n]
+	}
+	return strings.Join(lines, "\n")
+}
+
+// listCommand lists the mounted directory in the guest's own vocabulary.
+func listCommand(family string) string {
+	if family == "windows" {
+		return `dir "%USERPROFILE%\shared"`
+	}
+	return "ls -la ~/shared"
 }
 
 // shareConfig is Samba's configuration for one directory on one bridge address.

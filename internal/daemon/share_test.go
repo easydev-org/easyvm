@@ -436,40 +436,69 @@ func TestTheShareMountSpeaksTheGuestSHostShell(t *testing.T) {
 		t.Fatal(err)
 	}
 	src := stripGoComments(string(body))
-	i := strings.Index(src, "func (d *Driver) MountShare(")
-	if i < 0 {
-		t.Fatal("no MountShare")
-	}
-	rest := src[i:]
-	if end := strings.Index(rest[1:], "\nfunc "); end > 0 {
-		rest = rest[:end+1]
-	}
 
-	// A BRANCH ON THE FAMILY, because the shell is part of the platform.
-	if !strings.Contains(rest, `family == "windows"`) {
-		t.Fatal("`MountShare` does not branch on the family, so a Windows guest is sent a POSIX script " +
-			"and answers like a Windows guest: `\"'cat' is not recognized as an internal or external " +
-			"command\"")
+	// THE PLATFORM BRANCH IS IN `mountOnce`, BECAUSE THE MOUNT IS ONE COMMAND PER PLATFORM AND THE
+	// DECISIONS ARE IN GO. It used to be a shell script per platform inside `MountShare`, and every
+	// one of those was a small program whose control flow lived in a string.
+	i := strings.Index(src, "func (d *Driver) mountOnce(")
+	if i < 0 {
+		t.Fatal("no mountOnce - the per-platform mount has no home")
 	}
-	// AND `net use` IS THE WINDOWS MOUNT.
-	if !strings.Contains(rest, "net use") {
+	once := src[i:]
+	if end := strings.Index(once[1:], "\nfunc "); end > 0 {
+		once = once[:end+1]
+	}
+	if !strings.Contains(once, `case "windows"`) {
+		t.Fatal("`mountOnce` does not branch on the family, so a Windows guest is sent a POSIX command " +
+			"and answers `'cat' is not recognized as an internal or external command`")
+	}
+	if !strings.Contains(once, "net use") {
 		t.Fatal("the Windows branch does not use `net use`, which is how a Windows guest mounts a share")
 	}
-	// AND THE EMPTY PASSWORD IS SPELLED, or cmd's splitting drops it and Samba answers
+	// THE EMPTY PASSWORD IS SPELLED, or cmd's splitting drops it and Samba answers
 	// NT_STATUS_LOGON_FAILURE - which reads as a wrong password rather than a missing argument.
-	if !strings.Contains(rest, `/user:guest ""`) {
-		t.Fatal("the Windows mount does not pass an explicit empty password (`\"\"`); cmd would drop " +
-			"the argument and Samba would answer NT_STATUS_LOGON_FAILURE")
+	if !strings.Contains(once, `/user:guest ""`) {
+		t.Fatal("the Windows mount does not pass an explicit empty password")
 	}
-	// AND `&` RATHER THAN `&&` BETWEEN STATEMENTS: cmd's `&&` and `||` have equal precedence, so a
-	// chain mixing them groups differently from what it looks like.
-	if !strings.Contains(rest, `}, " & ")`) {
-		t.Fatal("the Windows statements are joined with `&&`, whose precedence relative to `||` in " +
-			"cmd makes `a && b || c && d` mean `((a && b) || c) && d`")
+	// AND macOS HAS ITS OWN, because `mount -t cifs` DOES NOT EXIST THERE.
+	if !strings.Contains(once, `case "macos"`) {
+		t.Fatal("`mountOnce` has no macOS branch, so a Mac is sent `mount -t cifs` - a Linux utility " +
+			"for a filesystem type macOS does not have")
 	}
-	// AND THE POSIX BRANCH KEEPS ITS OWN PROOF, unchanged.
-	if !strings.Contains(rest, "mount | grep -q") {
-		t.Fatal("the POSIX branch no longer verifies that the mount is present")
+	if !strings.Contains(once, "mount_smbfs") {
+		t.Fatal("the macOS branch does not use `mount_smbfs`")
+	}
+	if !strings.Contains(once, `//guest:@`) {
+		t.Fatal("the macOS mount does not spell the empty password as `//guest:@`, which is the man " +
+			"page's own form for \"this user, no password\"")
+	}
+
+	// AND THE DECISIONS ARE GO, NOT SHELL: a retry loop, a table check, and a listing, each a single
+	// command whose RESULT Go inspects.
+	ms := src[strings.Index(src, "func (d *Driver) MountShare("):]
+	if end := strings.Index(ms[1:], "\nfunc "); end > 0 {
+		ms = ms[:end+1]
+	}
+	if !strings.Contains(ms, "for i := 0; i < attempts; i++") {
+		t.Fatal("`MountShare` does not retry in Go, so a transient failure is final")
+	}
+	if !strings.Contains(ms, "mountsShare(family, table.Combined())") {
+		t.Fatal("`MountShare` does not check the mount table in Go, so a mount that reported success " +
+			"and did not happen is believed")
+	}
+	// AND THE SHELL-SCRIPT IDIOMS ARE GONE. `sh -s <<'...'`, `while ... done`, `set -e` and `&&`
+	// chains inside the mount command are the pattern this rewrite removed.
+	for _, bad := range []string{"sh -s <<", "set -e", "while [ \"$i\""} {
+		if strings.Contains(ms, bad) {
+			t.Fatalf("`MountShare` still contains the shell idiom %q; the control flow belongs in Go, "+
+				"where a mistake is a compile error rather than a string", bad)
+		}
+	}
+
+	// AND THE SHARE IS STILL PROVEN IN EVERY BRANCH - the sentinel in `actions.go` reads it back, and
+	// this function refuses a mount the table does not list.
+	if !strings.Contains(src, "mountsShare") {
+		t.Fatal("the mount is not verified at all")
 	}
 }
 
