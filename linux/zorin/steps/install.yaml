@@ -90,6 +90,12 @@ steps:
   - 1361
   - 764
   settle: 18
+- name: the updates pane is done
+  until_any:
+  - - installation
+    - type
+  timeout: 180
+  poll: 3
 - name: the keyboard pane is done
   until_any:
   - - installation
