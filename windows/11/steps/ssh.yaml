@@ -61,19 +61,19 @@ steps:
   key: ret
   settle: 120
 - name: sshd starts automatically
-  run: powershell -Command "Set-Service sshd -StartupType Automatic; (Get-Service sshd).StartType"
+  run: Set-Service sshd -StartupType Automatic; (Get-Service sshd).StartType
   settle: 4
   type_gap: 0.15
 - name: sshd takes passwords and port 22
-  run: powershell -Command "$f = Join-Path $env:ProgramData 'ssh/sshd_config'; Add-Content $f 'PasswordAuthentication yes'; (Select-String -Path $f -Pattern PasswordAuthentication).Line"
+  run: $f = Join-Path $env:ProgramData 'ssh/sshd_config'; Add-Content -Path $f -Value 'PasswordAuthentication yes'; (Select-String -Path $f -Pattern PasswordAuthentication).Line
   settle: 4
   type_gap: 0.15
 - name: sshd is running
-  run: powershell -Command "Start-Service sshd; (Get-Service sshd).Status"
+  run: Start-Service sshd; (Get-Service sshd).Status
   settle: 4
   type_gap: 0.15
 - name: the firewall allows 22
-  run: powershell -Command "New-NetFirewallRule -Name sshd22 -DisplayName OpenSSH22 -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22 -ErrorAction SilentlyContinue; Test-NetConnection localhost -Port 22 -InformationLevel Quiet"
+  run: New-NetFirewallRule -Name sshd22 -DisplayName OpenSSH22 -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22 -ErrorAction SilentlyContinue; Test-NetConnection localhost -Port 22 -InformationLevel Quiet
   settle: 4
   type_gap: 0.15
 - name: wait for sshd

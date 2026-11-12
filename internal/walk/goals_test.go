@@ -1648,3 +1648,64 @@ func TestATypedDollarNeedsASlowTypeGap(t *testing.T) {
 	}
 	t.Logf("checked %d typed command(s) with a `$`", checked)
 }
+
+// A `run:` AFTER POWERSHELL IS ALREADY OPEN MUST NOT SPAWN POWERSHELL AGAIN.
+//
+// MEASURED ON windows-ssh, FRAME 600, IN THE ADMINISTRATOR POWERSHELL WINDOW:
+//
+//	PS C:\Users\vmuser> powershell -Command "$f = Join-Path $env:ProgramData 'ssh/sshd_config';
+//	                                          Add-Content $f 'PasswordAuthentication yes'; ..."
+//	= : The term '=' is not recognized as the name of a cmdlet, function, script file...
+//	+ = Join-Path C:\ProgramData 'ssh/sshd_config'; Add-Content  'Password ...
+//
+// THE OUTER POWERSHELL EXPANDED `$f` AND `$env:ProgramData` BEFORE THE INNER ONE EVER SAW THE LINE.
+// `$f` was empty because the outer session had no such variable, so the inner PowerShell was handed
+// `= Join-Path C:\ProgramData ...; Add-Content  'Password...'` - and `Add-Content` with no value
+// parameter went INTERACTIVE:
+//
+//	cmdlet Add-Content at command pipeline position 1
+//	Supply values for the following parameters:
+//	Value[0]: powershell -Command "Start-Service sshd; (Get-Service sshd).Status"
+//	Value[1]: powershell -Command "New-NetFirewallRule ..."
+//
+// so the NEXT TWO STEPS BECAME ARGUMENTS TO A PROMPT. All four sshd steps were lost, and the failure
+// was reported as "nothing accepted ssh within 10m" - a timeout, not a mangled command.
+//
+// THE FILE OPENS POWERSHELL ONCE (step "type powershell", then Enter) and every later `run:` that is
+// PowerShell should be a plain command. This test is about the nesting, not about `$`: a `$` is fine
+// in a `run:` with a slow enough `type_gap`, and several Linux files legitimately use one.
+func TestNoRunNestsPowerShellInsidePowerShell(t *testing.T) {
+	root := filepath.Join("..", "..")
+	files, err := filepath.Glob(filepath.Join(root, "windows", "*", "steps", "*.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked, opened := 0, 0
+	for _, path := range files {
+		doc, err := Load(path, nil)
+		if err != nil {
+			continue
+		}
+		rel, _ := filepath.Rel(root, path)
+		for _, s := range doc.Steps {
+			if strings.Contains(strings.ToLower(s.Get("type")), "powershell") {
+				opened++
+			}
+			body := s.Get("run")
+			if body == "" {
+				continue
+			}
+			checked++
+			if strings.Contains(strings.ToLower(body), "powershell -command") {
+				t.Errorf("%s: %q spawns `powershell -Command` from a `run:`. Measured on "+
+					"windows-ssh: the outer PowerShell expanded `$f` and `$env:ProgramData` first, "+
+					"`Add-Content` lost its value and went interactive, and the next two steps were "+
+					"consumed as its parameter values", rel, s.Name)
+			}
+		}
+	}
+	if checked == 0 {
+		t.Skip("no windows `run:` steps here")
+	}
+	t.Logf("checked %d typed command(s); %d PowerShell launch(es)", checked, opened)
+}
