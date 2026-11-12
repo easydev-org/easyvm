@@ -418,3 +418,57 @@ func TestKillDoesNotWaitForAGuestNobodyAsked(t *testing.T) {
 		t.Fatal("`killAndReap` does not both kill and reap")
 	}
 }
+
+// A WINDOWS GUEST HAS NO `cat`, `sudo` OR `mount -t cifs`, AND THE SHARE COMMAND USED ALL THREE.
+//
+// MEASURED ON windows-vm-configure STEP 13 OF 20, AND IT IS THE SENTINEL THAT FOUND IT:
+//
+//	mount the host share: the guest cannot see a file this host wrote into /github/home/shared:
+//	the mount is not in place ... read "'cat' is not recognized as an internal or external command"
+//
+// `MountShare` WAS ONE POSIX SCRIPT. The guest-side round trip it replaced would have "passed" against
+// a local directory in the guest - exactly as it did on manjaro - and the mount would have been missing
+// with nothing saying so. The host-side sentinel cannot be fooled that way, and the failure it produced
+// named the shell rather than the share.
+func TestTheShareMountSpeaksTheGuestSHostShell(t *testing.T) {
+	body, err := os.ReadFile("share.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := stripGoComments(string(body))
+	i := strings.Index(src, "func (d *Driver) MountShare(")
+	if i < 0 {
+		t.Fatal("no MountShare")
+	}
+	rest := src[i:]
+	if end := strings.Index(rest[1:], "\nfunc "); end > 0 {
+		rest = rest[:end+1]
+	}
+
+	// A BRANCH ON THE FAMILY, because the shell is part of the platform.
+	if !strings.Contains(rest, `family == "windows"`) {
+		t.Fatal("`MountShare` does not branch on the family, so a Windows guest is sent a POSIX script " +
+			"and answers like a Windows guest: `\"'cat' is not recognized as an internal or external " +
+			"command\"")
+	}
+	// AND `net use` IS THE WINDOWS MOUNT.
+	if !strings.Contains(rest, "net use") {
+		t.Fatal("the Windows branch does not use `net use`, which is how a Windows guest mounts a share")
+	}
+	// AND THE EMPTY PASSWORD IS SPELLED, or cmd's splitting drops it and Samba answers
+	// NT_STATUS_LOGON_FAILURE - which reads as a wrong password rather than a missing argument.
+	if !strings.Contains(rest, `/user:guest ""`) {
+		t.Fatal("the Windows mount does not pass an explicit empty password (`\"\"`); cmd would drop " +
+			"the argument and Samba would answer NT_STATUS_LOGON_FAILURE")
+	}
+	// AND `&` RATHER THAN `&&` BETWEEN STATEMENTS: cmd's `&&` and `||` have equal precedence, so a
+	// chain mixing them groups differently from what it looks like.
+	if !strings.Contains(rest, `}, " & ")`) {
+		t.Fatal("the Windows statements are joined with `&&`, whose precedence relative to `||` in " +
+			"cmd makes `a && b || c && d` mean `((a && b) || c) && d`")
+	}
+	// AND THE POSIX BRANCH KEEPS ITS OWN PROOF, unchanged.
+	if !strings.Contains(rest, "mount | grep -q") {
+		t.Fatal("the POSIX branch no longer verifies that the mount is present")
+	}
+}

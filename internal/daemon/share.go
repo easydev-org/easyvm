@@ -160,18 +160,49 @@ func (d *Driver) MountShare(family string) error {
 	//
 	// `sudo -S` reads the password from standard input and `-p ''` suppresses the prompt, so the
 	// password is a line in the script rather than a terminal nobody has.
-	cmd := strings.Join([]string{
-		"set -e",
-		"mkdir -p ~/shared",
-		"printf '%s\\n' " + shellQuote(d.pass) + " | sudo -S -p '' umount ~/shared 2>/dev/null || true",
-		"printf '%s\\n' " + shellQuote(d.pass) + " | sudo -S -p '' mount -t cifs //172.30.0.1/shared ~/shared -o username=guest,password=,vers=3.0,uid=$(id -u),gid=$(id -g),iocharset=utf8",
-		// THE MOUNT IS PROVEN HERE, NOT BY THE STEP AFTER. `mount` lists the device it was given, so
-		// its absence is the fact that the previous line did not work - and this is the only place
-		// that can still return an error about it.
-		"mount | grep -q '//172.30.0.1/shared' || { echo 'MOUNT_NOT_PRESENT'; exit 1; }",
-		"ls -la ~/shared | head -5",
-	}, " && ")
-	res, err := client.Run("sh -c "+shellQuote(cmd), 120*time.Second)
+	// TWO COMMANDS, BECAUSE A GUEST'S SHELL IS PART OF ITS PLATFORM.
+	//
+	// MEASURED ON windows-vm-configure, after the sentinel was in place:
+	//
+	//	mount the host share: the guest cannot see a file this host wrote into /github/home/shared:
+	//	the mount is not in place ... read "'cat' is not recognized as an internal or external command"
+	//
+	// THE WHOLE COMMAND WAS POSIX - `cat`, `mkdir -p`, `sudo`, `mount -t cifs` - and a Windows guest
+	// has none of them. THE SENTINEL IS WHAT FOUND THIS: the guest-side round trip it replaced would
+	// have "passed" against a local directory, exactly as it did on manjaro.
+	var cmd string
+	if family == "windows" {
+		// `net use` IS WINDOWS'S MOUNT, and an empty password is spelled `""` because cmd's argument
+		// splitting would otherwise drop it.
+		//
+		// THE STATEMENTS ARE SEPARATED BY `&`, NOT `&&`, AND EACH CHECKS ITS OWN ERROR.
+		// cmd's `&&` and `||` bind left to right with EQUAL precedence, so `a && b || c && d` means
+		// `((a && b) || c) && d` - the recovery branch would run after a SUCCESS as well as a
+		// failure. One `&` between statements and an explicit `if errorlevel` after each removes
+		// the question.
+		cmd = strings.Join([]string{
+			`if not exist "%USERPROFILE%\shared" mkdir "%USERPROFILE%\shared"`,
+			`net use "%USERPROFILE%\shared" \\\\172.30.0.1\\shared /user:guest "" /persistent:no`,
+			// THE MOUNT IS PROVEN HERE. `net use` with no arguments lists the connections, and its
+			// absence is the previous line having failed.
+			`net use | findstr /C:"172.30.0.1" >nul`,
+			`if errorlevel 1 (echo MOUNT_NOT_PRESENT & exit /b 1)`,
+			`dir "%USERPROFILE%\shared"`,
+		}, " & ")
+	} else {
+		cmd = "sh -c " + shellQuote(strings.Join([]string{
+			"set -e",
+			"mkdir -p ~/shared",
+			"printf '%s\\n' " + shellQuote(d.pass) + " | sudo -S -p '' umount ~/shared 2>/dev/null || true",
+			"printf '%s\\n' " + shellQuote(d.pass) + " | sudo -S -p '' mount -t cifs //172.30.0.1/shared ~/shared -o username=guest,password=,vers=3.0,uid=$(id -u),gid=$(id -g),iocharset=utf8",
+			// THE MOUNT IS PROVEN HERE, NOT BY THE STEP AFTER. `mount` lists the device it was given,
+			// so its absence is the fact that the previous line did not work - and this is the only
+			// place that can still return an error about it.
+			"mount | grep -q '//172.30.0.1/shared' || { echo 'MOUNT_NOT_PRESENT'; exit 1; }",
+			"ls -la ~/shared | head -5",
+		}, " && "))
+	}
+	res, err := client.Run(cmd, 120*time.Second)
 	// THE GUEST'S OWN WORDS ARE LOGGED EITHER WAY. A mount that reported success and a share that
 	// lists nothing are different facts, and the `ls` in the command above is the only place the
 	// second is visible - throwing it away is what made the next step's `-> 1` unexplainable.
