@@ -408,6 +408,34 @@ func (e *Executor) doDesktop(s walk.Step) error {
 				"are windows, macos and linux", family)
 		}
 		if ok {
+			// A DESKTOP AT THE WRONG SIZE IS NOT A DESKTOP, BECAUSE EVERY COORDINATE IN THE FILE WAS
+			// MEASURED AT ONE SIZE.
+			//
+			// MEASURED ON zorin-install, WHICH PASSED THE GATE AND THEN PRODUCED A 0 MiB DISK:
+			//
+			//	a desktop is on screen (10s); drop=+20.6 (need 15) ratio=0.0x sat=+0.00
+			//	on a 800x600 frame
+			//
+			// THE GUEST WAS AT 800x600 WHILE THE FILE CLICKS (1223, 586) AND (1361, 764) - measured on a
+			// 1920x1080 screen. At 800x600 those land on the wallpaper, and the whole installer walk
+			// pressed nothing: the disk was never written, and the stage "passed" its steps and
+			// published 0 MiB.
+			//
+			// SO THE GATE ASKS FOR THE SIZE TOO. A guest that has not switched modes is a guest whose
+			// coordinates mean something else, and saying so HERE names the cause on the step that can
+			// see it rather than on the compress four hundred steps later.
+			//
+			// THE SIZE IS THE FILE'S OWN `resolution:`, which is what the coordinates were measured
+			// against; 1920x1080 when the file does not say.
+			want := resolutionOf(e.File)
+			w, h := f.Size()
+			if w > 0 && (w != want[0] || h != want[1]) {
+				e.Driver.Log(fmt.Sprintf("  a desktop is on screen at %dx%d, and this file's "+
+					"coordinates were measured at %dx%d; waiting for the guest to switch modes",
+					w, h, want[0], want[1]))
+				time.Sleep(poll)
+				continue
+			}
 			e.Driver.Log(fmt.Sprintf("  a desktop is on screen (%s); %s",
 				time.Since(start).Round(time.Second), lastStats.Explain()))
 			return nil
@@ -1110,4 +1138,16 @@ func (e *Executor) doSnapshot(s walk.Step) error {
 		return fail(s.Name, "%v", err)
 	}
 	return nil
+}
+
+// resolutionOf is the guest screen size a file's coordinates were measured at.
+//
+// IT IS THE FILE'S OWN `resolution:`, and 1920x1080 when the file does not say - which is the size
+// every walkthrough here was measured on. A guest that has not switched to it is a guest whose
+// coordinates mean something else entirely.
+func resolutionOf(f *walk.File) [2]int {
+	if f != nil && f.Resolution[0] > 0 && f.Resolution[1] > 0 {
+		return f.Resolution
+	}
+	return [2]int{1920, 1080}
 }
