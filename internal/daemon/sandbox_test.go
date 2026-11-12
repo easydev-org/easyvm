@@ -177,3 +177,48 @@ func TestBootIsANoOpOnARunningMachine(t *testing.T) {
 			"unnoticed one")
 	}
 }
+
+// A FILE WITH NO `boot:` STEP STILL HAS TO BE FOR THE RIGHT GUEST.
+//
+// `doBoot` REFUSES A MISMATCHED `os:` ON A RUNNING MACHINE, and that is not enough: a `dev.yaml` that
+// only adds packages, or a `test.yaml` that only runs commands, has NO boot step - so it would never
+// reach that check and would act on whatever guest happened to be running. A windows file typing into a
+// Linux guest fails as a missing command twenty steps later, with nothing pointing at the real mistake.
+//
+// SO THE CHECK IS WHERE THE MACHINE IS REUSED, not only where it is started, and the file's guest is
+// read from its boot steps. A file that names none is accepted: it is a set of actions, and the machine
+// decides what it is.
+func TestAReusedMachineIsTheGuestTheFileExpects(t *testing.T) {
+	body, err := os.ReadFile("transport.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := stripGoComments(string(body))
+
+	// THE CHECK IS AT REUSE, NOT ONLY AT BOOT.
+	i := strings.Index(src, `d.machine = fresh`)
+	if i < 0 {
+		t.Fatal("no `d.machine = fresh`; the reuse path has moved")
+	}
+	window := src[i:]
+	if end := strings.Index(window, "\n\t// THE HOOK IS HOW"); end > 0 {
+		window = window[:end]
+	}
+	if !strings.Contains(window, "fileOS(file)") {
+		t.Fatal("the reuse path does not check the file's guest, so a boot-less file would run " +
+			"against whatever machine happened to be up")
+	}
+	// AND `fileOS` READS THE BOOT STEPS.
+	j := strings.Index(src, "func fileOS(")
+	if j < 0 {
+		t.Fatal("no fileOS")
+	}
+	fn := src[j:]
+	if end := strings.Index(fn[1:], "\nfunc "); end > 0 {
+		fn = fn[:end+1]
+	}
+	fn = stripGoComments(fn)
+	if !strings.Contains(fn, `s.Has("boot")`) || !strings.Contains(fn, `s.Get("os")`) {
+		t.Fatal("`fileOS` does not read `os:` from the file's `boot:` steps")
+	}
+}

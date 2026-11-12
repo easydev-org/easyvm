@@ -195,6 +195,27 @@ func (d *Daemon) runWalkthroughFile(req Request, work string, done chan struct{}
 		d.machineClose = closeFresh
 		d.mu.Unlock()
 	} else {
+		// THE GUEST HAS TO BE THE ONE THIS FILE EXPECTS, AND THAT CHECK IS HERE RATHER THAN IN `doBoot`.
+		//
+		// `doBoot` DOES refuse a mismatched `os:` on a running machine, and that is not enough: a file
+		// with NO `boot:` step - a `dev.yaml` that only adds packages, a `test.yaml` that only runs
+		// commands - would never reach that check, and it would act on whatever guest happened to be
+		// running. A `windows` file typing into a Linux guest fails as a missing command twenty steps
+		// later, with nothing pointing at the real mistake.
+		//
+		// THE FILE'S OWN `os:` IS READ FROM ITS BOOT STEPS, because that is where a file states its
+		// guest. A file that names none is accepted: it is a set of actions and the machine decides
+		// what it is.
+		if want := fileOS(file); want != "" {
+			if named, ok := driver.Machine().(interface{ OS() string }); ok {
+				if have := named.OS(); have != "" && have != want {
+					fail(fmt.Sprintf("this daemon already holds a %s machine, and this file is for "+
+						"%s. One daemon holds one machine; `destroy` it to change the guest", have, want),
+						nil)
+					return
+				}
+			}
+		}
 		fmt.Printf("[easyvm]   reusing the machine already running for %s\n", filepath.Base(req.File))
 	}
 
@@ -273,4 +294,22 @@ func SocketDir(file, work string) string {
 		return work
 	}
 	return filepath.Dir(file)
+}
+
+// fileOS is the guest a file says it needs, read from its `boot:` steps.
+//
+// A FILE THAT NAMES NONE RETURNS "", which means "any machine will do" - a set of actions rather than
+// a description of a guest. That is how `dev.yaml` and `test.yaml` are written.
+func fileOS(f *walk.File) string {
+	for _, s := range f.Steps {
+		if s.Has("boot") || s.Has("boot_from") {
+			if os := s.Get("os"); os != "" {
+				return os
+			}
+			if fam := s.Get("family"); fam != "" {
+				return fam
+			}
+		}
+	}
+	return ""
 }
