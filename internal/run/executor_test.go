@@ -624,3 +624,39 @@ func TestSnapshotAndBootFromAreBothDispatched(t *testing.T) {
 			"`-incoming` error")
 	}
 }
+
+// A HALF-WRITTEN FRAME IS A RACE IN THE DRIVER, NOT A FAULT IN THE WALK.
+//
+// MEASURED ON macos-setup, AT STEP 6 OF 30 AND TWO MINUTES IN:
+//
+//	wait for the recovery menu: .../frames/frame-000134.ppm: unexpected EOF
+//	(is the write still in progress? format "ppm")
+//
+// and the recording's last frame shows the Apple logo with the boot progress bar halfway along -
+// macOS's recovery system still starting. The walk was not wrong; the poll landed on a screendump
+// that `qemu` had replied to but not finished writing, and `until:` returned that as the failure.
+//
+// `desktop:` HAS ALWAYS TOLERATED THIS by `continue`ing. `until:` did not, which made a twenty-minute
+// stage end at two minutes with a message about a file format.
+func TestAHalfWrittenFrameDoesNotEndAnUntil(t *testing.T) {
+	// THE CONTRACT, AS THE CODE STATES IT: a frame that cannot be read is retried until the step's
+	// own timeout, and only then is the last read error reported.
+	body, err := os.ReadFile("text.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(body)
+	if !strings.Contains(src, "A FRAME THAT CANNOT BE READ IS NOT A FAILURE, IT IS A FRAME THAT WAS NOT FINISHED") {
+		t.Fatal("`doUntil` no longer documents why a truncated frame is retried; without that, the " +
+			"next reader will make it fatal again and macos-setup will end at two minutes with a " +
+			"message about a file format")
+	}
+	if !strings.Contains(src, "lastErr = err") || !strings.Contains(src, "continue") {
+		t.Fatal("`doUntil` does not keep the read error and continue polling")
+	}
+	// AND A STEP THAT NEVER GETS A READABLE FRAME STILL FAILS, naming the error rather than a pane.
+	if !strings.Contains(src, "and no frame could be read") {
+		t.Fatal("`doUntil` would report 'never saw ...; last read: ' with an empty read when every " +
+			"frame was unreadable, which says nothing about why")
+	}
+}

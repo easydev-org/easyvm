@@ -196,12 +196,30 @@ func (e *Executor) doUntil(s walk.Step) error {
 
 	start := time.Now()
 	var last []string
+	var lastErr error
 	for time.Since(start) < timeout {
 		words, err := e.readScreen(s, s.Name)
 		if err != nil {
-			return fail(s.Name, "%v", err)
+			// A FRAME THAT CANNOT BE READ IS NOT A FAILURE, IT IS A FRAME THAT WAS NOT FINISHED.
+			//
+			// MEASURED ON macos-setup, AT STEP 6 OF 30:
+			//
+			//	wait for the recovery menu: .../frames/frame-000134.ppm: unexpected EOF
+			//	(is the write still in progress? format "ppm")
+			//
+			// QEMU'S `screendump` REPLIES BEFORE THE WRITE COMPLETES - `internal/screen`'s own comment
+			// says so - so a poll can land on a half-written file. `desktop:` already tolerates this
+			// by `continue`ing, and `until:` did not: it returned the truncated read as the reason the
+			// step failed, which is a race in the driver reported as a fault in the walk.
+			//
+			// THE TIMEOUT STILL BOUNDS IT: a frame that never becomes readable means the guest is
+			// gone, and the step then fails with the last read AND the last read error.
+			lastErr = err
+			time.Sleep(poll)
+			continue
 		}
 		last = words
+		lastErr = nil
 		for _, set := range alternatives {
 			if says(words, set) {
 				e.Driver.Log(fmt.Sprintf("  saw %q (%s)", strings.Join(set, " "),
@@ -215,6 +233,10 @@ func (e *Executor) doUntil(s walk.Step) error {
 			_ = e.Driver.Click(400+(int(time.Since(start).Seconds())%40), 300)
 		}
 		time.Sleep(poll)
+	}
+	if lastErr != nil && len(last) == 0 {
+		return fail(s.Name, "never saw %s within %s, and no frame could be read: %v",
+			describeSets(alternatives), timeout, lastErr)
 	}
 	return failWithScreen(s.Name, e.Driver, "never saw %s within %s; last read: %s",
 		describeSets(alternatives), timeout, truncateWords(last, 16))
