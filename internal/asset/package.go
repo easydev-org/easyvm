@@ -30,6 +30,23 @@ import (
 // SO `workflows/artifacts-publish.yml` DOWNLOADS EACH ONE ONCE, VERIFIES IT, AND PUSHES IT, and every
 // fetch below is a pull. A URL still appears in the code - in the pin tables - but only the publisher
 // reads it.
+//
+// THE ORDER IS A BOOTSTRAP AND IT IS NOT OPTIONAL. An empty package is not a broken dispatch - it is
+// an empty package, and every stage fails on the first `fetch:` while looking like fifteen unrelated
+// failures. MEASURED ON THE FIRST RUN AFTER THIS SWITCHED REPOSITORIES, which dispatched all fifteen
+// workflows at once and got:
+//
+//	15/15 failed, and the reason was one line per leg:
+//	  zorin-install   fetch the installer image: ... pulled easydev-org/easyvm/iso-zorin-core without success
+//	  zorin-ssh       FAILED: ghcr.io/easydev-org/easyvm:linux-zorin-ssh is not in the registry (404)
+//
+//	so:
+//	  1. artifacts-publish   fills the source tags (ISOs, firmware, Xcode, packages)   ~40 GiB
+//	  2. the `install` legs   produce the first disks, because their `pull:` is empty
+//	  3. the `ssh`/`vm` legs  have a disk to pull, and so does anything after them
+//
+// STEP 2 IS WHY AN INSTALL HAS NO `pull:`: its first step creates the disk it writes to. Every other
+// leg starts from a published one, so a package with no disks has nothing for them at all.
 
 // packageTag names one artifact in this repository's package.
 //

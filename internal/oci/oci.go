@@ -341,7 +341,21 @@ func fetchManifest(ctx context.Context, reg, repository, tag string, a auth) (ma
 	switch resp.StatusCode {
 	case http.StatusOK:
 	case http.StatusNotFound:
-		return manifest{}, fmt.Errorf("%s/%s:%s is not in the registry (404)", reg, repository, tag)
+		// A 404 IS ALMOST NEVER A TYPO, AND SAYING "check the tag" SENDS A READER THE WRONG WAY.
+		//
+		// MEASURED ON THE FIRST RUN AFTER THE DISKS MOVED TO A NEW PACKAGE: all fifteen workflows
+		// dispatched at once, and every `ssh` leg answered
+		//
+		//	FAILED: ghcr.io/easydev-org/easyvm:linux-zorin-ssh is not in the registry (404)
+		//
+		// which reads like a wrong name and was an EMPTY PACKAGE: the install leg that publishes that
+		// tag had not run yet, because an install has no `pull:` and is what CREATES a disk. Fifteen
+		// legs looked like fifteen bugs and were one ordering fact.
+		return manifest{}, fmt.Errorf("%s/%s:%s is not in the registry (404). Either the tag is "+
+			"wrong, or the stage that PUBLISHES it has not run: an `install` leg has no `pull:` and "+
+			"is what creates a disk, so the legs after it need that install to have finished first. "+
+			"A source tag (`iso-`, `macos-asset-`, `dev-`) is filled by workflows/artifacts-publish.yml",
+			reg, repository, tag)
 	case http.StatusUnauthorized, http.StatusForbidden:
 		return manifest{}, fmt.Errorf("%s/%s:%s needs credentials (%d); a public artifact "+
 			"needs none", reg, repository, tag, resp.StatusCode)
