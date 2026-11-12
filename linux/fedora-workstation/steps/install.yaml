@@ -323,9 +323,13 @@ steps:
   # an earlier run lands there, and that is a pass too.
   - name: first boot
     until_any:
-      - [welcome]
-      - [next]
+      # `next` ALONE WAS THE WEAKEST ALTERNATIVE IN THE FILE: a lone button word is satisfied by any
+      # pane that happens to have one, which is exactly the shape that published a 0 MiB cachyos disk
+      # (`安装成功` matched at 1s while the installer was at 11%). Fedora's first boot is a GNOME
+      # initial-setup page, and `type to search` is its own placeholder text.
+      - [welcome, to, fedora]
       - [type, to, search]
+      - [start, using, fedora]
     region: [0, 0, 1920, 1080]
     region_at: [1920, 1080]
     scale: 1

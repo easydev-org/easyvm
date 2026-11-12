@@ -294,20 +294,37 @@ steps:
   # English, and on a machine whose egress reports China it is Simplified Chinese - measured,
   # a completed install there reads `安装成功！` with `CachyOS 已安装在您的电脑上了。` under
   # it. A completion test that knew only English would throw that disk away at the timeout.
+  # THE INSTALLER'S LAST PAGE, AND NOTHING EARLIER THAN IT.
+  #
+  # MEASURED FROM cachyos-install's OWN RECORDING, at the moment this step reported success:
+  #
+  #	=== the installer finishes
+  #	  saw "安装成功" (1s)          <- ONE SECOND after the step began
+  #	=== stop the machine  stopping with method "kill"
+  #	=== publish the disk  linux-cachyos.qcow2: 0 MiB
+  #
+  # and the frame at that moment shows the installer still at
+  #
+  #	initialize pacman ... ranking mirrors ... 11%
+  #
+  # SO THE MATCH WAS A FALSE POSITIVE. A ONE-WORD ALTERNATIVE - `安装成功`, `现在重启` - is satisfied by
+  # any pane that happens to contain those characters, and this installer's own UI is labelled in
+  # Chinese on a locale where tesseract renders fragments of it. The walk then killed a machine that
+  # had just started copying packages, and the disk it published had no system on it.
+  #
+  # EVERY ALTERNATIVE IS NOW A PHRASE THE FINISHED INSTALLER SAYS AND NO EARLIER PANE DOES. The
+  # Chinese ones are dropped entirely rather than lengthened: this walk pins its own language to
+  # English in an earlier step, so a Chinese completion page is not a page this run can reach, and
+  # keeping a guess about one is how the false positive got in.
   - name: the installer finishes
     until_any:
       - [all, done]
       - [you, may, now]
+      - [installation, complete]
       - [reboot, now]
       - [restart, now]
-      - [安装成功]
-      - [已安装在]
-      - [现在重启]
       - [todo, listo]
-      - [ya, puede]
-      - [reiniciar]
       - [instalación, completada]
-      - [instalacion, completada]
     region: [0, 0, 1920, 1080]
     region_at: [1920, 1080]
     scale: 1

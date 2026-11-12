@@ -241,8 +241,26 @@ func Down() {
 	_, _ = run("iptables", "-F", "FORWARD")
 	_, _ = run("iptables", "-t", "nat", "-D", "POSTROUTING", "-s", spec, "-j", "MASQUERADE")
 	stopDHCP()
-	_, _ = run("ip", "link", "del", "dev", TapName)
-	_, _ = run("ip", "link", "del", "dev", BridgeName)
+	// THE TAP AND THE BRIDGE HAVE TO GO, AND A FAILED DELETE IS NOT SILENT.
+	//
+	// MEASURED IN THE LAB POD: a daemon killed while a walk was running left `qemutap0` attached to
+	// `qemubr0`, and THE NEXT RUN COULD NOT START AT ALL - qemu exits immediately when asked to open
+	// a tap that already exists, with no message of its own, so the log ends at `booting linux` and
+	// reads like a boot failure.
+	//
+	// The delete used to be `_, _ = run(...)`: correct while it succeeds, and invisible when it does
+	// not. These calls cannot fail for a reason the caller can act on, so they stay non-fatal - but
+	// they now SAY so, because the failure they cause is three steps away and looks like something
+	// else entirely.
+	for _, name := range []string{TapName, BridgeName} {
+		if out, err := run("ip", "link", "del", "dev", name); err != nil {
+			// A DEVICE THAT WAS NEVER CREATED IS NOT A LEFTOVER. `ip link del` answers "Cannot find
+			// device" with exit 1, which is the normal case for a run that failed before `Up`.
+			if !strings.Contains(string(out), "Cannot find device") {
+				fmt.Printf("  network: could not remove %s: %v (%s)\n", name, err, strings.TrimSpace(string(out)))
+			}
+		}
+	}
 }
 
 // --- helpers ---------------------------------------------------------------------------

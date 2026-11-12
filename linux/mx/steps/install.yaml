@@ -322,7 +322,6 @@ steps:
     until_any:
       - [congratulations]
       - [completed, the, installation]
-      - [已完成]
     region: [0, 0, 1920, 1080]
     region_at: [1920, 1080]
     scale: 1

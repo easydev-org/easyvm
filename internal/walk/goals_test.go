@@ -1363,3 +1363,59 @@ func TestAnInstallStopsTheMachineBeforePublishingTheDisk(t *testing.T) {
 	}
 	t.Logf("checked %d install walkthrough(s)", checked)
 }
+
+// A WAIT FOR "THE INSTALLER FINISHED" MUST NOT BE SATISFIED BY A WORD ON AN EARLIER PANE.
+//
+// MEASURED ON cachyos-install, WHICH PUBLISHED A 0 MiB DISK WITH EVERY STEP GREEN:
+//
+//	=== the installer finishes
+//	  saw "安装成功" (1s)
+//	=== stop the machine   stopping with method "kill"
+//	=== publish the disk   linux-cachyos.qcow2: 0 MiB
+//
+// ONE SECOND IS THE TELL: a live install cannot complete in one second. The frame at that moment
+// shows the installer at `initialize pacman ... ranking mirrors ... 11%`, and the match came from a
+// ONE-WORD CJK ALTERNATIVE that tesseract found somewhere in the installer's own Chinese-labelled UI.
+//
+// THE SHAPE IS THE BUG, not the language: a `until_any:` entry with a single short word is satisfied
+// by any screen containing that word. Completion pages are recognised by a PHRASE.
+func TestNoCompletionWaitIsASingleShortWord(t *testing.T) {
+	root := filepath.Join("..", "..")
+	files, err := filepath.Glob(filepath.Join(root, "*", "*", "steps", "*.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked := 0
+	for _, path := range files {
+		doc, err := Load(path, nil)
+		if err != nil {
+			continue
+		}
+		rel, _ := filepath.Rel(root, path)
+		for _, s := range doc.Steps {
+			for _, key := range []string{"until_any", "expect_any", "unless_any"} {
+				sets, _ := s.Spec[key].([]any)
+				for _, raw := range sets {
+					words, ok := raw.([]any)
+					if !ok || len(words) != 1 {
+						continue
+					}
+					one := strings.TrimSpace(fmt.Sprint(words[0]))
+					// A CJK word of four characters or fewer is the measured offender; the same
+					// reasoning applies to any one-glyph alternative in any script, so the check is
+					// on the SHAPE rather than on the language.
+					if len([]rune(one)) > 4 {
+						continue
+					}
+					checked++
+					t.Errorf("%s: %q has a one-word %s entry %q. A single short word is satisfied by "+
+						"any pane that contains it - measured on cachyos, where `安装成功` matched at 1s "+
+						"while the installer was at 11%% and the published disk was 0 MiB. Use a phrase "+
+						"the finished installer says and no earlier pane does",
+						rel, s.Name, key, one)
+				}
+			}
+		}
+	}
+	t.Logf("checked %d one-word alternatives across the walkthroughs", checked)
+}
