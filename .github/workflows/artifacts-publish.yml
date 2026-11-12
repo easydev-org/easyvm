@@ -240,18 +240,54 @@ jobs:
             if [ "$sha" != "" ] && [ "$sha" != "0" ]; then
               # THE PIN IS THE POINT. A file that does not match is not a newer version - it is the
               # wrong file, and pushing it would put it behind the right tag where nobody looks.
-              actual=$(sha256sum "$dest" | cut -d' ' -f1)
+              #
+              # THE HASH IS WHICHEVER ONE THE PIN PUBLISHED, AND NOT ALWAYS sha256. Apple's Xcode
+              # release index gives a sha1, archive.org republishes that same sha1, and
+              # `internal/asset/xcode.go` verifies it as a sha1 - so the catalogue carries a sha1 for
+              # `macos-asset-xcode-26.3` and a sha256 for everything else. CHECKING EVERYTHING AS
+              # sha256 REFUSED THE CORRECT FILE:
+              #
+              #	warning: macos-asset-xcode-26.3: sha256 is cf87232e..., the pin is cebf05ec...
+              #
+              # and `cebf05ec...` is 40 hex digits - a sha1 - being compared against 64. The length
+              # of the pin says which digest to compute, which is the one fact that does not need a
+              # second table.
+              case "${#sha}" in
+                40) actual=$(sha1sum   "$dest" | cut -d' ' -f1) ;;
+                64) actual=$(sha256sum "$dest" | cut -d' ' -f1) ;;
+                *)  echo "::warning::$tag: the pin is ${#sha} hex digits, which is neither sha1 nor sha256"
+                    failed="$failed $tag"
+                    continue ;;
+              esac
               if [ "$actual" != "$sha" ]; then
-                echo "::warning::$tag: sha256 is $actual, the pin is $sha"
+                echo "::warning::$tag: ${#sha}-digit digest is $actual, the pin is $sha"
                 failed="$failed $tag"
                 continue
               fi
-              echo "  sha256: verified"
+              echo "  sha${#sha}: verified"
             else
-              # THE UNPINNED TWO ARE A MOVING "latest", so the only honest check is a floor: a
-              # truncated transfer and an HTML error page are both far below it.
-              if [ "$got" -lt $((500 * 1024 * 1024)) ]; then
-                echo "::warning::$tag: $got bytes is below the 500 MiB floor for an installer image"
+              # THE UNPINNED ONES ARE EITHER A MOVING "latest" OR A SMALL BINARY, so the only honest
+              # check is a floor - and THE FLOOR IS NOT ONE NUMBER.
+              #
+              # MEASURED: `macos-asset-mac-guest-agent` is a 531 KB EXECUTABLE, and a 500 MiB floor
+              # refused it with a sentence about an installer image. The floor exists to catch a
+              # truncated transfer or an HTML error page, and those are proportional to the real
+              # file: half a gigabyte is right for a 7 GiB ISO and absurd for a 531 KB binary.
+              floor=500
+              case "$tag" in
+                macos-asset-mac-guest-agent) floor=0 ;;    # ~519 KB: checked in KB below, not MiB
+                dev-*)                       floor=10 ;;
+                macos-asset-*)               floor=1 ;;
+              esac
+              # THE AGENT IS A HALF-MEGABYTE BINARY, so its floor is in kilobytes and the `floor=0`
+              # above means "handled separately". Everything else uses the MiB table.
+              if [ "$tag" = "macos-asset-mac-guest-agent" ]; then
+                min=$((400 * 1024))
+              else
+                min=$((floor * 1024 * 1024))
+              fi
+              if [ "$got" -lt "$min" ]; then
+                echo "::warning::$tag: $got bytes is below the $min-byte floor for this kind of artifact"
                 failed="$failed $tag"
                 continue
               fi
