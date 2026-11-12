@@ -214,8 +214,16 @@ steps:
   # 12 is named after it.
   - name: wait for the installer window
     until_any:
+      # THE THREE PHRASES ARE THE REFERENCE IMPLEMENTATION'S, MEASURED ON THIS IMAGE:
+      # "the window title `Install Pop!_OS 24.04 LTS`, the first pane `Select a Language`, and the
+      # product name". `pop` ALONE IS THE PREFIX OF `pop-os` AND OF `Pop!_OS`, so it matches the title
+      # and the product name both.
+      - [select, a, language]
+      - [install, pop]
+      - ["pop!_os"]
+      # AND THE LATER PANES AS WELL, because a slower image reaches one of them before the title is
+      # ever re-read - and any of these is a screen the installer alone draws.
       - [clean, install]
-      - [erase, and, install]
       - ["full", "name"]
     timeout: 300
     poll: 3
