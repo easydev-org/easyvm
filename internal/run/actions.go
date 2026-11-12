@@ -600,7 +600,12 @@ func (e *Executor) doRecord(s walk.Step) error {
 		if e.rec == nil {
 			return fail(s.Name, "`record: false` but nothing was recording")
 		}
-		video := s.Get("_video")
+		// THE NAME COMES FROM THE START STEP, WHICH IS A DIFFERENT `walk.Step`.
+		//
+		// `s.Get("_video")` READ THE STOP STEP'S OWN SPEC and was therefore ALWAYS EMPTY - so every
+		// recording was written to the fallback `install.mp4` whatever `record:` had said at the start.
+		// A file with two `record:` steps produced a video named for neither.
+		video := e.recVideo
 		if video == "" {
 			video = filepath.Join(e.Work, "install.mp4")
 		}
@@ -608,12 +613,15 @@ func (e *Executor) doRecord(s walk.Step) error {
 			return fail(s.Name, "%v", err)
 		}
 		e.rec = nil
+		e.recVideo = ""
 		return nil
 	}
 	if err := e.sampler(filepath.Join(e.Work, "shots")); err != nil {
 		return fail(s.Name, "%v", err)
 	}
-	s.Spec["_video"] = value
+	// REMEMBERED, because the `record: false` step is a DIFFERENT Step object and cannot see this one's
+	// Spec - and because `finishRecording` needs it when the walk fails before that step runs.
+	e.recVideo = value
 	e.Driver.Log(fmt.Sprintf("  recording: %s", value))
 	return nil
 }

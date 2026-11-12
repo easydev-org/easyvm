@@ -223,3 +223,30 @@ func allocatedBytes(path string) int64 {
 	}
 	return st.Blocks * 512
 }
+
+// finishRecording stops the sampler and writes the video, so a FAILED walk still leaves a recording.
+//
+// IT IS THE `defer` OF `Run`, and it exists because the `record: false` STEP IS UNREACHABLE WHEN A STEP
+// BEFORE IT FAILS. Measured on popos-install, which died at step 6 of 26 with a 1,693-byte `-logs`
+// artifact and NO `-video`: the frames had been captured once per second for four minutes and were
+// thrown away, and the question "what was on screen" had no answer in the run.
+//
+// IT DOES NOT REPORT AN ERROR. The walk is already returning one, and a failed encode would replace a
+// useful message with a cosmetic one - but it DOES log, because a recording that silently did not
+// happen is the failure this whole mechanism was rewritten to stop.
+func (e *Executor) finishRecording() {
+	rec := e.rec
+	video := e.recVideo
+	e.rec = nil
+
+	e.stopSampler()
+	if rec == nil {
+		return
+	}
+	if video == "" {
+		video = filepath.Join(e.Work, "install.mp4")
+	}
+	if err := rec.encode(video, e.Driver.Log); err != nil {
+		e.Driver.Log(fmt.Sprintf("  recording NOT written: %v", err))
+	}
+}

@@ -28,8 +28,11 @@ type Executor struct {
 	StopBefore string
 
 	// rec is the recording in progress, and recDone stops its sampler.
-	rec     *recorder
-	recDone chan struct{}
+	rec *recorder
+	// recVideo is where the running recording is being written, so a walk that fails can still
+	// produce the file - the `record: false` step is unreachable once a step before it fails.
+	recVideo string
+	recDone  chan struct{}
 
 	// BootDisk is the disk a `boot:` starts when no `disk:` step named one - the --boot-disk flag.
 	BootDisk string
@@ -68,11 +71,19 @@ type Result struct {
 // toolchain is missing" for a disk where an install never ran.
 func (e *Executor) Run(steps []walk.Step) (Result, error) {
 	var res Result
-	// A RECORDING STILL RUNNING WHEN THE WALK ENDS IS STOPPED, whichever way it ended. The Python
-	// implementation learned this as "a failed stage left qemu running and held /dev/kvm for every
-	// later job" - the same shape one level up: a sampler goroutine that outlives the walk writes
-	// frames into a directory the next stage then reads as its own.
-	defer e.stopSampler()
+	// A RECORDING STILL RUNNING WHEN THE WALK ENDS IS STOPPED **AND ENCODED**, WHICHEVER WAY IT ENDED.
+	//
+	// The Python implementation learned the "stop" half as "a failed stage left qemu running and held
+	// /dev/kvm for every later job". THE "ENCODE" HALF IS THIS PROJECT'S OWN, and its absence is why a
+	// failing leg had NO VIDEO:
+	//
+	//	popos-install failed at step 6 of 26, and its artifacts were `-logs` (1,693 bytes) and `-disk`
+	//	(518 bytes) - NO `-video` AT ALL, because `encode` was only ever called by the `record: false`
+	//	STEP and a failed walk never reaches it.
+	//
+	// A FAILING RUN IS THE ONE THAT NEEDS THE RECORDING. The frames are on disk; only the encode was
+	// skipped, and the encode is what turns them into the file a person can watch.
+	defer e.finishRecording()
 
 	started := e.StartAt == ""
 
