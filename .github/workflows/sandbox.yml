@@ -1,0 +1,174 @@
+name: sandbox
+
+# # THE SANDBOX MODE, PROVEN ON A RUNNER.
+#
+# `easyvm run` IS A BAKE: the walkthrough runs to its last step and `defer closeDriver()` closes the
+# machine. `easyvm create` IS A SANDBOX: the machine starts and STAYS STARTED until `destroy`. The
+# difference is one `defer`, and it is the whole product difference - a CI leg wants the first, a pod
+# wants the second.
+#
+# NOTHING IN THIS REPOSITORY EXERCISED `create` UNTIL THIS FILE. Fourteen packages of unit tests assert
+# the SHAPE (the sandbox does not defer its driver, it runs only boot steps, the CLI has both endings),
+# and a shape is not a machine that came up.
+#
+# SO THIS JOB:
+#
+#   1  pulls a published disk - any `vm` leg's output will do, they are all installed systems
+#   2  `easyvm create` that disk, which boots it and returns while it stays up
+#   3  PROVES IT IS UP BY ASKING THE GUEST, not by reading a status line
+#   4  LEAVES IT UP for a while, which is the property under test: a bake would have closed it
+#   5  `easyvm destroy`, and confirms the machine is gone
+#
+# THE PROOF IS AN SSH COMMAND THAT CANNOT SUCCEED ON A STOPPED MACHINE. A status field can be wrong;
+# `hostname` answering from inside the guest cannot.
+
+on:
+  workflow_dispatch:
+    inputs:
+      disk:
+        description: "the published disk to boot (a tag, e.g. linux-zorin-vm)"
+        default: "linux-zorin-vm"
+      disks_repository:
+        description: "the ghcr repository that holds the disks"
+        default: "easydev-org/easydiskbake"
+      hold_seconds:
+        description: "how long the machine is left running, to prove it does not close"
+        default: "120"
+
+concurrency:
+  group: sandbox
+  cancel-in-progress: true
+
+jobs:
+  sandbox:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    container:
+      image: ghcr.io/${{ github.repository }}:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+      options: --device /dev/kvm --device /dev/net/tun --cap-add NET_ADMIN
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: prepare
+        run: |
+          set -eu
+          test -e /dev/kvm || { echo "=== NO /dev/kvm ==="; exit 1; }
+          test -e /dev/net/tun || { echo "=== NO /dev/net/tun ==="; exit 1; }
+          : < /dev/net/tun || { echo "=== /dev/net/tun CANNOT BE OPENED ==="; exit 1; }
+          easyvm versions
+          qemu-img --version | head -1
+
+      - name: pull the disk
+        run: |
+          set -eu
+          mkdir -p "$GITHUB_WORKSPACE/work"
+          easyvm pull --tag "${{ inputs.disk }}" \
+                      --repository "${{ inputs.disks_repository }}" \
+                      --dest "$GITHUB_WORKSPACE/work/disk.qcow2"
+          ls -l "$GITHUB_WORKSPACE/work/"
+          qemu-img check "$GITHUB_WORKSPACE/work/disk.qcow2" || true
+
+      - name: write the sandbox file
+        # THE FILE DESCRIBES THE MACHINE AND NOTHING ELSE. A sandbox uses its `boot:` steps and no
+        # others: `create` runs those, because that is where the machine's shape lives - os, disk,
+        # video adapter, firmware.
+        run: |
+          cat > "$GITHUB_WORKSPACE/sandbox.yaml" <<'YAML'
+          name: sandbox probe
+          vars:
+            disk:
+              from: args.boot_disk
+              default: disk.qcow2
+          steps:
+            - name: boot the disk
+              boot: true
+              os: linux
+              disk: "{{ disk }}"
+              timeout: 900
+          YAML
+          easyvm check "$GITHUB_WORKSPACE/sandbox.yaml"
+
+      - name: start the daemon
+        run: |
+          set -eu
+          easyvm serve --work "$GITHUB_WORKSPACE/work" --novnc-port 0 \
+            > "$GITHUB_WORKSPACE/work/daemon.log" 2>&1 &
+          echo $! > "$GITHUB_WORKSPACE/work/daemon.pid"
+          for i in $(seq 1 30); do
+            logs=$(cat "$GITHUB_WORKSPACE/work/daemon.log" || true)
+            case "$logs" in *"listening on"*) echo "=== THE DAEMON IS UP ==="; break ;; esac
+            sleep 1
+          done
+          logs=$(cat "$GITHUB_WORKSPACE/work/daemon.log" || true)
+          case "$logs" in *"listening on"*) ;; *) echo "=== THE DAEMON DID NOT COME UP ==="; cat "$GITHUB_WORKSPACE/work/daemon.log"; exit 1 ;; esac
+
+      - name: create the sandbox
+        # `create` RETURNS WHEN THE MACHINE IS UP, not when the request is accepted - it polls
+        # `status` for `running`, because a request that blocked for a two-minute boot would make the
+        # client a supervisor.
+        run: |
+          set -eu
+          easyvm create "$GITHUB_WORKSPACE/sandbox.yaml" \
+            --work "$GITHUB_WORKSPACE/work" \
+            --boot-disk "$GITHUB_WORKSPACE/work/disk.qcow2" \
+            --password admin
+          easyvm status --work "$GITHUB_WORKSPACE/work"
+
+      - name: prove the guest answers, which a stopped machine cannot
+        run: |
+          set -eu
+          for i in $(seq 1 40); do
+            if out=$(ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+                        -o ConnectTimeout=5 -p 2222 vmuser@172.30.0.1 'hostname' 2>/dev/null); then
+              echo "=== THE GUEST ANSWERED: $out ==="
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "=== THE GUEST NEVER ANSWERED, THOUGH THE DAEMON SAID IT WAS UP ==="
+          easyvm status --work "$GITHUB_WORKSPACE/work" || true
+          cat "$GITHUB_WORKSPACE/work/daemon.log" || true
+          exit 1
+
+      - name: hold it, which is the property under test
+        # A BAKE WOULD HAVE CLOSED BY NOW. This is the assertion the whole mode exists for: the machine
+        # outlives its steps, because it has none.
+        run: |
+          set -eu
+          echo "holding for ${{ inputs.hold_seconds }}s"
+          sleep "${{ inputs.hold_seconds }}"
+          easyvm status --work "$GITHUB_WORKSPACE/work"
+          out=$(ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+                    -o ConnectTimeout=5 -p 2222 vmuser@172.30.0.1 'echo still-here' 2>/dev/null)
+          test "$out" = "still-here" || {
+            echo "=== THE GUEST IS GONE AFTER THE HOLD - the machine did not stay up ==="
+            exit 1
+          }
+          echo "=== THE MACHINE IS STILL UP AND STILL ANSWERS ==="
+
+      - name: destroy it
+        if: always()
+        run: |
+          set -u
+          easyvm destroy --work "$GITHUB_WORKSPACE/work" || true
+          sleep 3
+          # AND THE QEMU PROCESS IS GONE, which is what `destroy` is for: a machine that outlived every
+          # command would hold /dev/kvm with nothing able to reach it.
+          if pgrep -f "qemu-system-x86_64" > /dev/null; then
+            echo "=== QEMU IS STILL RUNNING AFTER destroy ==="
+            pgrep -af "qemu-system-x86_64" || true
+            exit 1
+          fi
+          echo "=== THE MACHINE IS GONE ==="
+
+      - name: stop the daemon
+        if: always()
+        run: |
+          set -u
+          [ -f "$GITHUB_WORKSPACE/work/daemon.pid" ] && kill "$(cat "$GITHUB_WORKSPACE/work/daemon.pid")" 2>/dev/null || true
