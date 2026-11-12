@@ -256,15 +256,42 @@ jobs:
           done
           echo "  will try, in order: $tags"
           got=""
+          # THE LEGS ARE DISPATCHED TOGETHER, SO THE DISK A LEG WANTS MAY BE PUBLISHING RIGHT NOW.
+          #
+          # `fail-fast: false` with no `needs:` starts every leg at once, so `vm` pulls
+          # `linux-ubuntu-ssh` while the `ssh` leg that writes it is still running. MEASURED THREE
+          # TIMES: `will try, in order: linux-ubuntu-ssh linux-ubuntu` then fifteen to thirty minutes
+          # spent on the FALLBACK disk, which is the install image with no sshd - a timeout that looks
+          # like a broken walk and is only a race.
+          #
+          # SO THE FIRST TAG IS WAITED FOR, not abandoned on the first 404. Every later tag is an
+          # immediate fallback, because those are tags that either exist or never will.
+          first=1
           for tag in $tags; do
             echo "=== pull $tag"
-            if easyvm pull --tag "$tag" \
-                           --repository "${{ inputs.disks_repository }}" \
-                           --dest "$GITHUB_WORKSPACE/work/disk.qcow2"; then
-              got="$tag"
-              break
-            fi
-            echo "  (no $tag in the package; trying the next one)"
+            attempt=0
+            while :; do
+              if easyvm pull --tag "$tag" \
+                             --repository "${{ inputs.disks_repository }}" \
+                             --dest "$GITHUB_WORKSPACE/work/disk.qcow2"; then
+                got="$tag"
+                break 2
+              fi
+              if [ "$first" != "1" ]; then
+                echo "  (no $tag in the package; trying the next one)"
+                break
+              fi
+              attempt=$((attempt + 1))
+              if [ "$attempt" -ge 60 ]; then
+                echo "  ($tag did not appear in 30 minutes; falling back)"
+                first=0
+                break
+              fi
+              echo "  ($tag is not there yet - the leg that publishes it is likely still running;"
+              echo "   waiting 30s, attempt $attempt of 60)"
+              sleep 30
+            done
+            first=0
           done
           if [ -z "$got" ]; then
             echo "::error::none of these tags exist: $tags"
