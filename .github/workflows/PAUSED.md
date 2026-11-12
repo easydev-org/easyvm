@@ -12,6 +12,7 @@ downloads, the guest boots, and every coordinate was measured against a differen
 | `fedora-workstation` | 43 | **45** | Anaconda's sidebar and hub layout change between major releases; nothing here has been measured on 45 |
 | `opensuse-tumbleweed` | tumbleweed (KDE Live) | **Leap 16.1** | Leap 16.1 SHIPS NO LIVE DESKTOP. Only Agama, an OEM image and an Immutable self-install image - so the YaST2 walkthrough is not merely stale, it describes a product that no longer exists |
 | `zorin` | 18 Core r3 | **18.1 Core** | Ubiquity panes move between point releases; 18.1 has not been recorded |
+| `ghostbsd` | 24.10.1 | **26.3-R15.1p6** | four releases behind, and the installer between FreeBSD 14 and 15 is not the same program |
 
 ## Resuming one
 
@@ -25,4 +26,4 @@ downloads, the guest boots, and every coordinate was measured against a differen
 ## The other twelve
 
 `ubuntu`, `kubuntu`, `mint`, `mx`, `popos`, `nixos`, `manjaro`, `cachyos`, `endeavouros`,
-`ghostbsd`, `windows`, `macos` are all on their latest stable releases and are not affected.
+`windows`, `macos` are all on their latest stable releases and are not affected.

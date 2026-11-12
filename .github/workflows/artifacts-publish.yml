@@ -173,7 +173,7 @@ jobs:
           iso-mx-xfce	linux	https://netix.dl.sourceforge.net/project/mx-linux/Final/Xfce/MX-25.3_Xfce_x64.iso	25b5ce20caeee1b0e50507291df5ac8a8211b1b9999d8dd7416da9b66ed9fbf9	2927624192
           iso-popos-desktop	linux	https://iso.pop-os.org/24.04/amd64/intel/9/pop-os_24.04_amd64_intel_9.iso	894bc15abcad05839b226655121a113ad16cfbc4ada98e93e3ffb74a853fdcd4	2693218304
           iso-nixos-graphical	linux	https://releases.nixos.org/nixos/26.05/nixos-26.05.13627.c56a87d8e41c/nixos-graphical-26.05.13627.c56a87d8e41c-x86_64-linux.iso	62900e47b6bea0917c491ac0a8e18dd4e3b7579d9b60ee8e0bbbd8945162256d	3888513024
-          iso-ghostbsd-mate	linux	https://download.ghostbsd.org/releases/amd64/24.10.1/GhostBSD-24.10.1.iso	e4e969603a3edf848db8c7fc2646f76871f0d9bd12787bc6c966250938c2c283	2798032896
+          iso-ghostbsd-mate	linux	https://download.ghostbsd.org/releases/amd64/26.3.R15.1p6/GhostBSD-26.3.R15.1p6.iso	2d1b46e7d0d9339ef04d2ee386783a2431f43eecb873b8f11b7109a43c577f7f	4122404864
           macos-asset-opencore	macos	https://github.com/acidanthera/OpenCorePkg/releases/download/1.0.7/OpenCore-1.0.7-RELEASE.zip	2ffab6ebf58c7aefb0bcb3a1a385d207746823d6dd87d44bd666e1286939943e	10437696
           macos-asset-opencore-template	macos	https://github.com/LongQT-sea/OpenCore-ISO/releases/download/v0.7/LongQT-OpenCore-v0.7.iso	287328995d4198f1b05166f087d85bf7ef66bedafe150d17ad112ac8de60051d	15884288
           macos-asset-ovmf-code	macos	https://raw.githubusercontent.com/kholia/OSX-KVM/326053dd61f49375d5dfb28ee715d38b04b5cd8e/OVMF_CODE.fd	52a625db5a45329bf8005232db33e94781787d92ae8d088f2f73332dd4ded3a9	1966080
