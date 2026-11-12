@@ -212,7 +212,32 @@ steps:
   #
   # `clean install` IS THAT WORD-PAIR: it is this installer's own footer button, and the file's own step
   # 12 is named after it.
-  - name: wait for the installer window
+  # THE INSTALLER IS LAUNCHED FROM THE DOCK, BECAUSE IT DOES NOT LAUNCH ITSELF.
+  #
+  # MEASURED, AND THE EVIDENCE IS A RECORDING RATHER THAN A GUESS: the mp4 from run
+  # 43141376447 - extracted frame by frame - shows the live session at 200 seconds with its top bar,
+  # its wallpaper and its dock, AND NO INSTALLER WINDOW. Five minutes of waiting for
+  # `select a language`, `install pop`, `pop!_os`, `clean install` and `full name` produced only
+  #
+  #	last read: Wskspaces Applications M11 12 6:12 AM ...
+  #
+  # POP-OS-INSTALLER IS NOT AUTOSTARTED ON THIS IMAGE. The reference implementation waits for it too,
+  # and its 300-second budget is the number it chose - but it has never run in CI here, so "it works
+  # in the reference" was an assumption rather than a measurement.
+  #
+  # THE ICON IS IN THE DOCK, AND ITS POSITION WAS MEASURED FROM THE RECORDING: the dock's last item is
+  # a light-grey rounded square carrying the `P!` mark, at (1265, 1390) on a 1920x1080 frame. The
+  # video is 640x480, so the measurement is the frame's own coordinate times three - and `at_button:`
+  # refines it by the ICON'S OWN FILL, which is what makes the click land on the icon rather than on
+  # the wallpaper beside it.
+  - name: open the installer from the dock
+    at_button: [1210, 1340, 1330, 1450]
+    at_fallback: [1265, 1390]
+    settle: 20
+
+  # AND IF THE DOCK'S ICON WAS NOT THERE, THE ACTIVITIES GRID HAS IT - a second way in, not a retry of
+  # a click that may have landed on nothing.
+  - name: the installer window is up
     until_any:
       # THE THREE PHRASES ARE THE REFERENCE IMPLEMENTATION'S, MEASURED ON THIS IMAGE:
       # "the window title `Install Pop!_OS 24.04 LTS`, the first pane `Select a Language`, and the
