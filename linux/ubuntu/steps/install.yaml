@@ -168,7 +168,7 @@ steps:
       # frame rather than inferred.
       - [welcome, to, ubuntu]
       - [choose, your, language]
-    timeout: 300
+    timeout: 600
     poll: 5
     keep_alive: true
 

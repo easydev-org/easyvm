@@ -157,12 +157,32 @@ steps:
   # `until_any:` RATHER THAN `until:`, because the launcher's language is whatever the geolocation
   # probe says - `Welcome` on one run, `Bienvenue` on the next, `Paigaldamine` on a third. Only the
   # words that never move are named, and the card labels are among them.
-  - name: wait for the launcher's cards
+  # THE INSTALLER PUTS ITSELF UP, AND IT TAKES MINUTES - MEASURED ON A COLD BOOT IN THE LAB POD.
+  #
+  # A file with NO clicks and NO keys in it, only `record:` and `wait: 1200`, was booted from this
+  # same ISO and its frames were read in order:
+  #
+  #	frame  100  (~200s)   bare desktop - wallpaper, top bar, clock, NOTHING ELSE
+  #	frame  180  (~360s)   `Install` / `Welcome` / `Try Zorin OS | Install Zorin OS`
+  #
+  # SO THE WINDOW APPEARS BY ITSELF, roughly two to three minutes after the desktop is drawn. That
+  # is why every walk here failed at the first press: `desktop: linux` opens on the BARE desktop -
+  # it has a panel, which is all that gate measures - and the press lands on wallpaper.
+  #
+  # 300 SECONDS WAS NOT ENOUGH. The measured gap is ~360s from boot and the desktop gate itself
+  # passes at ~71s, so the wait for the cards has to cover the rest with room for a slower runner.
+  # Ten minutes is that room.
+  #
+  # AND THE WINDOW'S OWN GEOMETRY MATCHES THE FILE: measured on frame 180 at 1920x1080 the panel is
+  # x 490..1426, y 246..900, and `Install Zorin OS` is centred in its lower half - which is where
+  # `at: [1223, 586]` below presses.
+  - name: wait for the installer to put itself up
     until_any:
       - [install, zorin]
       - [try, zorin]
-      - [installer, zorin]
-    timeout: 300
+      - [welcome]
+      - [no, localization]
+    timeout: 600
     poll: 5
 
   - name: install zorin os

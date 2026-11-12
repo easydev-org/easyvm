@@ -6,6 +6,12 @@ steps:
 - name: start recording
   record: probe.mp4
   poll: 3
+- name: create the empty disk
+  disk: disk.qcow2
+  disk_gb: 64
+- name: fetch the installer image
+  fetch: linux_iso
+  release: zorin
 - name: boot the installer
   boot: true
   os: linux

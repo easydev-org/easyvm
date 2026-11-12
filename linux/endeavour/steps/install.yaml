@@ -177,7 +177,7 @@ steps:
       - [american, english]
       - [erase, disk]
       - [welcome]
-    timeout: 300
+    timeout: 600
     poll: 5
     keep_alive: true
 
