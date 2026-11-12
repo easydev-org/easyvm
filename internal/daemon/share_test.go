@@ -644,3 +644,43 @@ func TestTheMacOSMountCheckMatchesTheRealSpelling(t *testing.T) {
 		t.Fatal("the check still looks for the form without the colon")
 	}
 }
+
+// EVERY BRANCH MAKES ITS OWN MOUNT POINT.
+//
+// MEASURED ON linux-ubuntu-vm, ON THE FIRST RUN WHERE THE VM LEG ACTUALLY GOT THE SSH DISK:
+//
+//	the input disk is linux-ubuntu-ssh
+//	status: failed step 15/23 "mount the host share"
+//	error: mount the host share: ... exit 1: Couldn't chdir to /home/vmuser/shared:
+//	       No such file or directory
+//
+// A MOUNT NEEDS A MOUNT POINT, and the macOS branch has had `mkdir -p ~/shared` since the rewrite
+// while the Linux branch never did. The note beside the Linux command said the opposite of what the
+// code did, which is how a one-line omission survived four runs.
+func TestEveryMountBranchCreatesItsMountPoint(t *testing.T) {
+	body, err := os.ReadFile("share.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(body)
+	// THE COMMAND, NOT THE PROSE. Comments above these branches quote the commands they explain, so a
+	// count over the whole file counts the explanations too. Each branch's command is a Go string
+	// literal that ENDS in its mount call, and that is what is looked for.
+	//
+	// MEASURED ON linux-ubuntu-vm: `Couldn't chdir to /home/vmuser/shared: No such file or directory`
+	// - the Linux branch mounted without making the directory, and the note beside it claimed it did.
+	for _, branch := range []struct{ name, literal string }{
+		{"macOS", "`mkdir -p ~/shared; ` +"},
+		{"Linux", "`mkdir -p ~/shared; ` +"},
+	} {
+		if !strings.Contains(src, branch.literal) {
+			t.Errorf("the %s branch has no `mkdir -p ~/shared` in its command, so a guest without that "+
+				"directory answers `Couldn't chdir to ~/shared: No such file or directory`", branch.name)
+		}
+	}
+	// AND THERE IS ONE PER POSIX BRANCH, counted on the command literal rather than on the prose.
+	if n := strings.Count(src, "`mkdir -p ~/shared; ` +"); n < 2 {
+		t.Errorf("only %d command(s) create the mount point; both the macOS and the Linux branch need "+
+			"one", n)
+	}
+}

@@ -288,7 +288,20 @@ func (d *Driver) mountOnce(client *guest.Client, family, dir string) error {
 		// `mount -t cifs` WITH THE CREDENTIALS ON THE COMMAND LINE, because a credentials FILE would
 		// have to be copied into the guest first and that is a second thing that can fail. The share
 		// account has no password, so there is no secret to leak in argv.
-		cmd = `printf '%s\n' ` + shellQuote(d.pass) +
+		// `mkdir -p ~/shared` FIRST, AND ITS ABSENCE WAS MEASURED:
+		//
+		//	mount the host share: mounting /github/home/shared in the linux guest: exit 1:
+		//	Couldn't chdir to /home/vmuser/shared: No such file or directory
+		//
+		// A MOUNT NEEDS A MOUNT POINT. The macOS branch has had `mkdir -p ~/shared` since the rewrite
+		// and this one never did - the note beside it says the opposite of what the code does, which
+		// is how a one-line omission survived four runs.
+		//
+		// AND AN OLD MOUNT IS UNMOUNTED FIRST, tolerating "not mounted": a retry after a half-finished
+		// mount otherwise fails with "already mounted" and looks like a different fault.
+		cmd = `mkdir -p ~/shared; ` +
+			`printf '%s\n' ` + shellQuote(d.pass) + ` | sudo -S -p '' umount ~/shared 2>/dev/null; ` +
+			`printf '%s\n' ` + shellQuote(d.pass) +
 			` | sudo -S -p '' mount -t cifs //172.30.0.1/shared ~/shared -o ` +
 			`username=guest,password=,vers=3.0,uid=$(id -u),gid=$(id -g),iocharset=utf8`
 	}
