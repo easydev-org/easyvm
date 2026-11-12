@@ -47,11 +47,11 @@ steps:
   settle: 12
 - name: the wizard is finished
   until_any:
-  - - type
-    - to
-    - search
-  - - show
-    - applications
+  - - software
+    - updater
+  - - updates
+    - available
+  - - activities
   timeout: 180
   poll: 3
 - name: open the terminal
