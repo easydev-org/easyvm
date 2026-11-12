@@ -42,6 +42,15 @@ vars:
     default: admin
 
 steps:
+  # THE RECORDING IS PART OF THE VERDICT, NOT A CONVENIENCE.
+  #
+  # A FAILURE THAT SAYS "did not advance: read ..." IS A FEW WORDS OF OCR, and the question
+  # it cannot answer is "what was on screen". A recording can, and it is tens of megabytes -
+  # which is why it is its own artifact rather than travelling with the disk.
+  - name: start recording
+    record: popos-install.mp4
+    poll: 20
+
   # THE MACHINE AND ITS INSTALLER, WHICH USED TO BE THE BAKE SKELETON IN PYTHON.
   #
   # THIS FILE IS A DECLARATION OF THE WIZARD STEPS AND NOTHING ELSE. Its own header says so:
@@ -378,3 +387,6 @@ steps:
     timeout: 3600
     poll: 20
     keep_alive: true
+
+  - name: stop recording
+    record: false

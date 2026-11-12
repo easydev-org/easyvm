@@ -57,6 +57,15 @@ ssh_port: 2222
 boot_disk: from_caller
 
 steps:
+  # THE RECORDING IS PART OF THE VERDICT, NOT A CONVENIENCE.
+  #
+  # A FAILURE THAT SAYS "did not advance: read ..." IS A FEW WORDS OF OCR, and the question
+  # it cannot answer is "what was on screen". A recording can, and it is tens of megabytes -
+  # which is why it is its own artifact rather than travelling with the disk.
+  - name: start recording
+    record: macos15-vm-configure.mp4
+    poll: 20
+
   # THE MACHINE IS STARTED HERE, IN THE FILE.
   #
   # THIS FILE'S DISK COMES FROM THE PREVIOUS STAGE - `boot_disk: from_caller` says the caller's
@@ -287,3 +296,6 @@ steps:
       plutil -lint ~/Library/LaunchAgents/org.vm.bootstrap.plist &&
       grep -c bootstrap-launcher.sh ~/Library/LaunchAgents/org.vm.bootstrap.plist
     timeout: 60
+
+  - name: stop recording
+    record: false

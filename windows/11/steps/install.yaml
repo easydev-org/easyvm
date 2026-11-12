@@ -64,6 +64,15 @@ vars:
     default: "1800"
 
 steps:
+  # THE RECORDING IS PART OF THE VERDICT, NOT A CONVENIENCE.
+  #
+  # A FAILURE THAT SAYS "did not advance: read ..." IS A FEW WORDS OF OCR, and the question
+  # it cannot answer is "what was on screen". A recording can, and it is tens of megabytes -
+  # which is why it is its own artifact rather than travelling with the disk.
+  - name: start recording
+    record: windows11-install.mp4
+    poll: 20
+
   # =======================================================================================
   # 0. THE HOST'S WORK, BEFORE ANY MACHINE EXISTS
   # =======================================================================================
@@ -222,3 +231,6 @@ steps:
 
   - name: publish the disk
     compress: "{{ out }}"
+
+  - name: stop recording
+    record: false

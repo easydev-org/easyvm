@@ -40,6 +40,15 @@ vars:
     default: vmuser
 
 steps:
+  # THE RECORDING IS PART OF THE VERDICT, NOT A CONVENIENCE.
+  #
+  # A FAILURE THAT SAYS "did not advance: read ..." IS A FEW WORDS OF OCR, and the question
+  # it cannot answer is "what was on screen". A recording can, and it is tens of megabytes -
+  # which is why it is its own artifact rather than travelling with the disk.
+  - name: start recording
+    record: zorin-ssh.mp4
+    poll: 20
+
   # THE MACHINE IS STARTED HERE, IN THE FILE, AND IT WAS NOT BEFORE.
   #
   # THIS STAGE'S DISK COMES FROM THE PREVIOUS ONE - so `boot_disk: from_caller` says the caller's
@@ -354,3 +363,6 @@ steps:
   - name: prove the account over ssh
     ssh: id -un; hostname
     timeout: 120
+
+  - name: stop recording
+    record: false

@@ -77,6 +77,15 @@ vars:
     default: kill
 
 steps:
+  # THE RECORDING IS PART OF THE VERDICT, NOT A CONVENIENCE.
+  #
+  # A FAILURE THAT SAYS "did not advance: read ..." IS A FEW WORDS OF OCR, and the question
+  # it cannot answer is "what was on screen". A recording can, and it is tens of megabytes -
+  # which is why it is its own artifact rather than travelling with the disk.
+  - name: start recording
+    record: macos15-setup.mp4
+    poll: 20
+
   # =======================================================================================
   # 0. THE MACHINE: OPENCORE, THE TARGET, AND THE INSTALLER AS A USB DEVICE
   # =======================================================================================
@@ -464,3 +473,6 @@ steps:
   - name: stop the machine
     shutdown: "{{ shutdown }}"
     timeout: 300
+
+  - name: stop recording
+    record: false
