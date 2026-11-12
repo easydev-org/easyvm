@@ -193,12 +193,26 @@ func (e *Executor) runOne(s walk.Step) error {
 		return e.doUntilConsole(s)
 	case s.Has("until") || s.Has("until_any"):
 		return e.doUntil(s)
+	// `run` BEFORE `expect`, AND THAT ORDER IS THE FIX RATHER THAN A PREFERENCE.
+	//
+	// A STEP THAT TYPES A COMMAND AND CHECKS THE SCREEN CARRIES BOTH KEYS. With `expect_any` tested
+	// first, such a step went to `doExpectAny` - WHICH ONLY READS THE SCREEN - so the typewriter never
+	// ran and the check then reported "did not advance". Measured on manjaro's `install openssh`, whose
+	// trace had NO `running N line(s)` line at all:
+	//
+	//	=== install openssh
+	//	error:   install openssh: did not advance: wanted "pacman" or "sudo", read "_ io"
+	//
+	// THE FIRST FIX WAS IN `doRun` - perform the check after the typing - AND IT COULD NOT WORK, because
+	// `run` never reached `doRun`. That is why the same failure appeared again on the next image.
+	//
+	// THE ACTION COMES FIRST AND THE CHECK IS PART OF IT, so `run` is matched before `expect`.
+	case s.Has("run"):
+		return e.doRun(s)
 	case s.Has("expect_any") || s.Has("expect"):
 		return e.doExpectAny(s)
 	case s.Has("disk_settle"):
 		return e.doDiskSettle(s)
-	case s.Has("run"):
-		return e.doRun(s)
 	case hasKey(s, "host_log"):
 		return e.doHostLog(s)
 	case hasKey(s, "at_button"):

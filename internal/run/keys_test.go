@@ -144,3 +144,40 @@ func TestARunStepStillTypesWhenItAlsoExpects(t *testing.T) {
 		t.Fatal("`doRun` checks the screen before typing")
 	}
 }
+
+// `run` MUST BE MATCHED BEFORE `expect`, OR THE TYPING IS SILENTLY SKIPPED.
+//
+// A step that types a command and checks the screen carries BOTH keys. `doExpectAny` only READS the
+// screen, so if it is reached first the typewriter never runs and the check reports "did not advance" -
+// which is what a step that did nothing would report.
+//
+// MEASURED ON manjaro's `install openssh`, TWICE, ON TWO DIFFERENT IMAGES:
+//
+//	=== install openssh
+//	error:   install openssh: did not advance: wanted "pacman" or "sudo", read "_ io"
+//
+// AND THE TRACE HAD NO `running N line(s)` LINE, which `doRun` prints unconditionally. The first fix
+// was inside `doRun` - perform the check after the typing - and it could not work, because `run` never
+// reached `doRun`. THAT IS WHY THE SAME FAILURE CAME BACK.
+//
+// The check belongs to the action, so the ACTION is dispatched first.
+func TestRunIsDispatchedBeforeExpect(t *testing.T) {
+	body, err := os.ReadFile("executor.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := stripCommentsForTest(string(body))
+	runAt := strings.Index(src, `case s.Has("run"):`)
+	expectAt := strings.Index(src, `case s.Has("expect_any") || s.Has("expect"):`)
+	if runAt < 0 {
+		t.Fatal("no `case s.Has(\"run\")` in the dispatcher")
+	}
+	if expectAt < 0 {
+		t.Fatal("no `case s.Has(\"expect_any\")` in the dispatcher")
+	}
+	if expectAt < runAt {
+		t.Fatal("`expect_any` is dispatched BEFORE `run`, so a step that both types and checks never " +
+			"types - measured on manjaro's `install openssh`, twice, with no `running N line(s)` line " +
+			"in the trace to say so")
+	}
+}
