@@ -31,15 +31,21 @@ func TestTheLinuxISOTagsThatAreNotTheDistributionName(t *testing.T) {
 	//	popos   3,753 against 2,568 - different images, and the panes are the desktop one's.
 	//	manjaro 4,969 against 5,278 - the reference's entry is `manjaro-kde`.
 	//	zorin   3,728 against 3,612 - the reference's entry is `zorin-core`.
+	//
+	// FOUR MORE ARE THE EDITION, AND THE FOUR WERE WRONG UNTIL THE PUBLISHER'S TABLE WAS READ. This
+	// build asked for `iso-cachyos`, `iso-kubuntu`, `iso-mint` and `iso-mx`; the publisher writes
+	// `iso-cachyos-desktop`, `iso-kubuntu-desktop`, `iso-mint-cinnamon` and `iso-mx-xfce`. The test
+	// agreed with the code and both were wrong, which is what a test written from the code always
+	// does - so these four now come from `images.all_images()`, the table that actually publishes.
 	cases := map[string]string{
 		"ubuntu":              "iso-ubuntu-desktop",
-		"kubuntu":             "iso-kubuntu",
+		"kubuntu":             "iso-kubuntu-desktop",
 		"fedora-workstation":  "iso-fedora-workstation",
-		"mint":                "iso-mint",
-		"cachyos":             "iso-cachyos",
+		"mint":                "iso-mint-cinnamon",
+		"cachyos":             "iso-cachyos-desktop",
 		"manjaro":             "iso-manjaro-kde",
 		"zorin":               "iso-zorin-core",
-		"mx":                  "iso-mx",
+		"mx":                  "iso-mx-xfce",
 		"popos":               "iso-popos-desktop",
 		"nixos":               "iso-nixos-graphical",
 		"opensuse-tumbleweed": "iso-opensuse-tumbleweed-kde",

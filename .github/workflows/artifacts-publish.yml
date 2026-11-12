@@ -44,6 +44,7 @@ on:
           - windows
           - linux
           - macos
+          - recovery
         default: all
       which:
         description: >-
@@ -93,6 +94,55 @@ jobs:
           /tmp/easyvm versions
           echo "EASYVM=/tmp/easyvm" >> "$GITHUB_ENV"
 
+      - name: mirror the macOS recovery image
+        # APPLE'S RECOVERY IMAGE IS THE ONE INPUT THAT CANNOT BE A URL IN THE CATALOGUE.
+        #
+        # Every other upstream here is one HTTP GET. This one is a session cookie, a five-field POST
+        # with opaque nonces, a token exchange, and then a CDN download that has to be parallel or it
+        # is cut short - Apple does not serve it as one request:
+        #
+        #	curl: (18) end of response with 887566699 bytes missing
+        #
+        # and every request produces a DIFFERENT URL AND A DIFFERENT TOKEN, so there is nothing stable
+        # to pin. The reference implementation solved this with a dedicated publisher that does that
+        # exchange; this build does not reimplement it, because the file is the SAME BYTES and one
+        # copy is already published. Mirroring it is a pull and a push, and both are this repository's
+        # package - which is what makes the token work at all.
+        #
+        # IT IS A SEPARATE STEP BECAUSE IT IS A SEPARATE KIND OF WORK: a transfer between two
+        # packages rather than a download from an upstream.
+        # THE EVENT CHECK IS NOT DECORATION: an `inputs.` value is EMPTY on any event that is not a
+        # dispatch, so a condition spelled `inputs.which == ''` alone is FALSE on a push and the step
+        # is skipped while the job reports success. This workflow is dispatch-only today; naming the
+        # event is what keeps that true if it ever is not.
+        if: github.event_name != 'workflow_dispatch' || (inputs.which == '' && (inputs.group == 'all' || inputs.group == 'recovery'))
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -eu
+          # THE SOURCE IS THE PUBLISHER'S OWN PACKAGE. It is public, so the token is not what reads
+          # it - but every tag this build consumes then lives in this repository's package, and the
+          # stage code has ONE place to look.
+          for tag in macos-recovery-sequoia; do
+            echo "=== $tag"
+            dest="$RUNNER_TEMP/$tag.dmg"
+            if ! "$EASYVM" pull --tag "$tag" --dest "$dest" \
+                    --repository easydev-org/easydiskbake --timeout 60m; then
+              echo "::warning::$tag: could not be read from the publisher's package"
+              continue
+            fi
+            got=$(stat -c %s "$dest")
+            echo "  got: $got bytes"
+            if [ "$got" -lt $((200 * 1024 * 1024)) ]; then
+              echo "::warning::$tag: $got bytes is below the 200 MiB floor for a recovery image"
+              rm -f "$dest"
+              continue
+            fi
+            "$EASYVM" push --tag "$tag" --file "$dest" --repository "$REPOSITORY" --timeout 60m
+            rm -f "$dest"
+          done
+
       - name: publish
         env:
           # GHCR IS WHAT THIS PUSHES TO, and the token has `packages: write` from the block above.
@@ -111,7 +161,6 @@ jobs:
           cat > /tmp/catalogue.tsv <<'CATALOGUE'
           iso-windows11	windows	https://software-static.download.prss.microsoft.com/dbazure/888969d5-f34g-4e03-ac9d-1f9786c66749/26200.6584.250915-1905.25h2_ge_release_svc_refresh_CLIENT_CONSUMER_x64FRE_en-us.iso	d141f6030fed50f75e2b03e1eb2e53646c4b21e5386047cb860af5223f102a32	7736125440
           iso-virtio-win	windows	https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso		0
-          iso-ubuntu	linux	https://releases.ubuntu.com/26.04/ubuntu-26.04.1-live-server-amd64.iso	cc8a95cde20f6ced61a322420de00f10cc3c90ced545daa46cb9c1a117f1d927	0
           iso-ubuntu-desktop	linux	https://releases.ubuntu.com/26.04/ubuntu-26.04.1-desktop-amd64.iso	601e30fbf5d97759367c632e2c33630665039b7e2158fd068403da3ccf1bda1f	6482409472
           iso-kubuntu-desktop	linux	https://cdimage.ubuntu.com/kubuntu/releases/26.04/release/kubuntu-26.04.1-desktop-amd64.iso	831e4d4bb85098339ba43d3502cd6619b27e76daf37246a084cd68a6413090b8	5072990208
           iso-fedora-workstation	linux	https://download.fedoraproject.org/pub/fedora/linux/releases/43/Workstation/x86_64/iso/Fedora-Workstation-Live-43-1.6.x86_64.iso	2a4a16c009244eb5ab2198700eb04103793b62407e8596f30a3e0cc8ac294d77	2742190080
@@ -124,13 +173,15 @@ jobs:
           iso-mx-xfce	linux	https://netix.dl.sourceforge.net/project/mx-linux/Final/Xfce/MX-25.3_Xfce_x64.iso	25b5ce20caeee1b0e50507291df5ac8a8211b1b9999d8dd7416da9b66ed9fbf9	2927624192
           iso-popos-desktop	linux	https://iso.pop-os.org/24.04/amd64/intel/9/pop-os_24.04_amd64_intel_9.iso	894bc15abcad05839b226655121a113ad16cfbc4ada98e93e3ffb74a853fdcd4	2693218304
           iso-nixos-graphical	linux	https://releases.nixos.org/nixos/26.05/nixos-26.05.13627.c56a87d8e41c/nixos-graphical-26.05.13627.c56a87d8e41c-x86_64-linux.iso	62900e47b6bea0917c491ac0a8e18dd4e3b7579d9b60ee8e0bbbd8945162256d	3888513024
-          iso-nixos	linux	https://channels.nixos.org/nixos-26.05/latest-nixos-minimal-x86_64-linux.iso	83445162c4a18fb372657d38c942147b770d3bfdaf6bb1c37905333b80f9a79f	1746124800
           iso-ghostbsd-mate	linux	https://download.ghostbsd.org/releases/amd64/24.10.1/GhostBSD-24.10.1.iso	e4e969603a3edf848db8c7fc2646f76871f0d9bd12787bc6c966250938c2c283	2798032896
-          iso-freebsd	linux	https://download.freebsd.org/releases/amd64/amd64/ISO-IMAGES/15.1/FreeBSD-15.1-RELEASE-amd64-disc1.iso	fa27646f05a1440fd26ffbb85e06a50bc86e128242a4e9cb7bb3ea76e1aa5fd9	1352255488
           macos-asset-opencore	macos	https://github.com/acidanthera/OpenCorePkg/releases/download/1.0.7/OpenCore-1.0.7-RELEASE.zip	2ffab6ebf58c7aefb0bcb3a1a385d207746823d6dd87d44bd666e1286939943e	10437696
           macos-asset-opencore-template	macos	https://github.com/LongQT-sea/OpenCore-ISO/releases/download/v0.7/LongQT-OpenCore-v0.7.iso	287328995d4198f1b05166f087d85bf7ef66bedafe150d17ad112ac8de60051d	15884288
           macos-asset-ovmf-code	macos	https://raw.githubusercontent.com/kholia/OSX-KVM/326053dd61f49375d5dfb28ee715d38b04b5cd8e/OVMF_CODE.fd	52a625db5a45329bf8005232db33e94781787d92ae8d088f2f73332dd4ded3a9	1966080
           macos-asset-ovmf-vars-1920x1080	macos	https://raw.githubusercontent.com/kholia/OSX-KVM/326053dd61f49375d5dfb28ee715d38b04b5cd8e/OVMF_VARS-1920x1080.fd	6ed987af3a3c155be71665f510eae3e007eda9b8b94afd59d45e91c4a11565cc	131072
+          macos-asset-xcode-26.3	macos	https://archive.org/download/xcode-26.3/Xcode_26.3_Universal.xip	cebf05ec2920111830af5e08a45f07961e36bfd6	2871807039
+          macos-asset-mac-guest-agent	macos	https://github.com/mav2287/mac-guest-agent/releases/latest/download/mac-guest-agent		0
+          dev-node-pkg	macos	https://nodejs.org/dist/v26.13.0/node-v26.13.0.pkg	445b202997c959dddbd54ad8c82956371b495b03c73d56044a6f82dfb3249c46	105205394
+          dev-python-pkg	macos	https://www.python.org/ftp/python/3.13.9/python-3.13.9-macos11.pkg	dafebf62b8737f341f6b7eca2d6d1153a50a6b1bfbfa4b8aaf0e62adc73e5017	70163313
           CATALOGUE
 
           echo "=== the catalogue ==="

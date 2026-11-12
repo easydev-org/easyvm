@@ -48,10 +48,19 @@ func fetchMacGuestAgent(spec Spec) (Result, error) {
 		return Result{Main: dest}, nil
 	}
 
-	if err := downloadResumable(macGuestAgentURL, dest, 0, 10*time.Minute); err != nil {
-		return Result{}, fmt.Errorf("fetching the macOS guest agent from %s: %w. Apple's own agent "+
-			"does not load under QEMU, so this is the binary that makes `shutdown: guest_agent` work "+
-			"on a Mac", macGuestAgentURL, err)
+	// FROM THIS REPOSITORY'S PACKAGE, NOT FROM A GITHUB RELEASE AT RUN TIME.
+	//
+	// THE RELEASE URL IS STILL THE PIN - it is what `artifacts-publish.yml` downloads from - but a
+	// stage pulls `macos-asset-mac-guest-agent`, so the bake does not depend on a third-party
+	// repository's release page at the moment it needs a shutdown to work.
+	//
+	// AND THE TAG IS THE PIN IN A WAY THE URL NEVER WAS. `releases/latest/download/<name>` resolves
+	// to whatever the project published most recently, which is a different binary on a different
+	// day; a tag in this package is the file this build verified, once.
+	if err := pullTag(packageTag("macos-asset-", "mac-guest-agent"), dest, macGuestAgentMinBytes,
+		10*time.Minute, "Apple's own agent does not load under QEMU, so this is the binary that "+
+			"makes `shutdown: guest_agent` work on a Mac"); err != nil {
+		return Result{}, err
 	}
 
 	fi, err := os.Stat(dest)

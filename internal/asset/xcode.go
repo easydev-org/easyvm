@@ -104,10 +104,21 @@ func fetchXcode(spec Spec) (Result, error) {
 		_ = os.Remove(dest)
 	}
 
-	if err := downloadResumable(pin.URL, dest, pin.Bytes, 40*time.Minute); err != nil {
-		return Result{}, fmt.Errorf("fetching %s from archive.org: %w. It is Apple's own .xip, "+
-			"republished there because the developer portal requires an Apple ID and a 2FA code",
-			pin.File, err)
+	// FROM THIS REPOSITORY'S PACKAGE, NOT FROM Archive.org AT RUN TIME.
+	//
+	// THE ARCHIVE.ORG URL IS STILL IN THE PIN because that is what `artifacts-publish.yml`
+	// downloads from - it is the one place the open internet is touched, once, by a job whose whole
+	// subject is verifying it. A stage pulls the tag, so a 2.7 GiB transfer off somebody else's
+	// server is no longer in the middle of a macOS bake, and a re-run is not exposed to archive.org
+	// being slow, rate-limited or gone.
+	//
+	// THE SHA1 IS STILL CHECKED, and it is the same number: the publisher verified it before the
+	// tag existed, and checking it here means a tag that was overwritten by something else is
+	// refused rather than installed.
+	if err := pullTag(packageTag("macos-asset-", "xcode-"+pin.Version), dest, pin.Bytes*9/10,
+		40*time.Minute, "It is Apple's own .xip, mirrored into this repository's package because "+
+			"the developer portal requires an Apple ID and a 2FA code"); err != nil {
+		return Result{}, err
 	}
 
 	fi, err := os.Stat(dest)

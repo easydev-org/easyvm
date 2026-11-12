@@ -136,9 +136,10 @@ func Fetch(spec Spec) (Result, error) {
 		// the file comes from archive.org with the sha1 Apple's own release index publishes.
 		return fetchXcode(spec)
 	case Packages:
-		return Result{}, fmt.Errorf("fetching the macOS packages is not implemented yet; the dev " +
-			"stage installs them with `brew`, which needs no host-side fetch - so a file that names " +
-			"this kind is asking for something no other stage does")
+		// `dev_packages` IS TWO .pkg FILES, NOT A `brew install`. Homebrew's installer refuses a
+		// non-arm64 macOS outright, so an Intel Sequoia guest installs each tool from the publisher
+		// that still ships an Intel build. See internal/asset/devpackages.go.
+		return fetchDevPackages(spec)
 
 	// THE VENDOR'S DRIVER ISO, PULLED FROM THIS REPOSITORY'S OWN PACKAGE.
 	//
@@ -408,6 +409,16 @@ func fetchOpenCore(spec Spec) (Result, error) {
 // THE TAGS WERE VERIFIED AGAINST THE REGISTRY before this map was written, which is the only way to
 // know a name rather than infer one.
 var linuxISOAliases = map[string]string{
+	// THE EDITION IS PART OF THE NAME, AND A MISSING ALIAS IS A 404 ON A LEG RATHER THAN A WRONG
+	// IMAGE. `iso-cachyos`, `iso-kubuntu`, `iso-mint` and `iso-mx` are names this build ASKED FOR and
+	// no publisher ever wrote: the reference table publishes `iso-cachyos-desktop`,
+	// `iso-kubuntu-desktop`, `iso-mint-cinnamon` and `iso-mx-xfce`, because those are the images the
+	// panes were measured on. The names are resolved against that table, not guessed from the
+	// distribution's name - which is what this map is for.
+	"cachyos":             "cachyos-desktop",
+	"kubuntu":             "kubuntu-desktop",
+	"mint":                "mint-cinnamon",
+	"mx":                  "mx-xfce",
 	"opensuse-tumbleweed": "opensuse-tumbleweed-kde",
 	"endeavour":           "endeavouros",
 	"ghostbsd":            "ghostbsd-mate",
