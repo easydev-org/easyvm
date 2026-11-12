@@ -182,12 +182,12 @@ steps:
   # press into a window that has not drawn is reported as success.
   - name: wait for the installer launcher
     until_any:
-      # `install linux mint` IS THE LAUNCHER'S OWN BUTTON TEXT and `installation type` is a pane the
-      # wizard draws one step in. A lone `welcome` or `install` was the first thing tried and this
-      # file's own test refused it: both are words a bare desktop can satisfy.
-      - [install, linux, mint]
+      # THE SAME TRAP AS ubuntu, WHICH IS MEASURED: a gate on the LAUNCHER's button text
+      # (`install linux mint`) waits for words that belong to the desktop, not to the wizard - and the
+      # wizard's own first pane says `Welcome to Linux Mint` with a language list.
+      - [welcome, to, linux, mint]
+      - [choose, your, language]
       - [installation, type]
-      - [erase, disk]
     timeout: 300
     poll: 5
     keep_alive: true

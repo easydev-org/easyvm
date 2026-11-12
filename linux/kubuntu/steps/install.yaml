@@ -135,11 +135,18 @@ steps:
   # a guess is a gate that hangs on the run it was meant to protect.
   - name: wait for the calamares window
     until_any:
-      # `install kubuntu` IS ON THE LAUNCHER, and `erase disk` / `manual partitioning` are Calamares's
-      # own pane labels. A lone `welcome` or `install` is satisfied by a bare desktop.
-      - [install, kubuntu]
+      # MEASURED ON ubuntu-install, WHICH USES THE SAME INSTALLER AND FAILED THE OPPOSITE WAY:
+      #
+      #	never saw "install ubuntu" ... within 5m0s
+      #	last read: Welcome to Ubuntu ... Choose your ...
+      #
+      # THE WIZARD'S FIRST PANE SAYS `Welcome to <name>` AND `Choose your language`. The button text
+      # `Install <name>` belongs to a pane many steps later, so a gate on it waits for a screen that
+      # cannot exist until the walk is already done. Kubuntu draws the same window under the same
+      # installer, so its title is `Welcome to Kubuntu`.
+      - [welcome, to, kubuntu]
+      - [choose, your, language]
       - [erase, disk]
-      - [manual, partitioning]
     timeout: 300
     poll: 5
     keep_alive: true

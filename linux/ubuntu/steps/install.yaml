@@ -153,12 +153,21 @@ steps:
   # the desktop hands over to it - a gate that required one of them would hang on the other.
   - name: wait for the installer window
     until_any:
-      # `install ubuntu` IS THE GREETER'S BUTTON TEXT and `try or install ubuntu` is the same control
-      # written out. `welcome` and `install` alone are words a bare desktop can satisfy - measured on
-      # popos, where a wait on `language` passed over `Workspaces Applications ... 3:49 AM`.
-      - [install, ubuntu]
-      - [try, or, install, ubuntu]
-      - [erase, disk, and, install, ubuntu]
+      # MEASURED FROM THIS STAGE'S OWN RECORDING, AFTER THE FIRST VERSION OF THIS GATE FAILED:
+      #
+      #	never saw "install ubuntu" or "try or install ubuntu" or "erase disk and install ubuntu"
+      #	within 5m0s; last read: -_- Nov 12 13:04 + an & (c) O Welcome to Ubuntu x iS Choose your ...
+      #
+      # THE WIZARD NEVER SAYS ANY OF THOSE WORDS ON ITS FIRST PANE. Its window title is `Welcome to
+      # Ubuntu` and its first question is `Choose your language:` - and the button text
+      # `Install Ubuntu` belongs to a pane FOURTEEN STEPS LATER. A gate on a later pane's words waits
+      # for a screen that cannot appear until the walk has already done its job.
+      #
+      # `welcome to ubuntu` IS THE WINDOW TITLE, which is the one piece of text on this pane that no
+      # live desktop draws, and `choose your language` is its own heading. Both were read off the
+      # frame rather than inferred.
+      - [welcome, to, ubuntu]
+      - [choose, your, language]
     timeout: 300
     poll: 5
     keep_alive: true

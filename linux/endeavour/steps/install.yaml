@@ -171,11 +171,12 @@ steps:
   # panel and Calamares draws over one, so the desktop gate can open before the wizard exists.
   - name: wait for the calamares window
     until_any:
-      # `install endeavouros` IS THE LAUNCHER'S OWN BUTTON, and Calamares's welcome pane offers
-      # `american english`. `welcome` and `install` alone are desktop words.
-      - [install, endeavouros]
-      - [erase, disk]
+      # THE SAME TRAP AS ubuntu, WHICH IS MEASURED. Calamares's first pane is a welcome screen with a
+      # language list - `American English` is the row it preselects - and the launcher's
+      # `Install EndeavourOS` text belongs to the desktop rather than the wizard.
       - [american, english]
+      - [erase, disk]
+      - [welcome]
     timeout: 300
     poll: 5
     keep_alive: true

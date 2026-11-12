@@ -219,14 +219,31 @@ steps:
     at: [1361, 764]
     settle: 18
 
-  # `Updates and other software` IS NOT ALWAYS SHOWN, AND THIS WALK DOES NOT WAIT FOR IT.
+  # `Updates and other software` IS SHOWN ON THIS BUILD, AND THE OLD COMMENT SAID IT WAS NOT.
   #
-  # Measured twice on this image: the keyboard pane's Continue goes STRAIGHT to `Installation
-  # type`. An earlier version spent a step clicking the footer on the keyboard pane a second
-  # time, which is harmless - the button is gone by then, so the click lands on blank space -
-  # but it made the sequence look like it had a pane that does not exist. There is no step
-  # for it: on the builds that show it this walk would be wrong, and none of them has been
-  # seen here.
+  # THE COMMENT USED TO READ: "Measured twice on this image: the keyboard pane's Continue goes
+  # STRAIGHT to `Installation type` ... on the builds that show it this walk would be wrong, and none
+  # of them has been seen here."
+  #
+  # THIS BUILD SHOWS IT. Frame 230s of zorin-install's own recording:
+  #
+  #	Updates and other software
+  #	  [x] Download updates while installing Zorin OS
+  #	  [x] Install third-party software for graphics and Wi-Fi ...
+  #	  [ ] Don't participate in the census              Continue at (1361,764)
+  #
+  # and the walk's next click was `installation type - install now` at the SAME coordinate - so the
+  # press that was meant for `Install Now` landed on this pane's Continue, the wizard advanced one
+  # page, and every pane after it was clicked a page early. The 0 MiB disk is the end of that chain.
+  #
+  # SO THE PANE IS CLICKED WHEN IT IS THERE. `optional: true` because the older images really do skip
+  # it, and its words are the heading the file now waits for.
+  - name: updates and other software, when this build shows it
+    unless_any:
+      - [installation, type]
+    at: [1361, 764]
+    settle: 18
+    optional: true
 
   # =======================================================================================
   # 3. INSTALLATION TYPE. `Erase disk and install Zorin OS` IS ALREADY SELECTED.
