@@ -52,6 +52,49 @@ steps:
     iso: installer_iso
     timeout: 1800
 
+  # THE UEFI BOOT LANDS ON AN X DRIVER MENU FIRST, AND IT IS ANSWERED BEFORE ANY WAIT FOR A DESKTOP.
+  #
+  # MEASURED on bsd-ghostbsd-install, step 4 of 17:
+  #
+  #	wait for the live desktop: never saw "install ghostbsd" or "applications" within 30m0s;
+  #	last read: start Desktop with Legacy Intel dri
+  #
+  # THE MENU WAS ON SCREEN FOR THIRTY MINUTES. It offers five X drivers and asks which to use, and
+  # the REFERENCE IMPLEMENTATION RECORDS THE EXACT SAME FAILURE:
+  #
+  #	Run 42364259880 looked for the word "scfb" and failed while the menu was on screen: the
+  #	selected row is drawn inverted and OCR read only that one, as `Start Desktop with Legacy
+  #	Intel dri`. The bottom four of the five entries were invisible to it. Matching the title -
+  #	which is present whatever row is selected - is the question that actually has one answer.
+  #
+  # SO THE MENU IS RECOGNISED BY ITS TITLE, and the answer is four Downs and Enter: `scfb`, the UEFI
+  # framebuffer, which is the driver this machine has. `SCFB_DOWNS = 4` is the reference
+  # implementation's measured number.
+  #
+  # THE STEP IS `optional` BECAUSE SOME GHOSTBSD IMAGES AUTO-SELECT AND NEVER SHOW IT - a machine that
+  # needed no menu must not fail a step about the menu.
+  - name: choose the X driver, when the menu appears
+    until_any:
+      - ["start", "desktop", "with"]
+      - ["failed", "to", "auto"]
+    timeout: 300
+    poll: 5
+    optional: true
+
+  # FOUR DOWNS IN ONE STEP, BECAUSE `repeat:` IS THE SAME FOUR KEYSTROKES AND ONE LINE.
+  #
+  # The interval is 1.0 second, which is the reference implementation's `time.sleep(1.0)` between
+  # presses: the menu redraws the inverted row on every move, and a key that arrives during the
+  # redraw is read as nothing.
+  - name: reach scfb with four downs
+    key: down
+    repeat: [4, 1.0]
+    settle: 2
+
+  - name: choose scfb
+    key: ret
+    settle: 25
+
   # THE LIVE SESSION HAS TWO RIGHT ANSWERS, AND THE DRIVER'S OWN MEASUREMENT SAYS SO:
   #
   #     the desktop comes up BEFORE its panel does
