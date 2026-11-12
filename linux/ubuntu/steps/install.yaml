@@ -298,10 +298,21 @@ steps:
   # motion. The click lands on the progress page, where there is no control to disturb.
   - name: the installer finishes
     until_any:
-      - [installation, complete]
-      - [installed, ready]
+      # THE COMPLETION PAGE'S OWN SENTENCE, MEASURED FROM THE RECORDING'S LAST FRAME:
+      #
+      #	Installation complete
+      #	Ubuntu 26.04.1 LTS is installed and ready to use
+      #	Restart to complete the installation or continue testing.
+      #	[Continue testing]  [Restart now]
+      #
+      # `installed and ready to use` IS THE SENTENCE NO EARLIER SCREEN DRAWS, and the first
+      # alternative below is that phrase. `installation complete` alone is the WINDOW TITLE, which
+      # stays on screen through the whole install - measured: it matched at 15m14s while the frame at
+      # that moment still read `Setting up the system...`, so the walk moved on 354 seconds before
+      # the installer was done. The disk survived that, and would not have on a slower runner.
+      - [installed, and, ready, to, use]
+      - [restart, to, complete, the, installation]
       - [restart, now]
-      - [press, enter, to, restart]
     region: [0, 0, 1920, 1080]
     region_at: [1920, 1080]
     scale: 1

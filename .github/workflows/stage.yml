@@ -225,8 +225,33 @@ jobs:
           #
           # A FALLBACK IS NOT A SILENT SUBSTITUTE: it is printed, and the leg's own `out` is still
           # published under its own name, so the next run finds the tag it wanted.
+          # THE PULL IS TAKEN FROM THE JSON, AND THE RENDERED VALUE IS PRINTED SO A MISMATCH IS
+          # VISIBLE RATHER THAN INFERRED.
+          #
+          # MEASURED ON windows-ssh, WHOSE LEG DECLARES `"pull": "windows11"`:
+          #
+          #	will try, in order: windows11-ssh windows11
+          #	=== pull windows11-ssh
+          #
+          # - the FIRST tag tried was the leg's own output name, not the disk the leg before it
+          # publishes. `windows11` was present only as a fallback. The declaration is correct in
+          # `windows.yml` at the same commit (`git show e408153:.github/workflows/windows.yml`), so
+          # the value arriving here was not the value declared.
+          #
+          # SO IT IS PRINTED, and the leg's own name is printed beside it: a run that says
+          # `pull=windows11-ssh` for a leg named `windows-ssh` is a run whose matrix arrived wrong,
+          # and that is a sentence rather than an investigation.
           tags="${{ matrix.pull }}"
-          for fb in ${{ matrix.fallback }}; do
+          fallbacks="${{ matrix.fallback }}"
+          echo "  matrix: name=${{ matrix.name }} pull='$tags' fallback='$fallbacks' out=${{ matrix.out }}"
+          # A LEG THAT PULLS ITS OWN OUTPUT NAME IS ALWAYS WRONG HERE - that is the disk it is about
+          # to WRITE. Refusing it converts a confusing 404 loop into one line that says what happened.
+          if [ "$tags" = "${{ matrix.out }}" ]; then
+            echo "::error::this leg pulls '$tags', which is its own output file. The matrix did not"
+            echo "::error::carry the 'pull' it declares; refusing rather than recursing."
+            exit 1
+          fi
+          for fb in $fallbacks; do
             case " $tags " in *" $fb "*) ;; *) tags="$tags $fb" ;; esac
           done
           echo "  will try, in order: $tags"
