@@ -472,3 +472,50 @@ func TestTheShareMountSpeaksTheGuestSHostShell(t *testing.T) {
 		t.Fatal("the POSIX branch no longer verifies that the mount is present")
 	}
 }
+
+// THE HOST-SIDE SENTINEL READ ITS OWN FILE WITH `cat`, WHICH A WINDOWS GUEST DOES NOT HAVE.
+//
+// MEASURED ON windows-vm-configure STEP 13 OF 20, AFTER THE MOUNT ITSELF HAD BEEN FIXED:
+//
+//	the guest cannot see a file this host wrote into /github/home/shared: the mount is not in
+//	place ... read "'cat' is not recognized as an internal or external command,"
+//
+// THE MESSAGE SAYS THE MOUNT FAILED AND THE FAILURE WAS THE PROOF'S OWN COMMAND. `MountShare`'s
+// Windows branch uses `net use` and may well have succeeded; the check that proves it then asked a
+// Windows guest to run `cat`.
+//
+// THIS IS THE THIRD TIME THE SAME MISTAKE APPEARED IN THIS MECHANISM - POSIX in the mount, POSIX in
+// the proof - and each time the message named the SHARE rather than the shell. A check about a guest
+// must speak the guest's language, and both halves of this one now branch on the family.
+func TestTheShareProofReadsWithTheGuestsOwnCommand(t *testing.T) {
+	body, err := os.ReadFile("../run/actions.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := stripGoComments(string(body))
+	i := strings.Index(src, "func (e *Executor) doShareMount(")
+	if i < 0 {
+		t.Fatal("no doShareMount")
+	}
+	rest := src[i:]
+	if end := strings.Index(rest[1:], "\nfunc "); end > 0 {
+		rest = rest[:end+1]
+	}
+	// A BARE `cat` ON THE PROOF PATH IS THE DEFECT: it must be behind a family branch.
+	if strings.Contains(rest, `client.Run("cat ~/shared/`) {
+		t.Fatal("the share proof runs a bare `cat`, so a Windows guest answers \"'cat' is not " +
+			"recognized as an internal or external command\" and the step blames the mount")
+	}
+	if !strings.Contains(rest, `family == "windows"`) {
+		t.Fatal("the proof does not branch on the family, so one of the two guests gets the wrong " +
+			"command")
+	}
+	// AND `type` IS THE WINDOWS READ.
+	if !strings.Contains(rest, `type "%USERPROFILE%\shared\`) {
+		t.Fatal("the Windows proof does not read with `type`")
+	}
+	// AND THE POSIX PATH IS STILL THERE, unchanged for the guests that have it.
+	if !strings.Contains(rest, `"cat ~/shared/"`) {
+		t.Fatal("the POSIX proof no longer reads with `cat`")
+	}
+}

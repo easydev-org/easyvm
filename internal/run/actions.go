@@ -559,7 +559,23 @@ func (e *Executor) doShareMount(s walk.Step) error {
 	if client == nil {
 		return fail(s.Name, "no ssh connection to read the proof with")
 	}
-	res, err := client.Run("cat ~/shared/"+sentinel, 60*time.Second)
+	// THE READ IS THE GUEST'S OWN COMMAND, BECAUSE `cat` IS NOT A WINDOWS PROGRAM.
+	//
+	// MEASURED ON windows-vm-configure, step 13 of 20:
+	//
+	//	the guest cannot see a file this host wrote into /github/home/shared: the mount is not in
+	//	place ... read "'cat' is not recognized as an internal or external command"
+	//
+	// THE MOUNT ITSELF MAY HAVE WORKED - `MountShare`'s Windows branch uses `net use` - and this check
+	// failed on its own command, which is the same mistake one layer up: a POSIX program assumed on a
+	// Windows guest. `type` is the equivalent and the path is the guest's home, spelled as cmd wants.
+	var readCmd string
+	if family == "windows" {
+		readCmd = `type "%USERPROFILE%\shared\` + sentinel + `"`
+	} else {
+		readCmd = "cat ~/shared/" + sentinel
+	}
+	res, err := client.Run(readCmd, 60*time.Second)
 	if err != nil || strings.TrimSpace(res.Stdout) != "from-the-host" {
 		return fail(s.Name, "the guest cannot see a file this host wrote into %s: the mount is not "+
 			"in place, and a guest writing to ~/shared would have written into its OWN directory. "+
