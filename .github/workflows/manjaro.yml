@@ -62,7 +62,8 @@ jobs:
             "file": "linux/manjaro/steps/ssh.yaml",
             "pull": "linux-manjaro",
             "out": "linux-manjaro-ssh.qcow2",
-            "timeout": 60
+            "timeout": 60,
+            "publish": "linux-manjaro-ssh"
           },
           {
             "name": "linux-manjaro-install",
@@ -78,6 +79,7 @@ jobs:
             "pull": "linux-manjaro-ssh",
             "fallback": "linux-manjaro",
             "out": "linux-manjaro-vm.qcow2",
-            "timeout": 60
+            "timeout": 60,
+            "publish": "linux-manjaro-vm"
           }
         ]

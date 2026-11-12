@@ -59,7 +59,8 @@ jobs:
             "file": "bsd/ghostbsd/steps/ssh.yaml",
             "pull": "bsd-ghostbsd-mate",
             "out": "bsd-ghostbsd-ssh.qcow2",
-            "timeout": 60
+            "timeout": 60,
+            "publish": "bsd-ghostbsd-ssh"
           },
           {
             "name": "bsd-ghostbsd-install",
@@ -75,6 +76,7 @@ jobs:
             "pull": "bsd-ghostbsd-mate-ssh",
             "fallback": "bsd-ghostbsd-mate",
             "out": "bsd-ghostbsd-vm.qcow2",
-            "timeout": 60
+            "timeout": 60,
+            "publish": "bsd-ghostbsd-vm"
           }
         ]

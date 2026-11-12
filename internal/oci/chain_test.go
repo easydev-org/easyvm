@@ -157,7 +157,7 @@ func indexOf(xs []string, x string) int {
 }
 
 type leg struct {
-	name, pull, fallback, publish string
+	name, pull, fallback, publish, out string
 }
 
 // legsOf reads the `stages:` JSON block out of one workflow.
@@ -205,6 +205,7 @@ func legsOf(t *testing.T, body []byte) []leg {
 		out = append(out, leg{
 			name: str("name"), pull: str("pull"),
 			fallback: str("fallback"), publish: str("publish"),
+			out: str("out"),
 		})
 	}
 	return out
@@ -348,4 +349,50 @@ func TestThePublisherPassesTheTokenToo(t *testing.T) {
 		t.Fatal("artifacts-publish.yml no longer passes `GITHUB_TOKEN` to both its steps; it was " +
 			"the workflow that proved the variable is what the registry wants")
 	}
+}
+
+// EVERY LEG THAT WRITES A DISK PUBLISHES IT, INCLUDING THE ONES THAT CONTINUE ONE.
+//
+// MEASURED ON linux-ubuntu-vm, WHICH HAD TO WAIT THIRTY MINUTES FOR AN SSHD NOBODY INSTALLED:
+//
+//	matrix: name=linux-ubuntu-vm pull='linux-ubuntu-ssh' fallback='linux-ubuntu' out=linux-ubuntu-vm.qcow2
+//	will try, in order: linux-ubuntu-ssh linux-ubuntu
+//	linux-ubuntu-ssh: 404
+//
+// `linux-ubuntu-ssh` HAD NEVER BEEN PUBLISHED, because the ssh leg's `publish` was empty - so the vm
+// leg fell back to the install disk, which has no sshd, and `wait for sshd` waited half an hour.
+//
+// AN `ssh` LEG DOES WRITE A DISK. It has its own `out:` and its content is the input disk after sshd
+// was installed; publishing it under its own name is exactly what the `vm` leg pulls.
+func TestEveryLegThatWritesADiskPublishesIt(t *testing.T) {
+	root := filepath.Join("..", "..", ".github", "workflows")
+	files, err := filepath.Glob(filepath.Join(root, "*.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked := 0
+	for _, name := range files {
+		body, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("cannot read %s: %v", name, err)
+		}
+		legs := legsOf(t, body)
+		for _, leg := range legs {
+			// A leg with an `out:` writes a file; publish must name a tag or the file is dropped.
+			if leg.out == "" {
+				continue
+			}
+			checked++
+			if leg.publish == "" {
+				t.Errorf("%s: %q writes %s and never publishes it. A leg that produces a disk and "+
+					"does not push it leaves the next stage to fall back to an earlier one - measured "+
+					"on linux-ubuntu-vm, whose ssh-leg input was 404 because that leg's publish was "+
+					"empty", filepath.Base(name), leg.name, leg.out)
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no legs with an `out:` were found")
+	}
+	t.Logf("checked %d writing leg(s)", checked)
 }

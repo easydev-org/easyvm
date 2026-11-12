@@ -62,7 +62,8 @@ jobs:
             "file": "linux/kubuntu/steps/ssh.yaml",
             "pull": "linux-kubuntu",
             "out": "linux-kubuntu-ssh.qcow2",
-            "timeout": 60
+            "timeout": 60,
+            "publish": "linux-kubuntu-ssh"
           },
           {
             "name": "linux-kubuntu-install",
@@ -78,6 +79,7 @@ jobs:
             "pull": "linux-kubuntu-ssh",
             "fallback": "linux-kubuntu",
             "out": "linux-kubuntu-vm.qcow2",
-            "timeout": 60
+            "timeout": 60,
+            "publish": "linux-kubuntu-vm"
           }
         ]

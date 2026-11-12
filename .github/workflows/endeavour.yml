@@ -62,7 +62,8 @@ jobs:
             "file": "linux/endeavour/steps/ssh.yaml",
             "pull": "linux-endeavour",
             "out": "linux-endeavour-ssh.qcow2",
-            "timeout": 60
+            "timeout": 60,
+            "publish": "linux-endeavour-ssh"
           },
           {
             "name": "linux-endeavour-install",
@@ -78,6 +79,7 @@ jobs:
             "pull": "linux-endeavour-ssh",
             "fallback": "linux-endeavour",
             "out": "linux-endeavour-vm.qcow2",
-            "timeout": 60
+            "timeout": 60,
+            "publish": "linux-endeavour-vm"
           }
         ]

@@ -62,7 +62,8 @@ jobs:
             "file": "linux/zorin/steps/ssh.yaml",
             "pull": "linux-zorin",
             "out": "linux-zorin-ssh.qcow2",
-            "timeout": 60
+            "timeout": 60,
+            "publish": "linux-zorin-ssh"
           },
           {
             "name": "linux-zorin-install",
@@ -78,6 +79,7 @@ jobs:
             "pull": "linux-zorin-ssh",
             "fallback": "linux-zorin",
             "out": "linux-zorin-vm.qcow2",
-            "timeout": 60
+            "timeout": 60,
+            "publish": "linux-zorin-vm"
           }
         ]

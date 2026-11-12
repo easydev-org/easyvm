@@ -66,7 +66,8 @@ jobs:
             "file": "windows/11/steps/ssh.yaml",
             "pull": "windows11",
             "out": "windows11-ssh.qcow2",
-            "timeout": 70
+            "timeout": 70,
+            "publish": "windows-ssh"
           },
           {
             "name": "windows-vm-configure",
@@ -74,7 +75,8 @@ jobs:
             "pull": "windows11-ssh",
             "fallback": "windows11",
             "out": "windows11-vm-configure.qcow2",
-            "timeout": 70
+            "timeout": 70,
+            "publish": "windows-vm-configure"
           },
           {
             "name": "windows-dev",
@@ -82,6 +84,7 @@ jobs:
             "pull": "windows11-vm-configure",
             "fallback": "windows11 windows11-ssh",
             "out": "windows11-dev.qcow2",
-            "timeout": 120
+            "timeout": 120,
+            "publish": "windows-dev"
           }
         ]

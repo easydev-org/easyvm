@@ -62,7 +62,8 @@ jobs:
             "file": "linux/nixos/steps/ssh.yaml",
             "pull": "linux-nixos",
             "out": "linux-nixos-ssh.qcow2",
-            "timeout": 60
+            "timeout": 60,
+            "publish": "linux-nixos-ssh"
           },
           {
             "name": "linux-nixos-install",
@@ -78,6 +79,7 @@ jobs:
             "pull": "linux-nixos-ssh",
             "fallback": "linux-nixos",
             "out": "linux-nixos-vm.qcow2",
-            "timeout": 60
+            "timeout": 60,
+            "publish": "linux-nixos-vm"
           }
         ]

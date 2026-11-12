@@ -62,7 +62,8 @@ jobs:
             "file": "linux/cachyos/steps/ssh.yaml",
             "pull": "linux-cachyos",
             "out": "linux-cachyos-ssh.qcow2",
-            "timeout": 60
+            "timeout": 60,
+            "publish": "linux-cachyos-ssh"
           },
           {
             "name": "linux-cachyos-install",
@@ -78,6 +79,7 @@ jobs:
             "pull": "linux-cachyos-ssh",
             "fallback": "linux-cachyos",
             "out": "linux-cachyos-vm.qcow2",
-            "timeout": 60
+            "timeout": 60,
+            "publish": "linux-cachyos-vm"
           }
         ]

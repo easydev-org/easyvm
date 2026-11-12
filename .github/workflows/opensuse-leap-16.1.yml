@@ -70,7 +70,8 @@ jobs:
             "file": "linux/opensuse-leap-16.1/steps/ssh.yaml",
             "pull": "linux-opensuse-leap-16.1",
             "out": "linux-opensuse-leap-16.1-ssh.qcow2",
-            "timeout": 60
+            "timeout": 60,
+            "publish": "linux-opensuse-leap-16.1-ssh"
           },
           {
             "name": "linux-opensuse-leap-16.1-install",
@@ -86,6 +87,7 @@ jobs:
             "pull": "linux-opensuse-leap-16.1-ssh",
             "fallback": "linux-opensuse-leap-16.1",
             "out": "linux-opensuse-leap-16.1-vm.qcow2",
-            "timeout": 60
+            "timeout": 60,
+            "publish": "linux-opensuse-leap-16.1-vm"
           }
         ]

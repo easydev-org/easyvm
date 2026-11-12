@@ -69,7 +69,8 @@ jobs:
             "file": "macos/15/steps/ssh.yaml",
             "pull": "macos15",
             "out": "macos15-ssh.qcow2",
-            "timeout": 90
+            "timeout": 90,
+            "publish": "macos-ssh"
           },
           {
             "name": "macos-vm-configure",
@@ -77,7 +78,8 @@ jobs:
             "pull": "macos15-ssh",
             "fallback": "macos15",
             "out": "macos15-vm-configure.qcow2",
-            "timeout": 90
+            "timeout": 90,
+            "publish": "macos-vm-configure"
           },
           {
             "name": "macos-dev",
@@ -85,6 +87,7 @@ jobs:
             "pull": "macos15-vm-configure",
             "fallback": "macos15 macos15-ssh",
             "out": "macos15-dev.qcow2",
-            "timeout": 150
+            "timeout": 150,
+            "publish": "macos-dev"
           }
         ]

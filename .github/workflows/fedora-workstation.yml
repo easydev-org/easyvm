@@ -62,7 +62,8 @@ jobs:
             "file": "linux/fedora-workstation/steps/ssh.yaml",
             "pull": "linux-fedora-workstation",
             "out": "linux-fedora-workstation-ssh.qcow2",
-            "timeout": 60
+            "timeout": 60,
+            "publish": "linux-fedora-workstation-ssh"
           },
           {
             "name": "linux-fedora-workstation-install",
@@ -78,6 +79,7 @@ jobs:
             "pull": "linux-fedora-workstation-ssh",
             "fallback": "linux-fedora-workstation",
             "out": "linux-fedora-workstation-vm.qcow2",
-            "timeout": 60
+            "timeout": 60,
+            "publish": "linux-fedora-workstation-vm"
           }
         ]

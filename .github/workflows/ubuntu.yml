@@ -62,7 +62,8 @@ jobs:
             "file": "linux/ubuntu/steps/ssh.yaml",
             "pull": "linux-ubuntu",
             "out": "linux-ubuntu-ssh.qcow2",
-            "timeout": 60
+            "timeout": 60,
+            "publish": "linux-ubuntu-ssh"
           },
           {
             "name": "linux-ubuntu-install",
@@ -78,6 +79,7 @@ jobs:
             "pull": "linux-ubuntu-ssh",
             "fallback": "linux-ubuntu",
             "out": "linux-ubuntu-vm.qcow2",
-            "timeout": 60
+            "timeout": 60,
+            "publish": "linux-ubuntu-vm"
           }
         ]

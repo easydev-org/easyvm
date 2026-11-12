@@ -62,7 +62,8 @@ jobs:
             "file": "linux/mx/steps/ssh.yaml",
             "pull": "linux-mx",
             "out": "linux-mx-ssh.qcow2",
-            "timeout": 60
+            "timeout": 60,
+            "publish": "linux-mx-ssh"
           },
           {
             "name": "linux-mx-install",
@@ -78,6 +79,7 @@ jobs:
             "pull": "linux-mx-ssh",
             "fallback": "linux-mx",
             "out": "linux-mx-vm.qcow2",
-            "timeout": 60
+            "timeout": 60,
+            "publish": "linux-mx-vm"
           }
         ]
