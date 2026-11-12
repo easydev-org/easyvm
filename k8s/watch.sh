@@ -20,6 +20,7 @@ set -eu
 FILE=${1:-/work/zorin-install.yaml}
 WORK=${WORK:-/work/w}
 SHOT=${SHOT:-/work/shots}
+INTERVAL=${INTERVAL:-5}
 mkdir -p "$WORK" "$SHOT"
 
 echo "=== daemon"
@@ -35,13 +36,24 @@ echo "=== run $FILE"
 easyvm run "$FILE" --work "$WORK" > "$WORK/run.log" 2>&1 &
 RPID=$!
 
-# WHILE IT RUNS: copy every new screendump out as a PNG, and print the step the daemon is on.
+# `easyvm run` IS A CLIENT AND IT RETURNS AS SOON AS THE REQUEST IS ACCEPTED - measured here: it
+# exited in three seconds while the daemon was still booting the ISO, and the loop's `kill -0 $RPID`
+# then reported "the run ended" and the cleanup killed a working guest. What has to be watched is the
+# DAEMON, whose `status` says `starting` / `running step N` / `failed` / `finished`.
+#
+# SO THE LOOP FOLLOWS `easyvm status` AND NOT A PID: it ends when the status line says the walk is
+# over, or when the daemon itself is gone.
 #
 # THE FRAMES ARE NUMBERED BY THE DAEMON, so "which frame is which step" is answered by the log rather
 # than by a timestamp - `[HH:MM:SS] running step 7/27` lines up with `frame-0007` because a `record:`
 # step's `poll:` decides the cadence and the walk advances at its own pace.
 seen=0
-while kill -0 "$RPID" 2>/dev/null; do
+while :; do
+  st=$(easyvm status --work "$WORK" 2>/dev/null || true)
+  case "$st" in
+    *"status: failed"*|*"status: finished"*) break ;;
+  esac
+  kill -0 "$DPID" 2>/dev/null || break
   for f in "$WORK"/frames/frame-*.ppm; do
     [ -e "$f" ] || continue
     # THE DAEMON NAMES THEM `frame-%06d.ppm`, so stripping non-digits gives a sortable integer.
@@ -53,8 +65,8 @@ while kill -0 "$RPID" 2>/dev/null; do
     seen=$n
   done
   printf '%s  %s\n' "$(date +%H:%M:%S)" \
-    "$(easyvm status --work "$WORK" 2>/dev/null | grep -oE 'step [0-9]+/[0-9]+ "[^"]*"' | head -1)"
-  sleep 5
+    "$(printf '%s' "$st" | grep -oE 'step [0-9]+/[0-9]+ "[^"]*"' | head -1)"
+  sleep "$INTERVAL"
 done
 
 wait "$RPID" 2>/dev/null || true
