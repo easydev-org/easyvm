@@ -284,28 +284,30 @@ steps:
   # survives a package update that rewrites the main file) and an append to the main file itself,
   # guarded by a grep so a second run adds no second line.
   - name: allow password authentication
-    run: |
-      echo {{ password }} | sudo -S sh -c '
-        mkdir -p /etc/ssh/sshd_config.d
-        printf "PasswordAuthentication yes\n" > /etc/ssh/sshd_config.d/99-vm.conf
-        # THE MAIN FILE TOO, REPLACING THE COMMENTED LINE THE PACKAGE SHIPS.
-        #
-        # Arch's /etc/ssh/sshd_config has NO `Include /etc/ssh/sshd_config.d/*.conf`, so the drop-in
-        # above is a file nothing reads. MEASURED ON endeavour-ssh, step 11 of 13, with the drop-in
-        # written and sshd restarted:
-        #
-        #     unable to authenticate, attempted methods [none password], no supported methods remain
-        #
-        # `^#?\s*PasswordAuthentication` MATCHES THE COMMENTED FORM, so this REPLACES it rather than
-        # adding a second line beside it - and the `grep -q ... ||` append below is the fallback for
-        # an image whose file has no such line at all.
-        sed -i "s/^#\?\s*PasswordAuthentication.*/PasswordAuthentication yes/" /etc/ssh/sshd_config
-        grep -q "^PasswordAuthentication yes" /etc/ssh/sshd_config || \
-          printf "PasswordAuthentication yes\n" >> /etc/ssh/sshd_config
-      ' 2>&1 | tail -3
+  # ONE LINE, BECAUSE `run:` TYPES EACH LINE AND PRESSES RETURN AFTER IT.
+  #
+  # A MULTI-LINE BODY IS NOT ONE COMMAND. This step was a nine-line `sh -c '...'` block, and `doRun`
+  # typed line 1, pressed Return, line 2, Return - so the shell received an UNTERMINATED QUOTE,
+  # submitted it, and ran every following line as its own command. THE COMMENT LINES RAN AS COMMANDS.
+  #
+  # MEASURED ON endeavour-ssh, step 11 of 13, on the run where the typing was first proven to happen:
+  #
+  #	=== allow password authentication
+  #	  running 19 line(s), 1020 character(s): echo admin | sudo -S sh -c ' ; ...
+  #	  wait for sshd: ... ssh: unable to authenticate, attempted methods [none password]
+  #
+  # NINETEEN LINES, 1020 CHARACTERS, NONE OF IT RUN AS ONE SCRIPT. The log line that proves the typing
+  # also proves the bug - which is why that line was worth adding.
+  #
+  # SO IT IS ONE LINE JOINED WITH `;`, which is what the reference implementation does and says:
+  # "Each statement is typed, so each is one line."
+  #
+  # THE COMMENTED `#PasswordAuthentication yes` IS REPLACED rather than appended beside, so sshd
+  # reads ONE uncommented setting; and /etc/ssh/sshd_config itself is written because Arch's copy
+  # has no `Include /etc/ssh/sshd_config.d/*.conf`.
+    run: echo {{ password }} | sudo -S -p '' sh -c 'mkdir -p /etc/ssh/sshd_config.d; printf "PasswordAuthentication yes\n" > /etc/ssh/sshd_config.d/99-vm.conf; sed -i "s/^#\?\s*PasswordAuthentication.*/PasswordAuthentication yes/" /etc/ssh/sshd_config; grep -q "^PasswordAuthentication yes" /etc/ssh/sshd_config || printf "PasswordAuthentication yes\n" >> /etc/ssh/sshd_config' 2>&1 | tail -3
     terminal_wait: 0
     settle: 3
-
 
   - name: enable ssh at boot
     run: echo {{ password }} | sudo -S systemctl enable ssh 2>&1 | tail -3

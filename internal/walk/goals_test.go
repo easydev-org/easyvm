@@ -1044,3 +1044,71 @@ func TestThePasswordSettingReachesTheMainConfig(t *testing.T) {
 	}
 	t.Logf("checked %d password step(s)", checked)
 }
+
+// A `run:` BODY IS TYPED LINE BY LINE, SO A MULTI-LINE SHELL SCRIPT IS NOT ONE COMMAND.
+//
+// `doRun` TYPES EACH LINE AND PRESSES RETURN AFTER IT. A body like
+//
+//	echo pw | sudo -S sh -c '
+//	  mkdir -p /etc/ssh
+//	  # a comment
+//	  sed -i ...
+//	' 2>&1 | tail -3
+//
+// is therefore submitted ONE LINE AT A TIME: the shell receives an unterminated quote on line 1, runs
+// it, and then executes every following line - INCLUDING THE COMMENT LINES - as its own command.
+//
+// MEASURED ON endeavour-ssh, STEP 11 OF 13, on the run where the typing was first proven to happen:
+//
+//	=== allow password authentication
+//	  running 19 line(s), 1020 character(s): echo admin | sudo -S sh -c ' ; ...
+//	  wait for sshd: ... ssh: unable to authenticate, attempted methods [none password]
+//
+// THE LOG LINE THAT PROVED THE TYPING ALSO PROVED THE BUG. Nineteen lines, 1020 characters, and none of
+// it ran as one script - so the drop-in and the main config were never written.
+//
+// `ssh:` MAY BE MULTI-LINE, because it is sent as one command over one channel. `run:` MAY NOT.
+func TestARunBodyIsOneLine(t *testing.T) {
+	root := filepath.Join("..", "..")
+	var files []string
+	for _, pat := range []string{
+		filepath.Join(root, "linux", "*", "steps", "*.yaml"),
+		filepath.Join(root, "windows", "*", "steps", "*.yaml"),
+		filepath.Join(root, "bsd", "*", "steps", "*.yaml"),
+		filepath.Join(root, "macos", "*", "steps", "*.yaml"),
+	} {
+		got, err := filepath.Glob(pat)
+		if err != nil {
+			t.Fatal(err)
+		}
+		files = append(files, got...)
+	}
+	if len(files) == 0 {
+		t.Skip("no walkthroughs here")
+	}
+	var checked int
+	for _, path := range files {
+		rel, _ := filepath.Rel(root, path)
+		doc, err := Load(path, nil)
+		if err != nil {
+			continue
+		}
+		for _, s := range doc.Steps {
+			body := s.Get("run")
+			if body == "" {
+				continue
+			}
+			checked++
+			if n := len(strings.Split(strings.TrimRight(body, "\n"), "\n")); n > 1 {
+				t.Errorf("%s: the step %q has a %d-line `run:` body. `run:` TYPES EACH LINE AND PRESSES "+
+					"RETURN, so a multi-line shell script is submitted one line at a time - an "+
+					"unterminated quote, then every later line as its own command, comments included. "+
+					"JOIN IT WITH `;`, or use `ssh:` if it genuinely must be a script", rel, s.Name, n)
+			}
+		}
+	}
+	if checked == 0 {
+		t.Skip("no run steps here")
+	}
+	t.Logf("checked %d run step(s)", checked)
+}
