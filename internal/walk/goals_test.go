@@ -1460,3 +1460,46 @@ func TestARecordStepDoesNotCarryAPoll(t *testing.T) {
 	}
 	t.Logf("checked %d record step(s)", checked)
 }
+
+// ONLY THE FIRST `run:` IN A TERMINAL OPENS ONE.
+//
+// `terminal_wait: N` PRESSES ctrl+alt+t AND WAITS N SECONDS. On a walkthrough with six `run:` steps
+// that is SIX NEW TERMINALS - measured on ubuntu-ssh, whose recording shows seven windows stacked,
+// each command typed into a fresh one while the previous was still running.
+//
+// THE COST IS NOT COSMETIC. `apt-get install openssh-server` needs minutes; the next step opened a
+// second terminal thirty seconds later and typed into that, so the install's own output was never
+// seen and `systemctl is-active ssh` answered `inactive` while apt was still working.
+func TestOnlyOneTerminalWaitPerFile(t *testing.T) {
+	root := filepath.Join("..", "..")
+	files, err := filepath.Glob(filepath.Join(root, "*", "*", "steps", "*.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked := 0
+	for _, path := range files {
+		doc, err := Load(path, nil)
+		if err != nil {
+			continue
+		}
+		rel, _ := filepath.Rel(root, path)
+		opens := 0
+		for _, s := range doc.Steps {
+			if !s.Has("run") || !s.Has("terminal_wait") {
+				continue
+			}
+			opens++
+			checked++
+			if opens > 1 {
+				t.Errorf("%s: %q is the %dth `run:` with `terminal_wait`, and each one presses "+
+					"ctrl+alt+t. One opens the terminal; the rest must type into it or a command "+
+					"that takes minutes has its next step typed into a new window",
+					rel, s.Name, opens)
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no `run:` steps with `terminal_wait` were found")
+	}
+	t.Logf("checked %d terminal-opening step(s)", checked)
+}

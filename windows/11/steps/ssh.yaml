@@ -62,20 +62,16 @@ steps:
   settle: 120
 - name: sshd starts automatically
   run: powershell -Command "Set-Service sshd -StartupType Automatic; (Get-Service sshd).StartType"
-  terminal_wait: 20
-  settle: 3
+  settle: 4
 - name: sshd takes passwords and port 22
   run: powershell -Command "$c='C:\ProgramData\ssh\sshd_config'; (Get-Content $c) -replace '^#?\s*PasswordAuthentication\s+.*','PasswordAuthentication yes' -replace '^#?\s*Port\s+.*','Port 22' | Set-Content $c; Select-String -Path $c -Pattern 'PasswordAuthentication','^Port'"
-  terminal_wait: 30
   settle: 4
 - name: sshd is running
   run: powershell -Command "Start-Service sshd; (Get-Service sshd).Status"
-  terminal_wait: 30
   settle: 4
 - name: the firewall allows 22
   run: powershell -Command "Get-NetFirewallRule -Name sshd-22 -ErrorAction SilentlyContinue | Remove-NetFirewallRule; New-NetFirewallRule -Name sshd-22 -DisplayName 'OpenSSH 22' -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22
     | Out-Null; 'FIREWALL-OK'"
-  terminal_wait: 30
   settle: 4
 - name: wait for sshd
   require_ssh: true

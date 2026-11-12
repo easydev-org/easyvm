@@ -54,32 +54,26 @@ steps:
   - - activities
   timeout: 180
   poll: 3
-- name: keep the screen on
-  run: xset s off; xset -dpms; xset s noblank
-  terminal_wait: 15
-  settle: 2
 - name: open the terminal
   key: ctrl+alt+t
   settle: 20
+- name: keep the screen on
+  run: xset s off; xset -dpms; xset s noblank
+  settle: 3
 - name: sudo is unlocked for this session
   run: printf '%s\n' {{ password }} | sudo -S -v
-  terminal_wait: 15
   settle: 2
 - name: install openssh-server
   run: sudo apt-get install -y openssh-server
-  terminal_wait: 240
   settle: 5
 - name: allow password authentication
   run: sudo sed -i s/^#PasswordAuthentication.*/PasswordAuthentication\ yes/ /etc/ssh/sshd_config && grep -i ^PasswordAuthentication /etc/ssh/sshd_config
-  terminal_wait: 20
   settle: 3
 - name: enable ssh at boot
   run: sudo systemctl enable --now ssh
-  terminal_wait: 30
   settle: 5
 - name: prove ssh is active
   run: systemctl is-active ssh
-  terminal_wait: 15
   settle: 3
 - name: wait for sshd
   require_ssh: true
