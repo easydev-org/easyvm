@@ -199,9 +199,24 @@ func fetchVirtioWin(work string) (Result, error) {
 		return Result{Main: dest}, nil
 	}
 
+	// THE DISKS LIVE IN THIS REPOSITORY'S OWN ghcr PACKAGE, NOT ANOTHER REPOSITORY'S.
+	//
+	// `easydev-org/easydiskbake` WAS THE DEFAULT AND IT CANNOT BE: a GITHUB_TOKEN is scoped to the
+	// repository whose workflow holds it, so a token minted for `easydev-org/easyvm` has `packages`
+	// access to `easyvm` and to nothing else. The push that produced the first real disk measured it:
+	//
+	//	FAILED: the registry refused a pull,push token (HTTP 403):
+	//	{"errors":[{"code":"DENIED","message":"requested access to the resource is denied"}]}
+	//
+	// The disk existed - 3927 MiB of installed opensuse-tumbleweed - and could not be published,
+	// because the destination belonged to a different repository. Reading has the same shape: a
+	// private package in another repository is not readable with this token either.
+	//
+	// SO BOTH DIRECTIONS ARE THIS REPOSITORY. `workflows/artifacts-publish.yml` mirrors every pinned
+	// upstream input into `ghcr.io/easydev-org/easyvm`, and every fetch and every push goes there.
 	repository := os.Getenv("DISKS_REPOSITORY")
 	if repository == "" {
-		repository = "easydev-org/easydiskbake"
+		repository = "easydev-org/easyvm"
 	}
 	art := oci.Artifact{
 		Repository: strings.ToLower(repository),
@@ -245,9 +260,24 @@ func fetchWindowsISO(work string) (Result, error) {
 		return Result{Main: dest}, nil
 	}
 
+	// THE DISKS LIVE IN THIS REPOSITORY'S OWN ghcr PACKAGE, NOT ANOTHER REPOSITORY'S.
+	//
+	// `easydev-org/easydiskbake` WAS THE DEFAULT AND IT CANNOT BE: a GITHUB_TOKEN is scoped to the
+	// repository whose workflow holds it, so a token minted for `easydev-org/easyvm` has `packages`
+	// access to `easyvm` and to nothing else. The push that produced the first real disk measured it:
+	//
+	//	FAILED: the registry refused a pull,push token (HTTP 403):
+	//	{"errors":[{"code":"DENIED","message":"requested access to the resource is denied"}]}
+	//
+	// The disk existed - 3927 MiB of installed opensuse-tumbleweed - and could not be published,
+	// because the destination belonged to a different repository. Reading has the same shape: a
+	// private package in another repository is not readable with this token either.
+	//
+	// SO BOTH DIRECTIONS ARE THIS REPOSITORY. `workflows/artifacts-publish.yml` mirrors every pinned
+	// upstream input into `ghcr.io/easydev-org/easyvm`, and every fetch and every push goes there.
 	repository := os.Getenv("DISKS_REPOSITORY")
 	if repository == "" {
-		repository = "easydev-org/easydiskbake"
+		repository = "easydev-org/easyvm"
 	}
 	art := oci.Artifact{
 		Repository: strings.ToLower(repository),
@@ -306,9 +336,24 @@ func fetchRecoveryMacOS(spec Spec) (Result, error) {
 	if fi, err := os.Stat(dest); err == nil && fi.Size() > 200<<20 {
 		return Result{Main: dest}, nil
 	}
+	// THE DISKS LIVE IN THIS REPOSITORY'S OWN ghcr PACKAGE, NOT ANOTHER REPOSITORY'S.
+	//
+	// `easydev-org/easydiskbake` WAS THE DEFAULT AND IT CANNOT BE: a GITHUB_TOKEN is scoped to the
+	// repository whose workflow holds it, so a token minted for `easydev-org/easyvm` has `packages`
+	// access to `easyvm` and to nothing else. The push that produced the first real disk measured it:
+	//
+	//	FAILED: the registry refused a pull,push token (HTTP 403):
+	//	{"errors":[{"code":"DENIED","message":"requested access to the resource is denied"}]}
+	//
+	// The disk existed - 3927 MiB of installed opensuse-tumbleweed - and could not be published,
+	// because the destination belonged to a different repository. Reading has the same shape: a
+	// private package in another repository is not readable with this token either.
+	//
+	// SO BOTH DIRECTIONS ARE THIS REPOSITORY. `workflows/artifacts-publish.yml` mirrors every pinned
+	// upstream input into `ghcr.io/easydev-org/easyvm`, and every fetch and every push goes there.
 	repository := os.Getenv("DISKS_REPOSITORY")
 	if repository == "" {
-		repository = "easydev-org/easydiskbake"
+		repository = "easydev-org/easyvm"
 	}
 	tag := recoveryMacOSTag(spec.Release)
 	art := oci.Artifact{
@@ -438,9 +483,24 @@ func fetchLinuxISO(spec Spec) (Result, error) {
 	}
 
 	// 2. THE PUBLISHED ARTIFACT, IF THERE IS ONE.
+	// THE DISKS LIVE IN THIS REPOSITORY'S OWN ghcr PACKAGE, NOT ANOTHER REPOSITORY'S.
+	//
+	// `easydev-org/easydiskbake` WAS THE DEFAULT AND IT CANNOT BE: a GITHUB_TOKEN is scoped to the
+	// repository whose workflow holds it, so a token minted for `easydev-org/easyvm` has `packages`
+	// access to `easyvm` and to nothing else. The push that produced the first real disk measured it:
+	//
+	//	FAILED: the registry refused a pull,push token (HTTP 403):
+	//	{"errors":[{"code":"DENIED","message":"requested access to the resource is denied"}]}
+	//
+	// The disk existed - 3927 MiB of installed opensuse-tumbleweed - and could not be published,
+	// because the destination belonged to a different repository. Reading has the same shape: a
+	// private package in another repository is not readable with this token either.
+	//
+	// SO BOTH DIRECTIONS ARE THIS REPOSITORY. `workflows/artifacts-publish.yml` mirrors every pinned
+	// upstream input into `ghcr.io/easydev-org/easyvm`, and every fetch and every push goes there.
 	repository := os.Getenv("DISKS_REPOSITORY")
 	if repository == "" {
-		repository = "easydev-org/easydiskbake"
+		repository = "easydev-org/easyvm"
 	}
 	tag := linuxISOTag(release)
 	dest := filepath.Join(spec.Work, "installer.iso")

@@ -36,7 +36,7 @@ on:
       # THE DEFAULT TAG EACH LEG PULLS. A stage that installs has none.
       disks_repository:
         type: string
-        default: "easydev-org/easydiskbake"
+        default: "easydev-org/easyvm"
 
 # NO WORKFLOW-LEVEL `concurrency` HERE. THE CALLER OWNS THE RUN.
 #
@@ -61,9 +61,17 @@ jobs:
       # `--device /dev/kvm` is the accelerator, without which a macOS guest cannot be given `+invtsc`
       # and deadlocks, and every other guest runs fifty times slower.
       options: --device /dev/kvm --device /dev/net/tun --cap-add NET_ADMIN
+    # `packages: READ` WAS THE 403. The install leg publishes its disk with `easyvm push`, and a
+    # read-only token cannot create a package version at all:
+    #
+    #	FAILED: the registry refused a pull,push token (HTTP 403):
+    #	{"errors":[{"code":"DENIED","message":"requested access to the resource is denied"}]}
+    #
+    # measured on linux-opensuse-tumbleweed-install, whose 3927 MiB disk was finished and could not
+    # be published. `write` covers read as well, which is what the pull side needs.
     permissions:
       contents: read
-      packages: read
+      packages: write
     strategy:
       # EVERY LEG AT ONCE. Each matrix leg gets its own runner, with its own /dev/kvm and its own
       # container, so the legs do not compete - and `max-parallel: 1` would make a stage wait for the

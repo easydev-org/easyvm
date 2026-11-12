@@ -30,7 +30,7 @@ on:
         default: "linux-zorin-vm"
       disks_repository:
         description: "the ghcr repository that holds the disks"
-        default: "easydev-org/easydiskbake"
+        default: "easydev-org/easyvm"
       hold_seconds:
         description: "how long the machine is left running, to prove it does not close"
         default: "120"

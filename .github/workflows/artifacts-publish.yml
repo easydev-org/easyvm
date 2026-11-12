@@ -1,0 +1,232 @@
+name: artifacts-publish
+
+# Download every pinned upstream input this repository needs, verify its sha256, and push it to
+# THIS repository's own ghcr package:
+#
+#     ghcr.io/easydev-org/easyvm:iso-windows11
+#     ghcr.io/easydev-org/easyvm:iso-ubuntu-desktop
+#     ghcr.io/easydev-org/easyvm:macos-asset-opencore
+#     ...
+#
+# WHY THIS FILE EXISTS AT ALL
+#
+# A GITHUB_TOKEN IS SCOPED TO THE REPOSITORY WHOSE WORKFLOW HOLDS IT. Until this file existed, every
+# fetch and every push in this build pointed at `easydev-org/easydiskbake`, and the token minted for
+# `easydev-org/easyvm` has `packages` access to `easyvm` and to nothing else. The first install leg
+# that finished a real disk measured exactly what that costs:
+#
+#	FAILED: the registry refused a pull,push token (HTTP 403):
+#	{"errors":[{"code":"DENIED","message":"requested access to the resource is denied"}]}
+#
+# 3927 MiB of installed opensuse-tumbleweed - a disk that booted, was configured and shut down -
+# could not be published, because the destination belonged to a different repository. Reading has
+# the same shape: another repository's package is not this token's to read, and a private one is not
+# any token's without a grant.
+#
+# SO BOTH DIRECTIONS ARE THIS REPOSITORY. `internal/asset` and `internal/opencore` default to
+# `easydev-org/easyvm`, and this workflow is what makes those tags exist.
+#
+# THE PINS ARE THE REFERENCE IMPLEMENTATION'S, COPIED RATHER THAN RE-DERIVED. Every sha256 and size
+# below comes from `easydiskbake/lib/images.py`, which is the table that measured them. A pin that is
+# re-guessed is a pin nobody verified.
+#
+# MANUAL ONLY. These are pinned inputs: they change when a version is deliberately bumped, so running
+# this is a decision rather than a side effect of a commit.
+
+on:
+  workflow_dispatch:
+    inputs:
+      group:
+        description: "Which group to publish"
+        type: choice
+        options:
+          - all
+          - windows
+          - linux
+          - macos
+        default: all
+      which:
+        description: >-
+          One exact tag, overriding `group`. Empty publishes the group. The comment on each entry
+          below names them, and the run prints the whole catalogue before it starts.
+        default: ""
+      keep:
+        description: "Keep the downloaded files on the runner (they are otherwise deleted after push)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: artifacts-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # TWENTY INPUTS, ONE OF THEM 7.2 GiB AND THREE MORE AROUND 6. Downloads at a few hundred Mbit/s
+    # plus an upload to the same registry is a few hours for a full run; a single group is far less.
+    timeout-minutes: 330
+    permissions:
+      contents: read
+      packages: write
+      checks: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: prepare the runner
+        # THE DISK IS THE POINT: the largest single input is 7.2 GiB and its sha256 pass reads it
+        # again, so a runner with a 14 GiB volume fails halfway through the Windows image.
+        uses: easydev-org/easyactions/runner-check@main
+        with:
+          kvm: false
+          disk-gb: '60'
+          token: ${{ github.token }}
+
+      - name: build easyvm
+        # `easyvm push` IS THE PUBLISHER, and the host runner does not have it: the program is
+        # baked into the bake image at /usr/local/bin/easyvm, which is a container this job does not
+        # run. Building it here is two seconds of Go and means the publisher is the same code the
+        # stages use rather than a second implementation of the registry exchange.
+        run: |
+          set -eu
+          go build -trimpath -o /tmp/easyvm ./cmd/easyvm
+          /tmp/easyvm versions
+          echo "EASYVM=/tmp/easyvm" >> "$GITHUB_ENV"
+
+      - name: publish
+        env:
+          # GHCR IS WHAT THIS PUSHES TO, and the token has `packages: write` from the block above.
+          GITHUB_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          GROUP: ${{ inputs.group }}
+          WHICH: ${{ inputs.which }}
+          KEEP: ${{ inputs.keep }}
+        run: |
+          set -eu
+          # THE CATALOGUE, AS ONE TABLE. `tag|group|url|sha256|bytes`, and an empty sha256 means the
+          # upstream is a moving "latest" that cannot be pinned - virtio-win and opensuse-tumbleweed
+          # are the two, and they are verified by size instead (see the floor check below).
+          #
+          # TAB-SEPARATED, AND THE TABS IN THIS HEREDOC ARE REAL TABS.
+          cat > /tmp/catalogue.tsv <<'CATALOGUE'
+          iso-windows11	windows	https://software-static.download.prss.microsoft.com/dbazure/888969d5-f34g-4e03-ac9d-1f9786c66749/26200.6584.250915-1905.25h2_ge_release_svc_refresh_CLIENT_CONSUMER_x64FRE_en-us.iso	d141f6030fed50f75e2b03e1eb2e53646c4b21e5386047cb860af5223f102a32	7736125440
+          iso-virtio-win	windows	https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso		0
+          iso-ubuntu	linux	https://releases.ubuntu.com/26.04/ubuntu-26.04.1-live-server-amd64.iso	cc8a95cde20f6ced61a322420de00f10cc3c90ced545daa46cb9c1a117f1d927	0
+          iso-ubuntu-desktop	linux	https://releases.ubuntu.com/26.04/ubuntu-26.04.1-desktop-amd64.iso	601e30fbf5d97759367c632e2c33630665039b7e2158fd068403da3ccf1bda1f	6482409472
+          iso-kubuntu-desktop	linux	https://cdimage.ubuntu.com/kubuntu/releases/26.04/release/kubuntu-26.04.1-desktop-amd64.iso	831e4d4bb85098339ba43d3502cd6619b27e76daf37246a084cd68a6413090b8	5072990208
+          iso-fedora-workstation	linux	https://download.fedoraproject.org/pub/fedora/linux/releases/43/Workstation/x86_64/iso/Fedora-Workstation-Live-43-1.6.x86_64.iso	2a4a16c009244eb5ab2198700eb04103793b62407e8596f30a3e0cc8ac294d77	2742190080
+          iso-mint-cinnamon	linux	https://mirrors.kernel.org/linuxmint/stable/22.3/linuxmint-22.3-cinnamon-64bit.iso	a081ab202cfda17f6924128dbd2de8b63518ac0531bcfe3f1a1b88097c459bd4	3091660800
+          iso-opensuse-tumbleweed-kde	linux	https://download.opensuse.org/tumbleweed/iso/openSUSE-Tumbleweed-KDE-Live-x86_64-Current.iso		0
+          iso-cachyos-desktop	linux	https://mirror.cachyos.org/ISO/desktop/260809/cachyos-desktop-linux-260809.iso	959f6577f45e25ee9fd8c220fd221b08e4ea79412c7315c0f922dd6d86d5e33c	3188850688
+          iso-manjaro-kde	linux	https://download.manjaro.org/kde/26.1.0/manjaro-kde-26.1.0-260812-linux71.iso	711b64362abe0b45348dc33bd4a2c654641e069b50ae9ae37c01771da880aa99	5534201856
+          iso-endeavouros	linux	https://mirror.alpix.eu/endeavouros/iso/EndeavourOS_Titan-Nova-2026.08.15.iso	0487f46fe29e0ab2ed153ba874568cc542a0507fb6029f29ad552b36ba447393	3898638336
+          iso-zorin-core	linux	https://mirrors.edge.kernel.org/zorinos-isos/18/Zorin-OS-18-Core-64-bit-r3.iso	09959ce793b8a065b70207e46cd646b1de805fc7e0bad925ce28df6e04b7f807	3787948032
+          iso-mx-xfce	linux	https://netix.dl.sourceforge.net/project/mx-linux/Final/Xfce/MX-25.3_Xfce_x64.iso	25b5ce20caeee1b0e50507291df5ac8a8211b1b9999d8dd7416da9b66ed9fbf9	2927624192
+          iso-popos-desktop	linux	https://iso.pop-os.org/24.04/amd64/intel/9/pop-os_24.04_amd64_intel_9.iso	894bc15abcad05839b226655121a113ad16cfbc4ada98e93e3ffb74a853fdcd4	2693218304
+          iso-nixos-graphical	linux	https://releases.nixos.org/nixos/26.05/nixos-26.05.13627.c56a87d8e41c/nixos-graphical-26.05.13627.c56a87d8e41c-x86_64-linux.iso	62900e47b6bea0917c491ac0a8e18dd4e3b7579d9b60ee8e0bbbd8945162256d	3888513024
+          iso-nixos	linux	https://channels.nixos.org/nixos-26.05/latest-nixos-minimal-x86_64-linux.iso	83445162c4a18fb372657d38c942147b770d3bfdaf6bb1c37905333b80f9a79f	1746124800
+          iso-ghostbsd-mate	linux	https://download.ghostbsd.org/releases/amd64/24.10.1/GhostBSD-24.10.1.iso	e4e969603a3edf848db8c7fc2646f76871f0d9bd12787bc6c966250938c2c283	2798032896
+          iso-freebsd	linux	https://download.freebsd.org/releases/amd64/amd64/ISO-IMAGES/15.1/FreeBSD-15.1-RELEASE-amd64-disc1.iso	fa27646f05a1440fd26ffbb85e06a50bc86e128242a4e9cb7bb3ea76e1aa5fd9	1352255488
+          macos-asset-opencore	macos	https://github.com/acidanthera/OpenCorePkg/releases/download/1.0.7/OpenCore-1.0.7-RELEASE.zip	2ffab6ebf58c7aefb0bcb3a1a385d207746823d6dd87d44bd666e1286939943e	10437696
+          macos-asset-opencore-template	macos	https://github.com/LongQT-sea/OpenCore-ISO/releases/download/v0.7/LongQT-OpenCore-v0.7.iso	287328995d4198f1b05166f087d85bf7ef66bedafe150d17ad112ac8de60051d	15884288
+          macos-asset-ovmf-code	macos	https://raw.githubusercontent.com/kholia/OSX-KVM/326053dd61f49375d5dfb28ee715d38b04b5cd8e/OVMF_CODE.fd	52a625db5a45329bf8005232db33e94781787d92ae8d088f2f73332dd4ded3a9	1966080
+          macos-asset-ovmf-vars-1920x1080	macos	https://raw.githubusercontent.com/kholia/OSX-KVM/326053dd61f49375d5dfb28ee715d38b04b5cd8e/OVMF_VARS-1920x1080.fd	6ed987af3a3c155be71665f510eae3e007eda9b8b94afd59d45e91c4a11565cc	131072
+          CATALOGUE
+
+          echo "=== the catalogue ==="
+          awk -F'\t' '{printf "  %-34s %-8s %s\n", $1, $2, ($4==""?"(unpinned - size floor only)":"sha256 "+substr($4,1,16))}' /tmp/catalogue.tsv
+
+          # THE SELECTION IS A TAG, NOT A WORKFLOW. `which` wins over `group`, and an unknown tag
+          # fails with the list of real ones rather than publishing nothing and reporting success.
+          if [ -n "$WHICH" ]; then
+            if ! awk -F'\t' -v w="$WHICH" '$1==w{found=1} END{exit !found}' /tmp/catalogue.tsv; then
+              echo "::error::$WHICH is not a tag in this catalogue:" >&2
+              awk -F'\t' '{print "  "$1}' /tmp/catalogue.tsv >&2
+              exit 1
+            fi
+            selected=$(awk -F'\t' -v w="$WHICH" '$1==w' /tmp/catalogue.tsv)
+          elif [ "$GROUP" = "all" ]; then
+            selected=$(cat /tmp/catalogue.tsv)
+          else
+            selected=$(awk -F'\t' -v g="$GROUP" '$2==g' /tmp/catalogue.tsv)
+            if [ -z "$selected" ]; then
+              echo "::error::group $GROUP selects nothing" >&2
+              exit 1
+            fi
+          fi
+
+          # KEEP GOING, BECAUSE ONE UPSTREAM MUST NOT COST THE OTHERS. A mirror being briefly wrong is
+          # the normal failure here, and the list that matters at the end is the one of what failed.
+          failed=""
+          published=0
+          work=$(mktemp -d)
+          trap 'rm -rf "$work"' EXIT
+
+          # PROCESS SUBSTITUTION, NOT A PIPE. A pipe puts the `while` body in a SUBSHELL, so
+          # `failed` and `published` are discarded when it ends - and the run would report success
+          # after every download failed. `< <(...)` keeps the loop in this shell.
+          while IFS=$(printf '\t') read -r tag group url sha size <&3; do
+            [ -n "$tag" ] || continue
+            # THE FILE'S NAME COMES FROM THE URL, so the layer carries a name a reader recognises
+            # rather than "download".
+            name=$(basename "${url%%\?*}")
+            dest="$work/$name"
+            echo
+            echo "=== $tag"
+            echo "  from: $url"
+            # NO `--max-time`. It is a limit on the WHOLE transfer, so it ends a 7.2 GiB download
+            # at the number whatever the speed - the connect timeout is what guards a dead mirror,
+            # and `--retry-all-errors` is what retries a stall.
+            if ! curl -fL --retry 5 --retry-delay 10 --retry-all-errors \
+                        --connect-timeout 30 -C - \
+                        -o "$dest" "$url"; then
+              echo "::warning::$tag: download failed"
+              failed="$failed $tag"
+              continue
+            fi
+            got=$(stat -c %s "$dest")
+            echo "  got:  $got bytes"
+            if [ "$sha" != "" ] && [ "$sha" != "0" ]; then
+              # THE PIN IS THE POINT. A file that does not match is not a newer version - it is the
+              # wrong file, and pushing it would put it behind the right tag where nobody looks.
+              actual=$(sha256sum "$dest" | cut -d' ' -f1)
+              if [ "$actual" != "$sha" ]; then
+                echo "::warning::$tag: sha256 is $actual, the pin is $sha"
+                failed="$failed $tag"
+                continue
+              fi
+              echo "  sha256: verified"
+            else
+              # THE UNPINNED TWO ARE A MOVING "latest", so the only honest check is a floor: a
+              # truncated transfer and an HTML error page are both far below it.
+              if [ "$got" -lt $((500 * 1024 * 1024)) ]; then
+                echo "::warning::$tag: $got bytes is below the 500 MiB floor for an installer image"
+                failed="$failed $tag"
+                continue
+              fi
+              echo "  sha256: unpinned upstream, size floor passed"
+            fi
+            if "$EASYVM" push --tag "$tag" --file "$dest" --repository "$REPOSITORY" --timeout 90m; then
+              published=$((published + 1))
+            else
+              echo "::warning::$tag: push failed"
+              failed="$failed $tag"
+            fi
+            if [ "$KEEP" != "true" ]; then rm -f "$dest"; fi
+          done 3< <(printf '%s\n' "$selected")
+
+          echo
+          echo "=== done: see the tags in the package"
+          # A FAILURE LIST IS WRITTEN TO THE STEP SUMMARY, because the log is thousands of lines and
+          # the question after a run is one line long.
+          {
+            echo "## artifacts-publish"
+            echo
+            echo "repository: \`$REPOSITORY\`"
+            echo
+            if [ -n "$failed" ]; then
+              echo "**failed:**$failed"
+              exit 1
+            fi
+            echo "every selected artifact was verified and pushed"
+          } >> "$GITHUB_STEP_SUMMARY"

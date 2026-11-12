@@ -25,7 +25,7 @@ on:
     inputs:
       disks_repository:
         description: "the ghcr repository that holds the disks"
-        default: "easydev-org/easydiskbake"
+        default: "easydev-org/easyvm"
 
 concurrency:
   group: fedora-workstation
