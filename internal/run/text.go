@@ -114,12 +114,39 @@ func (e *Executor) readScreen(s walk.Step, label string) ([]string, error) {
 		//
 		// on a file whose region is right and whose guest had not finished switching modes. A
 		// hard failure turned "the pane is not up yet" into "the file is broken".
+		// AND A SIZE MISMATCH SCALES THE RECTANGLE RATHER THAN ABANDONING THE READ.
+		//
+		// MEASURED ON mx-install, WHICH GOT FURTHER THAN ANY install LEG BEFORE IT - the desktop
+		// gate passed in five seconds once the Desktop ISO replaced the Server one - and then failed
+		// thirty times in a row with
+		//
+		//	wait for the terms page: the framebuffer is 1024x768 but this region was measured at
+		//	1920x1080; not reading it
+		//
+		// THE GUEST NEVER SWITCHED MODES: `-device VGA,xres=1920,yres=1080` tells the ADAPTER what
+		// it can do, and the live session's X server chose 1024x768 because nothing told it to
+		// prefer the larger mode. `ubuntu-vm` proves the parameter itself is fine - a disk with an
+		// installed system reads at 1920x1080 with the same qemu command - so this is a property of
+		// a LIVE session, not of this build's machine.
+		//
+		// THE REGION IS A PLACE ON THE PAGE, NOT A PLACE ON A SCREEN: [690, 225, 1560, 265] on
+		// 1920x1080 is the right-hand content pane, and the same pane at 1024x768 is the same
+		// FRACTION of the frame. Scaling preserves what the measurement was about and makes it work
+		// at whatever size the guest picked.
+		//
+		// AND THE LOG SAYS SO, because a silently scaled rectangle is a reading taken from somewhere
+		// other than where the file said, and that has to be visible when a step fails.
 		if at, ok := pairOf(s, "region_at"); ok {
 			w, h := f.Size()
 			if at[0] != w || at[1] != h {
-				e.Driver.Log(fmt.Sprintf("  %s: the framebuffer is %dx%d but this region was "+
-					"measured at %dx%d; not reading it", s.Name, w, h, at[0], at[1]))
-				return nil, nil
+				scaled := [4]int{
+					region[0] * w / at[0], region[1] * h / at[1],
+					region[2] * w / at[0], region[3] * h / at[1],
+				}
+				e.Driver.Log(fmt.Sprintf("  %s: the framebuffer is %dx%d and this region was "+
+					"measured at %dx%d; reading the same place scaled to [%d, %d, %d, %d]",
+					s.Name, w, h, at[0], at[1], scaled[0], scaled[1], scaled[2], scaled[3]))
+				region = scaled
 			}
 		}
 		scale := 3

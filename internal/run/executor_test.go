@@ -466,3 +466,97 @@ func TestDesktopTakesItsFamilyFromItsOwnValue(t *testing.T) {
 		t.Fatal("`desktop_family` is read before `desktop`, so a step with both gets the wrong one")
 	}
 }
+
+// A REGION MEASURED AT ONE RESOLUTION IS READ AT ANOTHER BY SCALING IT, NOT BY GIVING UP.
+//
+// MEASURED ON mx-install, THE FIRST install LEG EVER TO GET PAST THE DESKTOP GATE - it passed in five
+// seconds once the Desktop ISO replaced the Server one - WHICH THEN FAILED THIRTY TIMES IN A ROW:
+//
+//	wait for the terms page: the framebuffer is 1024x768 but this region was measured at 1920x1080;
+//	not reading it
+//
+// THE LIVE SESSION NEVER SWITCHED MODES. `-device VGA,xres=1920,yres=1080` tells the ADAPTER what it
+// supports; the guest's X server still chose 1024x768 because nothing asked it for more. `ubuntu-vm`
+// reads at 1920x1080 with the same qemu command, so the parameter is right and the difference is that
+// an INSTALLED system has a display configuration and a live session does not.
+//
+// THE REGION IS A FRACTION OF THE PAGE, not a place on a screen: [690, 225, 1560, 265] on 1920x1080 is
+// the right-hand content pane, and the same pane at 1024x768 is the same fraction of the frame. Scaling
+// keeps what the measurement was about.
+func TestARegionIsScaledWhenTheFramebufferIsAnotherSize(t *testing.T) {
+	body, err := os.ReadFile("text.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(body)
+	i := strings.Index(src, "func (e *Executor) readScreen(")
+	if i < 0 {
+		t.Fatal("no readScreen")
+	}
+	rest := src[i:]
+	if end := strings.Index(rest[1:], "\nfunc "); end > 0 {
+		rest = rest[:end+1]
+	}
+	// THE COMMENTS ARE STRIPPED FIRST: the note explaining this defect QUOTES the message it removed,
+	// so a check over raw text fails on its own explanation - the same trap `stripGoComments` was
+	// written for in the daemon package.
+	rest = stripCommentsForTest(rest)
+	// THE OLD BEHAVIOUR: report and read nothing. That is what failed thirty polls in a row.
+	if strings.Contains(rest, "not reading it") {
+		t.Fatal("`readScreen` still abandons the read on a size mismatch, so a live session at " +
+			"1024x768 can never be read against a region measured at 1920x1080")
+	}
+	// AND THE SCALE IS THERE, multiplying by the frame's size and dividing by the measured one.
+	for _, want := range []string{"region[0] * w / at[0]", "region[3] * h / at[1]"} {
+		if !strings.Contains(rest, want) {
+			t.Fatalf("the scaling does not compute %q", want)
+		}
+	}
+	// AND IT SAYS SO IN THE LOG, because a scaled read is taken from somewhere other than where the
+	// file said and that must be visible when the step fails.
+	if !strings.Contains(rest, "reading the same place scaled to") {
+		t.Fatal("the scaling is silent")
+	}
+}
+
+// stripCommentsForTest removes `//` comments and /* */ blocks so a check can read the CODE.
+func stripCommentsForTest(src string) string {
+	var out []byte
+	i := 0
+	for i < len(src) {
+		c := src[i]
+		switch {
+		case c == '"' || c == '\'':
+			quote := c
+			out = append(out, c)
+			i++
+			for i < len(src) {
+				out = append(out, src[i])
+				if src[i] == '\\' && i+1 < len(src) {
+					out = append(out, src[i+1])
+					i += 2
+					continue
+				}
+				if src[i] == quote {
+					i++
+					break
+				}
+				i++
+			}
+		case c == '/' && i+1 < len(src) && src[i+1] == '/':
+			for i < len(src) && src[i] != '\n' {
+				i++
+			}
+		case c == '/' && i+1 < len(src) && src[i+1] == '*':
+			i += 2
+			for i+1 < len(src) && !(src[i] == '*' && src[i+1] == '/') {
+				i++
+			}
+			i += 2
+		default:
+			out = append(out, c)
+			i++
+		}
+	}
+	return string(out)
+}
