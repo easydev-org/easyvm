@@ -17,7 +17,7 @@ func ExecutableKeys() []string {
 		"share_serve", "share_mount",
 		"type", "key", "double", "at",
 		"wait_for", "screenshot",
-		"unless", "until", "until_any", "until_console", "expect", "expect_any", "at_window",
+		"unless", "unless_any", "until", "until_any", "until_console", "expect", "expect_any", "at_window",
 		"at_button", "host_log", "run", "disk_settle",
 		"repeat_until",
 		"demo_script",

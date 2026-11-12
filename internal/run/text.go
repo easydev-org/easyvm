@@ -226,20 +226,34 @@ func (e *Executor) doUntil(s walk.Step) error {
 // not press the desktop icon while YaST2 is already open, because a second double-click lands on the
 // wizard - and a step that cannot say "unless this is already up" has to be a Python function.
 func (e *Executor) doUnless(s walk.Step) error {
-	want := wordsOf(s, "unless")
-	if len(want) == 0 {
-		return fail(s.Name, "`unless:` must name words")
+	// `unless_any:` IS THE ALTERNATIVES FORM, and it exists for the same reason `expect_any:` does: a
+	// pane can announce itself in more than one way. Measured on opensuse-tumbleweed's installer, whose
+	// welcome screen reads `installation` and `upgrade` correctly while `welcome` comes back from
+	// tesseract as `Wesn Home` - so the gate has to accept whichever of the three it can see.
+	//
+	// `unless:` REMAINS ONE WORD-SET WITH AND MEANING, because a gate that required ANY of two words
+	// and a gate that required BOTH were spelled the same way and that is a trap. Two keys, two
+	// meanings, no guessing.
+	alternatives := wordSetsOf(s, "unless_any")
+	if len(alternatives) == 0 {
+		if want := wordsOf(s, "unless"); len(want) > 0 {
+			alternatives = [][]string{want}
+		}
+	}
+	if len(alternatives) == 0 {
+		return fail(s.Name, "`unless:` or `unless_any:` must name words")
 	}
 	words, err := e.readScreen(s, s.Name+" - unless")
 	if err != nil {
 		// A SCREEN THAT CANNOT BE READ IS NOT "THE WORDS ARE ABSENT". Guessing would run the step on
 		// a screen nobody looked at, which is the failure the whole check exists to prevent.
-		return fail(s.Name, "could not read the screen to decide `unless: %s`: %v",
-			strings.Join(want, " "), err)
+		return fail(s.Name, "could not read the screen to decide `unless`: %v", err)
 	}
-	if says(words, want) {
-		e.Driver.Log(fmt.Sprintf("  skipped: the screen already shows %q", strings.Join(want, " ")))
-		return nil
+	for _, want := range alternatives {
+		if says(words, want) {
+			e.Driver.Log(fmt.Sprintf("  skipped: the screen already shows %q", strings.Join(want, " ")))
+			return nil
+		}
 	}
 	// THE STEP CONTINUES. `unless` is a gate on the rest of the same step, and the dispatcher ran
 	// this first.

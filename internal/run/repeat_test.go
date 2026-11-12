@@ -1,6 +1,8 @@
 package run
 
 import (
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/easydev-org/easyvm/internal/walk"
@@ -173,4 +175,52 @@ func stepWith(t *testing.T, spec map[string]any) walk.Step {
 	t.Helper()
 	spec["name"] = "probe"
 	return walk.Step{Index: 1, Name: "probe", Spec: spec}
+}
+
+// `unless_any:` IS THE ALTERNATIVES FORM OF `unless:`, AND IT EXISTS BECAUSE OCR DOES NOT READ EVERY
+// WORD ON A PANE EQUALLY WELL.
+//
+// MEASURED ON opensuse-tumbleweed-install: the double-click on the Installer icon WORKED, YaST drew, and
+// the check failed on its own vocabulary:
+//
+//	open yast2: did not advance: wanted "language" or "welcome", read
+//	"1 i 1 , im | a | es (o) Wesn Home} installation) Wpgrade) mm co ..."
+//
+// `Welcome` came back from tesseract as `Wesn Home`; `installation` and `upgrade` came back correctly.
+// A CHECK THAT ASKS FOR A WORD THE READER CANNOT PRODUCE ALWAYS FAILS, and the fix is to ask for a word
+// it demonstrably does produce - not to loosen the match, which would let a wrong pane pass.
+//
+// `unless:` STAYS ONE WORD-SET WITH AND MEANING: a gate that required ANY of two words and one that
+// required BOTH were spelled the same way, and that is a trap. Two keys, two meanings.
+func TestUnlessAnyTakesTheAlternatives(t *testing.T) {
+	body, err := os.ReadFile("text.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(body)
+	i := strings.Index(src, "func (e *Executor) doUnless(")
+	if i < 0 {
+		t.Fatal("no doUnless")
+	}
+	rest := src[i:]
+	if end := strings.Index(rest[1:], "\nfunc "); end > 0 {
+		rest = rest[:end+1]
+	}
+	if !strings.Contains(rest, `wordSetsOf(s, "unless_any")`) {
+		t.Fatal("`doUnless` does not read `unless_any`, so a gate with alternatives is refused")
+	}
+	// AND THE SINGULAR KEY STILL WORKS, unchanged.
+	if !strings.Contains(rest, `wordsOf(s, "unless")`) {
+		t.Fatal("`unless` no longer works on its own")
+	}
+	// AND IT IS REGISTERED, or every file that uses it is refused as an unknown key - which is exactly
+	// what happened for one build after the reader was written.
+	keys, err := os.ReadFile("../step/keys.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(keys), `"unless_any": {Name: "unless_any", Kind: KindWordSets,`) {
+		t.Fatal("`unless_any` is not declared in the step vocabulary, so `easyvm check` refuses every " +
+			"file that uses it with `an unknown key used to mean a step that did nothing`")
+	}
 }

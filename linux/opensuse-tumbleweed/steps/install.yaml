@@ -136,15 +136,37 @@ steps:
     #
     keep_alive: true
 
+  # THE WORDS THIS STEP WAITS FOR ARE THE ONES OCR CAN ACTUALLY READ OFF THIS INSTALLER.
+  #
+  # MEASURED ON opensuse-tumbleweed-install: the double-click WORKED and YaST drew, and the check then
+  # failed on its OWN vocabulary:
+  #
+  #	open yast2: did not advance: wanted "language" or "welcome", read
+  #	"1 i 1 , im | a | es (o) Wesn Home} installation) Wpgrade) mm co ..."
+  #
+  # THAT IS YaST's WELCOME PANE, READ IMPERFECTLY. `Welcome` came back as `Wesn Home`, and `Installation`
+  # and `Upgrade` came back correctly - the vocabulary beside them (larger, centred, against a coloured
+  # header) is what tesseract struggles with on this pane.
+  #
+  # A CHECK THAT ASKS FOR A WORD THE READER CANNOT PRODUCE IS A CHECK THAT ALWAYS FAILS, and the fix is
+  # to ask for a word it demonstrably DOES produce on this screen - not to loosen the match, which would
+  # let a wrong pane pass.
   - name: open yast2
     double: [267, 34]
     settle: 40
     expect_any:
+      - [installation]
+      - [upgrade]
       - [language]
-      - [welcome]
 
+  # THE RETRY USES THE SAME VOCABULARY AS THE CHECK IT FOLLOWS, or it re-clicks a pane that is already
+  # open - a second double-click on the Installer icon is harmless to YaST and forty-five seconds of a
+  # sixty-minute budget.
   - name: open yast2 (once more, if it did not)
-    unless: [language]
+    unless_any:
+      - [installation]
+      - [upgrade]
+      - [language]
     double: [267, 34]
     settle: 45
     optional: true

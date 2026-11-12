@@ -99,6 +99,11 @@ var Keys = map[string]Key{
 			"network, overlay); missing is a StepError, never a quiet fallback"},
 	"unless": {Name: "unless", Kind: KindWords,
 		Summary: "do this only if the screen does NOT already show these words"},
+	"unless_any": {Name: "unless_any", Kind: KindWordSets,
+		Summary: "the alternatives form of `unless:`; the step runs only if the screen shows " +
+			"NONE of these word-sets. It exists for the same reason `expect_any:` does: a pane " +
+			"can announce itself in more than one way, and OCR reads some of those ways better " +
+			"than others"},
 	"skip_when_unfinished": {Name: "skip_when_unfinished", Kind: KindBool,
 		Summary: "in a panes epilogue: run only if the walk finished"},
 
