@@ -77,9 +77,10 @@ func TestTheArtifactWorkflowAndItsPermission(t *testing.T) {
 	for _, want := range []string{
 		// The permission without which the push is a 403.
 		"packages: write",
-		// The publisher itself, built rather than assumed to be on the runner.
+		// The pull side is still the program, and the push side is oras.
 		"./cmd/easyvm",
-		"push --tag",
+		"oras push",
+		"ORAS_VERSION=",
 		// EVERY TAG THE BUILD FETCHES has to be in the catalogue, so one of the four groups is not
 		// silently short an input.
 		"iso-windows11",

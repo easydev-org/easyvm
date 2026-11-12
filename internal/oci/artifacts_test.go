@@ -183,3 +183,70 @@ func TestPrepareInstallsOrasAndSkipsWhenPresent(t *testing.T) {
 			"means a version bump is two commits and one of them gets forgotten")
 	}
 }
+
+// EVERY WORKFLOW THAT PUBLISHES USES ORAS, NOT A SUBCOMMAND THAT NO LONGER EXISTS.
+//
+// `easyvm push` was removed and `stage.yml` was updated - but `artifacts-publish.yml` was NOT, and
+// nothing noticed until a real publish failed:
+//
+//	got: 2583691264 bytes            <- the download and the hash were fine
+//	--novnc-port N   0 disables it   <- this is `easyvm`'s USAGE TEXT
+//	warning: iso-popos-desktop: push failed
+//
+// An unknown subcommand makes the program print its whole usage and exit 2, so the failure reads as a
+// rejected push rather than a missing command - and the file's own `|| echo "push failed"` turned it
+// into a warning, so the step still "succeeded" at the shell level.
+//
+// THIS IS THE SAME CLASS OF BUG AS THE ARTIFACT ONE ABOVE: a shared step edited in one place while a
+// second copy of the assumption lived somewhere else.
+func TestNoWorkflowRunsARemovedSubcommand(t *testing.T) {
+	root := filepath.Join("..", "..", ".github", "workflows")
+	files, err := filepath.Glob(filepath.Join(root, "*.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked := 0
+	for _, name := range files {
+		body, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("cannot read %s: %v", name, err)
+		}
+		for _, line := range strings.Split(string(body), "\n") {
+			trimmed := strings.TrimSpace(line)
+			// COMMENTS MAY NAME IT - they explain what was removed and why.
+			if strings.HasPrefix(trimmed, "#") {
+				continue
+			}
+			checked++
+			// A SHELL COMMAND, in either the bare or the `"$EASYVM"` form.
+			for _, gone := range []string{"easyvm push", `"$EASYVM" push`} {
+				if strings.Contains(trimmed, gone) {
+					t.Errorf("%s runs %q, and that subcommand was removed. An unknown subcommand "+
+						"prints the program's usage and exits 2, so the log reads as a rejected "+
+						"push instead of a missing command: %q", filepath.Base(name), gone, trimmed)
+				}
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no workflow lines were checked")
+	}
+}
+
+// AND THE PUBLISHING TOOL IS INSTALLED WHEREVER IT IS USED.
+//
+// `artifacts-publish.yml` runs on a host runner rather than in the image, so it cannot inherit the
+// oras that `prepare` installs - it builds its own, pinned the same way.
+func TestThePublisherInstallsOrasItself(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "artifacts-publish.yml"))
+	if err != nil {
+		t.Skipf("no artifacts-publish.yml here (%v)", err)
+	}
+	src := string(body)
+	for _, want := range []string{"ORAS_VERSION=", "ORAS_SHA256=", "sha256sum -c -", "oras push"} {
+		if !strings.Contains(src, want) {
+			t.Errorf("artifacts-publish.yml does not carry %q, so it publishes with a tool it never "+
+				"installed or never verifies", want)
+		}
+	}
+}

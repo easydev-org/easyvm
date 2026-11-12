@@ -84,15 +84,34 @@ jobs:
           token: ${{ github.token }}
 
       - name: build easyvm
-        # `easyvm push` IS THE PUBLISHER, and the host runner does not have it: the program is
-        # baked into the bake image at /usr/local/bin/easyvm, which is a container this job does not
-        # run. Building it here is two seconds of Go and means the publisher is the same code the
-        # stages use rather than a second implementation of the registry exchange.
+        # `easyvm pull` IS HOW THE RECOVERY IMAGE IS READ, and the host runner does not have the
+        # program: it is baked into the bake image at /usr/local/bin/easyvm, which is a container this
+        # job does not run. Building it here is two seconds of Go.
+        #
+        # PULL AND PUSH ARE NOT SYMMETRIC ANY MORE, and that is deliberate: `pull` is the daemon's
+        # `fetch:` implementation and stays in the program; `push` is `oras`, which is installed below.
         run: |
           set -eu
           go build -trimpath -o /tmp/easyvm ./cmd/easyvm
-          /tmp/easyvm versions
           echo "EASYVM=/tmp/easyvm" >> "$GITHUB_ENV"
+
+      - name: install oras
+        # THE PUBLISHER. `easyvm push` was removed - it was 246 lines of registry protocol with one
+        # caller - and `oras` is that tool: the payload is a bare ISO or qcow2, not a rootfs.
+        #
+        # This job runs on the HOST runner rather than in a container, so the oras project's own
+        # installer action would work here - but the version and hash are pinned by hand for the same
+        # reason `prepare` pins them: the tags this writes are what later stages pull.
+        run: |
+          set -eu
+          ORAS_VERSION=1.2.2
+          ORAS_SHA256=bff970346470e5ef888e9f2c0bf7f8ee47283f5a45207d6e7a037da1fb0eae0d
+          curl -fsSL --retry 5 --retry-all-errors -o /tmp/oras.tgz \
+            "https://github.com/oras-project/oras/releases/download/v${ORAS_VERSION}/oras_${ORAS_VERSION}_linux_amd64.tar.gz"
+          echo "${ORAS_SHA256}  /tmp/oras.tgz" | sha256sum -c -
+          tar -xzf /tmp/oras.tgz -C /usr/local/bin oras
+          chmod 0755 /usr/local/bin/oras
+          oras version
 
       - name: mirror the macOS recovery image
         # APPLE'S RECOVERY IMAGE IS THE ONE INPUT THAT CANNOT BE A URL IN THE CATALOGUE.
@@ -139,7 +158,15 @@ jobs:
               rm -f "$dest"
               continue
             fi
-            "$EASYVM" push --tag "$tag" --file "$dest" --repository "$REPOSITORY" --timeout 60m
+            repo=$(printf '%s' "$REPOSITORY" | tr '[:upper:]' '[:lower:]')
+            ( cd "$RUNNER_TEMP" && \
+              oras push "ghcr.io/${repo}:${tag}" \
+                --artifact-type application/vnd.easydev.recovery \
+                "$(basename "$dest"):application/vnd.oci.image.layer.v1.tar" ) || {
+              echo "::warning::$tag: push failed"
+              rm -f "$dest"
+              continue
+            }
             rm -f "$dest"
           done
 
@@ -297,7 +324,16 @@ jobs:
               fi
               echo "  sha256: unpinned upstream, size floor passed"
             fi
-            if "$EASYVM" push --tag "$tag" --file "$dest" --repository "$REPOSITORY" --timeout 90m; then
+            # `oras push`, FROM THE FILE'S OWN DIRECTORY WITH A BARE FILENAME. oras validates the
+            # path in a `file:media:type` reference and rejects an absolute one; the flag that would
+            # allow it also disables the checks protecting a mistyped variable.
+            repo=$(printf '%s' "$REPOSITORY" | tr '[:upper:]' '[:lower:]')
+            if ( cd "$work" && \
+                 oras push "ghcr.io/${repo}:${tag}" \
+                   --artifact-type application/vnd.easydev.iso \
+                   "${name}:application/vnd.oci.image.layer.v1.tar" \
+                   --annotation "org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" \
+                   --annotation "org.opencontainers.image.revision=${{ github.sha }}" ); then
               published=$((published + 1))
             else
               echo "::warning::$tag: push failed"
