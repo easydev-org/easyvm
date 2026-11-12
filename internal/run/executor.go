@@ -173,7 +173,7 @@ func (e *Executor) runOne(s walk.Step) error {
 		return e.doSSH(s)
 	case s.Has("repeat_until"):
 		return e.doRepeatUntil(s)
-	case s.Has("unless"):
+	case s.Has("unless"), s.Has("unless_any"):
 		if err := e.doUnless(s); err != nil {
 			return err
 		}
@@ -237,7 +237,7 @@ func (e *Executor) dispatchRest(s walk.Step) error {
 	// A COPY WITHOUT THE GATE, so dispatchRest cannot recurse.
 	rest := walk.Step{Index: s.Index, Name: s.Name, Spec: make(map[string]any, len(s.Spec))}
 	for k, v := range s.Spec {
-		if k == "unless" || k == "region" || k == "region_at" || k == "scale" {
+		if k == "unless" || k == "unless_any" || k == "region" || k == "region_at" || k == "scale" {
 			continue
 		}
 		rest.Spec[k] = v
