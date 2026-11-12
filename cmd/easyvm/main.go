@@ -38,6 +38,7 @@ import (
 	"github.com/easydev-org/easyvm/internal/daemon"
 	"github.com/easydev-org/easyvm/internal/machine"
 	"github.com/easydev-org/easyvm/internal/oci"
+	"github.com/easydev-org/easyvm/internal/protocol"
 	"github.com/easydev-org/easyvm/internal/walk"
 )
 
@@ -46,10 +47,15 @@ const usage = `easyvm - drive a walkthrough YAML file against a machine
 The machine has ONE owner: a daemon. This command is a client and sends it requests.
 ` + "`check`, `list` and `versions` are questions about a file, not about a machine, and need no daemon." + `
 
+TWO MODES, AND THEY DIFFER IN WHEN THE MACHINE STOPS:
+
+  easyvm run     FILE [flags]                    A BAKE: run every step, then stop the machine.
+  easyvm create  FILE [flags]                    A SANDBOX: boot and STAY UP until destroy.
+
   easyvm serve   --work DIR [--novnc-port N]     start the owner
-  easyvm run     FILE [flags]                    ask it to run a walkthrough
   easyvm status  [--work DIR]                    where is it now, and is the guest up
   easyvm stop    [--work DIR]                    stop the run and the machine
+  easyvm destroy [--work DIR]                    stop a sandbox's machine (its only ending)
   easyvm health  [--work DIR]                    exit 0 only if QMP and the guest both answer
 
   easyvm check   FILE                            validate without any machine at all
@@ -87,6 +93,10 @@ func main() {
 		os.Exit(cmdServe(args))
 	case "run":
 		os.Exit(cmdRun(args))
+	case "create":
+		os.Exit(cmdCreate(args))
+	case "destroy":
+		os.Exit(cmdDestroy(args))
 	case "status":
 		os.Exit(cmdStatus(args))
 	case "stop":
@@ -625,5 +635,111 @@ func cmdPush(args []string) int {
 		return 1
 	}
 	fmt.Printf("  %s\n", art.Tag)
+	return 0
+}
+
+// cmdCreate starts a machine and leaves it running, for a sandbox pod.
+//
+// IT IS NOT `run` WITH A LONGER TIMEOUT. A bake ends by running out of steps; a sandbox has no steps
+// to run out of, and `destroy` is the only ending it has. The file still describes the machine - its
+// `boot:` steps are the shape - but no other step runs.
+func cmdCreate(args []string) int {
+	fs := flag.NewFlagSet("create", flag.ContinueOnError)
+	file := fs.String("file", "", "the walkthrough whose `boot:` describes the machine")
+	work := fs.String("work", "", "the daemon's directory")
+	password := fs.String("password", "admin", "the guest account's password")
+	disk := fs.String("boot-disk", "", "the disk to start, when the file does not name one")
+	novnc := fs.Int("novnc", 0, "the browser page's port; 0 uses the daemon's")
+	timeout := fs.Duration("wait", 10*time.Minute, "how long to wait for the machine to be up")
+	set := map[string]string{}
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *file == "" && fs.NArg() > 0 {
+		*file = fs.Arg(0)
+	}
+	if *file == "" {
+		fmt.Fprintln(os.Stderr, "easyvm create: a walkthrough file is required")
+		return 2
+	}
+	if *work == "" {
+		*work = filepath.Dir(*file)
+	}
+	cl, err := client.Dial(*work)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		return 3
+	}
+	defer cl.Close()
+
+	resp, err := cl.Do(client.Request{
+		Command:   protocol.CommandCreate,
+		File:      *file,
+		BootDisk:  *disk,
+		Password:  *password,
+		NoVNCPort: *novnc,
+		Vars:      set,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "FAILED: %v\n", err)
+		return 1
+	}
+	if !resp.OK {
+		fmt.Fprintf(os.Stderr, "REFUSED: %s\n", resp.Error)
+		return 1
+	}
+
+	// THE MACHINE IS UP WHEN `status` SAYS running, NOT WHEN THE REQUEST RETURNED. `create` returns at
+	// once and boots in the background, exactly as `run` does, because a request that blocked for a
+	// two-minute boot would make the client a supervisor.
+	deadline := time.Now().Add(*timeout)
+	for time.Now().Before(deadline) {
+		st, err := cl.Do(client.Request{Command: "status"})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "FAILED: %v\n", err)
+			return 1
+		}
+		if st.State != nil {
+			switch st.State.Status {
+			case "running":
+				fmt.Printf("[easyvm] the machine is up: %s\n", st.State.File)
+				if st.State.SSH != "" {
+					fmt.Printf("[easyvm] ssh: %s\n", st.State.SSH)
+				}
+				return 0
+			case "failed":
+				fmt.Fprintf(os.Stderr, "FAILED: %s: %s\n", st.State.Message, st.State.Error)
+				return 1
+			}
+		}
+		time.Sleep(2 * time.Second)
+	}
+	fmt.Fprintf(os.Stderr, "FAILED: the machine was not up within %s\n", *timeout)
+	return 1
+}
+
+// cmdDestroy stops a sandbox's machine and clears it, which is the only ending a sandbox has.
+func cmdDestroy(args []string) int {
+	work, code := workArg("destroy", args)
+	if code != 0 {
+		return code
+	}
+	cl, err := client.Dial(work)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		return 3
+	}
+	defer cl.Close()
+
+	resp, err := cl.Do(client.Request{Command: protocol.CommandDestroy})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "FAILED: %v\n", err)
+		return 1
+	}
+	if !resp.OK {
+		fmt.Fprintf(os.Stderr, "REFUSED: %s\n", resp.Error)
+		return 1
+	}
+	fmt.Println("[easyvm] the machine was destroyed")
 	return 0
 }

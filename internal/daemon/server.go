@@ -69,6 +69,11 @@ type Daemon struct {
 	novncPort int
 	// work is this daemon's directory: its socket, its frames and its disks.
 	work string
+	// sandbox says a `create` is holding a machine that must outlive its steps, and sandboxClose is
+	// what `destroy` calls. IT IS SEPARATE FROM ex BECAUSE THEY MEAN DIFFERENT THINGS: ex is a
+	// walkthrough in progress, which ends by itself; a sandbox has no end except `destroy`.
+	sandbox      bool
+	sandboxClose func()
 }
 
 // New returns an idle daemon.
@@ -156,7 +161,16 @@ func (d *Daemon) requestShutdown() {
 	d.stopping = true
 	ex := d.ex
 	done := d.done
+	// A SANDBOX IS STOPPED HERE TOO. Its machine is not part of any run loop, so a container stop
+	// that only waited for `ex` would leave qemu holding /dev/kvm with nothing able to reach it.
+	sandboxClose := d.sandboxClose
+	d.sandboxClose = nil
+	d.sandbox = false
 	d.mu.Unlock()
+
+	if sandboxClose != nil {
+		sandboxClose()
+	}
 
 	if ex != nil {
 		// THE MACHINE IS STOPPED HERE, NOT BY THE RUN LOOP, because the run loop may be blocked in
@@ -188,6 +202,12 @@ func (d *Daemon) handle(req Request) Response {
 	case "run":
 		return d.startRun(req)
 
+	case protocol.CommandCreate:
+		return d.startSandbox(req)
+
+	case protocol.CommandDestroy:
+		return d.destroySandbox()
+
 	case "stop":
 		d.mu.Lock()
 		ex := d.ex
@@ -207,8 +227,8 @@ func (d *Daemon) handle(req Request) Response {
 	case "ping":
 		return Response{OK: true}
 	}
-	return Response{OK: false, Error: fmt.Sprintf("%q is not a command; use run, status, "+
-		"stop, shutdown or ping", req.Command)}
+	return Response{OK: false, Error: fmt.Sprintf("%q is not a command; use run, create, status, "+
+		"stop, destroy, shutdown or ping", req.Command)}
 }
 
 // startRun begins a walkthrough in the background and returns at once.

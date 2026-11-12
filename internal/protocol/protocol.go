@@ -84,3 +84,28 @@ type Response struct {
 	Error string `json:"error,omitempty"`
 	State *State `json:"state,omitempty"`
 }
+
+// The two MODES a daemon can be asked for, and they are different products rather than different
+// flags.
+//
+//	`run`    A BAKE. The walkthrough runs to its last step and the machine goes away. Every CI leg in
+//	         this repository does this, and that is why `defer closeDriver()` was right there.
+//
+//	`create` A SANDBOX. The machine starts and STAYS STARTED. There is no final step to run out: a
+//	         pod is a guest you can ssh into, screenshot and type at, for as long as the caller wants
+//	         it, and `destroy` is what ends it.
+//
+// THE DIFFERENCE IS NOT A TIMEOUT. A bake with a very long timeout still ends by running out of
+// steps; a sandbox has no steps to run out of. Making them one mode with a flag would mean the
+// closing behaviour depended on a duration, which is the kind of rule that is wrong on the day a
+// slow install takes longer than the number.
+//
+// WHAT A SANDBOX STILL USES FROM THE FILE is its `boot:` - the os, the disk, the share, the video
+// adapter - because that is the machine's shape and the file is where shape lives. What it does NOT
+// use is the steps: a sandbox that ran a walkthrough would be a bake with extra words.
+const (
+	// CommandCreate starts a machine and returns; it does not run any steps.
+	CommandCreate = "create"
+	// CommandDestroy stops the machine and its daemon, and is the only ending a sandbox has.
+	CommandDestroy = "destroy"
+)
