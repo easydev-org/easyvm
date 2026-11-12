@@ -1,30 +1,7 @@
-# Zorin OS: Ubiquity's panes, as a sequence.
-#
-#     python3 lib/steps.py linux/zorin/steps/install.yaml --qmp /work/drive.sock.qmp
-#
-# WHAT THIS REPLACES
-#
-# linux/zorin/install.py's walk_ubiquity() and start_the_installer(). install.py keeps
-# the machine, the frames, the recording and the publish.
-#
-# NOTHING HERE IS READ TO DECIDE ANYTHING. The screen is read after each step and the reading
-# goes into the log, where it is useful for a post-mortem and dangerous as a decision. The one
-# exception is the launcher retry, and it is an `unless` because a second press is only right
-# when the wizard is NOT up - see that step.
-#
-# THIS WIZARD IS TRANSLATED, AND THAT IS MEASURED, NOT SPECULATION
-#
-# Ubiquity was seen coming up in English and in Estonian on the same ISO, and a test for the
-# word `welcome` fails on a screen that is perfectly correct. One run advanced correctly to a
-# Keyboard pane rendering `Klahvistiku paigutus` and stopped with
-#
-#     === THE WELCOME PANE DID NOT ADVANCE TO KEYBOARD LAYOUT ===
-#
-# A translated wizard is not a broken one, and the coordinate is the same in every language.
-
 name: zorin - the ubiquity walk
-resolution: [1920, 1080]
-
+resolution:
+- 1920
+- 1080
 vars:
   user:
     from: args.user
@@ -32,407 +9,177 @@ vars:
   password:
     from: args.password
     default: admin
-  # WHERE `compress:` WRITES, AND IT COMES FROM THE WORKFLOW'S `--out`.
-  #
-  # The workflow declares each install leg with `"out": "linux-<distro>.qcow2"` and passes it as
-  # `--out`; a `compress: "{{ out }}"` step names that same file. WITHOUT THE DECLARATION HERE the
-  # variable does not exist and `easyvm check` refuses the file - which is what happened when the step
-  # was first added, and is the vocabulary doing its job.
   out:
     from: args.out
     default: out/distro.qcow2
-
 steps:
-  # THE RECORDING IS PART OF THE VERDICT, NOT A CONVENIENCE.
-  #
-  # A FAILURE THAT SAYS "did not advance: read ..." IS A FEW WORDS OF OCR, and the question
-  # it cannot answer is "what was on screen". A recording can, and it is tens of megabytes -
-  # which is why it is its own artifact rather than travelling with the disk.
-  - name: start recording
-    record: zorin-install.mp4
-    poll: 20
-
-  # THE MACHINE AND ITS INSTALLER, WHICH USED TO BE THE BAKE SKELETON IN PYTHON.
-  #
-  # THIS FILE IS A DECLARATION OF THE WIZARD STEPS AND NOTHING ELSE. Its own header says so:
-  #
-  #     WHAT THIS FILE IS. It is a DECLARATION, not an implementation. The bake skeleton - disk,
-  #     guest, recording, the QMP driver, the walk, ...
-  #
-  # and in the Python implementation lib/install_skeleton.py built the machine, created the disk and
-  # attached the ISO before running these steps. Reproduced as YAML that skeleton has to be IN the
-  # file, or the first `at:` reports `drive.sock.qmp: no such file` on a machine nobody started.
-  #
-  # 64G IS THE WORKFLOW'S OWN `--disk-size 64G`, not a number chosen here: every coordinate in this
-  # directory was measured on a disk that size, and the installer's partitioning pane reads capacity.
-  - name: create the empty disk
-    disk: disk.qcow2
-    disk_gb: 64
-
-  # THE INSTALLER IMAGE, BY THE TAG THIS REPOSITORY PUBLISHES IT UNDER.
-  - name: fetch the installer image
-    fetch: linux_iso
-    release: zorin
-
-  - name: boot the installer
-    boot: true
-    os: linux
-    iso: installer_iso
-    timeout: 1800
-  # THE LIVE DESKTOP FIRST, BECAUSE A CLICK ON A SCREEN THAT HAS NOT DRAWN IS A CLICK ON NOTHING.
-  #
-  # `boot:` RETURNS WHEN QEMU IS RUNNING, WHICH IS NOT WHEN THE INSTALLER IS VISIBLE. A live medium
-  # unpacks itself from a multi-gigabyte ISO after that: measured on opensuse-tumbleweed, whose first
-  # click landed on
-  #
-  #	Guest has not initialized the display (yet).
-  #
-  # - the VNC server's own text, meaning the guest had drawn NO FRAME AT ALL.
-  #
-  # `desktop: linux` is a measurement of the panel a booted session draws, which is the honest gate
-  # for every live installer here. The `timeout` is generous because unpacking a 4 GiB image is real
-  # work, and a fixed `settle` would be a guess that is right on a fast runner and wrong on a slow one.
-  # THE INSTALLER'S OWN FIRST SCREEN, READ AS TEXT.
-  #
-  # `desktop: linux` MEASURES A PANEL AND THESE INSTALLERS HAVE NO PANEL: they are
-  # full-screen console UI (subiquity, calamares in text mode, the Debian installer,
-  # anaconda) drawing character cells. Measured on ubuntu-install: fifteen minutes of
-  # `drop=+0.0 ratio=0.0x sat=+0.00` - a black screen - while `console.log` showed the
-  # firmware boot the DVD, GRUB load, and the installer take over. The test was
-  # measuring the wrong thing, which is the fourth time this session.
-  #
-  # AND THE BUDGET IS THE INSTALL'S, NOT A GUI'S: a live medium unpacks itself from a
-  # multi-gigabyte ISO before its first screen exists, and the reference implementation
-  # gives this 5400 seconds rather than guessing a smaller number.
-  # THE DESKTOP, BECAUSE THIS IS A DESKTOP IMAGE AND THE PANES BELOW WERE MEASURED ON IT.
-  #
-  # `ubuntu` USED TO RESOLVE TO `iso-ubuntu`, WHICH IS THE *SERVER* LIVE IMAGE (2,792 MiB): its GRUB
-  # entry reads "Try or Install Ubuntu Server" and its installer takes over the whole screen with no
-  # panel, so `desktop: linux` could never pass and neither could the coodinate panes that follow.
-  #
-  # `ubuntu: iso-ubuntu-desktop` IS 6,182 MiB - Desktop 26.04.1 exactly - and it boots to a live
-  # desktop with a panel, an install launcher, and the Ubiquity-style panes these files click.
-  #
-  # THE SAME CORRECTION APPLIES TO FOUR MORE, and the SIZES are what say so rather than a guess:
-  #
-  #	nixos     iso-nixos 1,665 MiB          -> iso-nixos-graphical 3,708   (minimal has NO desktop)
-  #	popos     iso-popos 3,753 MiB          -> iso-popos-desktop   2,568
-  #	manjaro   iso-manjaro 4,969 MiB        -> iso-manjaro-kde     5,278
-  #	zorin     iso-zorin 3,728 MiB          -> iso-zorin-core      3,612
-  #
-  # `keep_alive` IS PART OF THE WAIT: it can run for ninety minutes and a live session's idle timer
-  # puts a lock screen up well before that, after which every word on the screen is the lock screen's.
-  - name: wait for the live desktop
-    desktop: linux
-    timeout: 5400
-    poll: 5
-    keep_alive: true
-
-  # =======================================================================================
-  # 0. THE LAUNCHER, THEN THE SCREEN SAVER - AND THE ORDER IS THE WHOLE OF IT
-  # =======================================================================================
-  #
-  # Measured twice, and the order is the whole of it:
-  #
-  #   * terminal first, launcher second - the terminal window owns the screen, both presses
-  #     land in it, and Ubiquity never starts. Two CI runs and one local run failed exactly
-  #     this way, the frame still reading `Paigaldamine | Tere tulemast | Eesti | ...`;
-  #   * launcher first, terminal second - Ubiquity reaches its Keyboard pane, and the
-  #     terminal opened afterwards sits behind it because Ubiquity raises itself.
-  #
-  # THE LAUNCHER'S LANGUAGE IS WHATEVER THE GEOLOCATION PROBE SAYS - measured, `Welcome` on
-  # one run and `Paigaldamine` (Estonian) on the next, same ISO. Its CARDS DO NOT MOVE, so the
-  # button is at (1223,586) in both, which is why this is a coordinate and not a lookup.
-  #
-  # TWO PRESSES 3 SECONDS APART. One press only focuses the window; the pair, three seconds
-  # apart, is what was measured to start Ubiquity.
-  # A GATE BEFORE THE PRESS, BECAUSE THE LAUNCHER DRAWS ITS CARDS LATE.
-  #
-  # MEASURED FROM THIS STAGE'S OWN RECORDING, frame by frame: the launcher window is up at 60s as an
-  # EMPTY PANEL, and its two cards (`Try Zorin OS`, `Install Zorin OS`) do not appear until about
-  # 100s. The old walk pressed (1223, 586) at 10s, into blank window, and never pressed the card that
-  # starts Ubiquity at all - so the "installer" that appeared at 300s was the launcher finally
-  # finishing, not Ubiquity, and every pane after it was a click on the launcher's own body.
-  #
-  # `until_any:` RATHER THAN `until:`, because the launcher's language is whatever the geolocation
-  # probe says - `Welcome` on one run, `Bienvenue` on the next, `Paigaldamine` on a third. Only the
-  # words that never move are named, and the card labels are among them.
-  # THE INSTALLER PUTS ITSELF UP, AND IT TAKES MINUTES - MEASURED ON A COLD BOOT IN THE LAB POD.
-  #
-  # A file with NO clicks and NO keys in it, only `record:` and `wait: 1200`, was booted from this
-  # same ISO and its frames were read in order:
-  #
-  #	frame  100  (~200s)   bare desktop - wallpaper, top bar, clock, NOTHING ELSE
-  #	frame  180  (~360s)   `Install` / `Welcome` / `Try Zorin OS | Install Zorin OS`
-  #
-  # SO THE WINDOW APPEARS BY ITSELF, roughly two to three minutes after the desktop is drawn. That
-  # is why every walk here failed at the first press: `desktop: linux` opens on the BARE desktop -
-  # it has a panel, which is all that gate measures - and the press lands on wallpaper.
-  #
-  # 300 SECONDS WAS NOT ENOUGH. The measured gap is ~360s from boot and the desktop gate itself
-  # passes at ~71s, so the wait for the cards has to cover the rest with room for a slower runner.
-  # Ten minutes is that room.
-  #
-  # AND THE WINDOW'S OWN GEOMETRY MATCHES THE FILE: measured on frame 180 at 1920x1080 the panel is
-  # x 490..1426, y 246..900, and `Install Zorin OS` is centred in its lower half - which is where
-  # `at: [1223, 586]` below presses.
-  - name: wait for the installer to put itself up
-    until_any:
-      - [install, zorin]
-      - [try, zorin]
-      - [welcome]
-      - [no, localization]
-    timeout: 600
-    poll: 5
-
-  - name: install zorin os
-    at: [1223, 586]
-    repeat: [2, 3]
-    settle: 40
-
-  # THE RETRY IS CONDITIONAL, AND `unless` IS WHY IT CAN BE. A second pair of presses is what
-  # the driver did when the wizard had not opened - and it is WRONG when the wizard HAS
-  # opened, because those two presses then land inside it. So this step runs only while the
-  # keyboard pane's words are absent.
-  - name: install zorin os (once more, if the wizard is not up)
-    unless: [keyboard]
-    at: [1223, 586]
-    repeat: [2, 3]
-    settle: 40
-
-  # NOW THE TERMINAL, WITH UBIQUITY ALREADY UP AND OWNING THE SCREEN.
-  #
-  # `setsid` plus full redirection puts the keepalive in its own session with no descriptor on
-  # the pty, so `exit` closes the window with it instead of leaving it in front of the
-  # installer. Alt+F4 was tried and put up the LAUNCHER'S `Quit the installation?` dialog.
-  - name: disable the screen saver and the lock
-    run: "xrandr --output Virtual-1 --mode 1920x1080 2>/dev/null || xrandr --output Virtual1 --mode 1920x1080 2>/dev/null || xrandr -s 1920x1080 2>/dev/null || true; xset s off; xset -dpms; xset s noblank; gsettings set org.gnome.desktop.session idle-delay 0; gsettings set org.gnome.desktop.screensaver lock-enabled false; ( for i in $(seq 1 1080); do xdotool mousemove_relative -- 1 0 2>/dev/null; xdotool mousemove_relative -- -1 0 2>/dev/null; sleep 20; done ) >/dev/null 2>&1 & exit"
-    terminal_wait: 8
-    settle: 10
-
-  # =======================================================================================
-  # 1. THE WELCOME PANE. ITS LANGUAGE LIST IS NOT TOUCHED.
-  # =======================================================================================
-  #
-  # `English` is the default unless the geolocation probe moved it, and picking a row by
-  # coordinate is UNSAFE because the list scrolls to the current entry: measured, `English`
-  # sat at y 516 in a window scrolled to `Estonian` and at y 383 in one scrolled to the top.
-  # Only the footer button is pressed.
-  - name: welcome
-    at: [1361, 764]
-    settle: 15
-
-  # =======================================================================================
-  # 2. KEYBOARD LAYOUT, AND THE PLAIN `English (US)` ROW MUST BE CLICKED
-  # =======================================================================================
-  #
-  # Zorin preselects `English (US) - English (Dvorak)`. That is not cosmetic: every character
-  # this driver types is remapped, and `docker` reached the account form as `erjt.p`, which
-  # the form rejected with `May only contain lower-case letters, digits, hyphens, and
-  # underscores.` Measured on a live session, twice.
-  - name: keyboard - english (us)
-    at: [1106, 402]
-    settle: 4
-
-  - name: keyboard
-    at: [1361, 764]
-    settle: 18
-
-  # `Updates and other software` IS SHOWN ON THIS BUILD, AND THE OLD COMMENT SAID IT WAS NOT.
-  #
-  # THE COMMENT USED TO READ: "Measured twice on this image: the keyboard pane's Continue goes
-  # STRAIGHT to `Installation type` ... on the builds that show it this walk would be wrong, and none
-  # of them has been seen here."
-  #
-  # THIS BUILD SHOWS IT. Frame 230s of zorin-install's own recording:
-  #
-  #	Updates and other software
-  #	  [x] Download updates while installing Zorin OS
-  #	  [x] Install third-party software for graphics and Wi-Fi ...
-  #	  [ ] Don't participate in the census              Continue at (1361,764)
-  #
-  # and the walk's next click was `installation type - install now` at the SAME coordinate - so the
-  # press that was meant for `Install Now` landed on this pane's Continue, the wizard advanced one
-  # page, and every pane after it was clicked a page early. The 0 MiB disk is the end of that chain.
-  #
-  # SO THE PANE IS CLICKED WHEN IT IS THERE, and the step is NOT `optional:` - a press that does not
-  # happen is a failure here, not a warning. The gate is `unless_any:` on `installation type`, so on
-  # an image that skips this pane the step is correctly skipped rather than silently mis-pressing.
-  - name: updates and other software, when this build shows it
-    unless_any:
-      - [installation, type]
-    at: [1361, 764]
-    settle: 18
-
-  # =======================================================================================
-  # 3. INSTALLATION TYPE. `Erase disk and install Zorin OS` IS ALREADY SELECTED.
-  # =======================================================================================
-  #
-  # Measured: the radio is filled when the pane is first drawn, so the only click it needs is
-  # `Install Now`, which puts up the confirmation.
-  # MEASURED FROM THIS STAGE'S OWN RECORDING, FRAME BY FRAME, AND IT IS WHY THE DISK STAYED 0 MiB:
-  #
-  #	100s   Keyboard layout, `Continue` at (1361,764)
-  #	180s   STILL Keyboard layout, and the keyboard TEST BOX now reads
-  #	       `}nn || qpabep [[rgyigy K` - which is this file's account-name typing arriving here
-  #	300s   Installation type, with `Write the changes to disks?` up and UNPRESSED
-  #
-  # THE WHOLE WALK WAS ONE PANE BEHIND. Every step's fixed `settle:` was shorter than the time the
-  # next pane needed, so each click landed on the pane BEFORE the one it was written for - and the
-  # wizard never reached "install", while every step still reported success.
-  #
-  # SO EACH PANE WAITS FOR ITSELF. The words are the pane's own heading, which no other pane uses.
-  - name: the keyboard pane is done
-    until_any:
-      - [installation, type]
-      - [updates, and, other, software]
-    timeout: 180
-    poll: 3
-
-  - name: installation type - install now
-    at: [1361, 764]
-    settle: 18
-
-  # =======================================================================================
-  # 4. THE CONFIRMATION, CLICKED WHETHER OR NOT IT WAS READ
-  # =======================================================================================
-  #
-  # A conditional that gates a click is the same mistake as a lookup that chooses one, and
-  # this repository has paid for it four times. The click costs nothing when the dialog is
-  # absent: the point is blank space on the pane underneath.
-  # AND THE CONFIRMATION WAITS FOR ITSELF TOO. The dialog is what writes the disk, and pressing it
-  # while it is still assembling is the same failure one pane later - measured at 300s in the same
-  # recording, where it was drawn and untouched.
-  - name: the disk warning is up
-    until_any:
-      - [write, the, changes, to, disks]
-      - [partition, tables]
-    timeout: 120
-    poll: 2
-
-  - name: write the changes to disks
-    at: [1293, 673]
-    settle: 20
-
-  # The time zone default is kept: on this cluster it is a US zone, and the requirement is a
-  # disk that installs, not a particular region.
-  - name: the disk warning is answered
-    until_any:
-      - [where, are, you]
-      - [time, zone]
-    timeout: 180
-    poll: 3
-
-  - name: where are you
-    at: [1361, 764]
-    settle: 18
-
-  # =======================================================================================
-  # 5. WHO ARE YOU? FIVE FIELDS, EACH LABELLED TO ITS LEFT
-  # =======================================================================================
-  #
-  #     Your name:             (975, 386)
-  #     Your computer's name:  (857, 422)
-  #     Pick a username:       (859, 477)
-  #     Choose a password:     (873, 514)
-  #     Confirm your password: (883, 550)
-  - name: the time zone pane is done
-    until_any:
-      - [who, are, you]
-      - [your, name]
-    timeout: 180
-    poll: 3
-
-  - name: who are you - your name
-    at: [975, 386]
-    type: "{{ user }}"
-    settle: 2
-  # THE COMPUTER-NAME FIELD IS LEFT AT THE INSTALLER'S DEFAULT. It used to be the account's
-  # name - a second copy of the login that had to be kept in step by hand. The machine is named
-  # once, after ssh works, by steps/vm-configure.yaml.
-  - name: who are you - username
-    at: [859, 477]
-    type: "{{ user }}"
-    settle: 2
-  - name: who are you - password
-    at: [873, 514]
-    type: "{{ password }}"
-    settle: 2
-  - name: who are you - confirm password
-    at: [883, 550]
-    type: "{{ password }}"
-    settle: 3
-
-  # =======================================================================================
-  # 6. THE INSTALL, BY THE MEASURED DURATION
-  # =======================================================================================
-  #
-  # The disk is written from here, and this ISO's completion is not a word this walk can
-  # rely on. Forty minutes is the measured thirty with room for a slower runner - the same
-  # number mint uses for the same reason and the same family of installer.
-  #
-  # THE KEEP-ALIVE CLICK IS PART OF THE WAIT: this is a session whose screen saver races the
-  # installer, and the `run` step above is the other half of that defence.
-  - name: who are you
-    at: [1361, 764]
-    settle: 20
-
-  - name: the install runs, as measured
-    wait: 2400
-    keep_alive: true
-
-  # THE DISK IS THE ARTIFACT, AND WITHOUT THIS STEP THERE IS NONE.
-  #
-  # THE WORKFLOW ASKS FOR ONE: each install leg is declared with `"out": "linux-<distro>.qcow2"`, and
-  # `--out` is where a `compress:` WRITES - it is not a filename the engine invents. WITH NO
-  # `compress:` STEP NOTHING WAS WRITTEN, and the leg's `-disk` artifact was 518 bytes:
-  #
-  #	linux-zorin-install-disk   518 bytes
-  #	linux-zorin-vm-disk     10,497,859,093 bytes
-  #
-  # A PASSING INSTALL THAT LEAVES NO DISK is a leg that proves the installer works and produces nothing
-  # for the stage after it. `compress:` flattens the overlay's parent chain into one qcow2 with zstd, so
-  # the file it leaves is the install itself.
-  # THE MACHINE IS STOPPED BEFORE THE DISK IS READ, AND THAT IS WHY THIS STEP EXISTS.
-  #
-  # MEASURED ON zorin-install, WHICH ANSWERED ALL 21 STEPS AND THEN FAILED ON THE LAST ONE:
-  #
-  #	publish the disk: qemu-img convert: exit status 1
-  #	(qemu-img: Could not open '/__w/easyvm/easyvm/work/disk.qcow2': Failed to get shared "write" lock
-  #
-  # THE INSTALL WAS COMPLETE AND THE DISK WAS STILL OPEN. `compress:` READS THE FILE, and qemu holds a
-  # write lock on it until the machine is stopped - so a `compress:` before a `shutdown:` cannot work
-  # however good the install was.
-  #
-  # `kill`, NOT `acpi`, AND THE MEASUREMENT IS WHY.
-  #
-  # MEASURED ON zorin-install, WHICH PASSED ALL 21 STEPS AND THEN PRODUCED A 0 MiB DISK:
-  #
-  #	=== stop the machine
-  #	  stopping with method "acpi"
-  #	  pressing the power button
-  #	  the guest did not power off within 5m0s; killing it - the disk will need a journal replay
-  #	=== publish the disk
-  #	  compressing with zstd
-  #	  linux-zorin.qcow2: 0 MiB
-  #
-  # A LIVE INSTALLER DOES NOT ANSWER THE POWER BUTTON. `acpi` pressed it, the guest ignored it, the
-  # wait expired after five minutes, and the kill that followed raced `qemu-img convert` - which read
-  # a disk qemu was still releasing and wrote ZERO BYTES.
-  #
-  # `kill` IS NOT A COMPROMISE HERE, BECAUSE THE INSTALLER HAS ALREADY FINISHED: the step above waits
-  # for the install to complete, and what follows is a disk with a written system on it. The journal
-  # replay the kill costs is paid on the next boot, which is the stage after this one, and it is
-  # cheaper than five minutes of waiting for a button nothing presses.
-  #
-  # THE WAIT IS SHORTENED TOO: 120 seconds, because a kill does not need the five minutes a graceful
-  # request does - and the boot after this one replays the journal either way.
-  - name: stop the machine
-    shutdown: kill
-    timeout: 120
-
-  - name: publish the disk
-    compress: "{{ out }}"
-
-  - name: stop recording
-    record: false
+- name: start recording
+  record: zorin-install.mp4
+  poll: 20
+- name: create the empty disk
+  disk: disk.qcow2
+  disk_gb: 64
+- name: fetch the installer image
+  fetch: linux_iso
+  release: zorin
+- name: boot the installer
+  boot: true
+  os: linux
+  iso: installer_iso
+  timeout: 1800
+- name: wait for the live desktop
+  desktop: linux
+  timeout: 5400
+  poll: 5
+  keep_alive: true
+- name: wait for the installer to put itself up
+  until_any:
+  - - install
+    - zorin
+  - - try
+    - zorin
+  - - welcome
+  - - false
+    - localization
+  timeout: 600
+  poll: 5
+- name: install zorin os
+  at:
+  - 1223
+  - 586
+  repeat:
+  - 2
+  - 3
+  settle: 40
+- name: install zorin os (once more, if the wizard is not up)
+  unless:
+  - keyboard
+  at:
+  - 1223
+  - 586
+  repeat:
+  - 2
+  - 3
+  settle: 40
+- name: disable the screen saver and the lock
+  run: xrandr --output Virtual-1 --mode 1920x1080 2>/dev/null || xrandr --output Virtual1 --mode 1920x1080 2>/dev/null || xrandr -s 1920x1080 2>/dev/null || true; xset s off; xset -dpms; xset s noblank;
+    gsettings set org.gnome.desktop.session idle-delay 0; gsettings set org.gnome.desktop.screensaver lock-enabled false; ( for i in $(seq 1 1080); do xdotool mousemove_relative -- 1 0 2>/dev/null; xdotool
+    mousemove_relative -- -1 0 2>/dev/null; sleep 20; done ) >/dev/null 2>&1 & exit
+  terminal_wait: 8
+  settle: 10
+- name: welcome
+  at:
+  - 1361
+  - 764
+  settle: 15
+- name: keyboard - english (us)
+  at:
+  - 1106
+  - 402
+  settle: 4
+- name: keyboard
+  at:
+  - 1361
+  - 764
+  settle: 18
+- name: updates and other software, when this build shows it
+  unless_any:
+  - - installation
+    - type
+  at:
+  - 1361
+  - 764
+  settle: 18
+- name: the keyboard pane is done
+  until_any:
+  - - installation
+    - type
+  - - updates
+    - and
+    - other
+    - software
+  timeout: 180
+  poll: 3
+- name: installation type - install now
+  at:
+  - 1361
+  - 764
+  settle: 18
+- name: the disk warning is up
+  until_any:
+  - - write
+    - the
+    - changes
+    - to
+    - disks
+  - - partition
+    - tables
+  timeout: 120
+  poll: 2
+- name: write the changes to disks
+  at:
+  - 1293
+  - 673
+  settle: 20
+- name: the disk warning is answered
+  until_any:
+  - - where
+    - are
+    - you
+  - - time
+    - zone
+  timeout: 180
+  poll: 3
+- name: where are you
+  at:
+  - 1361
+  - 764
+  settle: 18
+- name: the time zone pane is done
+  until_any:
+  - - who
+    - are
+    - you
+  - - your
+    - name
+  timeout: 180
+  poll: 3
+- name: who are you - your name
+  at:
+  - 975
+  - 386
+  type: '{{ user }}'
+  settle: 2
+- name: who are you - username
+  at:
+  - 859
+  - 477
+  type: '{{ user }}'
+  settle: 2
+- name: who are you - password
+  at:
+  - 873
+  - 514
+  type: '{{ password }}'
+  settle: 2
+- name: who are you - confirm password
+  at:
+  - 883
+  - 550
+  type: '{{ password }}'
+  settle: 3
+- name: who are you
+  at:
+  - 1361
+  - 764
+  settle: 20
+- name: the install runs, as measured
+  wait: 2400
+  keep_alive: true
+- name: stop the machine
+  shutdown: kill
+  timeout: 120
+- name: publish the disk
+  compress: '{{ out }}'
+- name: stop recording
+  record: false
