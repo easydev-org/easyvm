@@ -110,6 +110,26 @@ func Up(sshPort int, forwards []int) error {
 		return err
 	}
 
+	// A LEFTOVER TAP FROM A DAEMON THAT WAS KILLED IS THE FAILURE, NOT A DETAIL.
+	//
+	// MEASURED IN THE LAB POD, TWICE: a walk interrupted with SIGTERM left `qemutap0` attached and
+	// `DOWN`, and THE NEXT RUN COULD NOT START AT ALL - qemu is asked to open a tap that already
+	// exists, exits immediately, and says nothing of its own, so `daemon.log` ends at
+	// `booting linux from the installer` and the failure looks like a broken ISO.
+	//
+	// `Down()` cannot be relied on for this: a process killed between `exec.Command` and its cleanup
+	// never reaches it. So the TAP IS REMOVED HERE, BEFORE IT IS CREATED, which makes every boot
+	// self-healing rather than dependent on the last one having ended politely.
+	//
+	// THE BRIDGE IS LEFT ALONE ON PURPOSE: it is idempotent to re-add (`ip link add` on an existing
+	// bridge fails harmlessly and the address/routes below are set fresh), while deleting it would
+	// drop the container's own route for the length of the rebuild.
+	_, _ = run("ip", "link", "set", TapName, "down")
+	if out, err := run("ip", "link", "del", "dev", TapName); err == nil {
+		fmt.Printf("  network: removed a leftover %s from a previous run\n", TapName)
+		_ = out
+	}
+
 	// FORWARDING FIRST, BECAUSE EVERY RULE BELOW ASSUMES IT - AND IT IS READ BEFORE IT IS WRITTEN.
 	//
 	// `ip_forward` IS PER NETWORK NAMESPACE. If this process is in a namespace that already
