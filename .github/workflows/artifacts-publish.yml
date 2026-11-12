@@ -171,7 +171,7 @@ jobs:
           iso-endeavouros	linux	https://mirror.alpix.eu/endeavouros/iso/EndeavourOS_Titan-Nova-2026.08.15.iso	0487f46fe29e0ab2ed153ba874568cc542a0507fb6029f29ad552b36ba447393	3898638336
           iso-zorin-core	linux	https://mirrors.edge.kernel.org/zorinos-isos/18/Zorin-OS-18.1-Core-64-bit.iso	44649b97bd307fc4c8529205d098ebbf98575a1e1ba2ee7d7005b697af1721d5	3909091328
           iso-mx-xfce	linux	https://netix.dl.sourceforge.net/project/mx-linux/Final/Xfce/MX-25.3_Xfce_x64.iso	25b5ce20caeee1b0e50507291df5ac8a8211b1b9999d8dd7416da9b66ed9fbf9	2927624192
-          iso-popos-desktop	linux	https://iso.pop-os.org/24.04/amd64/intel/9/pop-os_24.04_amd64_intel_9.iso	894bc15abcad05839b226655121a113ad16cfbc4ada98e93e3ffb74a853fdcd4	2693218304
+          iso-popos-desktop	linux	https://iso.pop-os.org/24.04/amd64/intel/10/pop-os_24.04_amd64_intel_10.iso	a5b7321babdef75d86c688d3429fbd5525689d80a1a8b94bc393eea84f372b62	2583691264
           iso-nixos-graphical	linux	https://releases.nixos.org/nixos/26.05/nixos-26.05.13627.c56a87d8e41c/nixos-graphical-26.05.13627.c56a87d8e41c-x86_64-linux.iso	62900e47b6bea0917c491ac0a8e18dd4e3b7579d9b60ee8e0bbbd8945162256d	3888513024
           iso-ghostbsd-mate	linux	https://download.ghostbsd.org/releases/amd64/26.3.R15.1p6/GhostBSD-26.3.R15.1p6.iso	2d1b46e7d0d9339ef04d2ee386783a2431f43eecb873b8f11b7109a43c577f7f	4122404864
           macos-asset-opencore	macos	https://github.com/acidanthera/OpenCorePkg/releases/download/1.0.7/OpenCore-1.0.7-RELEASE.zip	2ffab6ebf58c7aefb0bcb3a1a385d207746823d6dd87d44bd666e1286939943e	10437696
