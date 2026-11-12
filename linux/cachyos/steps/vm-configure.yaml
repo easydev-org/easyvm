@@ -255,6 +255,21 @@ steps:
       # `//172.30.0.1/shared`, so `grep shared` matches that - but it also shows the mount POINT, and
       # on a guest that resolves `~` differently the two need not agree. Printing both, and failing
       # only on the round trip, is what makes the next failure name its cause.
+      # THE PATH IS SET, BECAUSE A NON-INTERACTIVE SSH COMMAND DOES NOT GET A LOGIN SHELL'S PATH.
+      #
+      # MEASURED ON cachyos-vm, step 16 of 23:
+      #
+      #	prove the share is readable and writable: the command exited 127
+      #
+      # 127 IS "COMMAND NOT FOUND", and the commands here are `mount`, `grep`, `ls`, `printf`, `cat`
+      # and `test` - every one of which is on the disk. `mount` LIVES IN /sbin, WHICH IS NOT ON THE
+      # PATH OF A NON-INTERACTIVE SHELL on most of these distributions: a login shell sources
+      # /etc/profile and adds it, and `ssh host command` does not.
+      #
+      # THE REST OF THIS FILE'S `ssh:` STEPS ARE LEFT ALONE: they call user-level tools that are
+      # already on the default path, and changing them all would be a larger edit than the evidence
+      # supports.
+      PATH="$PATH:/sbin:/usr/sbin:/usr/local/sbin"
       echo "--- what is mounted ---"
       mount | grep -i 'cifs\|smb' || echo "(no cifs/smb line in mount output)"
       echo "--- the mount point ---"

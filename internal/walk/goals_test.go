@@ -909,3 +909,75 @@ func TestTheNixOSConfigurationEditDoesNotAssumeItsShape(t *testing.T) {
 		t.Fatal("the step does not locate the closing brace by content")
 	}
 }
+
+// A NON-INTERACTIVE ssh COMMAND DOES NOT GET A LOGIN SHELL'S PATH, AND `mount` LIVES IN /sbin.
+//
+// MEASURED ON cachyos-vm, STEP 16 OF 23:
+//
+//	prove the share is readable and writable: the command exited 127
+//
+// 127 IS "COMMAND NOT FOUND", and the commands in that step are `mount`, `grep`, `ls`, `printf`,
+// `cat` and `test` - every one of which is on the disk. `mount` IS IN /sbin, WHICH IS NOT ON THE PATH
+// OF A NON-INTERACTIVE SHELL on most of these distributions: a login shell sources /etc/profile and
+// adds it, and `ssh host command` does not.
+//
+// A STEP THAT REPORTS 127 HAS NO FURTHER DIAGNOSIS TO GIVE - the shell never ran anything - which is
+// why the fix belongs beside the command rather than in an error message.
+func TestTheShareProofSetsThePathItNeeds(t *testing.T) {
+	root := filepath.Join("..", "..")
+	files, err := filepath.Glob(filepath.Join(root, "linux", "*", "steps", "vm-configure.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) == 0 {
+		t.Skip("no Linux vm-configure walkthroughs here")
+	}
+	var checked int
+	for _, path := range files {
+		rel, _ := filepath.Rel(root, path)
+		doc, err := Load(path, nil)
+		if err != nil {
+			continue
+		}
+		for _, s := range doc.Steps {
+			body := s.Get("ssh")
+			if !strings.Contains(body, "what is mounted") {
+				continue
+			}
+			checked++
+			// THE COMMENTS ARE STRIPPED FIRST: this step's own paragraph QUOTES the `mount | grep`
+			// line it used to begin with, so a check over raw text finds a `mount` ABOVE the PATH line
+			// that in fact sits below it - the same trap three other tests in this project hit.
+			code := stripHashComments(body)
+			// THE PATH IS EXTENDED BEFORE `mount` IS CALLED, not after.
+			pathAt := strings.Index(code, `PATH="$PATH:/sbin`)
+			mountAt := strings.Index(code, "mount |")
+			if pathAt < 0 {
+				t.Errorf("%s: %q calls `mount` without extending PATH, and `mount` is in /sbin which "+
+					"a non-interactive ssh command does not have - the step reports 127, \"command "+
+					"not found\", with no output at all", rel, s.Name)
+				continue
+			}
+			if mountAt >= 0 && pathAt > mountAt {
+				t.Errorf("%s: %q sets PATH after it calls `mount`, which is too late", rel, s.Name)
+			}
+		}
+	}
+	if checked == 0 {
+		t.Skip("no share proofs here")
+	}
+	t.Logf("checked %d share proof(s)", checked)
+}
+
+// stripHashComments removes `#` comment lines from a shell body, so a check about a SCRIPT reads the
+// script rather than the prose that explains it.
+func stripHashComments(body string) string {
+	var out []string
+	for _, line := range strings.Split(body, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "#") {
+			continue
+		}
+		out = append(out, line)
+	}
+	return strings.Join(out, "\n")
+}

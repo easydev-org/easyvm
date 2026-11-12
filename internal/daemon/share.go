@@ -241,8 +241,35 @@ func (d *Driver) mountOnce(client *guest.Client, family, dir string) error {
 			` | sudo -S -p '' mount -t cifs //172.30.0.1/shared ~/shared -o ` +
 			`username=guest,password=,vers=3.0,uid=$(id -u),gid=$(id -g),iocharset=utf8`
 	}
-	_, err := client.Run(cmd, 120*time.Second)
+	// THE SAME SHAPE `ssh:` LOGS, so this step reads like every other command in the walkthrough
+	// rather than like a black box: the command, its exit status, and its own output. A mount that
+	// failed said nothing before this and the step a person was reading reported only its own summary.
+	res, err := client.Run(cmd, 120*time.Second)
+	d.logf(fmt.Sprintf("  share: %s -> %d", oneLine(cmd), res.Status))
+	for _, line := range headTail(res.Combined(), 12, 4) {
+		d.logf("    " + line)
+	}
 	return err
+}
+
+// oneLine flattens a command for a log line without hiding that it was shortened.
+func oneLine(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if len(s) > 160 {
+		return s[:160] + "..."
+	}
+	return s
+}
+
+// headTail is the beginning AND the end of a long output, because a mount's useful line is often last.
+func headTail(s string, head, tail int) []string {
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	if len(lines) <= head+tail {
+		return lines
+	}
+	out := append([]string{}, lines[:head]...)
+	out = append(out, fmt.Sprintf("... %d line(s) omitted ...", len(lines)-head-tail))
+	return append(out, lines[len(lines)-tail:]...)
 }
 
 // tableCommand reports the system's own view of the mounts, as one command per platform.
