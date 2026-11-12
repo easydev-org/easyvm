@@ -1602,3 +1602,49 @@ func TestAnSSHLegWritesTheDiskItsWorkflowPublishes(t *testing.T) {
 	}
 	t.Logf("checked %d ssh walkthrough(s)", checked)
 }
+
+// A TYPED COMMAND THAT USES `$` NEEDS A SLOWER `type_gap` THAN THE DEFAULT.
+//
+// MEASURED ON windows-ssh, FRAME 550 OF ITS RECORDING:
+//
+//	PS> powershell -Command "Set-Service sshd -StartupType Automatic; (Get-Service sshd).StartType"
+//	Automatic                                    <- no `$`, worked
+//
+//	PS> powershell -Command "$f = Join-Path $env:ProgramData 'ssh/sshd_config'; Add-Content $f ...
+//	                      $f                       <- THE `$` IS GONE, and so is `$env:`
+//
+// `$` IS SHIFT+4. The default `type_gap` of 0.02s releases the shift before the 4 is delivered, and
+// the character arrives as `4`, `@` or nothing. `type:` steps have used 0.30s for this reason since
+// the port; `run:` inherited a much faster default and nobody had typed a `$` in one until now.
+func TestATypedDollarNeedsASlowTypeGap(t *testing.T) {
+	root := filepath.Join("..", "..")
+	files, err := filepath.Glob(filepath.Join(root, "*", "*", "steps", "*.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked := 0
+	for _, path := range files {
+		doc, err := Load(path, nil)
+		if err != nil {
+			continue
+		}
+		rel, _ := filepath.Rel(root, path)
+		for _, s := range doc.Steps {
+			body := s.Get("run")
+			if !strings.Contains(body, "$") {
+				continue
+			}
+			checked++
+			gap, _ := s.Float("type_gap", 0.02)
+			if gap < 0.10 {
+				t.Errorf("%s: %q types a `$` with type_gap %.2fs. Measured on windows-ssh: `$f` arrived "+
+					"as `f` and `$env:` as `env:` because the shift is released before the 4 is "+
+					"delivered. Use at least 0.15", rel, s.Name, gap)
+			}
+		}
+	}
+	if checked == 0 {
+		t.Skip("no typed command uses a `$` here")
+	}
+	t.Logf("checked %d typed command(s) with a `$`", checked)
+}

@@ -1,29 +1,7 @@
-# Linux Mint 22.3 Cinnamon, Ubiquity installer, 1920x1080.
-#
-#     python3 lib/steps.py linux/mint/steps/ubiquity.yaml --qmp /work/drive.sock.qmp
-#
-# WHERE EVERY NUMBER CAME FROM
-#
-# Measured on a live Mint session, one frame per pane, the same frames the Python driver in
-# linux/mint/install.py was written from. The values are not re-derived here - they are
-# copied, because a second set of measurements is a second thing that can disagree.
-#
-# WHY THIS WALKTHROUGH IS WORTH READING AS DATA
-#
-# Seven panes, five of which are "Continue" at one coordinate. In Python that is a hundred and
-# seventeen lines of clicks and comments. Here it is the footer written once as a YAML anchor
-# and used five times, and the two panes that are NOT the footer are visible as themselves.
-# Ubuntu's driver has the same shape and gets the same treatment.
-
 name: mint 22.3 cinnamon (ubiquity)
-resolution: [1920, 1080]
-
-# ANCHORS ARE FOR THE FOOTER, BECAUSE THE INSTALLER CENTRES ITS WINDOW.
-#
-# Ubiquity's footer is right-aligned inside a fixed-size window on a fixed-size screen, so one
-# coordinate is right for every pane. Writing it once is not tidiness: the Python driver had
-# CONTINUE and WRITE_CONTINUE as two constants eleven lines apart, and a reader could not tell
-# from either name that they are different controls on different panes.
+resolution:
+- 1920
+- 1080
 vars:
   user:
     from: args.user
@@ -31,132 +9,68 @@ vars:
   password:
     from: args.password
     default: admin
-
 steps:
-  # THE MACHINE IS STARTED HERE, ON THE DISK `install.yaml` MADE.
-  #
-  # THIS IS THE SECOND HALF OF MINT'S INSTALL. `install.yaml` creates the disk, boots the live media
-  # and gets to the installer; this file is Ubiquity's seven panes. They run against ONE machine, so
-  # `boot_disk: from_caller` says the caller's `--boot-disk` supplies it - and the file still has to
-  # START it, because in the Python implementation linux/mint/install.py did that before running
-  # either file.
-  - name: boot the installer
-    boot: true
-    os: linux
-    timeout: 1800
-
-  # 0. THE SESSION MUST NOT LOCK ITSELF WHILE THE INSTALL RUNS.
-  #
-  # This is a `run:` step and not a click, because the two mechanisms that blank this screen
-  # are the Cinnamon session's own dconf keys and the X server's DPMS timer, and NEITHER is
-  # reachable from QMP. Measured twice: run 42408624906 and run 42414965231 both came back to
-  # a full-window Mint lock screen with a large clock while a correct install finished
-  # underneath it, and the second one had already been clicking harmlessly for ten minutes.
-  #
-  # The trailing keep-alive is `xdotool`, from inside the session, because QMP's synthetic
-  # clicks are evidently not the event its idle timer counts.
-  - name: disable the screen saver and the lock
-    run: >-
-      gsettings set org.cinnamon.desktop.session idle-delay 0;
-      gsettings set org.cinnamon.desktop.screensaver lock-enabled false;
-      gsettings set org.cinnamon.desktop.screensaver idle-activation-enabled false;
-      xset s off; xset -dpms; xset s noblank;
-      ( for i in $(seq 1 1080); do xdotool mousemove_relative -- 1 0 2>/dev/null;
-      xdotool mousemove_relative -- -1 0 2>/dev/null; sleep 20; done ) >/dev/null 2>&1 & exit
-    terminal_wait: 8
-    settle: 10
-
-  # 1. THE INSTALLER IS AN ICON ON THE LIVE DESKTOP, AND IT NEEDS A DOUBLE CLICK.
-  #
-  # The 80 ms gap is the measurement: Cinnamon reads two presses farther apart than its
-  # double-click interval as two single clicks, and a single click only selects the icon.
-  - name: open the installer
-    double: [114, 47]
-    settle: 25
-    expect: welcome            # THE SCREEN IS READ TO CONFIRM, NEVER TO AIM
-
-  # 2-5. THE FOUR PANES THAT ONLY NEED THE FOOTER.
-  #
-  # `expect: ""` on some of these would be a guess; where the pane title is known and stable it
-  # is named, because a step that advances to the wrong pane is otherwise indistinguishable
-  # from one that worked. Mint's titles are readable ("install linux mint", "keyboard").
-  - name: welcome
-    at: &continue [1306, 727]
-    settle: 12
-
-  - name: keyboard layout
-    at: *continue
-    settle: 12
-
-  # MULTIMEDIA CODECS SHIPS OFF AND STAYS OFF. A bake does not need codecs, and enabling them
-  # is a download this run does not have to make.
-  - name: multimedia codecs
-    at: *continue
-    settle: 12
-
-  # `Erase disk and install Linux Mint` IS ALREADY SELECTED on this pane.
-  - name: installation type
-    at: *continue
-    settle: 15
-
-  # THE CONFIRMATION DIALOG, CLICKED WHETHER OR NOT THE SCREEN WAS READ.
-  #
-  # Run 42372449152 stopped here: a conditional decided from an OCR read whether the "Write the
-  # changes to disks?" dialog had appeared, did not see it, and skipped the click - then spent
-  # the rest of the run on the Installation type pane. A coordinate costs nothing when the
-  # dialog is absent, because it lands on blank space.
-  - name: write the changes to disks
-    at: [1269, 659]
-    settle: 20
-
-  # 6. THE TIME ZONE IS LEFT AT THE INSTALLER'S DEFAULT.
-  #
-  # Ubiquity preselects a city from the machine's location, which on this cluster is Shanghai.
-  # Changing it is one more text field and one more way to be wrong; the requirement is a disk
-  # that installs, not that it believes it is in a particular country. The same rule holds in
-  # every Linux driver here.
-  - name: time zone
-    at: *continue
-    settle: 15
-
-  # 7. THE ACCOUNT. `short password` is shown in red beside the field for `admin` and
-  # Continuing anyway is the measured, working answer - the run that clicked through it
-  # installed, booted and logged in with that password.
-  - name: full name
-    at: [965, 347]
-    type: "{{ user }}"
-
-  # THE HOSTNAME IS DERIVED FROM THE MACHINE MODEL - `docker-Standard-PC-Q35` - and is
-  # replaced with the user name so the disk has one canonical name in it.
-  - name: host name
-    at: [877, 375]
-    type: "{{ user }}"
-
-  - name: password
-    at: [877, 458]
-    type: "{{ password }}"
-
-  - name: confirm password
-    at: [877, 492]
-    type: "{{ password }}"
-
-  - name: create the account
-    at: *continue
-    settle: 20
-
-  # 8. A MEASURED WAIT, NOT A READING, AND THE READING IS WHY.
-  #
-  # Ubiquity's last screen is a modal - `Installation Complete`, `Installation has finished.
-  # You can continue testing Linux Mint now...`, `Continue Testing` / `Restart Now` - and on
-  # this ISO tesseract reads THE WHOLE MODAL AS AN EMPTY LINE. A local run copied files,
-  # configured hardware, configured the bootloader and put that modal up while its log said
-  # `installing: (©) i | | | 6 4)` every twenty seconds. Any completion test built on those
-  # words would have thrown a correct disk away, and the two that existed did exactly that on
-  # every CI run.
-  #
-  # 2400s is the measurement (22:51 -> 23:16 locally, 21:20 -> 22:0x on CI) with room for a
-  # slower runner. `keep_alive` is the click-per-poll that keeps a session awake; it is set
-  # here even with the screen saver disabled, because that path has already failed once.
-  - name: install
-    wait: 2400
-    keep_alive: true
+- name: boot the installer
+  boot: true
+  os: linux
+  timeout: 1800
+- name: disable the screen saver and the lock
+  run: gsettings set org.cinnamon.desktop.session idle-delay 0; gsettings set org.cinnamon.desktop.screensaver lock-enabled false; gsettings set org.cinnamon.desktop.screensaver idle-activation-enabled false; xset s off; xset -dpms; xset s noblank; ( for
+    i in $(seq 1 1080); do xdotool mousemove_relative -- 1 0 2>/dev/null; xdotool mousemove_relative -- -1 0 2>/dev/null; sleep 20; done ) >/dev/null 2>&1 & exit
+  terminal_wait: 8
+  settle: 10
+  type_gap: 0.15
+- name: open the installer
+  double:
+  - 114
+  - 47
+  settle: 25
+  expect: welcome
+- name: welcome
+  at: &id001
+  - 1306
+  - 727
+  settle: 12
+- name: keyboard layout
+  at: *id001
+  settle: 12
+- name: multimedia codecs
+  at: *id001
+  settle: 12
+- name: installation type
+  at: *id001
+  settle: 15
+- name: write the changes to disks
+  at:
+  - 1269
+  - 659
+  settle: 20
+- name: time zone
+  at: *id001
+  settle: 15
+- name: full name
+  at:
+  - 965
+  - 347
+  type: '{{ user }}'
+- name: host name
+  at:
+  - 877
+  - 375
+  type: '{{ user }}'
+- name: password
+  at:
+  - 877
+  - 458
+  type: '{{ password }}'
+- name: confirm password
+  at:
+  - 877
+  - 492
+  type: '{{ password }}'
+- name: create the account
+  at: *id001
+  settle: 20
+- name: install
+  wait: 2400
+  keep_alive: true
