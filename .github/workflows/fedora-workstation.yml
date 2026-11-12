@@ -44,7 +44,7 @@ jobs:
           {
             "name": "linux-fedora-workstation-ssh",
             "file": "linux/fedora-workstation/steps/ssh.yaml",
-            "pull": "linux-fedora-workstation-ssh",
+            "pull": "linux-fedora-workstation",
             "out": "linux-fedora-workstation-ssh.qcow2",
             "timeout": 60
           },
@@ -53,12 +53,14 @@ jobs:
             "file": "linux/fedora-workstation/steps/install.yaml",
             "pull": "",
             "out": "linux-fedora-workstation.qcow2",
+            "publish": "linux-fedora-workstation",
             "timeout": 90
           },
           {
             "name": "linux-fedora-workstation-vm",
             "file": "linux/fedora-workstation/steps/vm-configure.yaml",
-            "pull": "linux-fedora-workstation-vm",
+            "pull": "linux-fedora-workstation-ssh",
+            "fallback": "linux-fedora-workstation",
             "out": "linux-fedora-workstation-vm.qcow2",
             "timeout": 60
           }

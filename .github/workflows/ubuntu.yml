@@ -44,7 +44,7 @@ jobs:
           {
             "name": "linux-ubuntu-ssh",
             "file": "linux/ubuntu/steps/ssh.yaml",
-            "pull": "linux-ubuntu-ssh",
+            "pull": "linux-ubuntu",
             "out": "linux-ubuntu-ssh.qcow2",
             "timeout": 60
           },
@@ -53,12 +53,14 @@ jobs:
             "file": "linux/ubuntu/steps/install.yaml",
             "pull": "",
             "out": "linux-ubuntu.qcow2",
+            "publish": "linux-ubuntu",
             "timeout": 90
           },
           {
             "name": "linux-ubuntu-vm",
             "file": "linux/ubuntu/steps/vm-configure.yaml",
-            "pull": "linux-ubuntu-vm",
+            "pull": "linux-ubuntu-ssh",
+            "fallback": "linux-ubuntu",
             "out": "linux-ubuntu-vm.qcow2",
             "timeout": 60
           }

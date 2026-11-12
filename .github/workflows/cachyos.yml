@@ -44,7 +44,7 @@ jobs:
           {
             "name": "linux-cachyos-ssh",
             "file": "linux/cachyos/steps/ssh.yaml",
-            "pull": "linux-cachyos-ssh",
+            "pull": "linux-cachyos",
             "out": "linux-cachyos-ssh.qcow2",
             "timeout": 60
           },
@@ -53,12 +53,14 @@ jobs:
             "file": "linux/cachyos/steps/install.yaml",
             "pull": "",
             "out": "linux-cachyos.qcow2",
+            "publish": "linux-cachyos",
             "timeout": 90
           },
           {
             "name": "linux-cachyos-vm",
             "file": "linux/cachyos/steps/vm-configure.yaml",
-            "pull": "linux-cachyos-vm",
+            "pull": "linux-cachyos-ssh",
+            "fallback": "linux-cachyos",
             "out": "linux-cachyos-vm.qcow2",
             "timeout": 60
           }

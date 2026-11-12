@@ -42,26 +42,29 @@ jobs:
             "file": "windows/11/steps/install.yaml",
             "pull": "",
             "out": "windows11.qcow2",
+            "publish": "windows11",
             "timeout": 130
           },
           {
             "name": "windows-ssh",
             "file": "windows/11/steps/ssh.yaml",
-            "pull": "windows11-ssh",
+            "pull": "windows11",
             "out": "windows11-ssh.qcow2",
             "timeout": 70
           },
           {
             "name": "windows-vm-configure",
             "file": "windows/11/steps/vm-configure.yaml",
-            "pull": "windows11-vm-configure",
+            "pull": "windows11-ssh",
+            "fallback": "windows11",
             "out": "windows11-vm-configure.qcow2",
             "timeout": 70
           },
           {
             "name": "windows-dev",
             "file": "windows/11/steps/dev.yaml",
-            "pull": "windows11-dev",
+            "pull": "windows11-vm-configure",
+            "fallback": "windows11 windows11-ssh",
             "out": "windows11-dev.qcow2",
             "timeout": 120
           }

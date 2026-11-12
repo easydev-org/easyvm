@@ -44,7 +44,7 @@ jobs:
           {
             "name": "linux-endeavour-ssh",
             "file": "linux/endeavour/steps/ssh.yaml",
-            "pull": "linux-endeavour-ssh",
+            "pull": "linux-endeavour",
             "out": "linux-endeavour-ssh.qcow2",
             "timeout": 60
           },
@@ -53,12 +53,14 @@ jobs:
             "file": "linux/endeavour/steps/install.yaml",
             "pull": "",
             "out": "linux-endeavour.qcow2",
+            "publish": "linux-endeavour",
             "timeout": 90
           },
           {
             "name": "linux-endeavour-vm",
             "file": "linux/endeavour/steps/vm-configure.yaml",
-            "pull": "linux-endeavour-vm",
+            "pull": "linux-endeavour-ssh",
+            "fallback": "linux-endeavour",
             "out": "linux-endeavour-vm.qcow2",
             "timeout": 60
           }

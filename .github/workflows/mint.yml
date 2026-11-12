@@ -44,7 +44,7 @@ jobs:
           {
             "name": "linux-mint-ssh",
             "file": "linux/mint/steps/ssh.yaml",
-            "pull": "linux-mint-ssh",
+            "pull": "linux-mint",
             "out": "linux-mint-ssh.qcow2",
             "timeout": 60
           },
@@ -53,12 +53,14 @@ jobs:
             "file": "linux/mint/steps/install.yaml",
             "pull": "",
             "out": "linux-mint.qcow2",
+            "publish": "linux-mint",
             "timeout": 90
           },
           {
             "name": "linux-mint-vm",
             "file": "linux/mint/steps/vm-configure.yaml",
-            "pull": "linux-mint-vm",
+            "pull": "linux-mint-ssh",
+            "fallback": "linux-mint",
             "out": "linux-mint-vm.qcow2",
             "timeout": 60
           }

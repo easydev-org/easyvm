@@ -41,7 +41,7 @@ jobs:
           {
             "name": "bsd-ghostbsd-ssh",
             "file": "bsd/ghostbsd/steps/ssh.yaml",
-            "pull": "bsd-ghostbsd-mate-ssh",
+            "pull": "bsd-ghostbsd-mate",
             "out": "bsd-ghostbsd-ssh.qcow2",
             "timeout": 60
           },
@@ -50,12 +50,14 @@ jobs:
             "file": "bsd/ghostbsd/steps/gbi.yaml",
             "pull": "",
             "out": "bsd-ghostbsd.qcow2",
+            "publish": "bsd-ghostbsd-mate",
             "timeout": 90
           },
           {
             "name": "bsd-ghostbsd-vm",
             "file": "bsd/ghostbsd/steps/vm-configure.yaml",
-            "pull": "bsd-ghostbsd-mate-vm",
+            "pull": "bsd-ghostbsd-mate-ssh",
+            "fallback": "bsd-ghostbsd-mate",
             "out": "bsd-ghostbsd-vm.qcow2",
             "timeout": 60
           }

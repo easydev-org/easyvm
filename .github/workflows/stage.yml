@@ -136,10 +136,52 @@ jobs:
         # repository has ever published.
         if: matrix.pull != ''
         run: |
-          set -eu
-          easyvm pull --tag "${{ matrix.pull }}" \
-                      --repository "${{ inputs.disks_repository }}" \
-                      --dest "$GITHUB_WORKSPACE/work/disk.qcow2"
+          set -u
+          # A FALLBACK, BECAUSE THE LEGS RUN AT THE SAME TIME.
+          #
+          # `matrix.pull` IS WHERE THIS DISK SHOULD COME FROM, and on a package that has every tag it
+          # is the only source tried. THE LEGS ARE DISPATCHED TOGETHER, though - `fail-fast: false`
+          # and no `needs:` - so on a FRESH PACKAGE the `vm` leg starts while the `ssh` leg whose
+          # output it wants has not published it yet.
+          #
+          # MEASURED, AND IT COST A WHOLE BATCH: all fifteen workflows dispatched at once against an
+          # empty package, and every `ssh`/`vm` leg answered
+          #
+          #   FAILED: ghcr.io/easydev-org/easyvm:linux-zorin-ssh is not in the registry (404)
+          #
+          # SO EACH LEG TRIES ITS OWN TAG, THEN THE STAGES BEFORE IT, IN ORDER. The chain is
+          # install -> ssh -> vm-configure -> dev, and `fallback` is that chain written out for this
+          # leg. The FIRST tag that exists wins, which means:
+          #
+          #   once every tag exists   nothing falls back, and each leg continues its own disk
+          #   a fresh package         `vm` continues the INSTALLED disk instead of failing, and
+          #                           vm-configure configures the name, the share and the agent
+          #                           itself - which is all it ever needed ssh for
+          #
+          # A FALLBACK IS NOT A SILENT SUBSTITUTE: it is printed, and the leg's own `out` is still
+          # published under its own name, so the next run finds the tag it wanted.
+          tags="${{ matrix.pull }}"
+          for fb in ${{ matrix.fallback }}; do
+            case " $tags " in *" $fb "*) ;; *) tags="$tags $fb" ;; esac
+          done
+          echo "  will try, in order: $tags"
+          got=""
+          for tag in $tags; do
+            echo "=== pull $tag"
+            if easyvm pull --tag "$tag" \
+                           --repository "${{ inputs.disks_repository }}" \
+                           --dest "$GITHUB_WORKSPACE/work/disk.qcow2"; then
+              got="$tag"
+              break
+            fi
+            echo "  (no $tag in the package; trying the next one)"
+          done
+          if [ -z "$got" ]; then
+            echo "::error::none of these tags exist: $tags"
+            echo "::error::a fresh package needs each leg run once; an install leg has no pull:"
+            exit 1
+          fi
+          echo "  the input disk is $got"
           ls -l "$GITHUB_WORKSPACE/work/"
           # A TRUNCATED ARTIFACT IS ONE LINE HERE RATHER THAN A BOOT TIMEOUT.
           qemu-img check "$GITHUB_WORKSPACE/work/disk.qcow2" || true
@@ -281,7 +323,23 @@ jobs:
             ls -l "$GITHUB_WORKSPACE/work/" || true
             exit 0
           fi
-          easyvm push --tag "${{ matrix.name }}" \
+          # `matrix.publish` IS THE TAG, AND `matrix.name` IS ONLY THE JOB'S NAME.
+          #
+          # THEY WERE THE SAME THING AND THEY MUST NOT BE. Each leg pulls the disk the PREVIOUS stage
+          # produced - install -> ssh -> vm-configure - so the install leg's disk has to be published
+          # under the name the ssh leg asks for, which is the OS's own name and not the leg's:
+          #
+          #	install leg   name=linux-zorin-install    publishes  linux-zorin
+          #	ssh leg       name=linux-zorin-ssh        publishes  linux-zorin-ssh   (pulls linux-zorin)
+          #	vm leg        name=linux-zorin-vm         publishes  linux-zorin-vm    (pulls linux-zorin-ssh)
+          #
+          # PUBLISHING UNDER `matrix.name` MEANT the install leg wrote `linux-zorin-install` while every
+          # ssh leg pulled `linux-zorin`, so the two names never met and a fresh package could never
+          # boot an installed disk. `publish` defaults to the job's own name for the legs that
+          # continue themselves.
+          tag="${{ matrix.publish }}"
+          if [ -z "$tag" ]; then tag="${{ matrix.name }}"; fi
+          easyvm push --tag "$tag" \
                       --file "$out" \
                       --repository "${{ inputs.disks_repository }}" \
                       --timeout 40m || echo "  the push failed; the artifact below still has the disk"

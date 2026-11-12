@@ -44,7 +44,7 @@ jobs:
           {
             "name": "linux-zorin-ssh",
             "file": "linux/zorin/steps/ssh.yaml",
-            "pull": "linux-zorin-ssh",
+            "pull": "linux-zorin",
             "out": "linux-zorin-ssh.qcow2",
             "timeout": 60
           },
@@ -53,12 +53,14 @@ jobs:
             "file": "linux/zorin/steps/install.yaml",
             "pull": "",
             "out": "linux-zorin.qcow2",
+            "publish": "linux-zorin",
             "timeout": 90
           },
           {
             "name": "linux-zorin-vm",
             "file": "linux/zorin/steps/vm-configure.yaml",
-            "pull": "linux-zorin-vm",
+            "pull": "linux-zorin-ssh",
+            "fallback": "linux-zorin",
             "out": "linux-zorin-vm.qcow2",
             "timeout": 60
           }

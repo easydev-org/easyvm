@@ -44,7 +44,7 @@ jobs:
           {
             "name": "linux-mx-ssh",
             "file": "linux/mx/steps/ssh.yaml",
-            "pull": "linux-mx-ssh",
+            "pull": "linux-mx",
             "out": "linux-mx-ssh.qcow2",
             "timeout": 60
           },
@@ -53,12 +53,14 @@ jobs:
             "file": "linux/mx/steps/install.yaml",
             "pull": "",
             "out": "linux-mx.qcow2",
+            "publish": "linux-mx",
             "timeout": 90
           },
           {
             "name": "linux-mx-vm",
             "file": "linux/mx/steps/vm-configure.yaml",
-            "pull": "linux-mx-vm",
+            "pull": "linux-mx-ssh",
+            "fallback": "linux-mx",
             "out": "linux-mx-vm.qcow2",
             "timeout": 60
           }
