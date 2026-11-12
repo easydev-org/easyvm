@@ -415,11 +415,16 @@ var linuxISOAliases = map[string]string{
 	// `iso-kubuntu-desktop`, `iso-mint-cinnamon` and `iso-mx-xfce`, because those are the images the
 	// panes were measured on. The names are resolved against that table, not guessed from the
 	// distribution's name - which is what this map is for.
-	"cachyos":             "cachyos-desktop",
-	"kubuntu":             "kubuntu-desktop",
-	"mint":                "mint-cinnamon",
-	"mx":                  "mx-xfce",
-	"opensuse-tumbleweed": "opensuse-tumbleweed-kde",
+	"cachyos": "cachyos-desktop",
+	"kubuntu": "kubuntu-desktop",
+	"mint":    "mint-cinnamon",
+	"mx":      "mx-xfce",
+	// LEAP 16.1, NOT TUMBLEWEED. Tumbleweed is a rolling release and its KDE Live image is the one
+	// this file's YaST2 walkthrough was measured on; Leap 16.1 SHIPS NO LIVE DESKTOP AT ALL, only an
+	// Agama installer, an OEM image and an Immutable self-install image. The release name stays
+	// `opensuse-tumbleweed` in the walkthrough path and the tag carries the version, because the
+	// images are different products with different installers.
+	"opensuse-tumbleweed": "opensuse-leap-16.1",
 	"endeavour":           "endeavouros",
 	"ghostbsd":            "ghostbsd-mate",
 	// `ubuntu` MEANS THE DESKTOP IMAGE, AND THE TAG SAYS SO BECAUSE PUBLISHING BOTH UNDER ONE NAME IS

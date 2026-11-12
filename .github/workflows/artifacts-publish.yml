@@ -163,13 +163,13 @@ jobs:
           iso-virtio-win	windows	https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso		0
           iso-ubuntu-desktop	linux	https://releases.ubuntu.com/26.04/ubuntu-26.04.1-desktop-amd64.iso	601e30fbf5d97759367c632e2c33630665039b7e2158fd068403da3ccf1bda1f	6482409472
           iso-kubuntu-desktop	linux	https://cdimage.ubuntu.com/kubuntu/releases/26.04/release/kubuntu-26.04.1-desktop-amd64.iso	831e4d4bb85098339ba43d3502cd6619b27e76daf37246a084cd68a6413090b8	5072990208
-          iso-fedora-workstation	linux	https://download.fedoraproject.org/pub/fedora/linux/releases/43/Workstation/x86_64/iso/Fedora-Workstation-Live-43-1.6.x86_64.iso	2a4a16c009244eb5ab2198700eb04103793b62407e8596f30a3e0cc8ac294d77	2742190080
+          iso-fedora-workstation	linux	https://dl.fedoraproject.org/pub/fedora/linux/releases/45/Workstation/x86_64/iso/Fedora-Workstation-Live-45-1.4.x86_64.iso	68338c6bfe4f0d64151f2e47efe9f44a8855ad05b460e56b844fb3fa2c9a3beb	2925092864
           iso-mint-cinnamon	linux	https://mirrors.kernel.org/linuxmint/stable/22.3/linuxmint-22.3-cinnamon-64bit.iso	a081ab202cfda17f6924128dbd2de8b63518ac0531bcfe3f1a1b88097c459bd4	3091660800
-          iso-opensuse-tumbleweed-kde	linux	https://download.opensuse.org/tumbleweed/iso/openSUSE-Tumbleweed-KDE-Live-x86_64-Current.iso		0
+          iso-opensuse-leap-16.1	linux	https://download.opensuse.org/distribution/leap/16.1/offline/Leap-16.1-offline-installer-x86_64.install.iso	c95738ba232a36eb31dfdf3e5f663beb672232410894ab04b1bfe0c7a803a622868a90fe631fc6c89418eca9ad181979b8817a52fdec3c203a9a5b7b997ba051	4516216832
           iso-cachyos-desktop	linux	https://mirror.cachyos.org/ISO/desktop/260809/cachyos-desktop-linux-260809.iso	959f6577f45e25ee9fd8c220fd221b08e4ea79412c7315c0f922dd6d86d5e33c	3188850688
           iso-manjaro-kde	linux	https://download.manjaro.org/kde/26.1.0/manjaro-kde-26.1.0-260812-linux71.iso	711b64362abe0b45348dc33bd4a2c654641e069b50ae9ae37c01771da880aa99	5534201856
           iso-endeavouros	linux	https://mirror.alpix.eu/endeavouros/iso/EndeavourOS_Titan-Nova-2026.08.15.iso	0487f46fe29e0ab2ed153ba874568cc542a0507fb6029f29ad552b36ba447393	3898638336
-          iso-zorin-core	linux	https://mirrors.edge.kernel.org/zorinos-isos/18/Zorin-OS-18-Core-64-bit-r3.iso	09959ce793b8a065b70207e46cd646b1de805fc7e0bad925ce28df6e04b7f807	3787948032
+          iso-zorin-core	linux	https://mirrors.edge.kernel.org/zorinos-isos/18/Zorin-OS-18.1-Core-64-bit.iso	44649b97bd307fc4c8529205d098ebbf98575a1e1ba2ee7d7005b697af1721d5	3909091328
           iso-mx-xfce	linux	https://netix.dl.sourceforge.net/project/mx-linux/Final/Xfce/MX-25.3_Xfce_x64.iso	25b5ce20caeee1b0e50507291df5ac8a8211b1b9999d8dd7416da9b66ed9fbf9	2927624192
           iso-popos-desktop	linux	https://iso.pop-os.org/24.04/amd64/intel/9/pop-os_24.04_amd64_intel_9.iso	894bc15abcad05839b226655121a113ad16cfbc4ada98e93e3ffb74a853fdcd4	2693218304
           iso-nixos-graphical	linux	https://releases.nixos.org/nixos/26.05/nixos-26.05.13627.c56a87d8e41c/nixos-graphical-26.05.13627.c56a87d8e41c-x86_64-linux.iso	62900e47b6bea0917c491ac0a8e18dd4e3b7579d9b60ee8e0bbbd8945162256d	3888513024
@@ -252,12 +252,16 @@ jobs:
               # and `cebf05ec...` is 40 hex digits - a sha1 - being compared against 64. The length
               # of the pin says which digest to compute, which is the one fact that does not need a
               # second table.
+              # THE PIN'S LENGTH SAYS WHICH DIGEST TO COMPUTE, and opensuse publishes a sha512 -
+              # its release index has `.sha512` and NO `.sha256` (`HTTP 404` for the sha256 file).
+              # Between sha1, sha256 and sha512 that is three lengths, and each one names itself.
               case "${#sha}" in
-                40) actual=$(sha1sum   "$dest" | cut -d' ' -f1) ;;
-                64) actual=$(sha256sum "$dest" | cut -d' ' -f1) ;;
-                *)  echo "::warning::$tag: the pin is ${#sha} hex digits, which is neither sha1 nor sha256"
-                    failed="$failed $tag"
-                    continue ;;
+                40)  actual=$(sha1sum   "$dest" | cut -d' ' -f1) ;;
+                64)  actual=$(sha256sum "$dest" | cut -d' ' -f1) ;;
+                128) actual=$(sha512sum "$dest" | cut -d' ' -f1) ;;
+                *)   echo "::warning::$tag: the pin is ${#sha} hex digits, which is not sha1, sha256 or sha512"
+                     failed="$failed $tag"
+                     continue ;;
               esac
               if [ "$actual" != "$sha" ]; then
                 echo "::warning::$tag: ${#sha}-digit digest is $actual, the pin is $sha"

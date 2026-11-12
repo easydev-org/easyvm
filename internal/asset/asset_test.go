@@ -48,7 +48,7 @@ func TestTheLinuxISOTagsThatAreNotTheDistributionName(t *testing.T) {
 		"mx":                  "iso-mx-xfce",
 		"popos":               "iso-popos-desktop",
 		"nixos":               "iso-nixos-graphical",
-		"opensuse-tumbleweed": "iso-opensuse-tumbleweed-kde",
+		"opensuse-tumbleweed": "iso-opensuse-leap-16.1",
 		"endeavour":           "iso-endeavouros",
 		"ghostbsd":            "iso-ghostbsd-mate",
 	}
