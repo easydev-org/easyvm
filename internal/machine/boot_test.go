@@ -734,3 +734,37 @@ func TestAtMostOneMediumIsOnTheIDEBus(t *testing.T) {
 			"refuses while parsing:\n%s", joined)
 	}
 }
+
+// THE MACOS ADAPTER NEEDS ITS FRAMEBUFFER MEMORY, OR THE GUEST DRAWS AT 640x480.
+//
+// MEASURED ON macos-setup, EVERY POLL FOR THIRTY MINUTES:
+//
+//	wait for the recovery menu: the framebuffer is 640x480 and this region was measured at
+//	                            1920x1080; reading the same place scaled to [253, 88, 466, 248]
+//	wait for the recovery menu: 2 word(s): Ul ag
+//
+// `Disk Utility` AT 640x480 IS EIGHT PIXELS TALL. tesseract answers `Ul ag` - the icon and the two
+// letters it can resolve - and the gate expired having never read the menu it was looking at. Worse,
+// EVERY COORDINATE in macos/15/steps is a 1920x1080 position, so `at: [837, 514]` would be clamped
+// by `toAxis` and land somewhere else entirely on the 640-wide screen.
+//
+// THE PYTHON IMPLEMENTATION SETS `vgamem_mb=256` and its own note says why: "On the same disk it
+// reports 1920x1080 - the resolution the coordinate tables need". The port kept the wallpaper
+// comment and dropped the argument, so the adapter fell back to its default memory.
+//
+// THE RECORDING IS NOT EVIDENCE AGAINST THIS: it is normalised to 1920x1080, so the extracted frame
+// reads cleanly while the guest was never drawing at that size. That discrepancy is what made this
+// look like an OCR problem in `readScreen` for a session.
+func TestTheMacOSAdapterHasEnoughFramebufferForFHD(t *testing.T) {
+	body, err := os.ReadFile("boot.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(body)
+	if !strings.Contains(src, `"vmware-svga,vgamem_mb=256"`) {
+		t.Fatal("the macOS adapter is `vmware-svga` without `vgamem_mb`. Measured on " +
+			"macos-setup: the recovery system then draws at 640x480, `Disk Utility` is eight " +
+			"pixels tall, the gate reads `Ul ag` for thirty minutes, and every 1920x1080 " +
+			"coordinate in macos/15/steps is off the screen")
+	}
+}

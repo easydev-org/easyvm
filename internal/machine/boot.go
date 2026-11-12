@@ -498,7 +498,7 @@ func (b Boot) FirmwareArgs(ovmfCode, ovmfVars string) []string {
 //	acpi-pci-hotplug-with-bridge=off    macOS mishandles the PCIe hotplug bridge on ICH9
 //	-rtc base=utc                       macOS reads the clock from the RTC and expects UTC
 //	-smbios type=2                      the baseboard record macOS's platform check reads
-//	vmware-svga                         the adapter macOS's own driver recognises; virtio-vga left
+//	vmware-svga,vgamem_mb=256           the adapter macOS's own driver recognises; virtio-vga left
 //	                                    a 7 MB framebuffer with "No Kext Loaded", so the wallpaper
 //	                                    layer could not be drawn
 func (b Boot) ExtraArgs() []string {
@@ -511,7 +511,26 @@ func (b Boot) ExtraArgs() []string {
 		"-global", "ICH9-LPC.acpi-pci-hotplug-with-bridge-support=off",
 		"-rtc", "base=utc",
 		"-smbios", "type=2",
-		"-device", "vmware-svga",
+		// `vgamem_mb=256` IS NOT TUNING, IT IS THE RESOLUTION. Bare `vmware-svga` is given the
+		// adapter's default memory, and macOS then draws the RECOVERY SYSTEM at 640x480 no
+		// matter what OpenCore's `UEFI/Output/Resolution` says - measured on macos-setup, whose
+		// every poll for thirty minutes logged
+		//
+		//	wait for the recovery menu: the framebuffer is 640x480 and this region was
+		//	measured at 1920x1080; reading the same place scaled to [253, 88, 466, 248]
+		//	wait for the recovery menu: 2 word(s): Ul ag
+		//
+		// AT 640x480 `Disk Utility` IS EIGHT PIXELS TALL and tesseract cannot resolve it - the
+		// gate read `Ul ag` - while EVERY COORDINATE in macos/15/steps is a 1920x1080 position,
+		// so `at: [837, 514]` would have been clamped by `toAxis` and landed somewhere else
+		// entirely. The video is not evidence against this: it is normalised to 1920x1080, so
+		// the extracted frame reads cleanly while the guest was never drawing that size.
+		//
+		// THE PYTHON IMPLEMENTATION SETS IT: `vmware-svga,vgamem_mb=256` in
+		// macos/15/machine.py, with the note "On the same disk it reports 1920x1080 - the
+		// resolution the coordinate tables need". The port dropped the argument and kept the
+		// comment about the wallpaper, which is why six runs read a screen nobody could click.
+		"-device", "vmware-svga,vgamem_mb=256",
 	}
 }
 
