@@ -258,82 +258,38 @@ steps:
   # A MOUNT THAT REPORTS SUCCESS AND A DIRECTORY THAT IS EMPTY ARE DIFFERENT FACTS. Writing a
   # file and reading it back is the only proof that the share is the one the host is serving and
   # that it is writable - a read-only mount answers `ls` happily.
+  # THE WHOLE SCRIPT RUNS UNDER `sh`, BECAUSE `ssh host command` USES THE USER'S LOGIN SHELL.
+  #
+  # MEASURED ON cachyos-vm, step 16 of 23, AND IT TOOK THREE ROUNDS TO SEE BECAUSE EACH SPELLING FAILED
+  # IN A DIFFERENT PLACE:
+  #
+  #	1. `PATH="$PATH:/sbin:..."`      -> fish: Unsupported use of '='.
+  #	2. `/sbin/mount` instead         -> got as far as the round trip, then
+  #	                                    fish: Unsupported use of '='. got=$(cat ...)
+  #
+  # CACHYOS LOGS IN WITH FISH. `ssh host command` RUNS THE LOGIN SHELL, so every POSIX construct in this
+  # body - `VAR=$(...)`, `test`, `&&` - is a fish syntax error, and the step reports `exited 127` with
+  # the fish complaint sitting above it in the same buffer.
+  #
+  # `sh -c '...'` NAMES THE INTERPRETER INSTEAD OF INHERITING ONE, which is the only spelling that is
+  # right on every guest here: bash, dash, zsh and fish all have `/bin/sh`, and none of them rewrites
+  # what is inside the single quotes.
   - name: prove the share is readable and writable
     ssh: |
-      # NO `set -e` ON THE FIRST LINE, BECAUSE THE FIRST LINE IS A QUESTION.
-      #
-      # This began with `mount | grep ' on ' | grep shared` under `set -e`, so a mount whose line does
-      # not contain the literal word `shared` killed the step before its paragraph of diagnostics -
-      # and the log showed only `-> 1`:
-      #
-      #	=== serve the host share
-      #	  share: /github/home/shared served on 172.30.0.1:445
-      #	=== mount the host share
-      #	  share: the guest mounted //172.30.0.1/shared at ~/shared
-      #	=== prove the share is readable and writable  -> 1
-      #
-      # THE MOUNT SUCCEEDED AND THE PROOF WAS BLIND. `mount` shows the DEVICE as
-      # `//172.30.0.1/shared`, so `grep shared` matches that - but it also shows the mount POINT, and
-      # on a guest that resolves `~` differently the two need not agree. Printing both, and failing
-      # only on the round trip, is what makes the next failure name its cause.
-      # THE PATH IS SET, BECAUSE A NON-INTERACTIVE SSH COMMAND DOES NOT GET A LOGIN SHELL'S PATH.
-      #
-      # MEASURED ON cachyos-vm, step 16 of 23:
-      #
-      #	prove the share is readable and writable: the command exited 127
-      #
-      # 127 IS "COMMAND NOT FOUND", and the commands here are `mount`, `grep`, `ls`, `printf`, `cat`
-      # and `test` - every one of which is on the disk. `mount` LIVES IN /sbin, WHICH IS NOT ON THE
-      # PATH OF A NON-INTERACTIVE SHELL on most of these distributions: a login shell sources
-      # /etc/profile and adds it, and `ssh host command` does not.
-      #
-      # THE REST OF THIS FILE'S `ssh:` STEPS ARE LEFT ALONE: they call user-level tools that are
-      # already on the default path, and changing them all would be a larger edit than the evidence
-      # supports.
-      # NO PATH ASSIGNMENT AT ALL: THE LOGIN SHELL IS NOT ALWAYS POSIX, AND `/sbin/mount` NEEDS NO PATH.
-      #
-      # MEASURED ON cachyos-vm, step 16 of 23 - TWICE, WITH TWO DIFFERENT SPELLINGS:
-      #
-      #	PATH="$PATH:/sbin:/usr/sbin:/usr/local/sbin"
-      #	fish: Unsupported use of '='. In fish, please use 'set PATH ...'
-      #
-      # `ssh host command` RUNS THE USER'S LOGIN SHELL, and on cachyos that is FISH, where `VAR=value`
-      # is a syntax error rather than an assignment. `export VAR=value` is not fish either - fish has
-      # `set -x` - so the second spelling would have failed the same way.
-      #
-      # `mount` LIVES IN /sbin AND IS NAMED BY ITS PATH INSTEAD. That is true in every shell, needs no
-      # variable, and cannot be broken by the guest's choice of login shell. `/bin/mount` is not used
-      # because on some of these images it is a symlink under /usr/bin.
+      sh -c '
       echo "--- what is mounted ---"
-      /sbin/mount | grep -i 'cifs\|smb' || echo "(no cifs/smb line in mount output)"
+      /sbin/mount | grep -i "cifs\|smb" || echo "(no cifs/smb line in mount output)"
       echo "--- the mount point ---"
       ls -la ~/shared || echo "(~/shared is not readable)"
       echo "--- the round trip ---"
-      printf 'written-by-the-guest\n' > ~/shared/from-guest.txt
+      printf "written-by-the-guest\n" > ~/shared/from-guest.txt
       got=$(cat ~/shared/from-guest.txt)
       echo "read back: $got"
       test "$got" = "written-by-the-guest"
       echo "round trip ok"
+      '
     timeout: 120
 
-  # =======================================================================================
-  # 4. THE BOOTSTRAP LAUNCHER
-  # =======================================================================================
-  #
-  # WHAT THE DISK RUNS AT LOGIN, AND WHY IT IS A FILE RATHER THAN A TOOLCHAIN.
-  #
-  # `~/shared/bootstrap.sh` is a script a PERSON puts on the host. Nothing on this disk is
-  # required to run it - that is the point of using the shell the guest already has. The launcher
-  # below is what looks for it, once per login, and the probe `lib/bootstrap_probe.sh` is what
-  # proves the whole chain worked.
-  #
-  # AN XDG AUTOSTART ENTRY, WHICH IS THE ONE MECHANISM EVERY DESKTOP HERE HONOURS.
-  #
-  # It was a systemd user unit, and that is right on the eleven systems that run systemd - but MX
-  # boots SysVinit, so `systemctl --user` cannot work there at all (see the name step above for
-  # the same fact, measured). An autostart .desktop file is what GNOME, KDE, Xfce, MATE and
-  # Cinnamon all read at login, and it runs as the logged-in account by construction, which is
-  # what the launcher needs: the script it calls is the user's.
   - name: write the launcher
     write: launcher
     family: linux
