@@ -715,6 +715,23 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 		return err
 	}
 
+	// THE SOCKET IS RELEASED BEFORE THE PROCESS EXISTS, AND THE ORDER IS THE WHOLE THING.
+	//
+	// `Release` CLOSES the connection it holds for that path. Called after `cmd.Start()`, it closed the
+	// connection this very function had just made - so the machine came up and the first step that
+	// touched it failed with
+	//
+	//	press a key so the loader takes it: key "esc": input-send-event []+esc:
+	//	the qmp connection is closed
+	//
+	// MEASURED ON CI, on windows-install, three seconds into a run whose qemu was healthy: the disk was
+	// published as 512 bytes because nothing had ever driven the installer. A `Release` AFTER the socket
+	// is connected is not a cleanup, it is a self-mutilation.
+	//
+	// SO IT HAPPENS HERE, while `d.qmp` is nil and the previous machine's client is the only thing the
+	// registry can be holding. The lock is not needed: `Release` does its own.
+	_ = d.qmpRegistry().Release(qmpPath)
+
 	cmd := exec.Command("qemu-system-x86_64", args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -748,11 +765,6 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 	// the process and not about a machine. What this function does is RELEASE the previous machine's
 	// path from it: `Release` closes the connection and drops the path, which is exactly "this socket
 	// has no client now" - the state a new qemu needs - while the map itself survives.
-	reg := d.qmpRegistry()
-	// RELEASE DOES I/O (IT CLOSES THE SOCKET), SO IT IS OUTSIDE THE LOCK. A sampler that reconnects
-	// while this runs lands in the SAME registry and therefore hits `ErrBusy`, not a second client.
-	// `qmpPath` is the same path this function removed before starting qemu.
-	_ = reg.Release(qmpPath)
 
 	// NO CONSOLE IS STARTED HERE ANY MORE, AND THAT IS THE POINT.
 	//

@@ -312,9 +312,54 @@ func TestTheDaemonKeepsOneQMPRegistry(t *testing.T) {
 		t.Fatal("no Boot")
 	}
 	boot := functionBody(code[j:])
-	if !strings.Contains(boot, "reg.Release(") {
+	if !strings.Contains(boot, "d.qmpRegistry().Release(") {
 		t.Fatal("`Boot` does not release the previous machine's QMP path; the socket stays held by " +
 			"a client pointed at a qemu that exited, and the new machine's first `qmpSocket()` " +
 			"gets `ErrBusy` naming a machine that is gone")
+	}
+}
+
+// THE PREVIOUS MACHINE'S QMP PATH IS RELEASED BEFORE THE NEW PROCESS EXISTS, NOT AFTER IT IS CONNECTED.
+//
+// `Registry.Release` CLOSES the connection it holds for a path. Called after `cmd.Start()` it closed the
+// connection `Boot` had just made for the new machine, and the failure arrived on the first step that
+// touched the guest:
+//
+//	press a key so the loader takes it: key "esc": input-send-event []+esc:
+//	the qmp connection is closed
+//
+// MEASURED ON CI, on windows-install, three seconds into a run whose qemu was healthy - and the disk was
+// then published as 512 bytes because nothing had driven the installer. A test, because the two lines
+// are five lines apart and the difference between them is "the machine works" and "it does not".
+func TestTheOldQMPPathIsReleasedBeforeQemuStarts(t *testing.T) {
+	body, err := os.ReadFile("driver.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	code := dropLineComments(string(body))
+	i := strings.Index(code, "func (m machineControl) Boot(")
+	if i < 0 {
+		t.Fatal("no Boot")
+	}
+	boot := functionBody(code[i:])
+
+	release := strings.Index(boot, "d.qmpRegistry().Release(")
+	start := strings.Index(boot, "cmd.Start()")
+	connect := strings.Index(boot, "d.qmpSocket()")
+	if release < 0 {
+		t.Fatal("`Boot` never releases the previous machine's QMP path, so a new qemu inherits a " +
+			"held socket and its first client gets ErrBusy naming a machine that is gone")
+	}
+	if start < 0 || connect < 0 {
+		t.Fatal("`Boot` no longer starts qemu and connects to it")
+	}
+	if release > start {
+		t.Fatal("`Boot` releases the QMP path AFTER starting qemu. `Release` closes the connection " +
+			"for that path, so this closes the connection the boot is about to use - measured on CI " +
+			"as `the qmp connection is closed` on the first step, and a 512-byte published disk")
+	}
+	if release > connect {
+		t.Fatalf("`Boot` releases the QMP path after connecting (release %d, connect %d), so it "+
+			"closes the connection it just made", release, connect)
 	}
 }
