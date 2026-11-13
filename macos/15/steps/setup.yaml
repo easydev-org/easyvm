@@ -28,27 +28,47 @@ steps:
   os: macos
   recovery: recovery_macos
   timeout: 900
+- name: the recovery menu's rows
+  ocr:
+    name: recovery
+    region:
+    - 760
+    - 200
+    - 1400
+    - 560
+    region_at:
+    - 1920
+    - 1080
+    scale: 6
+    wait: 5
 - name: wait for the recovery menu
-  region:
-  - 760
-  - 200
-  - 1400
-  - 560
-  region_at:
-  - 1920
-  - 1080
-  scale: 6
-  timeout: 1800
-  poll: 10
-  until_any:
-  - - restore
-    - time
-    - machine
-  - - reinstall
-    - macos
-  - - safari
-  - - disk
-    - utility
+  loop:
+    max: 180
+    do:
+    - wait: 10
+    ocr:
+      name: recovery
+      region:
+      - 760
+      - 200
+      - 1400
+      - 560
+      region_at:
+      - 1920
+      - 1080
+      scale: 6
+      wait: 0
+    until:
+      check: recovery
+      says_any:
+      - - restore
+        - time
+        - machine
+      - - reinstall
+        - macos
+      - - safari
+      - - disk
+        - utility
 - name: select disk utility
   at:
   - 837

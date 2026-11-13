@@ -1909,12 +1909,13 @@ func TestGhostBSDSetsTheLoaderVariableThatMakesClicksWork(t *testing.T) {
 //	scale 6   restore, time machine, reinstall, safari
 //	scale 8   restore, time machine, safari
 //
-// `disk utility` DOES NOT READ AT 2x, 3x, 4x, 6x, 8x, 10x OR 12x. A gate whose `until:` is
+// `disk utility` DOES NOT READ AT 2x, 3x, 4x, 6x, 8x, 10x OR 12x. A gate whose condition is only
 // `[disk, utility]` therefore waits out its whole budget on a menu that is plainly on screen, which
-// is what it did for thirty minutes on every attempt.
+// it did for thirty minutes on every attempt.
 //
-// THIS IS THE PYTHON IMPLEMENTATION'S OWN RULE, and its comment states the reason: the menu is a
-// list of four labelled rows and TWO is enough - one row can be cut off by a redraw.
+// THE GATE IS NOW A `loop:` WITH ITS THREE PARTS WRITTEN DOWN - a wait, an `ocr:` reading, and a
+// condition - so the rectangle and its enlargement are beside the reading rather than inside the
+// condition that uses them.
 func TestTheMacOSRecoveryGateAcceptsReadableRows(t *testing.T) {
 	path := filepath.Join("..", "..", "macos", "15", "steps", "setup.yaml")
 	doc, err := Load(path, nil)
@@ -1931,22 +1932,140 @@ func TestTheMacOSRecoveryGateAcceptsReadableRows(t *testing.T) {
 	if gate == nil {
 		t.Fatal("no `wait for the recovery menu` step")
 	}
-	if gate.Has("until") {
-		t.Fatal("the recovery gate uses `until:`, which is one word-set with AND meaning. Requiring " +
-			"`disk utility` is requiring the one row that reads at no magnification - measured at " +
-			"2x, 3x, 4x, 6x, 8x, 10x and 12x on the real frame")
+	loop, ok := gate.Spec["loop"].(map[string]any)
+	if !ok {
+		t.Fatal("the recovery gate is not a `loop:`. The three parts - the wait, the `ocr:` reading " +
+			"and the condition - have to be visible, because the reading's region and enlargement " +
+			"are what make it work at 640x480")
 	}
-	sets, _ := gate.Spec["until_any"].([]any)
+	ocr, ok := loop["ocr"].(map[string]any)
+	if !ok {
+		t.Fatal("the loop has no `ocr:` - a condition with no reading reads the screen itself")
+	}
+	if scale, _ := toFloat(ocr["scale"]); scale < 6 {
+		t.Errorf("the reading crops at scale %.0f. Measured on the real 640x480 frame: at scale 6 "+
+			"four rows read, at scale 2 only two", scale)
+	}
+	until, ok := loop["until"].(map[string]any)
+	if !ok {
+		t.Fatal("the loop has no `until:`")
+	}
+	sets, _ := until["says_any"].([]any)
 	if len(sets) < 3 {
-		t.Errorf("the recovery gate accepts %d row(s). The menu has four labelled rows and the "+
-			"Python implementation needs TWO hits because one can be cut off by a redraw; with "+
-			"fewer than three alternatives a single bad read fails the step", len(sets))
+		t.Errorf("the condition accepts %d row(s). The menu has four labelled rows and two hits is "+
+			"the Python implementation's own rule, because one row can be cut off by a redraw; "+
+			"with fewer than three alternatives a single bad read fails the step", len(sets))
 	}
-	// AND IT IS ENLARGED FOR THE SIZE THE GUEST REALLY DRAWS AT.
-	scale, _ := gate.Float("scale", 3)
-	if scale < 6 {
-		t.Errorf("the recovery gate crops at scale %.0f. Measured on the real 640x480 frame: at "+
-			"scale 6 four rows read, at scale 2 only two - and the two that read at 2 are `restore` "+
-			"and `time machine`", scale)
+}
+
+// EVERY `region:` SAYS WHAT SIZE IT WAS MEASURED AT, AND EVERY READING NAMES ONE.
+//
+// A RECTANGLE IS PIXELS ON ONE PARTICULAR SCREEN, and this repository's guests draw at four different
+// sizes during a single boot:
+//
+//	UEFI shell            1280x800
+//	macOS recovery         640x480      <- the menu is 8 px tall at this size
+//	mx's live session     1024x768
+//	an installed system   1920x1080
+//
+// WITHOUT `region_at:` THERE IS NO WAY TO KNOW WHICH ONE A FILE MEANT, and both ways of guessing were
+// measured and both were wrong:
+//
+//	nixos:  `region_at` is [1920, 1080] but this frame is 1280x800     <- hard failure, and the
+//	                                                                     pane had simply not drawn
+//	mx:     the framebuffer is 1024x768 but this region was measured at
+//	        1920x1080; not reading it                                  <- read nothing, 30 times
+//
+// SO THE NUMBER IS REQUIRED. It is also what makes the scaling honest: the log says
+//
+//	reading the same place scaled to [253, 88, 466, 248]
+//
+// and a reader can check that against the frame.
+func TestEveryRegionSaysWhatSizeItWasMeasuredAt(t *testing.T) {
+	root := filepath.Join("..", "..")
+	files, err := filepath.Glob(filepath.Join(root, "*", "*", "steps", "*.yaml"))
+	if err != nil {
+		t.Fatal(err)
 	}
+	checked := 0
+	for _, path := range files {
+		doc, err := Load(path, nil)
+		if err != nil {
+			continue
+		}
+		rel, _ := filepath.Rel(root, path)
+		for _, s := range doc.Steps {
+			if !s.Has("region") {
+				continue
+			}
+			checked++
+			if !s.Has("region_at") {
+				t.Errorf("%s: %q crops `region:` and does not say `region_at:`. The crop is pixels "+
+					"on one screen, and this guest draws at 1280x800 in firmware, 640x480 in macOS "+
+					"recovery and 1024x768 in mx's live session - a number with no size beside it "+
+					"cannot be scaled, and guessing it wrong reads the wallpaper", rel, s.Name)
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no cropped step was found, so this checks nothing")
+	}
+	t.Logf("checked %d cropped step(s)", checked)
+}
+
+// AN `ocr:` STEP NAMES ITS REGION AND THE SIZE THAT REGION WAS MEASURED AT.
+//
+// THE TWO ARE ONE DECISION AND THE VOCABULARY REQUIRES BOTH. A reading is a rectangle of pixels on a
+// screen of one size; `name:` is what the condition reaches it by, `region:` is where, `region_at:`
+// is on what. Leaving any of the three out makes the reading either unreachable or unscalable, and
+// both were measured as gates that expired on a menu that was plainly on screen.
+func TestEveryOCRStepNamesItsRegionAndSize(t *testing.T) {
+	root := filepath.Join("..", "..")
+	files, err := filepath.Glob(filepath.Join(root, "*", "*", "steps", "*.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked := 0
+	for _, path := range files {
+		doc, err := Load(path, nil)
+		if err != nil {
+			continue
+		}
+		rel, _ := filepath.Rel(root, path)
+		var check func(any, string)
+		check = func(raw any, where string) {
+			m, ok := raw.(map[string]any)
+			if !ok {
+				return
+			}
+			if spec, ok := m["ocr"].(map[string]any); ok {
+				checked++
+				for _, key := range []string{"name", "region", "region_at", "wait"} {
+					if _, ok := spec[key]; !ok {
+						t.Errorf("%s: %s has an `ocr:` with no %q. Every reading needs a name to be "+
+							"asked about, a region to read, the size that region was measured at, "+
+							"and a `wait:` that says how long it paused first", rel, where, key)
+					}
+				}
+			}
+			// a loop carries its reading under `ocr:` too
+			if loop, ok := m["loop"].(map[string]any); ok {
+				check(loop, where+" (loop)")
+			}
+			for _, sub := range []string{"do", "actions"} {
+				if list, ok := m[sub].([]any); ok {
+					for _, item := range list {
+						check(item, where+"."+sub)
+					}
+				}
+			}
+			if ru, ok := m["repeat_until"].(map[string]any); ok {
+				check(ru, where+" (repeat_until)")
+			}
+		}
+		for _, s := range doc.Steps {
+			check(s.Spec, s.Name)
+		}
+	}
+	t.Logf("checked %d `ocr:` reading(s)", checked)
 }

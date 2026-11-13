@@ -99,6 +99,27 @@ func (e *Executor) readScreen(s walk.Step, label string) ([]string, error) {
 
 	crop := img
 	if region, ok := rectOf(s, "region"); ok {
+		// `region_at:` IS REQUIRED WITH `region:`, AND ITS ABSENCE IS AN ERROR RATHER THAN A DEFAULT.
+		//
+		// A RECTANGLE IS PIXELS ON ONE PARTICULAR SCREEN. Without the size it was measured at there
+		// is no way to know whether the crop lands on the pane or on the wallpaper when the guest
+		// draws at another size - and a guest DOES: the UEFI shell draws at 1280x800 and the desktop
+		// at 1920x1080, macOS recovery stays at 640x480, mx's live session picks 1024x768.
+		//
+		// MEASURED, TWICE, AND BOTH FAILURES LOOKED LIKE SOMETHING ELSE:
+		//
+		//	nixos:   `region_at` is [1920, 1080] but this frame is 1280x800
+		//	mx:      the framebuffer is 1024x768 but this region was measured at 1920x1080
+		//
+		// The first version FAILED on a mismatch, which turned "the pane is not up yet" into "the
+		// file is broken"; the second scaled the rectangle silently. Neither is possible to reason
+		// about when the number that says what the measurement was is optional.
+		if _, ok := pairOf(s, "region_at"); !ok {
+			return nil, fail(s.Name, "`region:` must say `region_at: [width, height]` - the size "+
+				"those pixels were measured at. A rectangle without it cannot be scaled for a guest "+
+				"that draws at another size, and this guest does: the UEFI shell is 1280x800, macOS "+
+				"recovery is 640x480, and mx's live session picks 1024x768")
+		}
 		// `region_at` EXISTS BECAUSE A CROP MEASURED AT ONE RESOLUTION IS WRONG AT ANOTHER. A step
 		// that says [880, 960, 1045, 1000] was measured on a 1920x1080 guest; a guest booted at
 		// another size would have the crop on the wrong part of the screen.
