@@ -1,25 +1,31 @@
-# A POD THAT RUNS easyvm INTERACTIVELY, SO A WALK CAN BE WATCHED INSTEAD OF INFERRED.
+# A POD THAT RUNS easyvm INTERACTIVELY, WITH THE WALKTHROUGHS IN A CONFIGMAP AND THE DISKS ON A PVC.
 #
-# THE PROBLEM THIS SOLVES. Every fix in this repository has been argued from a RECORDING - a 1 fps mp4
-# that is only available AFTER the leg ends, from an artifact that must be downloaded and frames that
-# must be extracted. That is how the zorin one-pane-behind bug was found, and it took four rounds
-# because each round could only see the finished walk.
+# THREE THINGS THIS BUYS, ALL OF THEM ABOUT USING THE SAME CODE AS CI WITHOUT USING THE SAME STORAGE:
 #
-# THIS POD LETS THE SAME WALK BE RUN BY HAND: boot the ISO, take a frame after each action, compare it
-# with what the YAML expected, and only then write the fix. A frame costs a tenth of a second here.
+#  1. THE YAML IS A CONFIGMAP. Every walkthrough, the answer file, and the answer template live in
+#     `easyvm-walks`, mounted read-only at /walks. Halting and re-creating the pod IS the reset, and
+#     `kubectl create configmap --from-file ... --dry-run=client -o yaml | kubectl apply -f -`
+#     replaces it without touching the pod spec - so a change to a step is one command and a rerun.
 #
-# THE DEVICES ARE THE SAME THREE EVERY CI LEG GETS:
+#  2. THE DISKS AND ISOs ARE ON A PVC. `fetch: linux_iso` and `easyvm pull` both look in the work
+#     directory FIRST and only reach ghcr when the file is absent, so a pre-seeded PVC means the
+#     local loop never touches the network. THE YAML IS BYTE-IDENTICAL TO CI'S: no tag is edited, no
+#     registry is overridden, and `--repository` is not passed. What changes is only whether the file
+#     is already there.
 #
-#	/dev/kvm        the accelerator - without it a Windows install takes a day, and macOS deadlocks
-#	/dev/net/tun    the tap the NIC is attached to
-#	NET_ADMIN       creating the tap, the bridge and the iptables rules
-#
-# THIS CLUSTER EXPOSES THEM AS `squat.ai/kvm` AND `squat.ai/tun`, which is why the pod asks for the
-# extended resources as well as the device nodes - a node advertises 30 of each.
-#
-# NO SLEEP, NO PORT-FORWARD, NO LONG-LIVED PROCESS IN THIS FILE: the pod runs `sleep infinity`, and
-# every actual command is a `kubectl exec` from the caller. That keeps the whole thing debuggable - a
-# crashed walk leaves the pod up so its work directory can be inspected.
+#  3. NOTHING SURVIVES BETWEEN RUNS. /work is wiped by the launcher below before a walk starts, so a
+#     rerun cannot be polluted by the previous one's disk, overlay or frames.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: easyvm-disks
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: workspace-local
+  resources:
+    requests:
+      storage: 200Gi
+---
 apiVersion: v1
 kind: Pod
 metadata:
@@ -32,31 +38,56 @@ spec:
   containers:
     - name: easyvm
       image: ghcr.io/easydev-org/easyvm:latest
-      # THE ENTRYPOINT IS OVERRIDDEN ON PURPOSE. The image's is `/usr/local/bin/easyvm`, which with no
-      # arguments prints usage and exits - a pod that ends before anyone can exec into it.
       command: ["sleep", "infinity"]
       securityContext:
         capabilities:
           add: ["NET_ADMIN"]
       resources:
         requests:
-          cpu: "4"
-          memory: 8Gi
+          cpu: "6"
+          memory: 12Gi
           squat.ai/kvm: "1"
           squat.ai/tun: "1"
         limits:
-          cpu: "8"
-          memory: 16Gi
+          cpu: "12"
+          memory: 24Gi
           squat.ai/kvm: "1"
           squat.ai/tun: "1"
       volumeMounts:
-        - name: work
-          mountPath: /work
+        - name: disks
+          mountPath: /disks
+        - name: walks
+          mountPath: /walks
+          readOnly: true
         - name: dev-kvm
           mountPath: /dev/kvm
         - name: dev-tun
           mountPath: /dev/net/tun
       env:
+        # EVERY OUTBOUND REQUEST GOES THROUGH THE CLUSTER'S mihomo, AND WITHOUT THIS THE POD CANNOT
+        # FETCH AN INSTALLER AT A USABLE SPEED.
+        #
+        # MEASURED: a direct `curl` from this pod to releases.ubuntu.com ran at about 30 KB/s, so the
+        # 6.5 GiB Desktop image would have taken four hours; the same request through mihomo answered
+        # its first byte in half a second. The proxy is a ClusterIP service in this namespace, so it
+        # is reachable by name and needs no host networking.
+        #
+        # THIS IS THE POD'S ENVIRONMENT, NOT THE YAML'S. The walkthrough files are byte-identical to
+        # CI's - they still say `fetch: linux_iso` and name no URL - and what changes is only how the
+        # container reaches the network. A local run that needed an edited file would be measuring a
+        # different thing than the one CI runs.
+        - name: https_proxy
+          value: http://mihomo.develop.svc.cluster.local:7890
+        - name: http_proxy
+          value: http://mihomo.develop.svc.cluster.local:7890
+        - name: no_proxy
+          value: localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.svc,.cluster.local
+        - name: HTTPS_PROXY
+          value: http://mihomo.develop.svc.cluster.local:7890
+        - name: HTTP_PROXY
+          value: http://mihomo.develop.svc.cluster.local:7890
+        - name: NO_PROXY
+          value: localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.svc,.cluster.local
         - name: GITHUB_TOKEN
           valueFrom:
             secretKeyRef:
@@ -64,11 +95,12 @@ spec:
               key: token
               optional: true
   volumes:
-    - name: work
-      emptyDir:
-        sizeLimit: 200Gi
-    # HOST DEVICE NODES. The `squat.ai` resources schedule the pod onto a node that HAS them; these
-    # mounts make the nodes appear inside the container.
+    - name: disks
+      persistentVolumeClaim:
+        claimName: easyvm-disks
+    - name: walks
+      configMap:
+        name: easyvm-walks
     - name: dev-kvm
       hostPath:
         path: /dev/kvm

@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -399,5 +400,100 @@ func TestEachOperatingSystemHasItsOwnGroupAndOneSharedMechanism(t *testing.T) {
 				"distribution or an operating system - so that dispatching one cannot cancel another, "+
 				"and so that a failed run's name says which guest broke", umbrella)
 		}
+	}
+}
+
+// `easyvm pull` DELEGATES THE TRANSFER TO oras, AND SAYS SO WHEN oras IS MISSING.
+//
+// THE TRANSFER IS NOT THIS PROGRAM'S JOB. `cmdPull` was 246 lines of registry protocol - token
+// exchange, manifest reading, resumable blob fetch - duplicating what `oras` already is. `easyvm push`
+// was deleted for that reason long ago; the pull side now matches, so a qcow2 in a registry is an
+// artifact handled by the artifact tool.
+//
+// WHAT STAYS IS `internal/oci`, AND THE CALLER IS THE DIFFERENCE: `fetch:` inside a walkthrough
+// resolves an installer image at RUN TIME in the daemon, possibly on a machine with no oras. That is
+// the asset layer using a library; THIS is the user-facing command, and it shells out.
+func TestPullDelegatesToOrasAndSaysSoWhenItIsMissing(t *testing.T) {
+	body, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(body)
+	i := strings.Index(src, "func cmdPull(")
+	if i < 0 {
+		t.Fatal("cmdPull is gone")
+	}
+	end := strings.Index(src[i:], "\nfunc ")
+	fn := src[i : i+end]
+
+	if !strings.Contains(fn, `exec.LookPath("oras")`) {
+		t.Error("`easyvm pull` does not look for oras; it must delegate the transfer rather than " +
+			"carry a second implementation of the registry protocol")
+	}
+	if !strings.Contains(fn, `exec.Command(tool, "pull"`) {
+		t.Error("`easyvm pull` does not run `oras pull`")
+	}
+	// AND A MISSING TOOL IS A SENTENCE ABOUT THE TOOL, not a registry error that reads like a
+	// missing tag.
+	if !strings.Contains(fn, "oras is not installed") {
+		t.Error("a missing oras must be reported as such; a caller would otherwise see a failure " +
+			"that looks like the artifact is absent")
+	}
+	// THE DISK HAS TO END UP AT THE PATH THE CALLER NAMED - oras writes the layer's own title.
+	if !strings.Contains(fn, "os.Rename(") {
+		t.Error("the pulled file is not moved to `--dest`; the workflow names work/disk.qcow2 and a " +
+			"walkthrough names installer_iso, so the file at the layer's title is not where anyone " +
+			"looks for it")
+	}
+}
+
+// THE PULL IS RESUMABLE, AND IT IS A SHELL SCRIPT BECAUSE IT HAS TO SURVIVE A RESET STREAM.
+//
+// `oras pull` HAS NO RESUME, AND A RETRY AROUND IT DOES NOT HELP. MEASURED, from the reference
+// implementation's own log of a 28 GiB blob:
+//
+//	attempt 1  03:39:28 -> 03:45:00   stream error: stream ID 1; PROTOCOL_ERROR
+//	attempt 2  03:45:05 -> 03:48:58   the same
+//	attempt 3  03:49:08 -> 03:55:03   the same
+//
+// Each attempt restarted at byte zero, so more attempts made more failures rather than progress. The
+// fix is a `Range` request against the blob, which is what .github/pull-artifact.sh does.
+func TestTheArtifactPullResumesInsteadOfRestarting(t *testing.T) {
+	path := filepath.Join("..", "..", ".github", "pull-artifact.sh")
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("%s: %v", path, err)
+	}
+	s := string(body)
+
+	// THE THREE CALLS. A token, a manifest for the digest and size, then the blob.
+	for _, want := range []string{"/token?scope=repository:", "/manifests/", "/blobs/"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("the pull script never calls %q; the blob is fetched directly because that is "+
+				"the only way to resume", want)
+		}
+	}
+	// THE RESUME ITSELF.
+	if !strings.Contains(s, "-C -") {
+		t.Error("the pull script does not resume: `curl -C -` is what continues from the .part " +
+			"file instead of restarting a multi-gigabyte transfer")
+	}
+	if !strings.Contains(s, ".part") {
+		t.Error("the pull script has no .part file, so a cut transfer has nothing to resume from")
+	}
+	// COMPLETENESS IS BY SIZE FROM THE MANIFEST, not by the file existing.
+	if !strings.Contains(s, `"$have" = "$size"`) {
+		t.Error("the pull script does not check the file against the manifest's size; a truncated " +
+			"transfer would look complete forever and surface as a corrupt disk much later")
+	}
+	// AND AN OVERSIZED PART IS DISCARDED rather than resumed from.
+	if !strings.Contains(s, "oversized part") {
+		t.Error("a part larger than the blob (a redirect to an error page) must be discarded; " +
+			"resuming from it appends past the end")
+	}
+	// IT DOES NOT FALL BACK TO ANOTHER TAG - the caller names one artifact.
+	if strings.Contains(s, "iso-windows11") || strings.Contains(s, "linux-ubuntu") {
+		t.Error("the pull script names a specific artifact; which tag to pull is the caller's " +
+			"decision, and a script that guessed would be a second place that can disagree")
 	}
 }

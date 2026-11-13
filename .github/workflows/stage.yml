@@ -271,9 +271,14 @@ jobs:
             echo "=== pull $tag"
             attempt=0
             while :; do
-              if easyvm pull --tag "$tag" \
-                             --repository "${{ inputs.disks_repository }}" \
-                             --dest "$GITHUB_WORKSPACE/work/disk.qcow2"; then
+              # THE TRANSFER IS THE SHELL SCRIPT, NOT `easyvm pull`. `oras pull` HAS NO RESUME,
+              # so a retry around it restarts every multi-gigabyte transfer at byte zero and more
+              # attempts make more failures rather than progress - measured on a 28 GiB blob whose
+              # first four attempts each died at the same stream error. .github/pull-artifact.sh
+              # fetches the blob with `Range:` and keeps a `.part` file.
+              if sh "$GITHUB_WORKSPACE/.github/pull-artifact.sh" \
+                     ghcr.io "$(printf '%s' "${{ inputs.disks_repository }}" | tr '[:upper:]' '[:lower:]')" \
+                     "$tag" "$GITHUB_WORKSPACE/work/disk.qcow2"; then
                 got="$tag"
                 break 2
               fi

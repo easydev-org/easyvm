@@ -197,13 +197,30 @@ func cmdVersions() int {
 // do to a machine; which disk it starts from is a fact about the JOB, and a file that carried a
 // registry path would make every run of it depend on a package that may have moved. The workflow
 // pulls, then hands the file a `--boot-disk`.
+// cmdPull PULLS A PUBLISHED DISK BY ASKING `oras`, AND THIS PROGRAM DOES NOT DO IT ITSELF.
+//
+// THE TRANSFER IS NOT THIS PROGRAM'S JOB. It was 246 lines of registry protocol that duplicated what
+// `oras` already is: token exchange, manifest reading, resumable blob fetch. `easyvm push` is already
+// gone for that reason, and the pull side now matches - a qcow2 in a registry is an artifact, and
+// `oras` is the tool that handles artifacts.
+//
+// WHAT STAYS IS `internal/oci`, AND THE DIFFERENCE IS THE CALLER. `fetch:` inside a walkthrough has to
+// resolve an installer image or a macOS asset AT RUN TIME, in the daemon, on a machine that may have
+// no `oras` - that is the asset layer using a library, not a user-facing command. THIS FUNCTION IS
+// THE USER-FACING ONE, and it shells out.
+//
+// THE FILE ENDS UP AT THE PATH THE CALLER ASKED FOR, because a walkthrough names `installer_iso` and
+// the workflow names `work/disk.qcow2`: oras writes the layer under its own title in the directory it
+// is told, so the file is moved into place here.
 func cmdPull(args []string) int {
 	fs := flag.NewFlagSet("pull", flag.ContinueOnError)
 	tag := fs.String("tag", "", "the artifact to pull, `repository:tag` or just `tag`")
 	dest := fs.String("dest", "", "where to write the disk; the default is the tag's own name")
 	registry := fs.String("registry", oci.DefaultRegistry, "the registry host")
 	repository := fs.String("repository", "", "owner/repo, lowercased; default is $GITHUB_REPOSITORY")
-	timeout := fs.Duration("timeout", 60*time.Minute, "how long the transfer may take")
+	// THE TIMEOUT IS KEPT AS A FLAG SO AN EXISTING CALLER DOES NOT BREAK, but oras owns the transfer
+	// and has no flag for it; the workflow's own step timeout is the real ceiling.
+	_ = fs.Duration("timeout", 60*time.Minute, "accepted for compatibility; the step timeout governs")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -214,7 +231,6 @@ func cmdPull(args []string) int {
 		fmt.Fprintln(os.Stderr, "easyvm pull: --tag is required, for example easyvm/win11:windows11-ssh")
 		return 2
 	}
-
 	var art oci.Artifact
 	if strings.Contains(*tag, ":") || strings.Contains(*tag, "/") {
 		parsed, err := oci.TagFrom(*tag)
@@ -229,10 +245,6 @@ func cmdPull(args []string) int {
 	if *registry != "" {
 		art.Registry = *registry
 	}
-	// THE REPOSITORY IS THE JOB'S, NOT A CONSTANT. ghcr paths are lowercase and
-	// `github.repository` preserves the owner's case, so the lowercased form is what a package
-	// actually lives under - and getting it wrong is a push to a package that does not exist,
-	// with an error that says "denied" rather than "wrong case".
 	if *repository != "" {
 		art.Repository = *repository
 	} else if art.Repository == "" {
@@ -244,27 +256,80 @@ func cmdPull(args []string) int {
 		}
 		art.Repository = strings.ToLower(env)
 	}
-	// THE TOKEN IS TAKEN FROM THE ENVIRONMENT WHEN THERE IS ONE, so a private package pulls with
-	// the job's own credential and a public one needs nothing.
-	if art.Token == "" {
-		art.Token = os.Getenv("GITHUB_TOKEN")
-	}
-
 	if *dest == "" {
 		*dest = filepath.Base(art.Tag) + ".qcow2"
 	}
-	ctx, cancel := oci.WithTimeout(*timeout)
-	defer cancel()
 
-	fmt.Printf("[easyvm] pulling %s/%s:%s -> %s\n", art.Registry, art.Repository, art.Tag, *dest)
-	if err := oci.Pull(ctx, art, *dest, func(msg string) { fmt.Println(msg) }); err != nil {
+	// A DISK THAT IS ALREADY THERE IS NOT PULLED AGAIN, AND THAT IS WHAT MAKES A LOCAL LOOP POSSIBLE.
+	// CI starts empty so the pull happens; a machine with disks already on disk skips it. NOTHING IN
+	// THE FILE IS EDITED FOR THAT CASE, so the walk that runs locally is the walk CI runs.
+	if fi, err := os.Stat(*dest); err == nil && fi.Size() > 512<<20 {
+		fmt.Printf("[easyvm] %s is already here (%d MiB); not pulling %s\n",
+			*dest, fi.Size()>>20, fmt.Sprintf("%s/%s:%s", art.Registry, art.Repository, art.Tag))
+		return 0
+	}
+
+	tool, err := exec.LookPath("oras")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "FAILED: oras is not installed. `easyvm pull` delegates the transfer "+
+			"to it - this program drives a machine, not a registry\n")
+		return 1
+	}
+	ref := fmt.Sprintf("%s/%s:%s", art.Registry, art.Repository, art.Tag)
+	dir := filepath.Dir(*dest)
+	if dir == "" {
+		dir = "."
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		fmt.Fprintf(os.Stderr, "FAILED: %v\n", err)
 		return 1
 	}
+
+	fmt.Printf("[easyvm] oras pull %s -> %s\n", ref, *dest)
+	pull := exec.Command(tool, "pull", ref, "-o", dir)
+	pull.Stdout = os.Stdout
+	pull.Stderr = os.Stderr
+	if err := pull.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "FAILED: oras pull %s: %v\n", ref, err)
+		return 1
+	}
+
+	// WHAT ORAS WROTE IS NAMED BY THE LAYER'S TITLE, so the caller's name is applied here. A single
+	// file in the directory is the disk; anything else means the artifact shape changed.
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "FAILED: %v\n", err)
+		return 1
+	}
+	got := ""
+	for _, e := range entries {
+		if e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		p := filepath.Join(dir, e.Name())
+		if fi, err := os.Stat(p); err != nil || fi.Size() < 512<<20 {
+			continue
+		}
+		if got != "" {
+			fmt.Fprintf(os.Stderr, "FAILED: oras wrote more than one large file into %s; the "+
+				"artifact should carry exactly one disk\n", dir)
+			return 1
+		}
+		got = p
+	}
+	if got == "" {
+		fmt.Fprintf(os.Stderr, "FAILED: oras reported success and there is no disk in %s\n", dir)
+		return 1
+	}
+	if got != *dest {
+		if err := os.Rename(got, *dest); err != nil {
+			fmt.Fprintf(os.Stderr, "FAILED: %v\n", err)
+			return 1
+		}
+	}
 	fi, err := os.Stat(*dest)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "FAILED: the pull reported success and %s is not there: %v\n",
-			*dest, err)
+		fmt.Fprintf(os.Stderr, "FAILED: %s is not there after the pull: %v\n", *dest, err)
 		return 1
 	}
 	fmt.Printf("[easyvm] %s: %d MiB\n", *dest, fi.Size()>>20)

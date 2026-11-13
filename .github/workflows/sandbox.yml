@@ -68,9 +68,11 @@ jobs:
         run: |
           set -eu
           mkdir -p "$GITHUB_WORKSPACE/work"
-          easyvm pull --tag "${{ inputs.disk }}" \
-                      --repository "${{ inputs.disks_repository }}" \
-                      --dest "$GITHUB_WORKSPACE/work/disk.qcow2"
+          # THE SAME RESUMABLE FETCH THE STAGE WORKFLOW USES. `oras pull` has no resume, and a
+          # sandbox disk is the same multi-gigabyte blob.
+          sh "$GITHUB_WORKSPACE/.github/pull-artifact.sh" \
+             ghcr.io "$(printf '%s' "${{ inputs.disks_repository }}" | tr '[:upper:]' '[:lower:]')" \
+             "${{ inputs.disk }}" "$GITHUB_WORKSPACE/work/disk.qcow2"
           ls -l "$GITHUB_WORKSPACE/work/"
           qemu-img check "$GITHUB_WORKSPACE/work/disk.qcow2" || true
 
