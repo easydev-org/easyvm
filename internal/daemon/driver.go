@@ -1029,3 +1029,11 @@ func humanBytes(n int64) string {
 	}
 	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
 }
+
+// QMP exposes the connection so the interactive surface can drive the machine.
+//
+// IT RETURNS THE DAEMON'S OWN CONNECTION RATHER THAN OPENING ONE, because qemu serves one client per
+// socket: a second `qmp.Registry.Acquire` on the same path would block on the greeting and look like
+// a hung guest. That is the same rule `Registry` exists to enforce, and it is why the click and key
+// commands live in the daemon rather than in a process of their own.
+func (d *Driver) QMP() (*qmp.Conn, error) { return d.qmpSocket() }

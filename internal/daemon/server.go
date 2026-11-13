@@ -31,7 +31,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/easydev-org/easyvm/internal/keys"
 	"github.com/easydev-org/easyvm/internal/protocol"
+	"github.com/easydev-org/easyvm/internal/qmp"
 	"github.com/easydev-org/easyvm/internal/run"
 )
 
@@ -40,6 +42,9 @@ import (
 type State = protocol.State
 type Request = protocol.Request
 type Response = protocol.Response
+
+// Screen is one captured frame, aliased for the same reason.
+type Screen = protocol.Screen
 
 // SocketPath is where a daemon listens, given a work directory.
 //
@@ -237,9 +242,47 @@ func (d *Daemon) handle(req Request) Response {
 
 	case "ping":
 		return Response{OK: true}
+
+	// THE INTERACTIVE SURFACE. Each one needs a RUNNING machine, and each answers "there is no
+	// machine" rather than failing obscurely - a browser that clicks before a machine exists should
+	// be told that, not shown a QMP connection error.
+	case protocol.CommandScreenshot:
+		return d.screenshot()
+	case protocol.CommandClick:
+		return d.withQMP("click", func(c *qmp.Conn) error { return c.Click(req.X, req.Y) })
+	case protocol.CommandDouble:
+		return d.withQMP("double-click", func(c *qmp.Conn) error { return c.DoubleClick(req.X, req.Y) })
+	case protocol.CommandKey:
+		if req.Key == "" {
+			return Response{OK: false, Error: "`key` needs a key, for example ret or ctrl+alt+t"}
+		}
+		strokes, err := keys.ParseCombo(req.Key)
+		if err != nil {
+			return Response{OK: false, Error: err.Error()}
+		}
+		return d.withQMP("key", func(c *qmp.Conn) error {
+			for _, stroke := range strokes {
+				if err := c.Stroke(stroke.Modifiers, stroke.Key); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+	case protocol.CommandType:
+		if req.Text == "" {
+			return Response{OK: false, Error: "`type` needs `text`"}
+		}
+		// THE PACE IS THE FILE'S, NOT THIS CALLER'S. A typed line in this repository has needed 0.15s
+		// per character since a `$` arrived as nothing on a Windows guest - see internal/keys. A
+		// browser that typed faster would lose characters on exactly the guests that made that
+		// number what it is, and the loss is invisible: the field simply ends up missing a character.
+		return d.withDriver("type", func(drv *Driver) error {
+			_, err := drv.Type(req.Text, 150*time.Millisecond)
+			return err
+		})
 	}
 	return Response{OK: false, Error: fmt.Sprintf("%q is not a command; use run, create, status, "+
-		"stop, destroy, shutdown or ping", req.Command)}
+		"stop, destroy, shutdown, ping, screenshot, click, double, key or type", req.Command)}
 }
 
 // startRun begins a walkthrough in the background and returns at once.
@@ -302,3 +345,82 @@ var (
 	// ErrBusy is what a client returns when the daemon refused because it was working.
 	ErrBusy = errors.New("the daemon is busy")
 )
+
+// withQMP runs one QMP operation against the machine this daemon holds.
+//
+// IT IS A FUNCTION RATHER THAN SIX COPIES OF THE SAME GUARD, and the guard is the point: every
+// interactive command needs the same three answers - is a machine up, did the operation succeed, and
+// what does the state look like now. A browser polling `status` while clicking must not be told a
+// click worked when there was no machine to click.
+func (d *Daemon) withQMP(what string, op func(*qmp.Conn) error) Response {
+	conn, err := d.interactiveConn()
+	if err != nil {
+		return Response{OK: false, Error: err.Error()}
+	}
+	if err := op(conn); err != nil {
+		return Response{OK: false, Error: fmt.Sprintf("%s: %v", what, err)}
+	}
+	st := d.snapshot()
+	return Response{OK: true, State: &st}
+}
+
+// withDriver is `withQMP` for the operations that need the DRIVER rather than the connection -
+// `type` paces its keystrokes, and that loop lives on the driver.
+func (d *Daemon) withDriver(what string, op func(*Driver) error) Response {
+	d.mu.Lock()
+	drv := d.machine
+	d.mu.Unlock()
+	if drv == nil {
+		return Response{OK: false, Error: "no machine is running; a `create` or a `run` with a " +
+			"`boot:` step starts one"}
+	}
+	concrete, ok := drv.(*Driver)
+	if !ok {
+		return Response{OK: false, Error: fmt.Sprintf("%s: this driver cannot type", what)}
+	}
+	if err := op(concrete); err != nil {
+		return Response{OK: false, Error: fmt.Sprintf("%s: %v", what, err)}
+	}
+	st := d.snapshot()
+	return Response{OK: true, State: &st}
+}
+
+// interactiveConn is the QMP connection to the machine this daemon holds.
+func (d *Daemon) interactiveConn() (*qmp.Conn, error) {
+	d.mu.Lock()
+	drv := d.machine
+	d.mu.Unlock()
+	if drv == nil {
+		return nil, fmt.Errorf("no machine is running; a `create` or a `run` with a `boot:` step " +
+			"starts one")
+	}
+	// THE DRIVER OWNS THE SINGLE QMP CONNECTION, and qemu serves one client per socket - so the
+	// interactive surface goes through it rather than opening a second.
+	if concrete, ok := drv.(*Driver); ok {
+		return concrete.QMP()
+	}
+	return nil, fmt.Errorf("this driver does not expose QMP")
+}
+
+// screenshot writes one frame and answers where it is.
+//
+// THE FILE IS A PPM AND THE HTTP LAYER CONVERTS IT. qemu's `screendump` writes P6 and that is the
+// only format it produces; a browser needs PNG, and the conversion belongs where the bytes are
+// served rather than in the daemon that also has to keep the raw frame for a post-mortem.
+func (d *Daemon) screenshot() Response {
+	conn, err := d.interactiveConn()
+	if err != nil {
+		return Response{OK: false, Error: err.Error()}
+	}
+	dir := filepath.Join(d.work, "live")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return Response{OK: false, Error: err.Error()}
+	}
+	f, err := conn.Screendump(dir)
+	if err != nil {
+		return Response{OK: false, Error: fmt.Sprintf("screenshot: %v", err)}
+	}
+	st := d.snapshot()
+	return Response{OK: true, State: &st,
+		Screen: &Screen{Path: f.Path, Width: f.Width, Height: f.Height}}
+}

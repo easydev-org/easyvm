@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>easyvm</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin:0; font:14px/1.4 ui-monospace,monospace; background:#15161a; color:#d8dade; }
+  header { display:flex; gap:1rem; align-items:center; padding:.6rem 1rem; background:#1d1f26;
+           border-bottom:1px solid #2b2e37; position:sticky; top:0; z-index:2; }
+  header b { color:#9ecbff; font-weight:600; }
+  #state { margin-left:auto; color:#9aa0aa; }
+  #state.err { color:#ff8a8a; }
+  main { display:grid; grid-template-columns:1fr 320px; gap:1rem; padding:1rem; }
+  #screen { position:relative; background:#000; border:1px solid #2b2e37; border-radius:4px;
+            overflow:hidden; line-height:0; }
+  #screen img { width:100%; height:auto; display:block; cursor:crosshair; image-rendering:pixelated; }
+  aside { display:flex; flex-direction:column; gap:.75rem; }
+  section { background:#1d1f26; border:1px solid #2b2e37; border-radius:4px; padding:.75rem; }
+  section h2 { margin:0 0 .5rem; font-size:.8rem; text-transform:uppercase; letter-spacing:.08em;
+               color:#7d8494; font-weight:600; }
+  button, input { background:#252833; color:#d8dade; border:1px solid #343846; border-radius:3px;
+                  padding:.35rem .55rem; font:inherit; }
+  button:hover { background:#2e3240; border-color:#454b5c; }
+  button:active { background:#3a4052; }
+  input { width:100%; box-sizing:border-box; margin-bottom:.4rem; }
+  .keys { display:grid; grid-template-columns:repeat(3,1fr); gap:.35rem; }
+  #log { white-space:pre-wrap; word-break:break-all; max-height:12rem; overflow:auto;
+         color:#8d93a1; font-size:.8rem; }
+</style>
+</head>
+<body>
+<header>
+  <b>easyvm</b>
+  <span id="size"></span>
+  <span id="state">connecting…</span>
+</header>
+<main>
+  <div id="screen"><img id="shot" alt="the machine" src="/screen.png"></div>
+  <aside>
+    <section>
+      <h2>pointer</h2>
+      <div class="keys">
+        <button data-click="quick">click last</button>
+        <button id="dbl">double-click</button>
+        <button id="refresh">refresh</button>
+      </div>
+      <p id="last" style="color:#7d8494;margin:.5rem 0 0">no click yet</p>
+    </section>
+    <section>
+      <h2>key</h2>
+      <input id="combo" placeholder="ctrl+alt+t" value="ret">
+      <div class="keys">
+        <button data-key="ret">Enter</button>
+        <button data-key="esc">Esc</button>
+        <button data-key="tab">Tab</button>
+        <button data-key="ctrl+alt+t">Terminal</button>
+        <button data-key="meta_l+r">Run</button>
+        <button data-key="backspace">Back</button>
+      </div>
+    </section>
+    <section>
+      <h2>type</h2>
+      <input id="text" placeholder="text to type">
+      <button id="send">send</button>
+    </section>
+    <section>
+      <h2>log</h2>
+      <div id="log"></div>
+    </section>
+  </aside>
+</main>
+<script>
+const shot = document.getElementById('shot');
+const state = document.getElementById('state');
+const log = document.getElementById('log');
+const size = document.getElementById('size');
+let last = null;
+
+function say(msg, bad) {
+  const t = new Date().toLocaleTimeString();
+  log.textContent = t + '  ' + msg + '\n' + log.textContent;
+  log.textContent = log.textContent.split('\n').slice(0, 60).join('\n');
+  if (bad) { state.className = 'err'; state.textContent = msg; }
+}
+
+async function post(path, body) {
+  const r = await fetch(path, {method:'POST', headers:{'Content-Type':'application/json'},
+                               body: JSON.stringify(body || {})});
+  const j = await r.json();
+  if (!j.ok) { say(j.error, true); return null; }
+  if (j.state) { state.className = ''; state.textContent =
+      (j.state.status || '') + ' ' + (j.state.step || ''); }
+  return j;
+}
+
+// THE CLICK MAP IS THE IMAGE ITSELF. The frame is the guest's screen at its own resolution, so a
+// pointer position on the <img> divided by its displayed size and multiplied by the frame's size is
+// the guest pixel - no window offset, no scroll container, nothing to get wrong.
+shot.addEventListener('click', async ev => {
+  const r = shot.getBoundingClientRect();
+  const x = Math.round((ev.clientX - r.left) * (shot.naturalWidth  / r.width));
+  const y = Math.round((ev.clientY - r.top ) * (shot.naturalHeight / r.height));
+  last = {x, y};
+  document.getElementById('last').textContent = 'last click: ' + x + ', ' + y;
+  await post('/api/click', {x, y});
+});
+
+document.getElementById('dbl').onclick = async () => {
+  if (!last) { say('click the screen first', true); return; }
+  await post('/api/double', last);
+};
+
+document.getElementById('refresh').onclick = () => refresh(true);
+
+document.getElementById('send').onclick = async () => {
+  const t = document.getElementById('text');
+  if (!t.value) return;
+  await post('/api/type', {text: t.value});
+  t.value = '';
+};
+
+document.querySelectorAll('[data-key]').forEach(b => {
+  b.onclick = () => post('/api/key', {key: b.dataset.key});
+});
+document.getElementById('combo').addEventListener('keydown', ev => {
+  if (ev.key === 'Enter') post('/api/key', {key: ev.target.value});
+});
+
+// ONE FRAME A SECOND, AND THE TIMESTAMP ON THE URL IS WHAT MAKES IT A NEW FRAME. A browser will not
+// re-request an image whose URL has not changed, so `src = '/screen.png'` polls once and then shows
+// the same picture forever.
+async function refresh() {
+  try {
+    const st = await fetch('/api/state').then(r => r.json());
+    if (st.state) { state.className = ''; state.textContent =
+        (st.state.status || '') + ' ' + (st.state.step || ''); }
+    await new Promise(res => {
+      shot.onload = () => { size.textContent = shot.naturalWidth + 'x' + shot.naturalHeight; res(); };
+      shot.onerror = () => res();
+      shot.src = '/screen.png?t=' + Date.now();
+    });
+  } catch (e) { say('refresh: ' + e, true); }
+}
+refresh();
+setInterval(refresh, 1000);
+</script>
+</body>
+</html>

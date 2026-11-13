@@ -342,6 +342,8 @@ func cmdServe(args []string) int {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	work := fs.String("work", "", "the directory the socket and the frames live in")
 	novncPort := fs.Int("novnc-port", daemon.DefaultNovNCPort, "where the noVNC page listens; 0 disables it")
+	httpAddr := fs.String("http", daemon.DefaultHTTPAddr, "the browser surface: a live screen, a "+
+		"click map, keys and typing. Empty disables it")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -352,6 +354,23 @@ func cmdServe(args []string) int {
 
 	d := daemon.New()
 	fmt.Printf("[easyvm] daemon for %s\n", *work)
+
+	// THE BROWSER SURFACE IS A SECOND FRONT END ON THE SAME DAEMON, started beside the socket and
+	// sharing its state. It is not a second service: every click and key it receives goes through the
+	// same `handle` the CLI uses, and the QMP connection is the one this daemon already holds.
+	if *httpAddr != "" {
+		go func() {
+			if err := d.ServeHTTP(daemon.HTTPServeOptions{
+				Addr: *httpAddr,
+				Ready: func(addr string) {
+					fmt.Printf("[easyvm] browser surface on http://%s/\n", addr)
+				},
+			}); err != nil {
+				fmt.Fprintf(os.Stderr, "[easyvm] http surface stopped: %v\n", err)
+			}
+		}()
+	}
+
 	err := d.Serve(daemon.ServeOptions{
 		Work:      *work,
 		NoVNCPort: *novncPort,
@@ -409,7 +428,7 @@ func cmdRun(args []string) int {
 	}
 
 	workDir := daemon.SocketDir(file, *work)
-	cl, err := client.Dial(workDir)
+	cl, err := connect(workDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n\n  A daemon owns the machine, so it must be started first:\n"+""+
 			"    easyvm serve --work %s\n  then this command again.\n", err, workDir)
@@ -453,7 +472,7 @@ func cmdStatus(args []string) int {
 	if code != 0 {
 		return code
 	}
-	cl, err := client.Dial(work)
+	cl, err := connect(work)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		return 3
@@ -484,7 +503,7 @@ func cmdStop(args []string) int {
 	if code != 0 {
 		return code
 	}
-	cl, err := client.Dial(work)
+	cl, err := connect(work)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		return 3
@@ -509,7 +528,7 @@ func cmdHealth(args []string) int {
 	if code != 0 {
 		return code
 	}
-	cl, err := client.Dial(work)
+	cl, err := connect(work)
 	if err != nil {
 		// A HEALTH CHECK MUST BE HONEST ABOUT ITS OWN FAILURE. A container that reported healthy
 		// because the probe could not reach the daemon is the failure mode `pgrep` has, one level
@@ -537,6 +556,25 @@ func cmdHealth(args []string) int {
 	}
 	fmt.Fprintf(os.Stderr, "unhealthy: %s %s\n", resp.State.Status, resp.State.Error)
 	return 1
+}
+
+// connect opens a client through whichever transport is configured.
+//
+// EASYVM_HTTP IS THE SWITCH, AND IT IS AN ENVIRONMENT VARIABLE RATHER THAN A FLAG ON EVERY COMMAND.
+// The transport is a property of where the daemon is, not of what you are asking it - a person with a
+// URL exports it once and every `easyvm status`, `stop` and `create` follows. A flag would have to be
+// repeated on six subcommands and would be forgotten on the seventh.
+//
+//	unset                  the unix socket in the work directory, which is what CI uses
+//	EASYVM_HTTP=:8080      the daemon's browser surface
+//
+// THE COMMANDS DO NOT CHANGE AT ALL. Both transports carry the same Request, so `easyvm stop --work
+// x` and `EASYVM_HTTP=host:8080 easyvm stop` run the same code after this function returns.
+func connect(work string) (*client.Client, error) {
+	if addr := os.Getenv("EASYVM_HTTP"); addr != "" {
+		return client.DialHTTP(addr)
+	}
+	return client.Dial(work)
 }
 
 func workArg(cmd string, args []string) (string, int) {
@@ -665,7 +703,7 @@ func cmdCreate(args []string) int {
 	if *work == "" {
 		*work = filepath.Dir(*file)
 	}
-	cl, err := client.Dial(*work)
+	cl, err := connect(*work)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		return 3
@@ -724,7 +762,7 @@ func cmdDestroy(args []string) int {
 	if code != 0 {
 		return code
 	}
-	cl, err := client.Dial(work)
+	cl, err := connect(work)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		return 3

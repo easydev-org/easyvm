@@ -76,6 +76,22 @@ type Request struct {
 	// a field per stage would be a second place the vocabulary lives. The file declares them; this
 	// supplies values.
 	Vars map[string]string `json:"vars,omitempty"`
+
+	// --- the interactive surface -------------------------------------------------------------
+	//
+	// A MACHINE THAT IS RUNNING CAN BE LOOKED AT AND TOUCHED, and these fields carry that. They are
+	// on the same request as `run` because it is the same daemon and the same QMP connection: the
+	// alternative is a second service that would have to reach the first one's socket anyway.
+	//
+	//	click    X, Y                       press and release at a point
+	//	double   X, Y                       one press-pair, which is what a double-click is
+	//	key      Key                        one qcode, e.g. `ret`, `esc`, `ctrl+alt+t`
+	//	type     Text                       a string, typed at the driver's pace
+	//	screenshot                          write a frame and answer with its path and size
+	//	frames                              the recording's frame files, newest last
+	X, Y int    `json:"x,omitempty"`
+	Key  string `json:"key,omitempty"`
+	Text string `json:"text,omitempty"`
 }
 
 type Response struct {
@@ -83,6 +99,20 @@ type Response struct {
 	OK    bool   `json:"ok"`
 	Error string `json:"error,omitempty"`
 	State *State `json:"state,omitempty"`
+
+	// Screen is the artifact a `screenshot` produced: where it was written, and how big it is.
+	//
+	// THE PATH IS SERVED SEPARATELY RATHER THAN INLINED, because a 1920x1080 PPM is 6 MB and a JSON
+	// document carrying base64 would be 8 MB per poll. The HTTP layer reads the file and answers with
+	// the bytes; this only says which file.
+	Screen *Screen `json:"screen,omitempty"`
+}
+
+// Screen is one captured frame.
+type Screen struct {
+	Path   string `json:"path"`
+	Width  int    `json:"width"`
+	Height int    `json:"height"`
 }
 
 // The two MODES a daemon can be asked for, and they are different products rather than different
@@ -104,6 +134,14 @@ type Response struct {
 // adapter - because that is the machine's shape and the file is where shape lives. What it does NOT
 // use is the steps: a sandbox that ran a walkthrough would be a bake with extra words.
 const (
+	// CommandClick, CommandDouble, CommandKey, CommandType and CommandScreenshot are the interactive
+	// surface: what a person at the console does, reachable over the socket so a browser can do it.
+	CommandClick      = "click"
+	CommandDouble     = "double"
+	CommandKey        = "key"
+	CommandType       = "type"
+	CommandScreenshot = "screenshot"
+
 	// CommandCreate starts a machine and returns; it does not run any steps.
 	CommandCreate = "create"
 	// CommandDestroy stops the machine and its daemon, and is the only ending a sandbox has.

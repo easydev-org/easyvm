@@ -32,15 +32,36 @@ esac
 
 # THE WALKTHROUGH NAME IS NOT THE LEG NAME for three of the four: ghostbsd installs through `gbi`,
 # macOS through `setup`, and the rest through `install`.
-walk=""
-for candidate in "$leg" install gbi setup; do
-    if [ -f "/walks/$os-$candidate.yaml" ]; then walk="/walks/$os-$candidate.yaml"; break; fi
-done
+# THE FILE THE WORKFLOW USES, BY ITS OWN MAPPING.
+#
+# `ghostbsd-install` IS NOT THE INSTALLER. It is a legacy file that boots an ALREADY-BUILT disk, while
+# the workflow's install leg runs `gbi` - which is the one with `create the empty disk` and `fetch:`.
+# Picking by name took the wrong file and the failure was
+#
+#	boot: no the target disk at .../disk.qcow2: no such file or directory
+#
+# SO THE MAPPING IS WRITTEN DOWN HERE, matching each workflow's `file:` entry. A leg that is not
+# listed falls back to its own name, which is right for ubuntu, windows and the rest.
+case "$leg" in
+    install) case "$os" in
+                 ghostbsd) walk=/walks/ghostbsd-gbi.yaml ;;
+                 macos)    walk=/walks/macos-setup.yaml ;;
+                 *)        walk="/walks/$os-install.yaml" ;;
+             esac ;;
+    setup)   walk=/walks/macos-setup.yaml ;;
+    ssh)     walk="/walks/$os-ssh.yaml" ;;
+    vm*)     walk="/walks/$os-vm-configure.yaml" ;;
+    dev)     walk="/walks/$os-dev.yaml" ;;
+    *)       walk="/walks/$os-$leg.yaml" ;;
+esac
+
 [ -n "$walk" ] || { echo "no walkthrough for $os/$leg; /walks holds:" >&2; ls /walks >&2; exit 2; }
 
 dir="/disks/os/$os"
 run="$dir/run-$leg"
-mkdir -p "$dir"
+# THE DIRECTORY HAS TO EXIST BEFORE THE LOG IS REDIRECTED, and on a fresh PVC it does not - the
+# launcher writes `> /disks/os/<os>-<leg>.log` before this script runs.
+mkdir -p "$dir" /disks/os
 
 # COMPLETELY RESET, EVERY TIME. The run directory, the daemon, and the tap the last run left behind -
 # so a rerun cannot be polluted by its own previous frames, overlay or network device.
@@ -84,6 +105,29 @@ if [ -z "$prev" ]; then
             break
         fi
     done
+fi
+
+# WINDOWS NAMES ITS IMAGE `windows11.iso`, NOT `installer.iso`. `fetch: windows_iso` looks for that
+# fixed name in the work directory, so the artifact is copied under BOTH names and whichever the
+# step asks for is already there.
+if [ "$os" = windows ]; then
+    for base in /disks/isos /artifacts/isos; do
+        if [ -f "$base/windows11.iso" ]; then
+            echo "=== windows image: $base/windows11.iso"
+            cp "$base/windows11.iso" "$run/windows11.iso"
+            cp "$base/virtio-win.iso" "$run/virtio-win.iso" 2>/dev/null || true
+            break
+        fi
+    done
+fi
+
+# THE WALKTHROUGH NAMES FILES RELATIVE TO THE REPOSITORY - `template: windows/11/answer/Autounattend.xml`
+# is a path in the repo, not in the work directory - so the daemon is started from a tree that has that
+# layout. /repo-src is a copy of the repository's own directories, put on the PVC once so it survives
+# pod recreation.
+if [ -d /disks/repo-src/windows ]; then
+    echo "=== working from /repo-src (the repository's layout)"
+    cd /disks/repo-src
 fi
 
 echo "=== daemon"
