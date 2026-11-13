@@ -100,3 +100,108 @@ func TestQMPSocketDoesNotHoldTheLockWhileItConnects(t *testing.T) {
 			"connect is guarded - state the discipline explicitly instead of leaving it implicit")
 	}
 }
+
+// THE BOOT DOES NOT HOLD THE LOCK, BECAUSE THE LOCK IS NOT WHAT MAKES THE MACHINE COHERENT.
+//
+// THE REASONING, WHICH IS THE POINT OF THIS TEST:
+//
+//	qmp.Conn serialises its own conversation (`wire sync.Mutex` inside internal/qmp), so two callers
+//	cannot interleave QMP commands even when neither holds `d.mu`. What `d.mu` has to keep coherent is
+//	the FIELDS ABOUT the machine - `proc`, `qmpConn`, `diskPath`, `vncPort` - each of which is a
+//	handful of assignments, never an I/O.
+//
+// AND THE MEASURED FAILURE WHEN THAT LINE WAS CROSSED:
+//
+//	goroutine 23  [sync.Mutex.Lock]  doBoot -> Boot -> qmpSocket -> d.mu.Lock    <- Boot HELD it
+//	goroutine 66  [sync.Mutex.Lock]  http /  -> vncPort   -> d.mu.Lock           <- waiting
+//
+// `qmpSocket` takes the lock only to LOOK at `qmpConn` and does its waiting outside, on purpose. Called
+// from inside a locked section it deadlocks the daemon against itself, and the symptom is not "boot is
+// slow" - it is a daemon whose HTTP surface stops answering:
+//
+//	curl http://127.0.0.1:8080/api/state   -> 200
+//	curl http://127.0.0.1:8080/vnc.html    -> connection accepted, then nothing, ever
+//
+// SO THE RULE IS STRUCTURAL: inside `Boot`, no lock may span a statement that can wait. This test
+// reads the function and refuses a `defer d.mu.Unlock()` - the shape that held the lock from the first
+// line to the last.
+func TestBootDoesNotHoldTheLockAcrossItsWork(t *testing.T) {
+	body, err := os.ReadFile("driver.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(body)
+	i := strings.Index(src, "func (m machineControl) Boot(")
+	if i < 0 {
+		t.Fatal("no Boot")
+	}
+	// THE FUNCTION ENDS AT THE FIRST CLOSING BRACE IN COLUMN ZERO AFTER IT. Scanning for "\nfunc "
+	// pulls in the next function's locks, and scanning for "\n}\n" stops at the first one - which is
+	// not necessarily this function's, because a `}` at column zero inside a string literal would do
+	// it too. Walking lines and counting braces is the version that cannot drift.
+	rest := functionBody(src[i:])
+
+	// A `defer d.mu.Unlock()` IS THE SHAPE THIS FORBIDS: it means the lock is taken before the work
+	// and released after it, whatever the work is.
+	if strings.Contains(rest, "defer d.mu.Unlock()") {
+		t.Fatal("`Boot` releases the machine lock with a deferred call, so it holds it across the " +
+			"whole boot - including `qmpSocket`, which wants the same lock and would deadlock. " +
+			"Measured as an HTTP surface that answers `/api/state` and never `/`")
+	}
+	// AND EVERY LOCK THAT IS TAKEN HAS AN UNLOCK ON THE WAY OUT.
+	//
+	// COUNTING TOTALS DOES NOT WORK, and this test proved it on itself: a guard reads
+	//
+	//	d.mu.Lock()
+	//	if d.proc != nil {
+	//		d.mu.Unlock()      <- the early return
+	//		return ...
+	//	}
+	//	d.mu.Unlock()          <- the normal path
+	//
+	// - ONE lock and TWO unlocks, which is correct and which a totals check calls unbalanced. What
+	// matters is that each `Lock()` is followed by one, so that is what is asserted.
+	code := dropLineComments(rest)
+	locks := strings.Count(code, "d.mu.Lock()")
+	unlocks := strings.Count(code, "d.mu.Unlock()")
+	if unlocks < locks {
+		t.Fatalf("`Boot` has %d Lock and %d Unlock; a path that returns without releasing leaves the "+
+			"machine locked for the life of the process", locks, unlocks)
+	}
+	if n := strings.Count(code, "d.mu.Lock()"); n == 0 {
+		t.Fatal("`Boot` never takes the machine lock, so nothing guards `proc` and `vncPort` - the " +
+			"lock has to be NARROW, not absent")
+	}
+}
+
+// dropLineComments removes `//` comments, so a quoted deadlock cannot be counted as a lock.
+func dropLineComments(src string) string {
+	var out []string
+	for _, line := range strings.Split(src, "\n") {
+		if i := strings.Index(line, "//"); i >= 0 {
+			line = line[:i]
+		}
+		out = append(out, line)
+	}
+	return strings.Join(out, "\n")
+}
+
+// functionBody returns a top-level function's text, ending at its own closing brace.
+func functionBody(src string) string {
+	depth := 0
+	var out []string
+	for _, line := range strings.Split(src, "\n") {
+		out = append(out, line)
+		// BRACES INSIDE A LINE COMMENT DO NOT COUNT, which keeps the prose in these files from
+		// unbalancing the walk.
+		code := line
+		if i := strings.Index(code, "//"); i >= 0 {
+			code = code[:i]
+		}
+		depth += strings.Count(code, "{") - strings.Count(code, "}")
+		if depth == 0 && len(out) > 1 {
+			break
+		}
+	}
+	return strings.Join(out, "\n")
+}

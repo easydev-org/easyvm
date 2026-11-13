@@ -367,17 +367,37 @@ func (d *Driver) releaseDiffLocked() error {
 // Start launches qemu with the ONE command line every family shares.
 func (m machineControl) Boot(spec run.BootSpec) error {
 	d := m.d
+
+	// THE LOCK IS FOR FIELDS, NOT FOR THE BOOT. IT DOES NOT SURVIVE THIS BLOCK.
+	//
+	// THE PREVIOUS VERSION HELD `d.mu` FROM HERE TO THE END OF THE FUNCTION, and the function starts a
+	// qemu, waits for its QMP socket and waits for the guest. That made every one of those waits a
+	// wait ON THE MACHINE'S LOCK, so the HTTP surface blocked behind a boot in progress:
+	//
+	//	goroutine 23  [sync.Mutex.Lock]   doBoot -> Boot -> qmpSocket -> d.mu.Lock   <- IT HELD IT
+	//	goroutine 66  [sync.Mutex.Lock]   http / -> vncPort -> d.mu.Lock            <- waiting
+	//
+	// `qmpSocket` takes the lock only to LOOK at `qmpConn`; it does its I/O outside, on purpose. So
+	// calling it from inside a locked section is a self-deadlock - Go's mutex is not reentrant - and
+	// the daemon stops answering while it is booting, which reads as a hung process.
+	//
+	// SEE ALSO THE CLAIM THAT MAKES THE REST SAFE: `qmp.Conn` serialises its own conversation, so two
+	// callers cannot interleave QMP commands even when neither holds `d.mu`. The lock is not what makes
+	// the machine coherent; it is what keeps the FIELDS about the machine coherent.
 	d.mu.Lock()
-	defer d.mu.Unlock()
 	if d.proc != nil {
+		d.mu.Unlock()
 		return fmt.Errorf("a machine is already running")
 	}
+	d.mu.Unlock()
 
 	guestOS, err := machine.ParseOS(spec.OS)
 	if err != nil {
 		return err
 	}
+	d.mu.Lock()
 	d.guestOS = spec.OS
+	d.mu.Unlock()
 	// THE ACCELERATOR IS NAMED IN THE COMMAND LINE, AND QEMU IS THE AUTHORITY ON IT.
 	//
 	// `-accel kvm` IS IN THE ARGUMENTS BELOW, which makes qemu refuse to start rather than silently
@@ -435,8 +455,10 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 		if err != nil {
 			return err
 		}
+		d.mu.Lock()
 		d.diff = o
 		d.flattenFrom = o.Path
+		d.mu.Unlock()
 		running = o.Path
 		d.logf(fmt.Sprintf("  running on a diff over %s (read-only); %s",
 			filepath.Base(o.Base), o.Path))
@@ -449,7 +471,9 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 	// THE DISPLAY NUMBER IS FIXED AT 0 INSIDE THE CONTAINER: one guest per container, and a
 	// computed number would make the log line and the -vnc argument disagree.
 	const vncDisplay = 0
+	d.mu.Lock()
 	d.vncPort = vncBase + vncDisplay
+	d.mu.Unlock()
 
 	args := []string{
 		// THE ACCELERATOR IS NAMED, AND ITS ABSENCE WAS THE REASON EVERY LEG RAN ON TCG.
@@ -652,8 +676,10 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("starting qemu: %w", err)
 	}
+	d.mu.Lock()
 	d.proc = cmd
 	d.qmpReg = qmp.NewRegistry()
+	d.mu.Unlock()
 
 	// NO CONSOLE IS STARTED HERE ANY MORE, AND THAT IS THE POINT.
 	//
@@ -769,8 +795,6 @@ func (m machineControl) Stop(method string) error {
 	if err != nil {
 		return err
 	}
-	d.mu.Lock()
-	d.mu.Unlock()
 	// `waitForExit` ALREADY REAPED IT - CALLING `Wait` AGAIN BLOCKS FOREVER.
 	//
 	// Measured on ubuntu-vm: the leg sat in `follow it` for thirty minutes with `status` still saying

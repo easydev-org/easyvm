@@ -102,6 +102,21 @@ func (d *Daemon) ServeHTTP(opts HTTPServeOptions) error {
 		}
 		http.FileServer(http.Dir(novncRoot)).ServeHTTP(w, r)
 	})
+	// A HEALTH CHECK THAT TOUCHES NOTHING: no lock, no machine, no disk.
+	//
+	// THE ABSENCE OF ONE COST A DIAGNOSIS. When `/` stopped answering, every question about the
+	// daemon was "is it hung?" and the only probe available was `/api/state`, which takes the same
+	// lock the hung code wanted - so a timeout could mean "the daemon is dead", "the lock is held" or
+	// "the handler is stuck", and there was no way to tell which.
+	//
+	// THIS ANSWERS "THE PROCESS IS SCHEDULING AND ITS LISTENER ACCEPTS", which is the question a
+	// person actually has. It is deliberately not a liveness check for the GUEST: that is
+	// `/api/state`, and conflating the two is what made a stalled machine look like a stalled daemon.
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, "ok\n")
+	})
 	mux.HandleFunc("/api/state", d.handleState)
 	mux.HandleFunc("/api/screen", d.handleScreenJSON)
 	mux.HandleFunc("/screen.png", d.handleScreenPNG)
