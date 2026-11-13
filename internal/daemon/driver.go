@@ -66,11 +66,6 @@ type Driver struct {
 	// frameMu serialises screen capture. ONE FRAME AT A TIME, because three readers of one screen do
 	// not need three screendumps and interleaved 6.2 MB writes produce unreadable files.
 	frameMu sync.Mutex
-	// pointer is the VNC session used for pointer and key events, opened on first use.
-	//
-	// IT IS NOT THE QMP CONNECTION. `input-send-event` was accepted and ignored by this guest, and the
-	// VNC server is the path a person's click takes - see console.go for the measurement.
-	pointer *vncConn
 	netUp   bool
 	// share is the smbd this driver started, if a `share_serve:` step asked for one.
 	share *shareServer
@@ -158,34 +153,26 @@ func (f frame) Words() []string  { return nil } // no OCR in this build; see the
 // QMP'S ABSOLUTE POINTER TAKES ONE EVENT PAIR PER AXIS, and the guest's tablet scales them. That is
 // why the coordinates are the file's own measured pixels rather than anything the host computes.
 func (d *Driver) Click(x, y int) error {
-	v, err := d.pointerConn()
+	// QMP, NOT THE VNC SESSION, AND THE REASON IS THAT QEMU'S VNC SERVER TAKES ONE CLIENT.
+	//
+	// The pointer was routed through VNC for a while, on the evidence that a click in the browser
+	// console visibly advanced the installer while `input-send-event` did nothing. THAT EVIDENCE WAS
+	// MISREAD: the real defect was the DEVICE - `virtio-tablet-pci`, which FreeBSD has no driver for -
+	// and once every guest got `usb-tablet` the QMP path worked on the first try.
+	//
+	// REACHING FOR VNC THEN PRODUCED A SECOND, WORSE BUG. The browser console holds the only client
+	// slot, so the daemon's own session was refused or dropped mid-run:
+	//
+	//	click (1331, 785): write tcp 127.0.0.1:50058->127.0.0.1:5900: write: broken pipe
+	//
+	// and a walk whose pointer is a socket contention problem fails in a way that reads as a dead
+	// widget. QMP has no such limit: it is the same connection the daemon already owns for status,
+	// screendumps and shutdown.
+	conn, err := d.qmpSocket()
 	if err != nil {
 		return err
 	}
-	return v.Click(x, y)
-}
-
-// pointerConn is the VNC session, opened lazily and reopened if the guest restarted.
-func (d *Driver) pointerConn() (*vncConn, error) {
-	d.mu.Lock()
-	v := d.pointer
-	port := d.vncPort
-	d.mu.Unlock()
-	if v != nil {
-		return v, nil
-	}
-	if port == 0 {
-		return nil, fmt.Errorf("no VNC port is known yet; the pointer can only be driven once " +
-			"the machine is up")
-	}
-	fresh, err := dialVNC(fmt.Sprintf("127.0.0.1:%d", port))
-	if err != nil {
-		return nil, err
-	}
-	d.mu.Lock()
-	d.pointer = fresh
-	d.mu.Unlock()
-	return fresh, nil
+	return conn.Click(x, y)
 }
 
 func (d *Driver) DoubleClick(x, y int) error {
@@ -790,15 +777,7 @@ func (m machineControl) Stop(method string) error {
 	d.mu.Lock()
 	page := d.page
 	d.page = nil
-	pointer := d.pointer
-	d.pointer = nil
 	d.mu.Unlock()
-	// THE POINTER SESSION GOES WITH THE MACHINE. A VNC connection to a stopped qemu is a socket that
-	// reads until it errors, and the next `run` would find it and try to send events into the guest
-	// that was.
-	if pointer != nil {
-		_ = pointer.Close()
-	}
 	if page != nil {
 		page.stop()
 	}
