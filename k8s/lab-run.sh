@@ -188,6 +188,25 @@ if [ "$os" = windows ]; then
             break
         fi
     done
+
+    # THE ANSWER FILE IS A RELATIVE PATH IN THE WALKTHROUGH, AND THE DAEMON'S CWD IS `/`.
+    #
+    #	- name: build the answer CD
+    #	  template: windows/11/answer/Autounattend.xml
+    #
+    # `cd` in this script changes THIS SHELL, not the daemon - the daemon is PID 1 and started with
+    # its own working directory - so the step failed with
+    #
+    #	build the answer CD: no answer file at windows/11/answer/Autounattend.xml
+    #
+    # IN CI THAT PATH RESOLVES BECAUSE THE DAEMON RUNS FROM THE CHECKOUT. Here the repository's own
+    # directories live under /disks/repo-src, so the SAME RELATIVE LAYOUT is reproduced under /work -
+    # the file the file names, at the path the file names, which is the property that matters.
+    if [ -f /disks/repo-src/windows/11/answer/Autounattend.xml ]; then
+        mkdir -p /work/windows/11/answer
+        cp /disks/repo-src/windows/11/answer/Autounattend.xml /work/windows/11/answer/
+        echo "=== answer file -> /work/windows/11/answer/Autounattend.xml"
+    fi
 fi
 
 # THE WALKTHROUGH NAMES FILES RELATIVE TO THE REPOSITORY - `template: windows/11/answer/Autounattend.xml`

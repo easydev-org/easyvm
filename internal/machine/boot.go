@@ -268,6 +268,10 @@ func (b Boot) StorageArgs() []string {
 				"-device", "qemu-xhci,id=xhci",
 				"-drive", "file="+b.Recovery+",media=disk,if=none,id=rec,readonly=on",
 				"-device", "usb-storage,bus=xhci.0,drive=rec",
+				// AND THE POINTER ON THE SAME BUS, which is what the reference implementation gives
+				// its mac and the reason a recovery screen can be clicked at all. A MAC HAS NO PS/2,
+				// so a pointer that is not on USB is a pointer that does not exist.
+				"-device", "usb-tablet,bus=xhci.0",
 			)
 		}
 		return args
@@ -392,6 +396,27 @@ func (b Boot) StorageArgs() []string {
 
 	// 4. THE DRIVER CD, FOR THE SYSTEM THAT WILL RUN ON THIS DISK.
 	appendUSBCD(b.DriverCD)
+
+	// 5. THE POINTER, WHICH BELONGS ON THE SAME CONTROLLER AS EVERYTHING ELSE HERE.
+	//
+	// IT WAS ADDED BY THE DAEMON INSTEAD, AND THAT IS WHERE IT BROKE WINDOWS:
+	//
+	//	qemu-system-x86_64: -device qemu-xhci,id=xhci: Duplicate ID 'xhci' for device
+	//
+	// A Windows boot has an ANSWER CD and a DRIVER CD, so `appendUSBCD` above had already created
+	// `qemu-xhci,id=xhci` - and the daemon then added it again for the tablet, without any way to know.
+	// `xhciAdded` IS THE FACT THAT MATTERS, and it lives here: the pointer is one more thing on this
+	// machine's USB bus, not a separate decision made by a caller that cannot see the bus.
+	//
+	// A MAC IS THE ONE EXCEPTION, and for a reason that is about macOS rather than about buses: its
+	// pointing device comes through OpenCore, and the tablet is still attached so a person can drive the
+	// recovery screen. `StorageArgs` has already created the controller for the recovery disk there,
+	// which is the same variable.
+	if !xhciAdded {
+		args = append(args, "-device", "qemu-xhci,id=xhci")
+		xhciAdded = true
+	}
+	args = append(args, "-device", "usb-tablet,bus=xhci.0")
 	return args
 }
 

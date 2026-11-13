@@ -582,49 +582,18 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 		"-device", fmt.Sprintf("virtio-net-pci,netdev=net0,mac=%s,romfile=,host_mtu=%d",
 			easyvmnet.TapMAC, easyvmnet.UplinkMTU()),
 	)
-	// EVERY GUEST GETS THE SAME POINTER: usb-tablet ON AN xHCI CONTROLLER.
-	//
-	// IT WAS `virtio-tablet-pci` FOR EVERYTHING BUT A BSD, AND THAT WAS WRONG TWICE OVER.
-	//
-	// FIRST, FREEBSD HAS NO virtio-input DRIVER AT ALL - the ISO's own file list is the proof, with
-	// nothing to infer:
-	//
-	//	$ 7z l GhostBSD-26.3.iso | grep virtio
-	//	virtio.ko  virtio_balloon.ko  virtio_blk.ko  virtio_console.ko
-	//	virtio_p9fs.ko  virtio_pci.ko  virtio_random.ko  virtio_scsi.ko
-	//	                    <- no virtio_input.ko, no virtio_tablet.ko
-	//
-	// so the device enumerated, no driver claimed it, and every absolute report was discarded while
-	// the keyboard - a different device - worked.
-	//
-	// SECOND, NOTHING ELSE NEEDED THE virtio TABLET EITHER. Linux and Windows drive a USB HID tablet
-	// with the driver they already load; macOS drives its own pointing device through OpenCore and has
-	// never been given either. ONE DEVICE FOR EVERY GUEST is one thing to reason about instead of two,
-	// and it is what the reference implementation does - `usb-tablet,bus=xhci.0` on the same
-	// controller that carries its macOS recovery disk.
-	//
-	// THE CONTROLLER IS NOT OPTIONAL, AND qemu SAID SO RATHER THAN GUESSING:
-	//
-	//	qemu-system-x86_64: -device usb-tablet: No 'usb-bus' bus found for device 'usb-tablet'
-	//
-	// q35 has no USB controller unless one is created - the legacy UHCI/ehci pair a `pc` machine
-	// gets for free is not part of it. `qemu-xhci,id=xhci` is the same controller the macOS branch
-	// creates for its recovery disk, and qemu merges the two requests into one device because the id
-	// is the same.
-	// A MAC ALREADY HAS THE CONTROLLER, from the recovery disk's own args, and asking for the same id
-	// twice is a qemu error rather than a merge:
+	// THE POINTER IS ADDED BY `StorageArgs`, NOT HERE, AND THAT IS THE FIX FOR WINDOWS.
 	//
 	//	qemu-system-x86_64: -device qemu-xhci,id=xhci: Duplicate ID 'xhci' for device
 	//
-	// so only the tablet is added there. The bus is the one `StorageArgs` created.
-	if boot.OS == machine.MacOS {
-		args = append(args, "-device", "usb-tablet,bus=xhci.0")
-	} else {
-		args = append(args,
-			"-device", "qemu-xhci,id=xhci",
-			"-device", "usb-tablet,bus=xhci.0",
-		)
-	}
+	// The daemon used to append the controller and the tablet at the end of its own argument list. A
+	// Windows boot already has an ANSWER CD and a DRIVER CD, so `StorageArgs` had created the xHCI
+	// controller for those - and the daemon, unable to see that, asked for a second one with the same
+	// id. qemu refuses rather than merging, so the machine never started and the failure arrived as
+	//
+	//	boot: qmp /work/drive.sock.qmp: connect: no such file or directory (waited 30s)
+	//
+	// which points at the socket rather than at the argument that killed qemu. See `Boot.StorageArgs`.
 
 	// FIRMWARE. OVMF for Windows and Linux, OpenCore for macOS - and the variables file is COPIED
 	// rather than referenced, because qemu writes to it.

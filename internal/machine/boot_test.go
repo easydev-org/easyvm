@@ -770,3 +770,60 @@ func TestTheMacOSAdapterIsBareVmwareSVGA(t *testing.T) {
 			"with `No Kext Loaded`, so the wallpaper layer could not be drawn")
 	}
 }
+
+// THE xHCI CONTROLLER IS NAMED ONCE, WHATEVER THE MACHINE HAS ON ITS USB BUS.
+//
+// MEASURED ON THE WINDOWS LEG:
+//
+//	qemu-system-x86_64: -device qemu-xhci,id=xhci: Duplicate ID 'xhci' for device
+//
+// A Windows boot has an ANSWER CD and a DRIVER CD, both on `usb-storage`, so `StorageArgs` had created
+// the controller for those - and the daemon appended `qemu-xhci,id=xhci` again for the pointer, with no
+// way to know it was already there. QEMU REFUSES RATHER THAN MERGING, so the machine never started, and
+// the failure surfaced as
+//
+//	boot: qmp /work/drive.sock.qmp: connect: no such file or directory (waited 30s)
+//
+// which names the socket instead of the argument that killed qemu - a diagnosis that costs a run.
+//
+// THE POINTER LIVES IN `StorageArgs` NOW, because it is one more thing on this machine's USB bus and
+// `xhciAdded` is the only code that knows how many things that is. This test states the invariant.
+func TestTheUSBControllerIsNamedOnce(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		b    Boot
+	}{
+		{"an installer and nothing else", Boot{OS: Linux, Disk: "/d.qcow2", ISO: "/i.iso"}},
+		{"windows, with an answer CD and a driver CD", Boot{OS: Windows, Disk: "/d.qcow2",
+			ISO: "/w.iso", AnswerCD: "/a.iso", DriverCD: "/v.iso"}},
+		{"macos, with a recovery disk", Boot{OS: MacOS, Disk: "/d.qcow2", Recovery: "/r.dmg",
+			BootImage: "/b.img", OpenCoreROM: "/rom", OpenCoreVars: "/vars"}},
+		{"bsd from a usb cd", Boot{OS: BSD, Disk: "/d.qcow2", ISO: "/g.iso"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			args := tc.b.StorageArgs()
+			n := 0
+			for i, a := range args {
+				if a == "-device" && i+1 < len(args) && strings.HasPrefix(args[i+1], "qemu-xhci,id=xhci") {
+					n++
+				}
+			}
+			if n != 1 {
+				t.Fatalf("the controller is named %d time(s), want exactly 1. Two is "+
+					"`Duplicate ID 'xhci' for device`, which is qemu refusing to start at all", n)
+			}
+			// AND THE TABLET IS ON IT, because a controller with nothing attached is a bus a person
+			// cannot point at.
+			tablet := false
+			for i, a := range args {
+				if a == "-device" && i+1 < len(args) && strings.HasPrefix(args[i+1], "usb-tablet") {
+					tablet = true
+				}
+			}
+			if !tablet {
+				t.Error("no usb-tablet: every guest needs a pointer, and `virtio-tablet-pci` is not " +
+					"one FreeBSD has a driver for")
+			}
+		})
+	}
+}
