@@ -1,0 +1,21 @@
+# THE BROWSER SURFACE, REACHABLE AS http://easyvm-<os>.develop.svc/easyvm/
+#
+# THE POD LISTENS ON 8080 AND THE SERVICE MAPS 80 -> 8080, which is the whole of the exposure: no
+# ingress, no port-forward, no second deployment. A person inside the cluster opens the Service name
+# and sees the machine; the same Service is what the CLI talks to with
+#
+#	EASYVM_HTTP=easyvm-macos.develop.svc:80 easyvm status
+#
+# ONE SERVICE PER OS, because one pod is one guest. The selectors are the pod labels the launcher
+# already sets (`app: easyvm-<os>`), so nothing about the pod needs to change.
+apiVersion: v1
+kind: Service
+metadata:
+  name: easyvm-macos
+spec:
+  selector:
+    app: easyvm-macos
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080

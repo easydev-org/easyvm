@@ -89,7 +89,13 @@ type Request struct {
 	//	type     Text                       a string, typed at the driver's pace
 	//	screenshot                          write a frame and answer with its path and size
 	//	frames                              the recording's frame files, newest last
-	X, Y int    `json:"x,omitempty"`
+	// X AND Y ARE DECLARED SEPARATELY BECAUSE THEY CARRY DIFFERENT TAGS. `X, Y int` with one tag
+	// gives field Y the tag `x` as well - `go vet` refuses it, and it shipped because `go build`
+	// does not run vet: the image's `binary` job failed on
+	//
+	//	internal/protocol/protocol.go:92:5: struct field Y repeats json tag "x"
+	X    int    `json:"x,omitempty"`
+	Y    int    `json:"y,omitempty"`
 	Key  string `json:"key,omitempty"`
 	Text string `json:"text,omitempty"`
 }
