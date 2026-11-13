@@ -50,8 +50,22 @@ func (e *Executor) doLoop(s walk.Step) error {
 		return fail(s.Name, "`loop:` must say `max:` - a loop with no ceiling presses a key until "+
 			"the stage times out")
 	}
-	if max > 200 {
-		return fail(s.Name, "`loop: max: %.0f` is over the ceiling of 200 attempts", max)
+	// THE CEILING IS TIME, NOT ATTEMPTS, AND MY FIRST NUMBER WAS A GUESS THAT BROKE AN INSTALL.
+	//
+	// MEASURED: ubuntu-install reached step 26 of 29 and failed with
+	//
+	//	the installer finishes: `loop: max: 270` is over the ceiling of 200 attempts
+	//
+	// - 270 x 10 seconds is FORTY-FIVE MINUTES, which is an ordinary Ubuntu install. A ceiling of 200
+	// attempts said "no loop may take longer than thirty-three minutes", which is not a fact about
+	// this repository; it was a number small enough to feel safe.
+	//
+	// SO THE BOUND IS THE STEP'S OWN `timeout:`, and `max` is bounded by that: a loop cannot ask to
+	// run longer than the step is willing to wait. 24 hours is the ceiling on the ceiling - a guard
+	// against a typo that would otherwise run until the job is killed, not a judgement about how long
+	// an install takes.
+	if max > 24*60*60 {
+		return fail(s.Name, "`loop: max: %.0f` is absurd; the ceiling is one day of attempts", max)
 	}
 	action, ok := raw["do"].([]any)
 	if !ok || len(action) == 0 {
