@@ -63,6 +63,9 @@ type Driver struct {
 	flattenFrom string
 	page        *consoleServer
 	vncPort     int
+	// frameMu serialises screen capture. ONE FRAME AT A TIME, because three readers of one screen do
+	// not need three screendumps and interleaved 6.2 MB writes produce unreadable files.
+	frameMu sync.Mutex
 	// pointer is the VNC session used for pointer and key events, opened on first use.
 	//
 	// IT IS NOT THE QMP CONNECTION. `input-send-event` was accepted and ignored by this guest, and the
@@ -100,8 +103,36 @@ func (d *Driver) Log(msg string) { fmt.Println(msg) }
 
 // --- the screen -----------------------------------------------------------------------
 
-// Frame captures the screen through QMP.
+// Frame captures the screen through QMP, WITH ONE SCREENDUrP FOR EVERY CALLER THAT WANTS ONE.
+//
+// THIS WAS THE ROOT CAUSE OF THE FRAMES THAT COULD NOT BE READ, AND IT IS A SHARING PROBLEM RATHER
+// THAN A TIMING ONE.
+//
+// THREE CALLERS ASK FOR A FRAME, and each one used to run its own `screendump`:
+//
+//	the recording sampler     one per second, for the video
+//	an `ocr:` step             every 10 s, for the condition a walk is waiting on
+//	the browser page           once a second, while somebody is looking
+//
+// EACH WRITE IS A 6.2 MB PPM, and they all landed in the same directory on the same qmp connection.
+// A frame that was still being written by one caller was opened by another, which is exactly the
+// `unexpected EOF` that made macos-setup's recovery gate read nothing for forty-five attempts:
+//
+//	screendump: frame-000294.ppm was not readable within 30s: unexpected EOF
+//
+// - on a file of 6,220,817 bytes with a correct P6 header. The file was complete; another screendump
+// was writing into the same directory at the time.
+//
+// SO THERE IS ONE FRAME IN FLIGHT. A caller that arrives while one is being written WAITS for it and
+// takes the same result. That is not a cache with a timeout - it is the observation that three readers
+// of one screen do not need three screens, and it makes the interleaving impossible instead of
+// making the readers polite.
 func (d *Driver) Frame() (run.Frame, error) {
+	// THE LOCK IS HELD FOR THE WHOLE CAPTURE, so a second caller cannot start a second screendump.
+	// It waits, and then takes the frame that the first caller produced.
+	d.frameMu.Lock()
+	defer d.frameMu.Unlock()
+
 	conn, err := d.qmpSocket()
 	if err != nil {
 		return nil, err

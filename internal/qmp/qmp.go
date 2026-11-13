@@ -190,12 +190,55 @@ func (c *Conn) Screendump(dir string) (Frame, error) {
 // a frame is 6 MB, which is milliseconds against a screendump that just spent longer writing it.
 func waitForStable(path string, limit time.Duration) error {
 	deadline := time.Now().Add(limit)
-	var lastErr error
+	var lastSize int64 = -1
+	var lastHeader int
 	for time.Now().Before(deadline) {
+		fi, err := os.Stat(path)
+		if err != nil {
+			lastSize, lastHeader = -1, 0
+			time.Sleep(50 * time.Millisecond)
+			continue
+		}
+		lastSize = fi.Size()
+
+		// THE HEADER SAYS HOW MANY BYTES THE FILE WILL BE, SO "DONE" IS ARITHMETIC.
+		//
+		// A PPM's size is decided before the first pixel is written:
+		//
+		//	header length + width * height * channels
+		//
+		// and qemu writes the header first. So a file whose size EQUALS that number is finished - not
+		// "probably finished", not "stable for two polls", but complete by the format's own rule. Every
+		// other judgement is a guess about a race:
+		//
+		//	A SIZE THAT STOPPED GROWING IS NOT A FINISHED WRITE. It is a finished write OR a writer
+		//	that has been descheduled, and the two are indistinguishable from outside. The previous
+		//	version of this function used the decoder as the judge and re-read all 6.2 MB every 20 ms
+		//	until it passed, which on a loaded disk meant the reader and the writer never let each
+		//	other finish:
+		//
+		//		screendump: frame-000294.ppm was not readable within 30s: unexpected EOF
+		//
+		//	thirty seconds, on a file of exactly 6,220,817 bytes with a correct P6 header.
+		//
+		//	A DECODE ON A COMPLETE FILE IS A REAL CHECK AND IS STILL DONE, once, at the end - because
+		//	a file of the right length can still be corrupt, and a caller that gets a path it cannot
+		//	read has been handed a lie.
+		need, hdr, ok := ppmExpectedSize(path)
+		if !ok {
+			// the header is not there yet, so there is nothing to compare against
+			lastHeader = 0
+			time.Sleep(50 * time.Millisecond)
+			continue
+		}
+		lastHeader = hdr
+		if fi.Size() < need {
+			time.Sleep(50 * time.Millisecond)
+			continue
+		}
 		fh, err := os.Open(path)
 		if err != nil {
-			lastErr = err
-			time.Sleep(20 * time.Millisecond)
+			time.Sleep(50 * time.Millisecond)
 			continue
 		}
 		_, _, decErr := image.Decode(fh) // registered: see the blank import in internal/screen
@@ -203,13 +246,58 @@ func waitForStable(path string, limit time.Duration) error {
 		if decErr == nil {
 			return nil
 		}
-		lastErr = decErr
-		time.Sleep(20 * time.Millisecond)
+		return fmt.Errorf("screendump: %s is %d bytes, the header says %d, and it does not decode: %w",
+			path, fi.Size(), need, decErr)
 	}
-	if lastErr == nil {
-		lastErr = fmt.Errorf("the file never appeared")
+	switch {
+	case lastSize < 0:
+		return fmt.Errorf("screendump: %s never appeared within %s", path, limit)
+	case lastHeader == 0:
+		return fmt.Errorf("screendump: %s is %d bytes and its PPM header never became readable "+
+			"within %s", path, lastSize, limit)
+	default:
+		return fmt.Errorf("screendump: %s is %d bytes after %s and its header says %d - the write "+
+			"did not finish", path, lastSize, limit, lastHeader)
 	}
-	return fmt.Errorf("screendump: %s was not readable within %s: %w", path, limit, lastErr)
+}
+
+// ppmExpectedSize is the byte count a complete PPM will have, read from its own header.
+//
+// IT IS PARSED FROM THE FILE RATHER THAN FROM THE SCREEN SIZE because the two are not the same
+// question: a guest that switches mode mid-write produces a frame of the OLD size, and a caller that
+// assumed the new one would wait for bytes that are never coming.
+func ppmExpectedSize(path string) (need int64, headerLen int, ok bool) {
+	fh, err := os.Open(path)
+	if err != nil {
+		return 0, 0, false
+	}
+	defer fh.Close()
+	// A PPM header is `P6\n<w> <h>\n<max>\n`, which is under 32 bytes for any screen this drives.
+	head := make([]byte, 64)
+	n, _ := fh.Read(head)
+	if n == 0 {
+		return 0, 0, false
+	}
+	data := head[:n]
+	if !strings.HasPrefix(string(data), "P6") {
+		return 0, 0, false
+	}
+	hl := ppmHeaderLen(data)
+	if hl == 0 {
+		return 0, 0, false
+	}
+	fields := strings.Fields(string(data[:hl]))
+	if len(fields) < 3 {
+		return 0, 0, false
+	}
+	var w, h int
+	if _, err := fmt.Sscanf(fields[1]+" "+fields[2], "%d %d", &w, &h); err != nil {
+		return 0, 0, false
+	}
+	if w <= 0 || h <= 0 {
+		return 0, 0, false
+	}
+	return int64(hl) + int64(w)*int64(h)*3, hl, true
 }
 
 // ppmSize reads the width and height from a binary PPM's header.
