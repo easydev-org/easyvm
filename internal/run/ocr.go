@@ -368,3 +368,75 @@ func (e *Executor) doUntilFact(s walk.Step) error {
 	}
 	return nil
 }
+
+// `if:` RUNS a step list when a boolean is TRUE; `else:` when it is false.
+//
+// EVERY CONDITION PRODUCES A BOOLEAN NOW, AND THAT IS WHAT MAKES A BRANCH POSSIBLE. Before this, a
+// gate answered by RETURNING from the executor: `until:` returned nil or an error, `unless:` skipped
+// and continued. A return value cannot be asked about twice, cannot be named in a log line, and
+// cannot be the subject of an `if:` - which is why an installer with two possible first screens had
+// to be written as three steps that each guessed.
+//
+//   - name: the installer opened straight onto a wizard
+//     check:
+//     name: wizard_up
+//     from: screen
+//     says_any: [[welcome], [language]]
+//
+//   - name: close the update nag, if this build shows one
+//     if: wizard_up
+//     then:
+//
+//   - at: [1464, 194]
+//     wait_after: 3
+//     else:
+//
+//   - key: esc
+//     wait_after: 1
+//
+// `if:` TAKES A NAME AND NOTHING ELSE, for the same reason `until: {fact:}` does: the comparison
+// belongs to `check:`, so a branch cannot also decide what the screen means. `then:` and `else:` are
+// plain step lists - they run through the ordinary dispatcher, so a branch can contain a loop or a
+// nested `if:` without a second vocabulary.
+func (e *Executor) doIf(s walk.Step) error {
+	name := s.Get("if")
+	if strings.TrimSpace(name) == "" {
+		return fail(s.Name, "`if:` must name a boolean a `check:` step produced")
+	}
+	value, ok := e.facts[name]
+	if !ok {
+		return fail(s.Name, "`if: %s` names a boolean no `check:` step has made. A `check:` step "+
+			"has to come first, in file order, with `name: %s`", name, name)
+	}
+
+	branch, label := "else", "else"
+	if value {
+		branch, label = "then", "then"
+	}
+	raw, ok := s.Spec[branch].([]any)
+	if !ok {
+		// A MISSING BRANCH IS NOT AN ERROR. `if:` with only `then:` is the ordinary case, and an
+		// empty branch is not a step that did nothing - it is a branch this run does not need.
+		e.Driver.Log(fmt.Sprintf("  %s: %s is %v, and there is no `%s:` to run",
+			s.Name, name, value, branch))
+		return nil
+	}
+	e.Driver.Log(fmt.Sprintf("  %s: %s is %v -> running %d step(s) of `%s:`",
+		s.Name, name, value, len(raw), label))
+
+	for i, item := range raw {
+		spec, ok := item.(map[string]any)
+		if !ok {
+			return fail(s.Name, "`%s[%d]` is not a mapping", branch, i)
+		}
+		sub := walk.Step{
+			Index: s.Index,
+			Name:  fmt.Sprintf("%s [%s %d]", s.Name, branch, i+1),
+			Spec:  spec,
+		}
+		if err := e.runOne(sub); err != nil {
+			return err
+		}
+	}
+	return nil
+}

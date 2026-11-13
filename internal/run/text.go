@@ -257,11 +257,28 @@ func (e *Executor) doUntil(s walk.Step) error {
 	if err != nil {
 		return fail(s.Name, "%v", err)
 	}
+	okNow := false
+	var hit string
 	for _, set := range alternatives {
 		if says(words, set) {
-			e.Driver.Log(fmt.Sprintf("  saw %q", strings.Join(set, " ")))
-			return nil
+			okNow, hit = true, strings.Join(set, " ")
+			break
 		}
+	}
+	// EVERY CONDITION CAN BIND ITS RESULT, SO EVERY CONDITION PRODUCES A BOOLEAN.
+	//
+	// `as: <name>` makes the answer a value a later `if:` can ask about, which is what turns a gate
+	// from "this step stops the walk" into "this step answers a question". Without it the only way
+	// to act on a negative result was an error, and an error ends the walk.
+	if name := s.Get("as"); name != "" {
+		if e.facts == nil {
+			e.facts = make(map[string]bool)
+		}
+		e.facts[name] = okNow
+	}
+	if okNow {
+		e.Driver.Log(fmt.Sprintf("  saw %q", hit))
+		return nil
 	}
 	return failWithScreen(s.Name, e.Driver, "the screen does not show %s; read: %s",
 		describeSets(alternatives), truncateWords(words, 16))
@@ -296,11 +313,25 @@ func (e *Executor) doUnless(s walk.Step) error {
 		// a screen nobody looked at, which is the failure the whole check exists to prevent.
 		return fail(s.Name, "could not read the screen to decide `unless`: %v", err)
 	}
+	already, hit := false, ""
 	for _, want := range alternatives {
 		if says(words, want) {
-			e.Driver.Log(fmt.Sprintf("  skipped: the screen already shows %q", strings.Join(want, " ")))
-			return nil
+			already, hit = true, strings.Join(want, " ")
+			break
 		}
+	}
+	if name := s.Get("as"); name != "" {
+		if e.facts == nil {
+			e.facts = make(map[string]bool)
+		}
+		// THE NAME IS THE QUESTION, NOT THE ANSWER: `unless: [done] as: delivered` means
+		// `delivered` is true when the words were NOT there. A boolean that changes meaning with the
+		// key that made it is a trap, so it is documented here and in the vocabulary.
+		e.facts[name] = !already
+	}
+	if already {
+		e.Driver.Log(fmt.Sprintf("  skipped: the screen already shows %q", hit))
+		return nil
 	}
 	// THE STEP CONTINUES. `unless` is a gate on the rest of the same step, and the dispatcher ran
 	// this first.

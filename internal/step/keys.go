@@ -367,6 +367,17 @@ var Keys = map[string]Key{
 		Summary: "with `check:`: every one of these words must be in the reading"},
 	"says_any": {Name: "says_any", Kind: KindWordSets,
 		Summary: "with `check:`: any one of these word-sets must be in the reading"},
+	"as": {Name: "as", Kind: KindString,
+		Summary: "bind a condition's result as a named boolean: `until_any: [...] as: up`. The " +
+			"name can then be tested by `if:` and `until: {fact: ...}`. With `unless:` the " +
+			"boolean is TRUE when the words were NOT there"},
+	"if": {Name: "if", Kind: KindString,
+		Summary: "run `then:` when this named boolean is true and `else:` when it is false. The " +
+			"boolean comes from a `check:` step; a branch is a plain step list"},
+	"then": {Name: "then", Kind: KindList,
+		Summary: "with `if:`: the steps to run when the boolean is true"},
+	"else": {Name: "else", Kind: KindList,
+		Summary: "with `if:`: the steps to run when the boolean is false"},
 	"fact": {Name: "fact", Kind: KindString,
 		Summary: "with `until:` inside a loop: the boolean a `check:` step produced. `until:` " +
 			"tests it and can do nothing else - the comparison belongs to `check:`"},

@@ -219,6 +219,8 @@ func (e *Executor) runOne(s walk.Step) error {
 		return e.doCheck(s)
 	case s.Has("loop"):
 		return e.doLoop(s)
+	case s.Has("if"):
+		return e.doIf(s)
 	case s.Has("require_ssh"):
 		return e.doRequireSSH(s)
 	case s.Has("ssh"):
