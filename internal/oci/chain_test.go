@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 
@@ -395,4 +396,75 @@ func TestEveryLegThatWritesADiskPublishesIt(t *testing.T) {
 		t.Fatal("no legs with an `out:` were found")
 	}
 	t.Logf("checked %d writing leg(s)", checked)
+}
+
+// A LEG'S `publish` MUST BE THE NAME THE NEXT LEG PULLS.
+//
+// MEASURED ON windows-vm-configure, WHICH WAITED THIRTY MINUTES FOR A DISK THAT WAS ALREADY THERE:
+//
+//	windows-ssh              pull='windows11'     publish='windows-ssh'
+//	windows-vm-configure     pull='windows11-ssh'
+//	windows11-ssh: 404  (60 attempts, thirty minutes)
+//	the input disk is windows11
+//	status: failed step 3/20 "wait for sshd"
+//
+// THE SSH LEG PUBLISHED `windows-ssh` - ITS OWN JOB NAME - WHILE THE LEG AFTER IT PULLED
+// `windows11-ssh`, THE DISK'S NAME. THE TWO NAMES NEVER MET.
+//
+// This was introduced by a script that filled every empty `publish` from the leg's own name. That is
+// RIGHT FOR LINUX, whose tags happen to equal their leg names (`linux-ubuntu-ssh`), and WRONG FOR
+// WINDOWS AND MACOS, whose disks are named after the release (`windows11`, `macos15`). The failure it
+// causes is a thirty-minute wait and a timeout that looks like a broken walk.
+//
+// THE CHECK IS ON THE CHAIN, NOT THE SPELLING: every leg with a `pull` must find that exact tag among
+// the `publish` values of the legs in the same workflow.
+func TestEveryPullIsSomebodysPublish(t *testing.T) {
+	root := filepath.Join("..", "..", ".github", "workflows")
+	files, err := filepath.Glob(filepath.Join(root, "*.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked := 0
+	for _, name := range files {
+		base := filepath.Base(name)
+		switch base {
+		case "stage.yml", "image.yml", "artifacts-publish.yml", "sandbox.yml":
+			continue
+		}
+		body, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("cannot read %s: %v", name, err)
+		}
+		legs := legsOf(t, body)
+		if len(legs) == 0 {
+			continue
+		}
+		published := map[string]string{}
+		for _, leg := range legs {
+			if leg.publish != "" {
+				published[leg.publish] = leg.name
+			}
+		}
+		for _, leg := range legs {
+			if leg.pull == "" {
+				continue // the first leg of a chain takes no disk
+			}
+			checked++
+			if _, ok := published[leg.pull]; !ok {
+				var have []string
+				for tag := range published {
+					have = append(have, tag)
+				}
+				sort.Strings(have)
+				t.Errorf("%s: %q pulls %q and NOTHING publishes it. The tags this workflow "+
+					"publishes are %v. A leg whose publish is its own job name instead of the "+
+					"disk's name leaves the next leg waiting thirty minutes for a tag that will "+
+					"never exist - measured on windows-vm-configure", base, leg.name, leg.pull, have)
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no legs with a `pull:` were found")
+	}
+	t.Logf("checked %d pulling leg(s)", checked)
 }

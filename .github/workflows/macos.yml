@@ -70,7 +70,7 @@ jobs:
             "pull": "macos15",
             "out": "macos15-ssh.qcow2",
             "timeout": 90,
-            "publish": "macos-ssh"
+            "publish": "macos15-ssh"
           },
           {
             "name": "macos-vm-configure",
@@ -79,7 +79,7 @@ jobs:
             "fallback": "macos15",
             "out": "macos15-vm-configure.qcow2",
             "timeout": 90,
-            "publish": "macos-vm-configure"
+            "publish": "macos15-vm-configure"
           },
           {
             "name": "macos-dev",
@@ -88,6 +88,6 @@ jobs:
             "fallback": "macos15 macos15-ssh",
             "out": "macos15-dev.qcow2",
             "timeout": 150,
-            "publish": "macos-dev"
+            "publish": "macos15-dev"
           }
         ]

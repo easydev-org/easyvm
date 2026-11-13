@@ -67,7 +67,7 @@ jobs:
             "pull": "windows11",
             "out": "windows11-ssh.qcow2",
             "timeout": 70,
-            "publish": "windows-ssh"
+            "publish": "windows11-ssh"
           },
           {
             "name": "windows-vm-configure",
@@ -76,7 +76,7 @@ jobs:
             "fallback": "windows11",
             "out": "windows11-vm-configure.qcow2",
             "timeout": 70,
-            "publish": "windows-vm-configure"
+            "publish": "windows11-vm-configure"
           },
           {
             "name": "windows-dev",
@@ -85,6 +85,6 @@ jobs:
             "fallback": "windows11 windows11-ssh",
             "out": "windows11-dev.qcow2",
             "timeout": 120,
-            "publish": "windows-dev"
+            "publish": "windows11-dev"
           }
         ]

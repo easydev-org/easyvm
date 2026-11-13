@@ -73,7 +73,7 @@ jobs:
           {
             "name": "bsd-ghostbsd-vm",
             "file": "bsd/ghostbsd/steps/vm-configure.yaml",
-            "pull": "bsd-ghostbsd-mate-ssh",
+            "pull": "bsd-ghostbsd-ssh",
             "fallback": "bsd-ghostbsd-mate",
             "out": "bsd-ghostbsd-vm.qcow2",
             "timeout": 60,
