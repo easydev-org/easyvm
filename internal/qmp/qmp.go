@@ -26,11 +26,17 @@ package qmp
 import (
 	"errors"
 	"fmt"
+	"image"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+
+	// THE FRAME THIS PACKAGE WRITES IS A P6 PPM, AND THE DECODER IS WHAT DECIDES WHEN IT IS DONE.
+	// A blank import registers the format with `image.Decode`, which `waitForStable` calls - the
+	// same decoder `internal/screen` uses, so "complete" has ONE definition rather than two.
+	_ "github.com/kovidgoyal/imaging/netpbm"
 
 	qemump "github.com/digitalocean/go-qemu/qmp"
 	"github.com/digitalocean/go-qemu/qmp/raw"
@@ -149,37 +155,48 @@ func (c *Conn) Screendump(dir string) (Frame, error) {
 	return Frame{Path: path, Width: w, Height: h}, nil
 }
 
-// waitForStable waits until the PPM is COMPLETE, which is not the same as "its size stopped moving".
+// waitForStable waits until the frame DECODES, because that is what the caller does with it.
 //
-// A STABLE SIZE FOR FORTY MILLISECONDS IS NOT A FINISHED FILE. qemu writes a screendump in chunks,
-// and a gap between two chunks is indistinguishable from the end of the write if the only thing
-// being watched is the size - so the reader was handed a truncated image and answered
+// MEASURED ON macos-setup, AND THE NUMBERS ARE THE POINT:
+//
+//	the recording sampler: 1803 frames captured, 2 tick(s) lost   <- it only WRITES
+//	the recovery menu gate: 165 of 179 poll(s) read no frame at all <- it also DECODES
+//
+// Same connection, same directory, same counter, same 1920x1080 screen. The reader that only takes
+// the file almost never failed; the reader that then decoded it failed nine times in ten, with
 //
 //	frame-001972.ppm: unexpected EOF (is the write still in progress? format "ppm")
 //
-// MEASURED ON macos-setup: `165 of 178 poll(s) read no frame at all`, EVERY ONE OF THEM UNEXPECTED
-// EOF. At 640x480 a frame is 921 KB and the gaps rarely land badly; at 1920x1080 it is 6.2 MB and
-// the gate spent thirty minutes reading half-written pictures. The recorded video looked perfect
-// throughout, because it is made from the frames that DID decode.
+// - AND THAT ERROR COMES FROM THE DECODER, NOT FROM A SIZE CHECK. The arithmetic test this replaced
+// (`stat size >= header + width*height*3`) PASSED on files the PPM decoder could not read to the end,
+// so the gate was handed frames its own next call rejected. Two definitions of "complete" is one too
+// many: this one now uses the consumer's.
 //
-// THE HEADER ALREADY SAYS HOW BIG THE FILE MUST BE - `P6`, width, height, maxval - so completion is
-// arithmetic rather than a guess: header length plus width*height*3 bytes. `ppmSize` performs
-// exactly that check and is what the caller needs anyway, so this waits on it instead of on a clock.
+// THE COST IS ONE EXTRA DECODE per frame, and it buys the only guarantee that matters - a caller
+// never receives a path it cannot read. `image.Decode` is already imported by `internal/screen`, and
+// a frame is 6 MB, which is milliseconds against a screendump that just spent longer writing it.
 func waitForStable(path string, limit time.Duration) error {
 	deadline := time.Now().Add(limit)
 	var lastErr error
 	for time.Now().Before(deadline) {
-		if _, _, err := ppmSize(path); err == nil {
-			return nil
-		} else {
+		fh, err := os.Open(path)
+		if err != nil {
 			lastErr = err
+			time.Sleep(20 * time.Millisecond)
+			continue
 		}
+		_, _, decErr := image.Decode(fh) // registered: see the blank import in internal/screen
+		_ = fh.Close()
+		if decErr == nil {
+			return nil
+		}
+		lastErr = decErr
 		time.Sleep(20 * time.Millisecond)
 	}
 	if lastErr == nil {
 		lastErr = fmt.Errorf("the file never appeared")
 	}
-	return fmt.Errorf("screendump: %s was not complete within %s: %w", path, limit, lastErr)
+	return fmt.Errorf("screendump: %s was not readable within %s: %w", path, limit, lastErr)
 }
 
 // ppmSize reads the width and height from a binary PPM's header.
