@@ -63,7 +63,14 @@ steps:
 - name: wait for the desktop
   desktop: windows
   timeout: 5400
-- name: shut the machine down
+- name: reboot into the installed system
+  boot: true
+  os: windows
+  timeout: 900
+- name: the installed system reaches a desktop
+  desktop: windows
+  timeout: 1800
+- name: shut the installed system down
   shutdown: acpi
   timeout: 300
 - name: publish the disk

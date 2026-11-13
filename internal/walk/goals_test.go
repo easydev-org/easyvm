@@ -1725,3 +1725,53 @@ func TestNoRunNestsPowerShellInsidePowerShell(t *testing.T) {
 	}
 	t.Logf("checked %d typed command(s); %d PowerShell launch(es)", checked, opened)
 }
+
+// AN INSTALL LEG THAT PUBLISHES A DISK MUST BOOT THAT DISK BEFORE PUBLISHING IT.
+//
+// MEASURED ON windows-ssh, ON A DISK `windows-install` HAD JUST PUBLISHED:
+//
+//	pulled ghcr.io/easydev-org/easyvm:windows11 (10890 MiB)
+//	failed step 4/31 "wait for the desktop"
+//	drop=+1.6 (need 15) ratio=0.0x (need 2)
+//
+// and the extracted frames are PURE BLACK at mean luminance 1.32 from thirty seconds to eight
+// hundred, carrying nothing but the firmware's own `BdsDxe: loading ...` lines. The machine never
+// left the firmware: the disk installed and could not be started again.
+//
+// THE INSTALLER'S DESKTOP PROVES THE INSTALLER RAN, NOT THAT THE DISK BOOTS. A reboot between them
+// is the only thing that tells the two apart, and putting it in the install leg means a bad disk
+// fails where it was made, with its own recording, instead of fifteen minutes into the next stage.
+func TestTheInstallingLegThatWasMeasuredUnbootableRebootsItsDisk(t *testing.T) {
+	root := filepath.Join("..", "..")
+	// WINDOWS ONLY, BECAUSE THAT IS THE ONE THAT WAS MEASURED. `windows-install` published a
+	// 10890 MiB `windows11` that booted to nothing but the TianoCore logo - the ssh leg that pulled
+	// it spent fifteen minutes on `wait for the desktop` with `ratio=0.0x`, and every extracted
+	// frame was black at mean luminance 1.32.
+	//
+	// THE LINUX INSTALL LEGS ARE NOT CHANGED BY THIS. `linux-ubuntu` installs, publishes, and its
+	// own ssh leg boots the result - the cycle is proven there, so demanding a second boot of twelve
+	// healthy legs would add twenty minutes each to prove something already measured.
+	//
+	// WHEN A LINUX LEG FAILS THIS WAY, ADD IT HERE WITH ITS OWN MEASUREMENT.
+	cases := []struct{ path string }{
+		{"windows/11/steps/install.yaml"},
+	}
+	for _, c := range cases {
+		doc, err := Load(filepath.Join(root, c.path), nil)
+		if err != nil {
+			t.Fatalf("%s: %v", c.path, err)
+		}
+		booted := 0
+		for _, s := range doc.Steps {
+			if s.Has("boot") {
+				booted++
+			}
+		}
+		if booted < 2 {
+			t.Errorf("%s boots %d time(s) and publishes a disk. One boot is the INSTALLER; a disk "+
+				"that installs and cannot start again is indistinguishable from a good one until "+
+				"the next stage spends its timeout on a firmware logo - measured on windows-ssh "+
+				"against a 10890 MiB `windows11`, whose every frame was black", c.path, booted)
+		}
+	}
+}
