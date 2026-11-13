@@ -54,7 +54,8 @@ steps:
     check:
       name: done
       from: screen
-      says_any:
+      mode: says_any
+      words:
       - - installation
         - method
       - - installation
@@ -125,7 +126,8 @@ steps:
     check:
       name: done
       from: screen
-      says_any:
+      mode: says_any
+      words:
       - - installation
         - method
       - - let's
@@ -199,7 +201,8 @@ steps:
     check:
       name: done
       from: screen
-      says_any:
+      mode: says_any
+      words:
       - - welcome
         - to
         - fedora

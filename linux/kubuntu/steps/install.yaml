@@ -54,7 +54,8 @@ steps:
     check:
       name: done
       from: screen
-      says_any:
+      mode: says_any
+      words:
       - - welcome
         - to
         - kubuntu
@@ -242,7 +243,8 @@ steps:
     check:
       name: done
       from: screen
-      says_any:
+      mode: says_any
+      words:
       - - all
         - done
       - - reboot

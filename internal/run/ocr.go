@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -213,12 +215,12 @@ func parseOCRStep(s walk.Step) (ocrSpec, error) {
 func (e *Executor) doCheck(s walk.Step) error {
 	raw, ok := s.Spec["check"].(map[string]any)
 	if !ok {
-		return fail(s.Name, "`check:` must be a mapping: name, from, and says/says_any")
+		return fail(s.Name, "`check:` must be a mapping: name, from, mode, and the mode's argument")
 	}
 	name, _ := raw["name"].(string)
 	if strings.TrimSpace(name) == "" {
 		return fail(s.Name, "`check:` must name the boolean it produces: "+
-			"`check: {name: done, from: page, says_any: [...]}`")
+			"`check: {name: done, from: page, mode: says_any, words: [[welcome]]}`")
 	}
 	from, _ := raw["from"].(string)
 	if strings.TrimSpace(from) == "" {
@@ -230,74 +232,168 @@ func (e *Executor) doCheck(s walk.Step) error {
 			"step has to come first, in file order, with that `name:`", from)
 	}
 
-	// THREE KINDS OF COMPARISON, AND A CHECK MAY USE ONE OF THEM:
-	//
-	//	says: / says_any:      the reading holds these words
-	//	number_between: [a, b] the reading holds a number in this range
-	//	size_between: [a, b]   the same, in GB, for a disk's capacity
-	//
-	// THE NUMBER FORM IS WHAT MAKES A CHOICE EXPRESSIBLE. "Click the first disk, read its capacity,
-	// and use it only if it is between 60 and 200 GB" is a decision about arithmetic, and a word list
-	// cannot say it - `says: [200]` would match any reading that happened to contain the digits,
-	// including `1,200 GB` and `20.0 GB`.
-	var sets [][]string
-	if one := wordsOfMapping(raw, "says"); len(one) > 0 {
-		sets = append(sets, one)
-	}
-	for _, set := range wordSetsOfMapping(raw, "says_any") {
-		sets = append(sets, set)
-	}
-	lo, hasLo := numberOf(raw["number_between"], 0)
-	hi, hasHi := numberOf(raw["number_between"], 1)
-	sizeLo, hasSizeLo := numberOf(raw["size_between"], 0)
-	sizeHi, hasSizeHi := numberOf(raw["size_between"], 1)
-	isNumber := hasLo && hasHi
-	isSize := hasSizeLo && hasSizeHi
-	if len(sets) == 0 && !isNumber && !isSize {
-		return fail(s.Name, "`check:` needs `says:`, `says_any:`, `number_between:` or "+
-			"`size_between:` - a comparison with no target")
+	mode, _ := raw["mode"].(string)
+	if mode == "" {
+		return fail(s.Name, "`check:` must say `mode:` - HOW the reading is compared. The modes "+
+			"are: %s", strings.Join(checkModeNames(), ", "))
 	}
 
-	okNow := false
-	var hit string
-	for _, set := range sets {
-		if says(words, set) {
-			okNow = true
-			hit = strings.Join(set, " ")
-			break
-		}
+	okNow, detail, err := runCheckMode(s.Name, mode, words, raw)
+	if err != nil {
+		return fail(s.Name, "%v", err)
 	}
-	if !okNow && (isNumber || isSize) {
-		wantLo, wantHi := lo, hi
-		if isSize {
-			wantLo, wantHi = sizeLo, sizeHi
-		}
-		// `capacities` already converts MB to GB, so both units a pane might print are comparable.
-		found := capacities(words)
-		for _, n := range found {
-			if n >= wantLo && n <= wantHi {
-				okNow = true
-				hit = fmt.Sprintf("%.1f GB", n)
-				break
-			}
-		}
-		if !okNow {
-			hit = "nothing in range"
-			e.Driver.Log(fmt.Sprintf("  %s: capacities read %s; wanted %.0f..%.0f GB",
-				s.Name, formatNumbers(found), wantLo, wantHi))
-		}
-	}
+
 	if e.facts == nil {
 		e.facts = make(map[string]bool)
 	}
 	e.facts[name] = okNow
-	if okNow {
-		e.Driver.Log(fmt.Sprintf("  %s: %s = true (read %q)", s.Name, name, hit))
-	} else {
-		e.Driver.Log(fmt.Sprintf("  %s: %s = false (read %q, wanted %s)", s.Name, name,
-			truncateWords(words, 10), describeSets(sets)))
-	}
+	e.Driver.Log(fmt.Sprintf("  %s: %s = %v (mode %s: %s)", s.Name, name, okNow, mode, detail))
 	return nil
+}
+
+// runCheckMode applies ONE named comparison and says what it found.
+//
+// THE MODES ARE THE EXTENSION POINT, AND THIS IS WHY THEY ARE A STRING RATHER THAN FOUR KEYS.
+// A check used to be "one of these four keys is present", so the vocabulary grew a new top-level word
+// for every kind of comparison: `says`, `says_any`, `size_between`, `number_between`. THE FIFTH KIND
+// WOULD HAVE BEEN A FIFTH WORD, and a file could not be validated against "exactly one of them" in a
+// way a reader can scan. With `mode:` the kind is a VALUE, the vocabulary stays one key, and
+// `checkModeNames()` is the one place that lists what exists.
+func runCheckMode(step, mode string, words []string, raw map[string]any) (bool, string, error) {
+	switch mode {
+	case "says":
+		// ALL of these words, in any order.
+		want, err := modeWords(raw, "words")
+		if err != nil {
+			return false, "", err
+		}
+		if says(words, want) {
+			return true, fmt.Sprintf("read %q", strings.Join(want, " ")), nil
+		}
+		return false, fmt.Sprintf("missing from %q", truncateWords(words, 10)), nil
+
+	case "says_any":
+		// ANY one of these word-sets.
+		sets, err := modeWordSets(raw, "words")
+		if err != nil {
+			return false, "", err
+		}
+		for _, set := range sets {
+			if says(words, set) {
+				return true, fmt.Sprintf("read %q", strings.Join(set, " ")), nil
+			}
+		}
+		return false, fmt.Sprintf("none of %s in %q", describeSets(sets), truncateWords(words, 10)), nil
+
+	case "size_between":
+		// A CAPACITY in this GB range - the disk-choice comparison.
+		lo, hi, err := modeRange(raw)
+		if err != nil {
+			return false, "", err
+		}
+		found := capacities(words)
+		for _, n := range found {
+			if n >= lo && n <= hi {
+				return true, fmt.Sprintf("%.1f GB is in %.0f..%.0f", n, lo, hi), nil
+			}
+		}
+		return false, fmt.Sprintf("capacities %s, wanted %.0f..%.0f GB", formatNumbers(found), lo, hi), nil
+
+	case "number_between":
+		// ANY number in this range, whatever it is about.
+		lo, hi, err := modeRange(raw)
+		if err != nil {
+			return false, "", err
+		}
+		var found []float64
+		for _, f := range numbersIn(words) {
+			found = append(found, f)
+			if f >= lo && f <= hi {
+				return true, fmt.Sprintf("%.2f is in %.0f..%.0f", f, lo, hi), nil
+			}
+		}
+		return false, fmt.Sprintf("numbers %v, wanted %.0f..%.0f", found, lo, hi), nil
+
+	case "equals":
+		// THE WHOLE READING, normalised - for a field whose value is the entire pane.
+		want, _ := raw["text"].(string)
+		if strings.TrimSpace(want) == "" {
+			return false, "", fmt.Errorf("`mode: equals` needs `text:`")
+		}
+		got := normalise(strings.Join(words, " "))
+		if got == normalise(want) {
+			return true, fmt.Sprintf("%q", want), nil
+		}
+		return false, fmt.Sprintf("%q is not %q", truncateWords(words, 10), want), nil
+
+	case "contains":
+		// ONE SUBSTRING, case- and punctuation-insensitive. `says` needs whole words; this does not.
+		want, _ := raw["text"].(string)
+		if strings.TrimSpace(want) == "" {
+			return false, "", fmt.Errorf("`mode: contains` needs `text:`")
+		}
+		// THE JOINED READING, LOWERCASED BUT NOT STRIPPED: `contains` is about a phrase, and
+		// `normalise` removes the spaces that make a phrase a phrase.
+		got := strings.ToLower(strings.Join(words, " "))
+		if strings.Contains(got, strings.ToLower(want)) {
+			return true, fmt.Sprintf("contains %q", want), nil
+		}
+		return false, fmt.Sprintf("%q does not contain %q", truncateWords(words, 10), want), nil
+
+	case "matches":
+		// A REGULAR EXPRESSION over the normalised reading - for a pane whose text is a template.
+		pattern, _ := raw["pattern"].(string)
+		if strings.TrimSpace(pattern) == "" {
+			return false, "", fmt.Errorf("`mode: matches` needs `pattern:`")
+		}
+		re, err := regexp.Compile(pattern)
+		if err != nil {
+			return false, "", fmt.Errorf("`mode: matches` pattern %q: %w", pattern, err)
+		}
+		// THE SAME JOINED FORM `contains` uses, so a pattern can match across words. Stripping to
+		// letters and digits turned `copying 41 of 100` into `copying41of100`, which no expression
+		// written against what the pane shows would match.
+		got := strings.ToLower(strings.Join(words, " "))
+		if re.MatchString(got) {
+			return true, fmt.Sprintf("matched %q", pattern), nil
+		}
+		return false, fmt.Sprintf("%q did not match %q", truncateWords(words, 10), pattern), nil
+	}
+	return false, "", fmt.Errorf("`check: mode: %s` is not a mode; the modes are: %s",
+		mode, strings.Join(checkModeNames(), ", "))
+}
+
+// checkModeNames is the single list, so a new mode is added HERE and named in the error above.
+func checkModeNames() []string {
+	return []string{"says", "says_any", "size_between", "number_between", "equals", "contains", "matches"}
+}
+
+// modeWords reads a plain word list, `words:`.
+func modeWords(raw map[string]any, key string) ([]string, error) {
+	got := wordsOfMapping(raw, key)
+	if len(got) == 0 {
+		return nil, fmt.Errorf("`mode: says` needs `words: [a, b]`")
+	}
+	return got, nil
+}
+
+// modeWordSets reads a list of word-sets, `words: [[a,b],[c]]`.
+func modeWordSets(raw map[string]any, key string) ([][]string, error) {
+	got := wordSetsOfMapping(raw, key)
+	if len(got) == 0 {
+		return nil, fmt.Errorf("`mode: says_any` needs `words: [[a, b], [c]]`")
+	}
+	return got, nil
+}
+
+// modeRange reads `range: [lo, hi]`.
+func modeRange(raw map[string]any) (float64, float64, error) {
+	lo, okLo := numberOf(raw["range"], 0)
+	hi, okHi := numberOf(raw["range"], 1)
+	if !okLo || !okHi || hi <= lo {
+		return 0, 0, fmt.Errorf("this mode needs `range: [low, high]` with high > low")
+	}
+	return lo, hi, nil
 }
 
 // wordsOfMapping and wordSetsOfMapping read the same shapes out of a nested mapping that the
@@ -485,3 +581,37 @@ func numberOf(raw any, index int) (float64, bool) {
 	}
 	return toFloat(list[index])
 }
+
+// numbersIn pulls every bare number out of a reading, in any unit, for `number_between`.
+//
+// IT IS NOT `capacities`: that one converts to GB because a DISK is what it is about. This mode is
+// about a number whose meaning the file knows - a percentage, a version, a count - so the values are
+// returned as written, and only a `tb`/`gb`/`mb` suffix is converted so a caller that does mean a
+// size is not surprised.
+func numbersIn(words []string) []float64 {
+	text := strings.ToLower(strings.Join(words, " "))
+	var out []float64
+	for _, m := range bareNumberPattern.FindAllStringSubmatch(text, -1) {
+		v, err := strconv.ParseFloat(m[1], 64)
+		if err != nil {
+			continue
+		}
+		// A UNIT IS OPTIONAL HERE, AND THE SUFFIX IS CAPTURED WHEN THERE IS ONE.
+		switch len(m) {
+		case 3:
+			switch m[2] {
+			case "mb":
+				v /= 1024.0
+			case "tb":
+				v *= 1024.0
+			}
+		}
+		out = append(out, v)
+	}
+	return out
+}
+
+// bareNumberPattern matches a number with OPTIONAL units, because most numbers a pane shows have
+// none: `42 percent`, `41 of 100`, `step 3`. Requiring a unit made `number_between` answer false for
+// every reading that was not a disk capacity.
+var bareNumberPattern = regexp.MustCompile(`(\d+(?:\.\d+)?)\s*(?:(tb|gb|mb)\b)?`)

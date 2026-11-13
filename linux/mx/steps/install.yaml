@@ -62,7 +62,8 @@ steps:
     check:
       name: done
       from: screen
-      says:
+      mode: says
+      words:
       - terms
       - of
       - use
@@ -93,7 +94,8 @@ steps:
     check:
       name: done
       from: screen
-      says:
+      mode: says
+      words:
       - select
       - type
       - of
@@ -125,7 +127,8 @@ steps:
     check:
       name: done
       from: screen
-      says:
+      mode: says
+      words:
       - final
       - review
     until:
@@ -160,7 +163,8 @@ steps:
     check:
       name: done
       from: screen
-      says:
+      mode: says
+      words:
       - create
       - a
       - swap
@@ -192,7 +196,8 @@ steps:
     check:
       name: done
       from: screen
-      says:
+      mode: says
+      words:
       - computer
       - identity
     until:
@@ -222,7 +227,8 @@ steps:
     check:
       name: done
       from: screen
-      says:
+      mode: says
+      words:
       - localization
       - defaults
     until:
@@ -252,7 +258,8 @@ steps:
     check:
       name: done
       from: screen
-      says:
+      mode: says
+      words:
       - default
       - user
       - login
@@ -309,7 +316,8 @@ steps:
     check:
       name: done
       from: screen
-      says_any:
+      mode: says_any
+      words:
       - - congratulations
       - - completed
         - the

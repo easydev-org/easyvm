@@ -54,7 +54,8 @@ steps:
     check:
       name: done
       from: screen
-      says_any:
+      mode: says_any
+      words:
       - - welcome
         - to
         - ubuntu
@@ -185,7 +186,8 @@ steps:
     check:
       name: done
       from: screen
-      says_any:
+      mode: says_any
+      words:
       - - installed
         - and
         - ready

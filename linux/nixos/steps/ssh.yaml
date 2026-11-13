@@ -70,7 +70,8 @@ steps:
     check:
       name: done
       from: screen
-      says_any:
+      mode: says_any
+      words:
       - - Dashboard
       - - Activities
     until:
@@ -109,7 +110,8 @@ steps:
     check:
       name: done
       from: screen
-      says_any:
+      mode: says_any
+      words:
       - - Console
     until:
       fact: done

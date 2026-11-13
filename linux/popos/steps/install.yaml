@@ -64,7 +64,8 @@ steps:
     check:
       name: done
       from: screen
-      says_any:
+      mode: says_any
+      words:
       - - select
         - a
         - language
@@ -149,7 +150,8 @@ steps:
     check:
       name: done
       from: screen
-      says:
+      mode: says
+      words:
       - Full
       - Name
       - User
@@ -192,7 +194,8 @@ steps:
     check:
       name: done
       from: screen
-      says_any:
+      mode: says_any
+      words:
       - - Choose
         - Account
         - Password

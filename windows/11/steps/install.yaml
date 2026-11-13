@@ -74,7 +74,8 @@ steps:
     check:
       name: done
       from: screen
-      says:
+      mode: says
+      words:
       - Windows
       - Setup
     until:

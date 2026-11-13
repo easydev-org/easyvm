@@ -115,7 +115,8 @@ steps:
     check:
       name: done
       from: screen
-      says_any:
+      mode: says_any
+      words:
       - - system
         - settings
       - - general
@@ -150,7 +151,8 @@ steps:
     check:
       name: done
       from: screen
-      says_any:
+      mode: says_any
+      words:
       - - sharing
         - remote
       - - allow
@@ -203,7 +205,8 @@ steps:
     check:
       name: done
       from: screen
-      says_any:
+      mode: says_any
+      words:
       - - allow
         - full
         - disk
@@ -250,7 +253,8 @@ steps:
     check:
       name: done
       from: screen
-      says_any:
+      mode: says_any
+      words:
       - - log
         - in
         - to

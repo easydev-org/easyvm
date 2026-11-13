@@ -360,18 +360,22 @@ var Keys = map[string]Key{
 			"It decides nothing - a `when:` step answers from the name, and work/ocr/<name>.txt " +
 			"keeps the words a decision was made from"},
 	"check": {Name: "check", Kind: KindMapping,
-		Summary: "compare a named reading with a target and bind a BOOLEAN: {name, from, " +
-			"says/says_any}. `from:` is what an `ocr:` step read. It never reads the screen, so it " +
-			"costs nothing to re-ask"},
-	"says": {Name: "says", Kind: KindWords,
-		Summary: "with `check:`: every one of these words must be in the reading"},
-	"size_between": {Name: "size_between", Kind: KindList,
-		Summary: "with `check:`: a capacity in this GB range must appear in the reading, e.g. " +
-			"[60, 200]. The unit is converted, so a pane printing MB is comparable"},
-	"number_between": {Name: "number_between", Kind: KindList,
-		Summary: "with `check:`: any number in this range must appear in the reading"},
-	"says_any": {Name: "says_any", Kind: KindWordSets,
-		Summary: "with `check:`: any one of these word-sets must be in the reading"},
+		Summary: "compare a named reading and bind a BOOLEAN: {name, from, mode, ...}. `from:` is " +
+			"what an `ocr:` step read; `mode:` says HOW to compare. It never reads the screen, so " +
+			"it costs nothing to re-ask"},
+	"mode": {Name: "mode", Kind: KindString,
+		Summary: "with `check:`: how the reading is compared - says, says_any, size_between, " +
+			"number_between, equals, contains or matches. The modes are the extension point: a " +
+			"new kind of comparison is a new value, not a new top-level key"},
+	"words": {Name: "words", Kind: KindList,
+		Summary: "with `check: mode: says`/`says_any`: the word list, or a list of word-sets"},
+	"range": {Name: "range", Kind: KindList,
+		Summary: "with `check: mode: size_between`/`number_between`: [low, high]. GB for a size, " +
+			"so a pane printing MB or TB is comparable"},
+	"text": {Name: "text", Kind: KindString,
+		Summary: "with `check: mode: equals`/`contains`: the text to compare against"},
+	"pattern": {Name: "pattern", Kind: KindString,
+		Summary: "with `check: mode: matches`: a regular expression over the normalised reading"},
 	"as": {Name: "as", Kind: KindString,
 		Summary: "bind a condition's result as a named boolean: `until_any: [...] as: up`. The " +
 			"name can then be tested by `if:` and `until: {fact: ...}`. With `unless:` the " +

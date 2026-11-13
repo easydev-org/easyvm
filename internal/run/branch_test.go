@@ -29,9 +29,10 @@ func TestAConditionBindsABooleanAndABranchReadsIt(t *testing.T) {
 	check := walk.Step{Index: 1, Name: "is the wizard up", Spec: map[string]any{
 		"name": "is the wizard up",
 		"check": map[string]any{
-			"name":     "wizard_up",
-			"from":     "screen",
-			"says_any": []any{[]any{"welcome"}, []any{"language"}},
+			"name":  "wizard_up",
+			"from":  "screen",
+			"mode":  "says_any",
+			"words": []any{[]any{"welcome"}, []any{"language"}},
 		},
 	}}
 	if err := ex.doCheck(check); err != nil {

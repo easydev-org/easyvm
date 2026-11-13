@@ -1960,7 +1960,11 @@ func TestTheMacOSRecoveryGateAcceptsReadableRows(t *testing.T) {
 	if !ok {
 		t.Fatal("the loop has no `check:` - the comparison that turns the reading into a boolean")
 	}
-	sets, _ := check["says_any"].([]any)
+	if mode, _ := check["mode"].(string); mode != "says_any" {
+		t.Errorf("the check's mode is %q, want says_any - the recovery menu is four labelled rows "+
+			"and any one of them is enough", mode)
+	}
+	sets, _ := check["words"].([]any)
 	if len(sets) < 3 {
 		t.Errorf("the condition accepts %d row(s). The menu has four labelled rows and two hits is "+
 			"the Python implementation's own rule, because one row can be cut off by a redraw; "+

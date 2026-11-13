@@ -61,7 +61,8 @@ steps:
     check:
       name: done
       from: recovery
-      says_any:
+      mode: says_any
+      words:
       - - restore
         - time
         - machine
@@ -103,7 +104,8 @@ steps:
     check:
       name: right_disk
       from: disk
-      size_between:
+      mode: size_between
+      range:
       - 60
       - 200
     until:
@@ -157,7 +159,8 @@ steps:
     check:
       name: done
       from: screen
-      says_any:
+      mode: says_any
+      words:
       - - erase
         - complete
       - - erase
@@ -192,7 +195,8 @@ steps:
     check:
       name: done
       from: screen
-      says:
+      mode: says
+      words:
       - reinstall
       - macos
     until:
@@ -258,7 +262,8 @@ steps:
     check:
       name: done
       from: screen
-      says_any:
+      mode: says_any
+      words:
       - - select
         - your
         - country
