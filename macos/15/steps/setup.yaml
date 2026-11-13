@@ -3,6 +3,13 @@ resolution:
 - 1920
 - 1080
 vars:
+  # `out` IS THE FILE `publish the disk` FLATTENS INTO, and it comes from `stage.yml`'s matrix -
+  # `out: macos15.qcow2` - so the disk is named for the tag it is pushed under rather than for this
+  # file. Every other install leg in this repository declares it; macOS did not, which is the other
+  # half of why its disk was never pushed.
+  out:
+    from: args.out
+    default: out/macos15.qcow2
   disk_name:
     default: main
   expected_gb:
@@ -726,5 +733,25 @@ steps:
 - name: stop the machine
   shutdown: '{{ shutdown }}'
   timeout: 300
+# THE DISK IS FLATTENED INTO THE FILE THE NEXT STAGE PULLS, AND THIS STEP WAS MISSING.
+#
+# `stage.yml` publishes `work/<matrix.out>`, and for this leg that is `macos15.qcow2` - the name
+# `macos15` is pushed under. A walk without a `compress:` writes only `work/disk.qcow2`, so the publish
+# step found nothing at `work/macos15.qcow2` and the push was SKIPPED:
+#
+#	publish the disk = success     (nothing to publish is not an error, by design)
+#	push the disk    = skipped     (env.out was empty, so the guard did not fire)
+#
+# MEASURED ON CI, run 43519327315, WHICH OTHERWISE BAKED A GOOD SYSTEM: setup=success, video 2.0 MB,
+# disk 33 GiB on the local pod - and NO `macos15` TAG IN GHCR, so the ssh stage had nothing to pull and
+# failed with a disk below the floor. Every other install leg here has this step; macOS was the one that
+# never got it, because its own runs always ended before the copy finished and so never reached the
+# publish.
+#
+# `compress:` ALSO VERIFIES THE OVERLAY: the boot ran on a read-only base with a throwaway diff, and
+# `qemu-img convert` is what turns that diff into one flat file - and what fails if the base was written
+# to.
+- name: publish the disk
+  compress: '{{ out }}'
 - name: stop recording
   record: false
