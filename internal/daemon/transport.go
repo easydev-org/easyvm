@@ -88,28 +88,38 @@ func (d *Daemon) runWalkthroughFile(req Request, work string, done chan struct{}
 	//
 	// A SANDBOX RUNS SEVERAL FILES AGAINST ONE MACHINE - `init.yaml` installs, `dev.yaml` adds a
 	// toolchain, `test.yaml` runs the tests - so the driver is created on the FIRST file that needs
-	// one and kept in `d.machine` until `destroy`. A later file finds it and reuses it; its `boot:`
+	// one and kept in the slot until `destroy`. A later file finds it and reuses it; its `boot:`
 	// step is a no-op because the machine is already up.
 	//
 	// AND A FILE THAT CHANGES THE DISK IS REFUSED, because the machine has already read it: a second
 	// `disk:` on a running guest would be a file describing a machine that does not exist.
-	d.mu.Lock()
-	driver := d.machine
-	d.mu.Unlock()
-
-	if driver == nil {
-		fresh, closeFresh, err := NewDriver(file, work, req.BootDisk, file.SSHPort,
+	//
+	// WHICH OF THE TWO CASES THIS IS COMES FROM THE SLOT, NOT FROM `d.machine == nil`. A `create` has
+	// already reserved the slot before this function runs, so "there is a slot but no driver" is the
+	// ordinary path for a sandbox - and a second `NewDriver` there would be a second qemu.
+	var driver run.Driver
+	slot, phase := d.slot()
+	switch {
+	case phase == slotStarting && slot != nil && slot.driver == nil:
+		// RESERVED BY `startRun` OR `startSandbox`: build the driver and publish it into that slot.
+		fresh, closeFresh, err := NewDriver(d, file, work, req.BootDisk, file.SSHPort,
 			req.Password)
 		if err != nil {
 			fail("the machine could not be prepared", err)
 			return
 		}
+		if err := d.publish(slot, fresh, closeFresh); err != nil {
+			// THE RESERVATION WAS TAKEN AWAY while the driver was being built - a `stop` or a
+			// `destroy` arrived. The driver is closed rather than installed, because a machine with
+			// no slot is a machine nothing can ever stop.
+			closeFresh()
+			fail("the machine could not be installed", err)
+			return
+		}
 		driver = fresh
-		d.mu.Lock()
-		d.machine = fresh
-		d.machineClose = closeFresh
-		d.mu.Unlock()
-	} else {
+
+	case phase == slotRunning && slot != nil:
+		driver = slot.driver
 		// THE GUEST HAS TO BE THE ONE THIS FILE EXPECTS, AND THAT CHECK IS HERE RATHER THAN IN `doBoot`.
 		//
 		// `doBoot` DOES refuse a mismatched `os:` on a running machine, and that is not enough: a file
@@ -122,7 +132,7 @@ func (d *Daemon) runWalkthroughFile(req Request, work string, done chan struct{}
 		// guest. A file that names none is accepted: it is a set of actions and the machine decides
 		// what it is.
 		if want := fileOS(file); want != "" {
-			if named, ok := driver.Machine().(interface{ OS() string }); ok {
+			if named, ok := slot.driver.Machine().(interface{ OS() string }); ok {
 				if have := named.OS(); have != "" && have != want {
 					fail(fmt.Sprintf("this daemon already holds a %s machine, and this file is for "+
 						"%s. One daemon holds one machine; `destroy` it to change the guest", have, want),
@@ -132,6 +142,18 @@ func (d *Daemon) runWalkthroughFile(req Request, work string, done chan struct{}
 			}
 		}
 		fmt.Printf("[easyvm]   reusing the machine already running for %s\n", filepath.Base(req.File))
+
+	case phase == slotStopping:
+		fail("the previous machine is still closing", ErrMachineClosing)
+		return
+
+	case phase == slotStarting:
+		fail("a machine is being started on this daemon already", ErrMachineStarting)
+		return
+
+	default:
+		fail("no machine slot is reserved for this run", ErrSlotLost)
+		return
 	}
 
 	// THE HOOK IS HOW `stop` REACHES A RUN THAT IS MID-STEP. Without it, `stop` could only set a
@@ -183,15 +205,20 @@ func (d *Daemon) runWalkthroughFile(req Request, work string, done chan struct{}
 	// That is a screenshot away from being diagnosed, and the screenshot no longer existed.
 	//
 	// A SANDBOX KEEPS ITS MACHINE FOR A DIFFERENT REASON - it has no end except `destroy` - and both
-	// arrive at the same place, so one flag covers them.
+	// arrive at the same place, so the slot's OWNER decides rather than a flag beside it.
 	d.mu.Lock()
-	keep := d.sandbox || runErr != nil
-	closeFn := d.machineClose
+	slot = d.machine
+	keep := runErr != nil || (slot != nil && slot.owner == ownerCreate)
+	var closeFn func()
 	if !keep {
+		// THE SLOT IS CLEARED BEFORE THE CLOSER RUNS, because this run is the slot's owner and it is
+		// ending: there is nothing left for a `boot` to join. `destroy` is the case that holds the
+		// slot across a teardown, because there the caller did not ask for the machine to end as part
+		// of a longer operation - a person did.
 		d.machine = nil
-		d.machineClose = nil
-	} else {
-		d.machineClose = nil
+		if slot != nil {
+			closeFn = slot.close
+		}
 	}
 	d.ex = nil
 	d.st.Answered = res.Answered
@@ -209,7 +236,7 @@ func (d *Daemon) runWalkthroughFile(req Request, work string, done chan struct{}
 	}
 	d.mu.Unlock()
 
-	if !keep && closeFn != nil {
+	if closeFn != nil {
 		closeFn()
 		return
 	}

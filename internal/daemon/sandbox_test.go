@@ -36,19 +36,23 @@ func TestTheSandboxDoesNotCloseItsDriver(t *testing.T) {
 		t.Fatal("`bootSandbox` never closes the driver, so a machine that FAILED to start would " +
 			"hold /dev/kvm with nothing able to reach it")
 	}
-	// AND THE SUCCESS PATH STORES IT FOR `destroy` INSTEAD.
-	if !strings.Contains(code, "d.sandboxClose = closeDriver") {
-		t.Fatal("`bootSandbox` does not keep closeDriver, so `destroy` has nothing to call and the " +
-			"machine outlives every command")
+	// AND THE SUCCESS PATH HANDS THE SLOT TO `create`, so `destroy` has a closer and the machine
+	// outlives the steps. THE OWNER IS THE RECORD: there used to be a `sandbox` flag and a
+	// `sandboxClose` field beside `machine`/`machineClose`, and the four could disagree - which is
+	// how `create` once built a second driver over a `run`'s machine.
+	if !strings.Contains(code, "owner = ownerCreate") {
+		t.Fatal("`bootSandbox` does not give the slot to `create`, so the slot still says it belongs " +
+			"to a run - and a run closes its machine when its file ends")
 	}
 	// AND IT MUST NOT `defer` IT, which would close on return.
 	if strings.Contains(code, "defer closeDriver()") {
 		t.Fatal("`bootSandbox` defers closeDriver, which closes the machine as soon as the boot " +
 			"returns - that is `run`, not `create`")
 	}
-	// AND THE FLAG IS SET, so a second `create` is refused rather than starting a second qemu.
-	if !strings.Contains(code, "d.sandbox = true") {
-		t.Fatal("`bootSandbox` does not record that a sandbox is running")
+	// AND THE SLOT IS CHECKED FIRST, so a second `create` is refused rather than starting a second
+	// qemu. The check is in `startSandbox`; this asserts the owner is what carries the fact.
+	if !strings.Contains(code, "d.machine != nil") {
+		t.Fatal("`bootSandbox` does not check the slot before setting the owner")
 	}
 }
 
@@ -134,20 +138,24 @@ func TestAMachineOutlivesTheFileThatBootedIt(t *testing.T) {
 	}
 	code := stripGoComments(rest)
 
-	// THE DRIVER IS REUSED, NOT RECREATED PER FILE.
-	if !strings.Contains(code, "driver := d.machine") {
-		t.Fatal("`runWalkthroughFile` does not look for a machine the daemon already holds, so " +
-			"every YAML would boot its own qemu")
+	// THE SLOT IS ASKED FOR ITS PHASE, NOT RE-DERIVED FROM A FIELD.
+	//
+	// `d.machine == nil` USED TO BE THE TEST, and it cannot tell "no machine" from "reserved, no driver
+	// yet" - so a `create`, which reserves the slot before this function runs, would have built a
+	// SECOND driver over the first one's disk.
+	if !strings.Contains(code, "d.slot()") {
+		t.Fatal("`runWalkthroughFile` does not ask the slot for its phase, so it cannot tell a " +
+			"reserved slot from an empty one - and a sandbox reserves before this runs")
 	}
-	// AND A FRESH ONE IS STORED FOR THE NEXT FILE.
-	if !strings.Contains(code, "d.machine = fresh") {
-		t.Fatal("`runWalkthroughFile` does not keep the driver it created, so the next file would " +
-			"boot a second machine")
+	// AND A FRESH DRIVER IS PUBLISHED INTO THE RESERVATION, which is what pairs it with its closer.
+	if !strings.Contains(code, "d.publish(slot, fresh, closeFresh)") {
+		t.Fatal("`runWalkthroughFile` does not publish the driver into the slot it reserved, so the " +
+			"slot can end up with a driver nothing can stop")
 	}
-	// AND WHETHER IT CLOSES DEPENDS ON THE MODE, NOT ON THE FILE.
-	if !strings.Contains(code, "keep := d.sandbox") {
-		t.Fatal("`runWalkthroughFile` does not consult `d.sandbox`, so either every bake would leak " +
-			"a guest or every sandbox would close after its first file")
+	// AND WHETHER IT CLOSES DEPENDS ON THE SLOT'S OWNER, NOT ON A FLAG BESIDE IT.
+	if !strings.Contains(code, "slot.owner == ownerCreate") {
+		t.Fatal("`runWalkthroughFile` does not consult the slot's owner, so either every bake would " +
+			"leak a guest or every sandbox would close after its first file")
 	}
 }
 
@@ -196,9 +204,9 @@ func TestAReusedMachineIsTheGuestTheFileExpects(t *testing.T) {
 	src := stripGoComments(string(body))
 
 	// THE CHECK IS AT REUSE, NOT ONLY AT BOOT.
-	i := strings.Index(src, `d.machine = fresh`)
+	i := strings.Index(src, "case phase == slotRunning && slot != nil:")
 	if i < 0 {
-		t.Fatal("no `d.machine = fresh`; the reuse path has moved")
+		t.Fatal("no reuse branch; the reuse path has moved")
 	}
 	window := src[i:]
 	if end := strings.Index(window, "\n\t// THE HOOK IS HOW"); end > 0 {

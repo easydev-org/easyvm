@@ -66,29 +66,269 @@ type Daemon struct {
 	done chan struct{}
 	// stopping asks the run to stop at the next step boundary.
 	stopping bool
-	// listener is the unix socket.
-	listener interface{ Close() error }
 	// shutdown asks Serve to return.
 	shutdown chan struct{}
-	// novncPort is the page's port for runs this daemon starts.
 	// work is this daemon's directory: its socket, its frames and its disks.
 	work string
-	// sandbox says a `create` is holding a machine that must outlive its steps, and sandboxClose is
-	// what `destroy` calls. IT IS SEPARATE FROM ex BECAUSE THEY MEAN DIFFERENT THINGS: ex is a
-	// walkthrough in progress, which ends by itself; a sandbox has no end except `destroy`.
-	sandbox      bool
-	sandboxClose func()
-	// machine is the driver this daemon HOLDS, and it outlives every walkthrough.
+
+	// --- THE ONE MACHINE ---------------------------------------------------------------
 	//
-	// THE DAEMON WAS ONE FILE PER MACHINE: `runWalkthrough` called `NewDriver` and deferred its
-	// closer, so each YAML got a fresh driver and therefore a fresh qemu. That is a bake.
+	// A DAEMON HOLDS AT MOST ONE MACHINE, and "at most one" has to be a fact about ONE variable, not
+	// a rule about four. The version before this had `machine`, `machineClose`, `sandbox` and
+	// `sandboxClose`, and the four could disagree:
 	//
-	// A SANDBOX IS THE OTHER WAY ROUND - THE MACHINE IS THE LONG-LIVED THING AND A YAML IS A SET OF
-	// ACTIONS ON IT. `init.yaml` installs, `dev.yaml` adds a toolchain, `test.yaml` runs the tests, and
-	// all three act on ONE machine that was booted once. So the driver is created on the first file
-	// that needs one and kept until `destroy`.
-	machine      run.Driver
-	machineClose func()
+	//	`sandbox`      says a `create` owns the machine
+	//	`machine`      says there is one
+	//	`machineClose` is what stops it
+	//	`sandboxClose` is the SAME closer under another name, set by the other entry point
+	//
+	// MEASURED: `startSandbox` checked `d.sandbox` and `d.ex` but NOT `d.machine`, so `create` on a
+	// daemon already running a `run`'s machine built a second driver and overwrote the closer - and
+	// the first machine's qemu was then unreachable, holding /dev/kvm until the container died.
+	//
+	// SO THEY ARE ONE STRUCT, and the invariants are the struct's own: a `slot` with a `driver` has a
+	// `close`; `closing` is set only while `close` runs; and `owner` says who may end it.
+	machine *machineSlot
+	// qmpReg is THE PROCESS'S ONE QMP REGISTRY, and it lives here rather than on a Driver because
+	// "this process may have one QMP client per socket" is a fact about the process.
+	//
+	// IT USED TO BE A DRIVER FIELD, AND `Boot` REPLACED IT ON EVERY BOOT. The recorder's sampler
+	// holds the driver, so it kept the OLD map while the boot made a new one - two maps, two empty
+	// `held` sets, two clients, and qemu greeting only the first. The sampler's client worked and
+	// `Boot` waited seven minutes for a greeting that was never coming:
+	//
+	//	goroutine 21 [IO wait, 7 minutes]:  qmp.(*SocketMonitor).Connect()
+	//	goroutine 27 [IO wait]:             the sampler's successful listen
+	//
+	// A single owner for the life of the process is the only shape in which `Acquire`'s refusal
+	// means anything.
+	qmpRegAll *qmp.Registry
+}
+
+// machineSlot is the one machine a daemon may hold: ITS OWNER, ITS PHASE, AND THE TWO THINGS THAT
+// MATCH IT TO THE WORLD - the driver to act through and the function that stops it.
+//
+// # THE PHASE IS THE STATE MACHINE, AND IT IS THE ONLY ONE
+//
+//	absent ──reserve──► starting ──publish──► running ──quiesce──► stopping ──► absent
+//	                        │                    │
+//	                        └──fail──────────────┴──(close)──► absent
+//
+// EVERY DECISION ABOUT "MAY A BOOT START" IS A QUESTION ABOUT THIS FIELD. Before it, the answer was
+// spread over `machine == nil`, `d.sandbox`, `d.ex != nil` and `proc != nil`, and each combination
+// meant something slightly different to whoever wrote the check:
+//
+//	`startSandbox` read `d.sandbox` and `d.ex` and NEVER `d.machine`, so `create` on a daemon already
+//	running a `run`'s machine built a second driver, overwrote the closer, and left the first qemu
+//	unreachable holding /dev/kvm until the container died.
+//
+// THE LAST TRANSITION IS THE IMPORTANT ONE. `stopping` means the slot is STILL OCCUPIED while `destroy`
+// tears the machine down, so `absent` never means "the previous one is half gone" - it means gone. A
+// boot that arrives mid-teardown is told to retry, not handed a disk that is still being written.
+type machineSlot struct {
+	// phase is the state machine. Guarded by Daemon.mu.
+	phase slotPhase
+	// driver is what steps act through. Nil only while `starting` has not produced one yet.
+	driver run.Driver
+	// close stops everything the driver owns. IT IS SET BY `newMachineSlot` AND NEVER AFTERWARDS, so
+	// a slot with a driver has a closer - which is how a machine became unreachable once.
+	close func()
+	// owner is who may end it: `run` for a walkthrough in progress, `create` for a sandbox.
+	//
+	// THE DISTINCTION DECIDES WHAT HAPPENS WHEN THE WALK ENDS. A `run` closes its machine when it
+	// finishes cleanly, because a bake that outlived its file would hold /dev/kvm forever. A
+	// `create` has no end except `destroy`, so its machine stays.
+	owner machineOwner
+	// started is when the slot was reserved, for the errors that name how long something has held it
+	// and for the abandoned-run check below.
+	started time.Time
+}
+
+// slotPhase is where a machine is in its life. THE ZERO VALUE IS `absent`, so a nil slot and an unused
+// slot mean the same thing and there is no third state to forget.
+type slotPhase int
+
+const (
+	// slotAbsent means there is no machine and the slot is free.
+	slotAbsent slotPhase = iota
+	// slotStarting means a boot or a prepare has been accepted and has not produced a machine yet.
+	//
+	// IT IS A REAL STATE, NOT A MOMENT: a `run` loads a YAML, creates a 128 GiB qcow2 and may fetch a
+	// multi-gigabyte ISO before qemu exists. A second request that saw `absent` during that would build
+	// a second machine over the first one's disk.
+	slotStarting
+	// slotRunning means there is a live machine.
+	slotRunning
+	// slotStopping means `destroy` is tearing it down. THE SLOT IS STILL OCCUPIED.
+	slotStopping
+)
+
+func (p slotPhase) String() string {
+	switch p {
+	case slotStarting:
+		return "starting"
+	case slotRunning:
+		return "running"
+	case slotStopping:
+		return "stopping"
+	}
+	return "absent"
+}
+
+// machineOwner names who holds the slot, so a refusal can say so.
+type machineOwner int
+
+const (
+	// ownerRun is a walkthrough: its machine ends when the file does.
+	ownerRun machineOwner = iota
+	// ownerCreate is a sandbox: its machine ends only at `destroy`.
+	ownerCreate
+)
+
+func (o machineOwner) String() string {
+	if o == ownerCreate {
+		return "a `create` sandbox"
+	}
+	return "a `run`"
+}
+
+// newMachineSlot pairs a driver with the only function that can stop it.
+//
+// THE PAIRING IS THE CONSTRUCTOR'S JOB, so there is no way to publish a driver whose closer is
+// missing - which is how a machine became unreachable and held /dev/kvm until the container died.
+func newMachineSlot(driver run.Driver, close func(), owner machineOwner) *machineSlot {
+	return &machineSlot{
+		phase:   slotRunning,
+		driver:  driver,
+		close:   close,
+		owner:   owner,
+		started: time.Now(),
+	}
+}
+
+// --- the slot's transitions ------------------------------------------------------------
+//
+// THEY ALL TAKE `d.mu` THEMSELVES AND ARE THE ONLY WRITERS OF `d.machine`. Anything that reads the slot
+// goes through `d.slot()` for the same reason: one accessor, one lock, no caller deciding which field
+// answers "is there a machine".
+
+// reserve claims the slot for a new machine, or says why it cannot.
+//
+// IT SETS `slotStarting`, SO THE CLAIM IS VISIBLE BEFORE ANY WORK BEGINS. The gap between "is there a
+// machine" and "start one" is where two boots used to both see `nil`, which is the whole reason this
+// method exists as one operation rather than as a check followed by a store.
+func (d *Daemon) reserve(owner machineOwner) (*machineSlot, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if err := d.reserveLocked(owner); err != nil {
+		return nil, err
+	}
+	return d.machine, nil
+}
+
+// reserveLocked is the body of `reserve` for a caller that already holds `d.mu`.
+func (d *Daemon) reserveLocked(owner machineOwner) error {
+	switch slot := d.machine; {
+	case slot == nil || slot.phase == slotAbsent:
+		d.machine = &machineSlot{phase: slotStarting, owner: owner, started: time.Now()}
+		return nil
+	case slot.phase == slotStopping:
+		// THE PREVIOUS MACHINE IS STILL CLOSING ITS DISK. This is a retry, not a refusal: the caller
+		// asked too early, and a second attempt a moment later will succeed.
+		return ErrMachineClosing
+	case slot.phase == slotStarting:
+		return ErrMachineStarting
+	default:
+		return &ErrMachineRunning{Owner: slot.owner, OS: driverOS(slot.driver),
+			For: time.Since(slot.started)}
+	}
+}
+
+// publish fills a reserved slot with the machine that was built for it.
+//
+// IT REFUSES IF THE SLOT IS NO LONGER THE ONE THAT WAS RESERVED, which is what stops a run that was
+// abandoned - or a `destroy` that arrived while the boot was working - from installing a live machine
+// into a slot that no longer belongs to it.
+func (d *Daemon) publish(slot *machineSlot, driver run.Driver, close func()) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.machine != slot || slot.phase != slotStarting {
+		return ErrSlotLost
+	}
+	slot.driver = driver
+	slot.close = close
+	slot.phase = slotRunning
+	return nil
+}
+
+// slot returns the current slot and its phase under the lock, or nil.
+func (d *Daemon) slot() (*machineSlot, slotPhase) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.machine == nil {
+		return nil, slotAbsent
+	}
+	return d.machine, d.machine.phase
+}
+
+// release publishes `absent`, and it is the LAST thing `destroy` does.
+//
+// RELEASING BEFORE THE TEARDOWN WOULD BE THE BUG THIS TYPE EXISTS TO PREVENT: a boot arriving in the
+// window would start qemu against a disk the previous machine is still writing.
+func (d *Daemon) release(slot *machineSlot) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.machine == slot {
+		d.machine = nil
+	}
+}
+
+// --- the errors a reserved slot answers with -------------------------------------------
+//
+// THEY ARE TYPES RATHER THAN SENTENCES because the caller has to make three different decisions from
+// them: retry (`closing`, `starting`), give up (`running`), or start fresh (`absent`). A single string
+// flattens that into one, and every caller then guesses.
+
+// ErrMachineClosing says a machine IS there, and its teardown has not finished.
+var ErrMachineClosing = errors.New("the previous machine is still closing; retry in a moment")
+
+// ErrMachineStarting says a machine is being built right now and has not published itself yet.
+var ErrMachineStarting = errors.New("a machine is being started on this daemon already; retry in a moment")
+
+// ErrSlotLost says the reservation was taken away while the machine was being built.
+var ErrSlotLost = errors.New("this machine's reservation was cancelled while it was starting - a " +
+	"`stop` or a `destroy` arrived, so the machine that was just built is closed again")
+
+// ErrMachineRunning is a refusal that names the machine already holding the slot.
+type ErrMachineRunning struct {
+	Owner machineOwner
+	OS    string
+	For   time.Duration
+}
+
+func (e *ErrMachineRunning) Error() string {
+	held := e.Owner.String()
+	if e.OS != "" {
+		held += " (`" + e.OS + "`)"
+	}
+	if e.For > 0 {
+		held += fmt.Sprintf(", up %s", e.For.Round(time.Second))
+	}
+	return "a machine is already running on this daemon: " + held +
+		". One daemon holds one machine; `destroy` it first"
+}
+
+// driverOS is the family a driver reports, for a message. Empty when it has none yet.
+func driverOS(drv run.Driver) string {
+	if drv == nil {
+		return ""
+	}
+	if m := drv.Machine(); m != nil {
+		if named, ok := m.(interface{ OS() string }); ok {
+			return named.OS()
+		}
+	}
+	return ""
 }
 
 // New returns an idle daemon.
@@ -168,15 +408,20 @@ func (d *Daemon) requestShutdown() {
 	d.stopping = true
 	ex := d.ex
 	done := d.done
-	// A SANDBOX IS STOPPED HERE TOO. Its machine is not part of any run loop, so a container stop
-	// that only waited for `ex` would leave qemu holding /dev/kvm with nothing able to reach it.
-	sandboxClose := d.sandboxClose
-	d.sandboxClose = nil
-	d.sandbox = false
+	// THE MACHINE IS STOPPED HERE TOO, AND THROUGH THE SLOT RATHER THAN A FLAG BESIDE IT.
+	//
+	// A sandbox's machine is not part of any run loop, so a container stop that only waited for `ex`
+	// would leave qemu holding /dev/kvm with nothing able to reach it. There is one slot, and
+	// whatever holds it is what gets closed.
+	var closeFn func()
+	if slot := d.machine; slot != nil && slot.phase != slotStopping && slot.phase != slotAbsent {
+		slot.phase = slotStopping
+		closeFn = slot.close
+	}
 	d.mu.Unlock()
 
-	if sandboxClose != nil {
-		sandboxClose()
+	if closeFn != nil {
+		closeFn()
 	}
 
 	if ex != nil {
@@ -282,68 +527,58 @@ func (d *Daemon) handle(req Request) Response {
 // supervisor and the daemon unreachable for the whole run - which defeats the reason it is a
 // daemon. The client that needs the verdict polls `status`.
 func (d *Daemon) startRun(req Request) Response {
+	if req.File == "" {
+		return Response{OK: false, Error: "`run` needs a walkthrough file"}
+	}
+
 	d.mu.Lock()
+	// A RUN IN PROGRESS IS A REFUSAL, AND IT IS THE RUN RATHER THAN THE MACHINE THAT SAYS SO.
+	//
+	// The two are different facts: a machine can be up with no run (a `create` sandbox), and a run can
+	// be preparing a disk with no machine yet. This is the only place that asks about the RUN.
 	if d.ex != nil {
 		st := d.st
-		machine := d.machine
-		d.mu.Unlock()
-
-		// A RUN WHOSE MACHINE IS GONE IS NOT A RUN, AND `stop` CANNOT END IT.
-		//
-		// MEASURED: `easyvm stop` returned, `d.stopping` was set, qemu was killed by hand - and the leg
-		// went on reporting
-		//
-		//	status: running step 22/25 "installation runs"
-		//	REFUSED: a run is already in progress (step "installation runs"); stop it first
-		//
-		// for twenty more minutes. `ShouldStop` is only read BETWEEN steps, so a step blocked inside a
-		// guest round trip never sees it, and the daemon has no way to end a run whose machine no longer
-		// exists - so every later leg is refused and the pod is wedged.
-		//
-		// THE FIX IS TO NOTICE THE MACHINE IS GONE and take the slot back. The abandoned goroutine is
-		// left to fail on its own read; its `d.ex = nil` assignment is guarded by the same lock and
-		// cannot resurrect it.
-		// A RUN THAT HAS NOT MADE A MACHINE YET IS STILL A RUN. `machine == nil` means the executor is
-		// loading the file or preparing a disk - ordinary work - so the slot stays taken. Only a machine
-		// that EXISTED and is now gone is evidence the run is dead.
+		slot := d.machine
 		alive := true
-		if machine == nil {
-			// A RUN WITH NO MACHINE IS EITHER STILL PREPARING OR ABANDONED, AND TIME TELLS THEM APART.
-			//
-			// The first version of this check treated `machine == nil` as "still working", which is
-			// right for the seconds a disk takes to create and wrong for a run wedged before its
-			// machine ever existed - and that is exactly the state that answers
-			//
-			//	REFUSED: a run is already in progress (step "installation runs"); stop it first
-			//
-			// for a run that `stop` cannot end either. AN HOUR is longer than any preparation here
-			// (the longest is an overlay create plus an ISO copy, minutes) and shorter than a real
-			// install, so it separates them without a guess.
+		if slot == nil || slot.driver == nil {
+			// A RUN THAT HAS MADE NO MACHINE YET IS EITHER STILL PREPARING OR ABANDONED, AND TIME TELLS
+			// THEM APART. AN HOUR is longer than any preparation here - the longest is an overlay
+			// create plus an ISO copy, minutes - and shorter than a real install.
 			alive = time.Since(st.Started) < time.Hour
-		} else if m, ok := machine.(interface{ IsRunning() bool }); ok {
+		} else if m, ok := slot.driver.Machine().(interface{ IsRunning() bool }); ok {
 			alive = m.IsRunning()
 		}
-		if !alive {
-			d.mu.Lock()
-			if d.ex != nil {
-				d.ex = nil
-				d.machine = nil
-				d.st.Status = "failed"
-				d.st.Error = "the machine went away while a step was running; the run was abandoned"
-				d.stopping = false
-			}
-			d.mu.Unlock()
-		} else {
+		d.mu.Unlock()
+		if alive {
 			return Response{OK: false,
-				Error: fmt.Sprintf("a run is already in progress (step %q); stop it first",
-					st.Step),
+				Error: fmt.Sprintf("a run is already in progress (step %q); stop it first", st.Step),
 				State: &st}
 		}
+		// THE RUN IS DEAD: its machine exited and `stop` cannot end a goroutine blocked on a guest that
+		// will never answer. Taking the slot back is what un-wedges the daemon, which otherwise
+		// answers `a run is already in progress` to every later leg for the life of the process.
+		//
+		// The abandoned goroutine is left to fail on its own read; its own `d.ex = nil` is guarded by
+		// the same lock and cannot resurrect it.
 		d.mu.Lock()
-	}
-	if req.File == "" {
-		d.mu.Unlock()
-		return Response{OK: false, Error: "`run` needs a walkthrough file"}
+		if d.ex != nil {
+			d.ex = nil
+			slot2 := d.machine
+			d.machine = nil
+			d.st.Status = "failed"
+			d.st.Error = "the machine went away while a step was running; the run was abandoned"
+			d.stopping = false
+			d.mu.Unlock()
+			if slot2 != nil && slot2.close != nil {
+				// THE DEAD MACHINE IS STILL CLOSED, or its qemu's file descriptors and the tap outlive
+				// it - the abandoned goroutine will not do it, because it is blocked on the read that
+				// made the machine look dead in the first place.
+				slot2.close()
+			}
+		} else {
+			d.mu.Unlock()
+		}
+		d.mu.Lock()
 	}
 
 	// A NEW RUN CLEARS THE STOP FLAG, AND NOT CLEARING IT COST TWO LEGS.
@@ -356,16 +591,19 @@ func (d *Daemon) startRun(req Request) Response {
 	//	status: finished step 0/31 ""
 	//	/dsk/os/macos/run-setup/macos15-setup.mp4   0 MiB
 	//
-	// A leg that "finished" without running a step, and a video of nothing. The daemon is one process
-	// for many legs, and a stop belongs to the run it stopped.
+	// A leg that "finished" without running a step, and a video of nothing.
 	d.stopping = false
 	// THE DAEMON'S OWN DIRECTORY WINS, ALWAYS. A client that named a different one would put the
-	// socket in one place and the frames in another, and the frames are what a person looks at when
-	// a step fails. `req.Work` is accepted for a caller that started the daemon elsewhere and knows
-	// it; when it is empty the daemon's own is used.
+	// frames in one place and the disk in another.
 	work := d.work
 	if work == "" {
 		work = filepath.Dir(req.File)
+	}
+	// THE SLOT IS RESERVED HERE, BEFORE THE GOROUTINE STARTS, so a second `run` or `create` arriving a
+	// microsecond later is refused by a claim that already exists rather than by a race it might win.
+	if err := d.reserveLocked(ownerRun); err != nil {
+		d.mu.Unlock()
+		return Response{OK: false, Error: err.Error()}
 	}
 	d.st = State{
 		Status:  "starting",
@@ -386,13 +624,11 @@ func (d *Daemon) startRun(req Request) Response {
 func (d *Daemon) snapshot() State {
 	d.mu.Lock()
 	st := d.st
-	machine := d.machine
 	d.mu.Unlock()
 
 	// THE CONSOLE HAS NO PORT OF ITS OWN ANY MORE. The page, its assets and the WebSocket are served
 	// by the daemon's listener on :8080, so a person opens the Service URL - there is no second port to
 	// report, and no URL that can point at something that is not listening.
-	_ = machine
 	return st
 }
 
@@ -425,39 +661,61 @@ func (d *Daemon) withQMP(what string, op func(*qmp.Conn) error) Response {
 // withDriver is `withQMP` for the operations that need the DRIVER rather than the connection -
 // `type` paces its keystrokes, and that loop lives on the driver.
 func (d *Daemon) withDriver(what string, op func(*Driver) error) Response {
-	d.mu.Lock()
-	drv := d.machine
-	d.mu.Unlock()
-	if drv == nil {
-		return Response{OK: false, Error: "no machine is running; a `create` or a `run` with a " +
-			"`boot:` step starts one"}
-	}
-	concrete, ok := drv.(*Driver)
-	if !ok {
-		return Response{OK: false, Error: fmt.Sprintf("%s: this driver cannot type", what)}
-	}
-	if err := op(concrete); err != nil {
-		return Response{OK: false, Error: fmt.Sprintf("%s: %v", what, err)}
+	runErr := d.withMachine(func(drv run.Driver) error {
+		concrete, ok := drv.(*Driver)
+		if !ok {
+			return fmt.Errorf("this driver cannot type")
+		}
+		return op(concrete)
+	})
+	if runErr != nil {
+		return Response{OK: false, Error: fmt.Sprintf("%s: %v", what, runErr)}
 	}
 	st := d.snapshot()
 	return Response{OK: true, State: &st}
 }
 
-// interactiveConn is the QMP connection to the machine this daemon holds.
-func (d *Daemon) interactiveConn() (*qmp.Conn, error) {
+// withMachine runs fn against the machine this daemon holds, and it is the ONLY way a caller reaches
+// one. The alternative - each caller taking `d.mu`, reading `d.machine`, and asserting it is non-nil -
+// is how a nil machine got dereferenced in three places.
+//
+// A CALLER THAT ARRIVES WHILE THE MACHINE IS BEING TORN DOWN WAITS, rather than being told there is no
+// machine while one is still writing its disk. `destroy` holds the slot until the teardown has
+// finished, so "the slot is empty" always means "the previous machine is completely gone".
+func (d *Daemon) withMachine(fn func(run.Driver) error) error {
 	d.mu.Lock()
-	drv := d.machine
+	slot := d.machine
 	d.mu.Unlock()
-	if drv == nil {
-		return nil, fmt.Errorf("no machine is running; a `create` or a `run` with a `boot:` step " +
-			"starts one")
+	// A SLOT THAT IS STARTING HAS NO DRIVER YET AND A STOPPING ONE IS BEING TORN DOWN, so neither is
+	// something a step may act through. Both answer the same way as "no machine", because the caller
+	// asked to touch a guest and there is none to touch.
+	if slot == nil || slot.phase != slotRunning {
+		return ErrNoMachine
 	}
+	return fn(slot.driver)
+}
+
+// ErrNoMachine is what a caller gets when this daemon holds no guest.
+var ErrNoMachine = errors.New("no machine is running; a `create` or a `run` with a `boot:` step " +
+	"starts one")
+
+func (d *Daemon) interactiveConn() (*qmp.Conn, error) {
 	// THE DRIVER OWNS THE SINGLE QMP CONNECTION, and qemu serves one client per socket - so the
 	// interactive surface goes through it rather than opening a second.
-	if concrete, ok := drv.(*Driver); ok {
-		return concrete.QMP()
-	}
-	return nil, fmt.Errorf("this driver does not expose QMP")
+	var conn *qmp.Conn
+	err := d.withMachine(func(drv run.Driver) error {
+		concrete, ok := drv.(*Driver)
+		if !ok {
+			return fmt.Errorf("this driver does not expose QMP")
+		}
+		c, err := concrete.QMP()
+		if err != nil {
+			return err
+		}
+		conn = c
+		return nil
+	})
+	return conn, err
 }
 
 // screenshot writes one frame and answers where it is.

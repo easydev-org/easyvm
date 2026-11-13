@@ -43,21 +43,25 @@ import (
 )
 
 // Conn is one connection to one qemu instance.
+//
+// IT OWNS A `line` - a socket with one-command-at-a-time framing and a deadline per command - and
+// NOTHING ELSE. The version before this held a `*SocketMonitor` with a background listener goroutine,
+// which made every close a negotiation with a third party; see the note on `line` for the two failures
+// that came out of that.
+//
+// `mu` HERE GUARDS THE FRAME COUNTER AND THE LAST SCREEN SIZE, which are this type's own bookkeeping.
+// It is never held across a command: the socket's own lock is the `line`'s.
 type Conn struct {
 	// Path is the unix socket, for error messages.
 	Path string
 
-	mon    *qemump.SocketMonitor
-	raw    *raw.Monitor
-	closer func()
+	l   *line
+	raw *raw.Monitor
 
 	mu    sync.Mutex
 	frame int
 	lastW int
 	lastH int
-	// wire serialises every command that goes down the socket. `mu` above guards the struct's
-	// own state; this one guards the CONVERSATION, which is what two concurrent readers corrupt.
-	wire sync.Mutex
 }
 
 // handshakeTimeout bounds the QMP greeting, which qemu never sends to a second client.
@@ -72,52 +76,22 @@ func Open(path string, wait time.Duration) (*Conn, error) {
 	deadline := time.Now().Add(wait)
 	var lastErr error
 	for {
-		mon, err := qemump.NewSocketMonitor("unix", path, 5*time.Second)
+		// THE HANDSHAKE HAS ITS OWN DEADLINE, and that deadline is the difference between a
+		// seven-minute hang and an error. qemu accepts exactly one QMP client; a second is queued in
+		// its listen backlog and NEVER GREETED:
+		//
+		//	goroutine 21 [IO wait, 7 minutes]:
+		//	qmp.(*SocketMonitor).Connect()  <- dec.Decode(&ban), the greeting that never came
+		//	machineControl.Boot()           driver.go:680
+		//	doBoot -> runOne -> Run
+		//
+		// With a deadline it fails in ten seconds, the retry below reports `ErrBusy` - which names the
+		// real problem - instead of waiting on a socket nobody will answer.
+		l, err := dialLine(path, 5*time.Second, handshakeTimeout)
 		if err == nil {
-			// THE HANDSHAKE HAS A DEADLINE, BECAUSE QEMU DOES NOT CLOSE A SECOND CLIENT - IT IGNORES IT.
-			//
-			// `net.DialTimeout` bounds the CONNECT and nothing after it, and `mon.Connect()` then reads
-			// the greeting with no deadline at all. That is fine while one process holds the socket,
-			// and it is a hang the moment two do: qemu accepts the second connection into its backlog
-			// and never speaks on it, so the read waits forever.
-			//
-			// MEASURED, AND IT COST A WHOLE macOS LEG - the goroutine dump put `Boot` here for seven
-			// minutes while the guest was already up and drawing:
-			//
-			//	goroutine 21 [IO wait, 7 minutes]:
-			//	qmp.(*SocketMonitor).Connect()  socket.go:128   <- dec.Decode(&ban)
-			//	qmp.Open()                       qmp.go:74
-			//	machineControl.Boot()            driver.go:680
-			//	doBoot -> runOne -> Run
-			//
-			// The step never returned, so the walk never advanced, and the screen showed a finished
-			// recovery menu while the daemon believed it was still booting.
-			//
-			// A DEADLINE TURNS THAT INTO THE ERROR IT ALWAYS WAS: a closed connection, the retry loop
-			// below runs again, and the second attempt gets `ErrBusy` from the registry - which names
-			// the real problem instead of waiting on a socket nobody will answer.
-			//
-			// THE DEADLINE IS ENFORCED BY CLOSING RATHER THAN BY `SetDeadline`, because
-			// `SocketMonitor` does not expose its `net.Conn`. A closed socket makes the blocked read
-			// return at once, which is the same effect and needs no vendor change.
-			stop := make(chan struct{})
-			go func() {
-				select {
-				case <-stop:
-				case <-time.After(handshakeTimeout):
-					_ = mon.Disconnect()
-				}
-			}()
-			err = mon.Connect()
-			close(stop)
-			if err == nil {
-				return &Conn{Path: path, mon: mon, raw: raw.NewMonitor(mon)}, nil
-			}
-			_ = mon.Disconnect()
-			lastErr = err
-		} else {
-			lastErr = err
+			return &Conn{Path: path, l: l, raw: raw.NewMonitor(l)}, nil
 		}
+		lastErr = err
 		if time.Now().After(deadline) {
 			return nil, fmt.Errorf("qmp %s: %w (waited %s; is another process already holding "+
 				"this socket? qemu permits one client)", path, lastErr, wait)
@@ -126,14 +100,44 @@ func Open(path string, wait time.Duration) (*Conn, error) {
 	}
 }
 
-// Close disconnects. It is safe to call more than once.
+// ErrClosed is what a command on a closed connection returns.
+var ErrClosed = errors.New("the qmp connection is closed")
+
+// Close disconnects, once, safely from any goroutine - INCLUDING ONE THAT IS MID-COMMAND.
+//
+// THE WHOLE SHUTDOWN IS TWO LINES, BECAUSE THE TRANSPORT HAS NO THIRD PARTY IN IT. There is no
+// listener goroutine to wait for and no channel to unblock: `line.Close` closes the file descriptor,
+// which makes a `Read` that is in progress return immediately. That is the cancellation.
+//
+// THIS REPLACES A PANIC. `destroy` used to clear a `*SocketMonitor` field while the recorder's sampler
+// was inside `Screendump`, and the sampler - which had been handed the `*Conn` BEFORE the close - then
+// dereferenced a nil monitor:
+//
+//	panic: runtime error: invalid memory address or nil pointer dereference
+//	qmp.(*SocketMonitor).RunWithFile(0x0, ...)
+//	daemon.(*Driver).Frame() -> run.(*Executor).sampler.func1()
+//
+// A daemon that panics as PID 1 restarts the container and takes /work, the frames and the recording
+// with it. Now a command on a closed connection gets `ErrClosed`, which is a value.
 func (c *Conn) Close() error {
-	if c == nil || c.mon == nil {
+	if c == nil || c.l == nil {
 		return nil
 	}
-	err := c.mon.Disconnect()
-	c.mon = nil
-	return err
+	return c.l.Close()
+}
+
+// withRaw runs fn against the raw monitor.
+//
+// IT IS ONE CALL THROUGH, because the locks that used to be here are now the transport's own: `line.Run`
+// takes its mutex for the length of one command and sets a deadline on it, so a command cannot land on a
+// torn-down socket and cannot wait forever for a reply.
+func (c *Conn) withRaw(fn func(*raw.Monitor) error) error {
+	return fn(c.raw)
+}
+
+// withMonitor is `withRaw` for the commands that take the generated monitor API.
+func (c *Conn) withMonitor(fn func(qemump.Monitor) error) error {
+	return fn(c.l)
 }
 
 // Frame is a screen capture on disk.
@@ -166,8 +170,6 @@ func (c *Conn) Screendump(dir string) (Frame, error) {
 	// SO THE SAMPLER WON ALMOST EVERY TICK and the gate mostly read nothing at all. The gate is
 	// what decides whether a step passed; losing nine attempts in ten to the recorder is not a
 	// recording problem.
-	c.wire.Lock()
-	defer c.wire.Unlock()
 	c.mu.Lock()
 	c.frame++
 	n := c.frame
@@ -204,7 +206,10 @@ func (c *Conn) Screendump(dir string) (Frame, error) {
 	if err != nil {
 		return Frame{}, err
 	}
-	if _, err := c.mon.Run(cmd); err != nil {
+	if err := c.withMonitor(func(mon qemump.Monitor) error {
+		_, err := mon.Run(cmd)
+		return err
+	}); err != nil {
 		// NO PPM FALLBACK, AND ITS ABSENCE IS THE POINT.
 		//
 		// `format: png` HAS BEEN IN `screendump` SINCE QEMU 9.0, and this image pins the emulator:
@@ -290,7 +295,10 @@ func (c *Conn) screendumpPNG(path string) error {
 	if err != nil {
 		return err
 	}
-	_, err = c.mon.Run(cmd)
+	err = c.withMonitor(func(mon qemump.Monitor) error {
+		_, err := mon.Run(cmd)
+		return err
+	})
 	return err
 }
 
@@ -694,7 +702,9 @@ func (c *Conn) moveTo(x, y int) error {
 		raw.InputEventAbs(raw.InputMoveEvent{Axis: raw.InputAxisX, Value: toAxis(x, w)}),
 		raw.InputEventAbs(raw.InputMoveEvent{Axis: raw.InputAxisY, Value: toAxis(y, h)}),
 	}
-	if err := c.raw.InputSendEvent(nil, nil, events); err != nil {
+	if err := c.withRaw(func(m *raw.Monitor) error {
+		return m.InputSendEvent(nil, nil, events)
+	}); err != nil {
 		return fmt.Errorf("pointer to (%d, %d): %w", x, y, err)
 	}
 	// AND IT IS GIVEN A MOMENT, because the move is a report the guest has to process before a press
@@ -742,7 +752,9 @@ func (c *Conn) button(b raw.InputButton, down bool) error {
 	events := []raw.InputEvent{
 		raw.InputEventBtn(raw.InputBtnEvent{Button: b, Down: down}),
 	}
-	if err := c.raw.InputSendEvent(nil, nil, events); err != nil {
+	if err := c.withRaw(func(m *raw.Monitor) error {
+		return m.InputSendEvent(nil, nil, events)
+	}); err != nil {
 		return fmt.Errorf("button: %w", err)
 	}
 	return nil
@@ -811,7 +823,9 @@ func (c *Conn) Stroke(modifiers []string, key string) error {
 			Down: false, Key: raw.KeyValueQcode(code),
 		}))
 	}
-	if err := c.raw.InputSendEvent(nil, nil, events); err != nil {
+	if err := c.withRaw(func(m *raw.Monitor) error {
+		return m.InputSendEvent(nil, nil, events)
+	}); err != nil {
 		return fmt.Errorf("input-send-event %v+%s: %w", modifiers, key, err)
 	}
 	return nil
@@ -832,7 +846,7 @@ func qcodeByName(name string) (raw.KeyValueQcode, error) {
 
 // Reset asks qemu to reset the guest, which is a warm reboot.
 func (c *Conn) Reset() error {
-	return c.raw.SystemReset()
+	return c.withRaw(func(m *raw.Monitor) error { return m.SystemReset() })
 }
 
 // SystemPowerdown presses the guest's ACPI power button.
@@ -841,7 +855,7 @@ func (c *Conn) Reset() error {
 // waits for a click nobody makes, which is why every macOS walkthrough names `shutdown: ssh` or
 // `shutdown: guest_agent` instead.
 func (c *Conn) SystemPowerdown() error {
-	return c.raw.SystemPowerdown()
+	return c.withRaw(func(m *raw.Monitor) error { return m.SystemPowerdown() })
 }
 
 // --- snapshots ---------------------------------------------------------------------

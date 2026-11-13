@@ -342,27 +342,62 @@ func TestStopDoesNotHoldTheLockWhileItWorks(t *testing.T) {
 // A dial to a guest that is not answering takes the full thirty seconds. Held across `d.mu`, that
 // blocks `status`, `Frame` and the console page for thirty seconds per attempt.
 func TestGuestDoesNotDialUnderTheLock(t *testing.T) {
-	body, err := os.ReadFile("driver.go")
+	// THE DIAL MOVED INTO `sshSession`, AND THE PROPERTY MOVED WITH IT: a dial to a guest that is not
+	// answering takes the full timeout, and a mutex held across it stops `status`, the console page and
+	// every step for exactly as long.
+	//
+	// THE TEST FOLLOWS THE DIAL. It used to read `Guest()` for `guest.Dial(` and now reads the session,
+	// because a test that looks for code which has MOVED passes by finding nothing - which is worse
+	// than failing.
+	sess, err := os.ReadFile("sshsession.go")
 	if err != nil {
 		t.Fatal(err)
 	}
-	src := string(body)
-	start := strings.Index(src, "func (d *Driver) Guest(")
+	src := string(sess)
+	start := strings.Index(src, "func (s *sshSession) Get() (*guest.Client, error) {")
 	if start < 0 {
-		t.Fatal("no Guest")
+		t.Fatal("no `sshSession.Get`; the dialing has moved again")
 	}
 	rest := src[start:]
 	if end := strings.Index(rest[1:], "\nfunc "); end > 0 {
 		rest = rest[:end+1]
 	}
 	code := stripGoComments(rest)
-	dial := strings.Index(code, "guest.Dial(")
+
+	dial := strings.Index(code, "s.dial()")
 	if dial < 0 {
-		t.Fatal("`Guest` does not dial at all")
+		t.Fatal("`sshSession.Get` never dials, so a session can never be established")
 	}
-	if unlock := strings.Index(code, "d.mu.Unlock()"); unlock < 0 || unlock > dial {
-		t.Fatal("`Guest` dials while holding the driver's mutex, so every other caller waits out " +
-			"the full dial timeout")
+	unlock := strings.LastIndex(code[:dial], "s.mu.Unlock()")
+	if unlock < 0 {
+		t.Fatal("`sshSession.Get` reaches the dial without releasing its mutex, so every concurrent " +
+			"caller waits out the full dial timeout")
+	}
+	// AND IT RE-ACQUIRES AFTERWARDS, or the result is stored without synchronisation.
+	if !strings.Contains(code[dial:], "s.mu.Lock()") {
+		t.Fatal("`sshSession.Get` dials without taking the lock back, so the connection is stored " +
+			"alongside whatever another goroutine is writing")
+	}
+	// AND THE DRIVER'S `Guest` MUST NOT DIAL AT ALL: it asks the session.
+	body, err := os.ReadFile("driver.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dsrc := stripGoComments(string(body))
+	i := strings.Index(dsrc, "func (d *Driver) Guest() *guest.Client {")
+	if i < 0 {
+		t.Fatal("no `Driver.Guest`")
+	}
+	drest := dsrc[i:]
+	if end := strings.Index(drest[1:], "\nfunc "); end > 0 {
+		drest = drest[:end+1]
+	}
+	if strings.Contains(drest, "guest.Dial(") {
+		t.Fatal("`Driver.Guest` dials directly again, so a dead session is never noticed and a " +
+			"reboot leaves the next step writing into a closed socket")
+	}
+	if !strings.Contains(drest, "sess.Get()") {
+		t.Fatal("`Driver.Guest` does not ask the session for its connection")
 	}
 }
 

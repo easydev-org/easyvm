@@ -265,45 +265,56 @@ func TestANewRunClearsTheStopFlag(t *testing.T) {
 // registry itself lives as long as the daemon. This reads the source to refuse a second
 // `qmp.NewRegistry()` outside the one accessor.
 func TestTheDaemonKeepsOneQMPRegistry(t *testing.T) {
-	body, err := os.ReadFile("driver.go")
-	if err != nil {
-		t.Fatal(err)
+	// THE REGISTRY LIVES ON THE DAEMON, because "this process is one QMP client per socket" is a
+	// fact about the process and not about a machine. A driver comes and goes across legs; the
+	// registry must not, or `Acquire`'s refusal is only as wide as whichever map a caller happens to
+	// hold - which is precisely the seven-minute hang described on the test above.
+	var src strings.Builder
+	for _, f := range []string{"server.go", "driver.go"} {
+		body, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		src.WriteString(dropLineComments(string(body)))
+		src.WriteString("\n")
 	}
-	code := dropLineComments(string(body))
+	code := src.String()
 
-	// THE ONLY PLACE ALLOWED TO CONSTRUCT ONE.
-	accessor := strings.Index(code, "func (d *Driver) qmpRegistryLocked() *qmp.Registry {")
-	if accessor < 0 {
-		t.Fatal("no `qmpRegistryLocked`; the one registry needs one place that creates it")
+	// THE CREATION IS IN ONE FUNCTION, ON THE DAEMON.
+	if !strings.Contains(code, "func (d *Driver) qmpRegistry() *qmp.Registry {") {
+		t.Fatal("no `qmpRegistry`; the one registry needs one place that creates it")
 	}
-	accessorBody := functionBody(code[accessor:])
-	if !strings.Contains(accessorBody, "qmp.NewRegistry()") {
-		t.Fatal("`qmpRegistryLocked` does not create the registry, so nothing does")
+	i := strings.Index(code, "func (d *Driver) qmpRegistry() *qmp.Registry {")
+	body := functionBody(code[i:])
+	if !strings.Contains(body, "qmp.NewRegistry()") {
+		t.Fatal("`qmpRegistry` does not create the registry, so nothing does")
+	}
+	// IT IS STORED ON THE DAEMON, NOT THE DRIVER: `d.daemon.qmpRegAll`.
+	if !strings.Contains(body, "d.daemon.qmpRegAll") {
+		t.Fatal("`qmpRegistry` does not store the registry on the daemon; a per-driver registry is " +
+			"replaced when a driver is, and the next caller gets a second map - two clients")
 	}
 
-	// EVERYWHERE ELSE, A CONSTRUCTION IS A SECOND MAP.
-	rest := code[:accessor] + code[accessor+len(accessorBody):]
+	// AND NOWHERE ELSE CONSTRUCTS ONE.
+	rest := code[:strings.Index(code, "func (d *Driver) qmpRegistry() *qmp.Registry {")] +
+		code[strings.Index(code, "func (d *Driver) qmpRegistry() *qmp.Registry {")+len(body):]
 	if n := strings.Count(rest, "qmp.NewRegistry()"); n > 0 {
-		t.Fatalf("%d other `qmp.NewRegistry()` call(s) in driver.go. A second map has an empty "+
-			"`held`, so a caller holding it believes the socket is free and opens a SECOND QMP "+
-			"client - which qemu queues and never greets. Callers must share "+
-			"`qmpRegistryLocked()`, and a new machine releases the old path instead of replacing "+
-			"the map", n)
+		t.Fatalf("%d other `qmp.NewRegistry()` call(s). A second map has an empty `held`, so a "+
+			"caller holding it believes the socket is free and opens a SECOND QMP client - which "+
+			"qemu queues and never greets. Measured as a 7-minute hang on `boot the recovery "+
+			"image` with the guest already up", n)
 	}
-	// AND BOOT RELEASES THE PREVIOUS MACHINE'S CONNECTION, or the new qemu's socket is still held by a
-	// client that is talking to a qemu that exited.
-	i := strings.Index(code, "func (m machineControl) Boot(")
-	if i < 0 {
+
+	// AND `Boot` RELEASES THE PREVIOUS MACHINE'S PATH FROM IT, or the new qemu's socket is still
+	// held by a client talking to a qemu that exited.
+	j := strings.Index(code, "func (m machineControl) Boot(")
+	if j < 0 {
 		t.Fatal("no Boot")
 	}
-	boot := functionBody(code[i:])
+	boot := functionBody(code[j:])
 	if !strings.Contains(boot, "reg.Release(") {
-		t.Fatal("`Boot` does not release the previous machine's QMP connection; the socket stays " +
-			"held by a client pointed at a qemu that exited, and the new machine's first " +
-			"`qmpSocket()` gets `ErrBusy` naming a machine that is gone")
-	}
-	if !strings.Contains(boot, "d.qmpConn = nil") {
-		t.Fatal("`Boot` releases the registry entry but leaves `d.qmpConn` set, so `qmpSocket`'s " +
-			"fast path keeps handing out the connection that was just closed")
+		t.Fatal("`Boot` does not release the previous machine's QMP path; the socket stays held by " +
+			"a client pointed at a qemu that exited, and the new machine's first `qmpSocket()` " +
+			"gets `ErrBusy` naming a machine that is gone")
 	}
 }

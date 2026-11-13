@@ -277,15 +277,18 @@ var _ = os.Getenv
 
 // vncPort is the port the CURRENT machine's VNC listener is on, or 0 when there is no machine.
 //
-// IT IS ASKED FOR RATHER THAN STORED, because the port belongs to the guest and this daemon runs
-// several: `destroy` stops the machine and the next `run` starts a new qemu on a new port. A value
-// captured at startup would point the browser at a socket that was closed when the previous guest went
-// away - and noVNC reports that as "Failed to connect to server", which reads as a broken console.
+// IT IS ASKED FOR RATHER THAN STORED, because the answer is "is there a machine" - and the port
+// itself is not a variable at all. One guest per container means qemu always gets
+// `-vnc 127.0.0.1:0` and always listens on 5900; see `vncDisplay`. A field for it could only ever hold
+// 5900 or 0, and the 0 was answering a different question.
 func (d *Daemon) vncPort() int {
 	d.mu.Lock()
-	machine := d.machine
+	slot := d.machine
 	d.mu.Unlock()
-	if p, ok := machine.(interface{ VNCPort() int }); ok {
+	if slot == nil {
+		return 0
+	}
+	if p, ok := slot.driver.(interface{ VNCPort() int }); ok {
 		return p.VNCPort()
 	}
 	return 0

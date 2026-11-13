@@ -23,22 +23,51 @@ import (
 )
 
 const (
-	// DefaultNovNCPort is where a browser connects. 6080 is the noVNC convention.
-	DefaultNovNCPort = 6080
 	// vncBase is qemu's own numbering: display N listens on 5900+N.
 	vncBase = 5900
+	// vncDisplay is the display number, and it is a CONSTANT RATHER THAN STATE.
+	//
+	// ONE GUEST PER CONTAINER, so there is nothing to compute: qemu is always given
+	// `-vnc 127.0.0.1:0` and therefore always listens on 5900. The driver used to carry a
+	// `vncPort int` field for this, which could only ever hold 5900 or 0 - and the 0 was really
+	// the answer to a DIFFERENT question, "is there a machine". Two facts in one field, and the
+	// console page read it on every browser connect.
+	vncDisplay = 0
 )
 
-// qemuDriver is the one implementation of run.Driver: it holds the qemu process, the QMP socket and
-// the ssh connection, and it starts each of them at most once.
+// qemuDriver is the one implementation of run.Driver.
 //
-// IT LAZILY OPENS EACH CHANNEL, and that is not tidiness. A walkthrough's first step may be
-// `record:` before `boot:`, so the QMP socket does not exist yet; the ssh connection cannot be made
-// until the guest answers; and a `run` that opened everything up front would fail on a file whose
-// steps are in a different order than the implementation expected.
+// # THE SHAPE, AND WHY IT IS THIS SHAPE
+//
+// EVERY FIELD HERE IS A FACT THAT CANNOT BE DERIVED. That rule is not tidiness - it is what keeps
+// the machine's state describable in one place. The version before this one had fourteen fields, and
+// SEVEN OF THEM WERE COPIES OF SOMETHING ELSE:
+//
+//	vncPort       always 5900, or "no machine"          -> a constant plus `proc == nil`
+//	netUp         implied by `proc != nil`              -> `Down()` is idempotent, so no flag
+//	flattenFrom   "the same file as diff.Path"          -> the comment said so itself
+//	diskPath      whatever `SetDisk` was told           -> belongs to the machine, not the driver
+//	qmpConn       the registry already holds it         -> one owner, not two
+//	qmpReg        A DAEMON-WIDE FACT, NOT A MACHINE'S   -> see below
+//
+// TWO FACTS WITH TWO HOMES IS WHERE BOTH OF TODAY'S BUGS CAME FROM. A `qmpReg` that `Boot` replaced
+// while the recorder's sampler still held the old map gave qemu two QMP clients, and the second one
+// waited seven minutes for a greeting qemu never sends. A `qmpConn` that `shutdown` closed while the
+// sampler was mid-`Screendump` dereferenced a nil monitor and took the daemon down as PID 1.
+//
+// SO THIS TYPE NOW HOLDS ONLY WHAT A MACHINE OWNS, and `qmpRegistry` moved to the Daemon because
+// "this process has exactly one QMP client" is a fact about the PROCESS.
+//
+// IT LAZILY OPENS EACH CHANNEL, and that is not laziness. A walkthrough's first step may be `record:`
+// before `boot:`, so the QMP socket does not exist yet; the ssh connection cannot be made until the
+// guest answers; and a `run` that opened everything up front would fail on a file whose steps are in
+// a different order than the implementation expected.
 type Driver struct {
-	file *walk.File
-	work string
+	// daemon is the process that owns this driver. ONLY ONE THING IS ASKED OF IT: the QMP registry,
+	// because "one client per socket" is a fact about the process rather than about a machine.
+	daemon *Daemon
+	file   *walk.File
+	work   string
 	// guestOS is the family the machine was actually STARTED as, remembered at boot.
 	//
 	// IT IS NOT READ FROM THE FILE, because a sandbox runs several files against one machine and the
@@ -47,46 +76,75 @@ type Driver struct {
 	port    int
 	pass    string
 
-	// novncPort is where the browser page listens; 0 disables it.
-
-	mu       sync.Mutex
-	proc     *exec.Cmd
-	qmpReg   *qmp.Registry
-	qmpConn  *qmp.Conn
-	ssh      *guest.Client
-	diskPath string
+	// mu guards every field below it. THE LOCK IS NEVER HELD ACROSS I/O - a dial, a migration, a
+	// shutdown request are all network round trips, and holding it across one blocks `status`, the
+	// console page and every step for as long as the round trip takes. Three separate deadlocks in
+	// this file were that mistake.
+	mu sync.Mutex
+	// booting is set from the moment a boot is accepted until the machine is published or the boot
+	// has failed. IT IS WHAT MAKES "ONE MACHINE" TRUE, because it closes the gap between "is there a
+	// machine" and "start one" - a gap in which two boots could both see nil and both start qemu.
+	booting bool
+	proc    *exec.Cmd
+	// qmp is the ONE connection to this machine, and the registry that owns it lives on the Daemon.
+	qmp *qmp.Conn
+	// disk is what this machine was started on, or will start on. It IS state: a `disk:` step
+	// creates a disk and tells the boot which one, so it is chosen during the run rather than at
+	// construction. What it is NOT is a second copy of the diff: `Disk()` answers "the file this
+	// stage has been writing to", which is the diff when one exists - ONE answer, computed, rather
+	// than a `flattenFrom` field that had to be kept equal to `diff.Path` by hand.
+	disk string
+	// ssh is the guest session. It is a SESSION rather than a resource: it can go stale while the
+	// machine is perfectly healthy (a `reboot:` kills it), which is why it repairs itself at the
+	// moment of use rather than being treated as part of the machine's lifetime. See `sshSession`.
+	ssh *sshSession
 	// diff is the throwaway overlay this run wrote into, when it made one. Its Close is what
 	// proves the base was not written to, so it belongs to the driver rather than to a step.
 	diff *overlay.Overlay
-	// flattenFrom is the diff a `compress:` step must read instead of diskPath - the same file as
-	// diff.Path, kept because the file may already be gone by the time the step asks.
-	flattenFrom string
-	vncPort     int
 	// frameMu serialises screen capture. ONE FRAME AT A TIME, because three readers of one screen do
-	// not need three screendumps and interleaved 6.2 MB writes produce unreadable files.
+	// not need three screendumps and interleaved writes produce unreadable files.
 	frameMu sync.Mutex
-	netUp   bool
 	// share is the smbd this driver started, if a `share_serve:` step asked for one.
 	share *shareServer
 	logf  func(string)
 }
 
 // NewDriver builds the driver and returns a closer for the caller's defer.
-func NewDriver(f *walk.File, work, bootDisk string, port int,
+//
+// THE DISK IS GIVEN ONCE, HERE, AND NEVER CHANGED. It used to be a field with a `SetDisk` setter,
+// because a `disk:` step could name it - but a machine has exactly one disk and it is chosen before
+// qemu starts. A setter meant the answer could change under a running guest, and the field was read
+// in three places that each had to remember it might.
+func NewDriver(owner *Daemon, f *walk.File, work, bootDisk string, port int,
 	password string) (run.Driver, func(), error) {
 	if err := os.MkdirAll(work, 0o755); err != nil {
 		return nil, nil, err
 	}
 	d := &Driver{
-		file:     f,
-		work:     work,
-		port:     port,
-		pass:     password,
-		diskPath: bootDisk,
+		daemon: owner,
+		file:   f,
+		work:   work,
+		port:   port,
+		pass:   password,
+		disk:   bootDisk,
 		logf: func(msg string) {
 			fmt.Printf("[easyvm] %s\n", msg)
 		},
 	}
+	// THE SESSION IS BUILT HERE, WITH ITS DIALER, BECAUSE NOTHING ELSE KNOWS THE TARGET.
+	//
+	// A `dev.yaml` runs against a machine that is already up, so the session must exist before any step
+	// asks for it - and it dials lazily, on the first use, so a file whose first step is a `disk:` does
+	// not pay for a connection the guest cannot accept yet.
+	d.ssh = newSSHSession(func() (*guest.Client, error) {
+		target := guest.Target{
+			Host:     "172.30.0.1",
+			Port:     port,
+			User:     f.SSHUser,
+			Password: password,
+		}
+		return guest.Dial(target, 30*time.Second)
+	})
 	return d, func() {
 		d.shutdown()
 	}, nil
@@ -254,52 +312,58 @@ const DefaultVideoDevice = "VGA,xres=1920,yres=1080,vgamem_mb=32"
 
 // --- the guest ------------------------------------------------------------------------
 
+// Guest is the connection a step addresses the guest through, or nil when none could be made.
+//
+// THE DIALING AND THE CACHING ARE `sshSession`'S, and that is a change of ownership rather than a move.
+// The cache was three interlocks in this function - look under the lock, dial outside it, look again in
+// case somebody else won - and it was correct. What it could not do was notice that a cached connection
+// had DIED, so a `reboot:` left the next step writing into a dead socket and the step was blamed.
+//
+// See the note on `sshSession` for the measured failure and for how `Do` repairs it.
 func (d *Driver) Guest() *guest.Client {
-	// THE LOCK IS HELD TO LOOK AND TO STORE, NEVER TO DIAL.
-	//
-	// A dial to a guest that is not answering takes the full thirty seconds, and holding `d.mu` across
-	// it blocks every other caller of this driver - `status`, `Frame`, the console page - for exactly
-	// as long. The same shape deadlocked `Stop`: a lock around a network round trip is wrong even
-	// when nothing recurses.
 	d.mu.Lock()
-	if d.ssh != nil {
-		existing := d.ssh
-		d.mu.Unlock()
-		return existing
-	}
-	target := guest.Target{Host: "172.30.0.1", Port: d.port, User: d.file.SSHUser, Password: d.pass}
+	sess := d.ssh
 	d.mu.Unlock()
-
-	client, err := guest.Dial(target, 30*time.Second)
+	if sess == nil {
+		return nil
+	}
+	c, err := sess.Get()
 	if err != nil {
 		d.logf(fmt.Sprintf("  could not open an ssh connection: %v", err))
 		return nil
 	}
-
-	// AND A CONNECTION THAT ARRIVED WHILE THIS ONE WAS DIALING WINS. Two steps that both needed a
-	// guest would otherwise leave two connections, and only the last one would ever be closed.
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if d.ssh != nil {
-		_ = client.Close()
-		return d.ssh
-	}
-	d.ssh = client
-	return d.ssh
+	return c
 }
 
-// DropGuest closes the cached ssh connection, so the next step dials a new one.
+// DoGuest runs an operation on the guest, repairing a dead session once.
 //
-// IT IS CALLED BY `require_ssh:` AFTER A SUCCESSFUL PROBE. The probe always makes its own connection;
-// the driver keeps one for the run; and a machine that restarted - by `reboot:` or by the guest's own
-// `systemctl reboot` inside an `ssh:` command - leaves the cached one writing into a dead socket.
-// Measured as `ssh session: EOF` on the step after the probe.
-func (d *Driver) DropGuest() {
+// A STEP USES THIS WHENEVER IT IS ABOUT TO TOUCH THE GUEST, because the repair needs to happen at the
+// moment of use rather than at the moment somebody remembered to invalidate. `Guest()` is kept for the
+// callers that need the raw client, such as the sftp subsystem.
+func (d *Driver) DoGuest(fn func(*guest.Client) error) error {
 	d.mu.Lock()
-	defer d.mu.Unlock()
-	if d.ssh != nil {
-		_ = d.ssh.Close()
-		d.ssh = nil
+	sess := d.ssh
+	d.mu.Unlock()
+	if sess == nil {
+		return errNoSSHSession
+	}
+	return sess.Do(fn)
+}
+
+// errNoSSHSession is what a step gets when it needs the guest and the driver was never prepared for one.
+var errNoSSHSession = errors.New("no ssh session is available; a `require_ssh:` step must come first")
+
+// dropGuest closes the cached connection, so the next use dials a new one.
+//
+// `reboot:` CALLS IT BECAUSE IT KNOWS THE GUEST IS RESTARTING. Nothing else has to: `sshSession.Do`
+// repairs a dead session on its own, which is why the interface method that made every caller
+// responsible for invalidation is gone.
+func (d *Driver) dropGuest() {
+	d.mu.Lock()
+	sess := d.ssh
+	d.mu.Unlock()
+	if sess != nil {
+		sess.Drop()
 	}
 }
 
@@ -310,7 +374,7 @@ func (d *Driver) Machine() run.Machine { return machineControl{d} }
 // SetDisk is how a `disk:` step tells boot: what to start.
 func (d *Driver) SetDisk(path string) {
 	d.mu.Lock()
-	d.diskPath = path
+	d.disk = path
 	d.mu.Unlock()
 }
 
@@ -320,16 +384,17 @@ func (m machineControl) SetDisk(path string) { m.d.SetDisk(path) }
 
 // Disk is what a `compress:` step asks for: the file this stage has been writing to.
 //
-// IT IS THE DIFF WHEN THERE IS ONE, and that is the whole point of the field next to it. A stage
-// that ran on an overlay wrote nothing to the disk it was given - the artifact has to be built
-// from the diff, or the published disk is the one the run never touched.
+// IT IS THE DIFF WHEN THERE IS ONE, AND IT IS COMPUTED RATHER THAN STORED. The version before this
+// had `flattenFrom` next to `diskPath`, kept equal to `diff.Path` by hand, and released in two
+// places - a copy of a fact that `diff` already held.
 func (m machineControl) Disk() string {
-	m.d.mu.Lock()
-	defer m.d.mu.Unlock()
-	if m.d.flattenFrom != "" {
-		return m.d.flattenFrom
+	d := m.d
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.diff != nil {
+		return d.diff.Path
 	}
-	return m.d.diskPath
+	return d.disk
 }
 
 // ReleaseDiff deletes the diff and proves the base was not written to.
@@ -356,11 +421,8 @@ func (d *Driver) releaseDiffLocked() error {
 	if err != nil {
 		return err
 	}
-	if d.flattenFrom == d.diff.Path {
-		// The flat has been published or the run is over; either way the path must stop being
-		// handed to a `compress:` step that would then open a file that does not exist.
-		d.flattenFrom = ""
-	}
+	// THE DIFF IS GONE, SO `Disk()` FALLS BACK TO THE DISK ON ITS OWN - there is no `flattenFrom` to
+	// clear, because there is no second field to keep in step.
 	d.diff = nil
 	return nil
 }
@@ -378,19 +440,40 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 	//	goroutine 23  [sync.Mutex.Lock]   doBoot -> Boot -> qmpSocket -> d.mu.Lock   <- IT HELD IT
 	//	goroutine 66  [sync.Mutex.Lock]   http / -> vncPort -> d.mu.Lock            <- waiting
 	//
-	// `qmpSocket` takes the lock only to LOOK at `qmpConn`; it does its I/O outside, on purpose. So
+	// `qmpSocket` takes the lock only to LOOK at `qmp`; it does its I/O outside, on purpose. So
 	// calling it from inside a locked section is a self-deadlock - Go's mutex is not reentrant - and
 	// the daemon stops answering while it is booting, which reads as a hung process.
 	//
-	// SEE ALSO THE CLAIM THAT MAKES THE REST SAFE: `qmp.Conn` serialises its own conversation, so two
-	// callers cannot interleave QMP commands even when neither holds `d.mu`. The lock is not what makes
-	// the machine coherent; it is what keeps the FIELDS about the machine coherent.
+	// THE RESERVATION IS WHAT MAKES "ONE MACHINE" TRUE, AND `proc != nil` COULD NOT DO IT.
+	//
+	// This check used to be `if d.proc != nil`, which is only set AFTER `cmd.Start()` - so the whole
+	// span before it, from here through `easyvmnet.Up` and the argument list, was a window in which a
+	// second boot saw an idle driver and started a second qemu. The two would then fight over
+	// `drive.sock.qmp` (qemu queues the second client and never greets it) and over the tap name, and
+	// the symptom was a machine that never answered rather than "two boots".
+	//
+	// `booting` is taken HERE, under the lock, and released on every path out of this function. It is
+	// a claim on the slot, not a description of a process: the difference is exactly the window.
 	d.mu.Lock()
-	if d.proc != nil {
+	if d.booting || d.proc != nil {
+		running := d.proc != nil
 		d.mu.Unlock()
-		return fmt.Errorf("a machine is already running")
+		return &MachineBusy{OS: d.guestOS, Running: running}
 	}
+	d.booting = true
 	d.mu.Unlock()
+
+	// EVERY EXIT FROM HERE RELEASES THE RESERVATION, whether the boot worked or not. A failed boot
+	// that kept it would wedge the driver: `proc` stays nil, `booting` stays true, and every later
+	// attempt is refused by a machine that does not exist.
+	ok := false
+	defer func() {
+		if !ok {
+			d.mu.Lock()
+			d.booting = false
+			d.mu.Unlock()
+		}
+	}()
 
 	guestOS, err := machine.ParseOS(spec.OS)
 	if err != nil {
@@ -456,9 +539,10 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 		if err != nil {
 			return err
 		}
+		// THE DIFF IS THE ONLY RECORD. `Disk()` answers "the file this stage wrote to" by
+		// asking this field, so there is no second copy to keep in step.
 		d.mu.Lock()
 		d.diff = o
-		d.flattenFrom = o.Path
 		d.mu.Unlock()
 		running = o.Path
 		d.logf(fmt.Sprintf("  running on a diff over %s (read-only); %s",
@@ -468,13 +552,6 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 
 	qmpPath := filepath.Join(d.work, "drive.sock.qmp")
 	_ = os.Remove(qmpPath)
-
-	// THE DISPLAY NUMBER IS FIXED AT 0 INSIDE THE CONTAINER: one guest per container, and a
-	// computed number would make the log line and the -vnc argument disagree.
-	const vncDisplay = 0
-	d.mu.Lock()
-	d.vncPort = vncBase + vncDisplay
-	d.mu.Unlock()
 
 	args := []string{
 		// THE ACCELERATOR IS NAMED, AND ITS ABSENCE WAS THE REASON EVERY LEG RAN ON TCG.
@@ -637,7 +714,6 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 	if err := easyvmnet.Up(d.port, nil); err != nil {
 		return err
 	}
-	d.netUp = true
 
 	cmd := exec.Command("qemu-system-x86_64", args...)
 	cmd.Stdout = os.Stdout
@@ -646,11 +722,8 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("starting qemu: %w", err)
 	}
-	d.mu.Lock()
-	d.proc = cmd
-	d.mu.Unlock()
 
-	// THE REGISTRY IS NOT REPLACED, AND THAT IS THE WHOLE FIX.
+	// THE REGISTRY IS NOT REPLACED, AND THAT IS THE WHOLE FIX FOR A SEVEN-MINUTE HANG.
 	//
 	// A REGISTRY IS WHAT MAKES "QEMU TAKES ONE CLIENT" TRUE: `Acquire` holds its map across the
 	// handshake, so a second caller gets `ErrBusy` naming the first owner. That guarantee is only as
@@ -661,35 +734,25 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 	// TWO MAPS MEAN TWO CLIENTS. The recorder's sampler starts at `record:` and ticks across every
 	// `boot:`, so it takes the registry pointer that existed BEFORE the boot; the boot then made a
 	// fresh one, and each asked qemu for the socket with its own empty `held`. qemu accepts the first
-	// and queues the second in its listen backlog WITHOUT EVER GREETING IT, and
-	// `SocketMonitor.Connect` read that greeting with no deadline:
+	// and queues the second in its listen backlog WITHOUT EVER GREETING IT:
 	//
 	//	goroutine 21 [IO wait, 7 minutes]:
 	//	qmp.(*SocketMonitor).Connect()  socket.go:128   <- dec.Decode(&ban)
 	//	machineControl.Boot()           driver.go:680
 	//	doBoot -> runOne -> Run
 	//
-	// while goroutine 27 was the sampler's successful `listen`. The guest had already drawn its
-	// recovery menu; the walk believed it was still booting, for seven minutes, past its own
-	// `timeout:`.
+	// The guest had already drawn its recovery menu; the walk believed it was still booting, for seven
+	// minutes, past its own `timeout:`.
 	//
-	// SO THE ONE REGISTRY IS KEPT FOR THE LIFE OF THE DAEMON AND THE PREVIOUS MACHINE'S CLIENT IS
-	// RELEASED FROM IT. `Release` closes the connection and drops the path from `held`, which is exactly
-	// "this socket has no client now" - the state a new qemu needs - and the map itself survives, so
-	// the one-client rule keeps its full width.
-	var reg *qmp.Registry
-	d.mu.Lock()
-	reg = d.qmpRegistryLocked()
-	d.mu.Unlock()
+	// THE REGISTRY NOW LIVES ON THE DAEMON, because "this process is one QMP client" is a fact about
+	// the process and not about a machine. What this function does is RELEASE the previous machine's
+	// path from it: `Release` closes the connection and drops the path, which is exactly "this socket
+	// has no client now" - the state a new qemu needs - while the map itself survives.
+	reg := d.qmpRegistry()
 	// RELEASE DOES I/O (IT CLOSES THE SOCKET), SO IT IS OUTSIDE THE LOCK. A sampler that reconnects
 	// while this runs lands in the SAME registry and therefore hits `ErrBusy`, not a second client.
 	// `qmpPath` is the same path this function removed before starting qemu.
 	_ = reg.Release(qmpPath)
-	d.mu.Lock()
-	// CLEARED WITH THE RELEASE: `qmpSocket`'s fast path returns `d.qmpConn` without asking the
-	// registry, so a stale pointer here would hand out the connection just closed.
-	d.qmpConn = nil
-	d.mu.Unlock()
 
 	// NO CONSOLE IS STARTED HERE ANY MORE, AND THAT IS THE POINT.
 	//
@@ -717,21 +780,60 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 	//
 	// SO THE PROCESS IS CHECKED FIRST. If it is gone, that is the answer and it is reported as such,
 	// with qemu's exit status attached.
-	if _, err := d.qmpSocket(); err != nil {
-		if d.proc != nil {
-			if waitErr := d.proc.Process.Signal(syscall.Signal(0)); waitErr != nil {
-				exit := "unknown"
-				if d.proc.ProcessState != nil {
-					exit = d.proc.ProcessState.String()
-				}
-				return fmt.Errorf("qemu exited before its QMP socket appeared (%s): %w. "+
-					"qemu's own output is above - a missing -device, a bad -machine option or an "+
-					"accelerator it cannot use all say so there and then exit", exit, err)
+	conn, err := d.qmpSocket()
+	if err != nil {
+		if waitErr := cmd.Process.Signal(syscall.Signal(0)); waitErr != nil {
+			exit := "unknown"
+			if cmd.ProcessState != nil {
+				exit = cmd.ProcessState.String()
 			}
+			return fmt.Errorf("qemu exited before its QMP socket appeared (%s): %w. "+
+				"qemu's own output is above - a missing -device, a bad -machine option or an "+
+				"accelerator it cannot use all say so there and then exit", exit, err)
 		}
 		return err
 	}
+
+	// THE MACHINE IS PUBLISHED ONLY NOW, WITH EVERY PART OF IT IN PLACE: a started process, an open
+	// QMP connection, and a disk. NOTHING ELSE IN THIS PROCESS CAN SEE A HALF-BUILT MACHINE, because
+	// `proc` and `qmp` are set together under the lock and `booting` is what every other accessor
+	// checked while this ran.
+	d.mu.Lock()
+	d.proc = cmd
+	d.qmp = conn
+	d.booting = false
+	d.mu.Unlock()
+	ok = true
+
+	// AND THE TAIL OF THE ARGUMENT LIST IS LOGGED, because the line above it is 300 words long.
+	d.logf(fmt.Sprintf("  qemu is up (pid %d); one QMP client on %s", cmd.Process.Pid,
+		filepath.Base(qmpPath)))
 	return nil
+}
+
+// MachineBusy is what a second boot is refused with.
+//
+// IT IS A TYPE RATHER THAN A SENTENCE because the caller has to tell three cases apart that a string
+// flattens into one: a machine is RUNNING (name its family), a machine is STILL STARTING (retry in a
+// moment), and the slot is held by something that has not produced a machine yet (the boot failed
+// part-way and the reservation is being released). The step that gets this prints `Error()`, and a
+// person reading the log gets the sentence; a supervisor gets the fields.
+type MachineBusy struct {
+	// OS is the family of the machine already holding the slot, when it got as far as being known.
+	OS string
+	// Running says the machine reached qemu, so it is a real guest and not a failed boot.
+	Running bool
+}
+
+func (e *MachineBusy) Error() string {
+	if !e.Running {
+		return "a machine is being started on this daemon already; its boot is still in progress " +
+			"or its last attempt has not finished unwinding"
+	}
+	if e.OS == "" {
+		return "a machine is already running on this daemon; `destroy` it first"
+	}
+	return fmt.Sprintf("a %s machine is already running on this daemon; `destroy` it first", e.OS)
 }
 
 // Stop shuts down by the method the file named, and there is no silent fallback between them.
@@ -956,12 +1058,10 @@ func (m machineControl) Reboot() error {
 	// Measured on run 43063744565's manjaro and opensuse legs, whose LAST step is an `ssh:` after a
 	// `reboot:`. Closing it here means the next step dials fresh, which is the only correct answer:
 	// a connection to a machine that restarted is not a connection.
-	d.mu.Lock()
-	if d.ssh != nil {
-		_ = d.ssh.Close()
-		d.ssh = nil
-	}
-	d.mu.Unlock()
+	// NOBODY HAS TO REMEMBER THIS, WHICH IS THE IMPROVEMENT: `sshSession.Do` would repair the stale
+	// connection on the next step anyway. Dropping it here means the next step does not spend a failed
+	// round trip discovering it, and the log says why.
+	d.dropGuest()
 	d.logf("  the machine was reset; the ssh connection was closed with it")
 	return nil
 }
@@ -1039,77 +1139,106 @@ func (m machineControl) IsRunning() bool {
 // and keeps the one that got there first.
 // qmpRegistryLocked returns the daemon's ONE registry, creating it on first use.
 //
-// THE CALLER MUST HOLD `d.mu`. There is exactly one of these for the life of the daemon, and that is
-// the property that makes `Acquire` able to refuse a second client: `Release` drops the path, `CloseAll`
-// drops everything, but the MAP is never replaced. See the note in `Boot` for the seven-minute hang
-// that a second map produced.
-func (d *Driver) qmpRegistryLocked() *qmp.Registry {
-	if d.qmpReg == nil {
-		d.qmpReg = qmp.NewRegistry()
+// THERE IS EXACTLY ONE FOR THE LIFE OF THE PROCESS, and that is the property that makes `Acquire`
+// able to refuse a second client: `Release` drops a path and `CloseAll` drops everything, but the MAP
+// is never replaced. See the note in `Boot` for the seven-minute hang that a second map produced.
+//
+// THE REGISTRY BELONGS TO THE DAEMON AND NOT TO THE DRIVER, because the guarantee it makes is about
+// this process and qemu's sockets - not about one machine. A driver comes and goes; the registry
+// outlives every boot, which is what lets `Release` mean "this socket has no client" instead of "a
+// whole new map that happens to be empty".
+func (d *Driver) qmpRegistry() *qmp.Registry {
+	d.daemon.mu.Lock()
+	defer d.daemon.mu.Unlock()
+	if d.daemon.qmpRegAll == nil {
+		d.daemon.qmpRegAll = qmp.NewRegistry()
 	}
-	return d.qmpReg
+	return d.daemon.qmpRegAll
 }
 
 func (d *Driver) qmpSocket() (*qmp.Conn, error) {
 	d.mu.Lock()
-	if d.qmpConn != nil {
-		conn := d.qmpConn
+	if d.qmp != nil {
+		conn := d.qmp
 		d.mu.Unlock()
 		return conn, nil
 	}
-	reg := d.qmpRegistryLocked()
 	path := filepath.Join(d.work, "drive.sock.qmp")
 	d.mu.Unlock()
 
-	conn, err := reg.Acquire(path, "easyvm", 30*time.Second)
+	// THE HANDSHAKE HAPPENS OUTSIDE THE LOCK, because it waits up to thirty seconds for a socket that
+	// a dead qemu will never create - and every other caller of this driver would block behind it.
+	conn, err := d.qmpRegistry().Acquire(path, "easyvm", 30*time.Second)
 	if err != nil {
 		return nil, err
 	}
 
 	d.mu.Lock()
-	if d.qmpConn != nil {
+	if d.qmp != nil {
 		// another caller won the race; its connection is the machine's, so this one is given back
-		// rather than left open beside it.
-		other := d.qmpConn
+		// rather than left open beside it - qemu has one client slot and two would poison it.
+		other := d.qmp
 		d.mu.Unlock()
 		_ = conn.Close()
 		return other, nil
 	}
-	d.qmpConn = conn
+	d.qmp = conn
 	d.mu.Unlock()
 	return conn, nil
 }
 
+// shutdown releases everything this machine owns, AND IT IS IDEMPOTENT.
+//
+// THE ORDER IS THE DEPENDENCY ORDER, and getting it wrong is how a daemon crashes while shutting
+// down: ssh talks to a guest that qemu must still be running; qmp talks to the monitor that lives in
+// that qemu; the tap and the share are host devices that outlive a process; and the diff is a file
+// that must be verified AFTER the guest has stopped writing to it.
+//
+// THE QMP CONNECTION IS CLOSED THROUGH THE REGISTRY'S `Release`, NOT THROUGH ITS OWN `Close`, so the
+// registry's map stops claiming the path. That is what lets the NEXT machine acquire the same socket
+// - the failure mode of "closed but still held" is `ErrBusy` naming an owner that no longer exists.
 func (d *Driver) shutdown() {
 	d.mu.Lock()
-	defer d.mu.Unlock()
-	if d.ssh != nil {
-		_ = d.ssh.Close()
-		d.ssh = nil
+	sess := d.ssh
+	d.ssh = nil
+	conn := d.qmp
+	d.qmp = nil
+	proc := d.proc
+	d.proc = nil
+	d.booting = false
+	d.mu.Unlock()
+
+	// EACH OF THESE IS DONE WITHOUT THE LOCK, because each one can block: closing a session, waiting
+	// for a process, stopping a server. A lock held across them blocks `status` for as long as the
+	// slowest one, and that reads as a hung daemon.
+	if sess != nil {
+		sess.Drop()
 	}
-	if d.qmpReg != nil {
-		_ = d.qmpReg.CloseAll()
-		d.qmpReg = nil
-		d.qmpConn = nil
+	if conn != nil {
+		_ = d.qmpRegistry().Release(filepath.Join(d.work, "drive.sock.qmp"))
 	}
-	if d.proc != nil {
-		_ = d.proc.Process.Kill()
-		_ = d.proc.Wait()
-		d.proc = nil
+	if proc != nil {
+		_ = proc.Process.Kill()
+		_ = proc.Wait()
 	}
-	if d.netUp {
-		easyvmnet.Down()
-		d.netUp = false
-	}
+	// THE TAP IS A HOST DEVICE, NOT A PROCESS'S. `Down` is a list of `iptables -D` and `ip link del`
+	// calls that each tolerate "not there", so it is safe to run when nothing was ever brought up -
+	// which is why this needs no `netUp` flag to decide.
+	easyvmnet.Down()
+
 	// THE SHARE GOES WITH THE MACHINE. It is one smbd per run, started by a step, and a daemon that
 	// exits without stopping it leaves a server bound to a bridge that is about to be removed.
 	d.stopShare()
+
 	// AND THE DIFF IS RELEASED AND ITS BASE VERIFIED, EVEN WHEN THE WALK FAILED.
 	//
 	// `compress:` releases it on the success path. A walk that failed before that step never
 	// re-checks the base - and a failed walk is exactly when "I did not write to it" is most
 	// likely to be false. Close is idempotent, so this is safe after a successful flatten too.
-	if err := d.releaseDiffLocked(); err != nil {
+	d.mu.Lock()
+	err := d.releaseDiffLocked()
+	d.mu.Unlock()
+	if err != nil {
 		d.logf("  " + err.Error())
 	}
 }
@@ -1225,11 +1354,13 @@ func (d *Driver) QMP() (*qmp.Conn, error) { return d.qmpSocket() }
 // therefore "is there a guest to look at", which is what a page needs to know before it tries.
 func (d *Driver) VNCPort() int {
 	d.mu.Lock()
-	defer d.mu.Unlock()
-	if d.proc == nil {
+	running := d.proc != nil
+	d.mu.Unlock()
+	if !running {
+		// NO MACHINE, NO PORT. The port itself is not a variable: see `vncDisplay`.
 		return 0
 	}
-	return d.vncPort
+	return vncBase + vncDisplay
 }
 
 // ErrMachineGone is what a caller gets once the guest's qemu has exited.

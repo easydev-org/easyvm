@@ -2,12 +2,18 @@ package qmp
 
 import (
 	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"image"
 	"image/color"
 	"image/png"
+	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -402,59 +408,81 @@ func dropComments(src string) string {
 //
 // `Screendump` now holds `wire` for its whole conversation. This test is a source check because the
 // failure needs a real qemu to reproduce, and the thing that must not regress is the locking.
-func TestScreendumpHoldsTheWireForTheWholeConversation(t *testing.T) {
-	body, err := os.ReadFile("qmp.go")
+// ONE CONNECTION CARRIES ONE COMMAND AT A TIME, AND THE TRANSPORT IS WHAT SAYS SO.
+//
+// TWO READERS SHARE THIS CONNECTION: the recording sampler, which asks for a frame EVERY SECOND, and
+// whatever gate is polling. Without serialisation they interleave their commands and replies on one
+// socket, and MEASURED on macos-setup that lost 166 of 180 gate polls silently - the gate is what
+// decides whether a step passed, so losing nine attempts in ten is not a recording problem.
+//
+// THE LOCK MOVED FROM `Screendump` TO THE TRANSPORT, AND THAT IS AN IMPROVEMENT RATHER THAN A
+// RELOCATION: a lock taken by one command protects the commands that remembered to take it. `line.Run`
+// takes it for the socket write and the socket read, so EVERY command is serialised by construction -
+// including the next one somebody adds.
+func TestEveryCommandOnAConnectionIsSerialised(t *testing.T) {
+	body, err := os.ReadFile("monitor.go")
 	if err != nil {
 		t.Fatal(err)
 	}
 	src := string(body)
-	start := strings.Index(src, "func (c *Conn) Screendump(")
+	start := strings.Index(src, "func (l *line) Run(")
 	if start < 0 {
-		t.Fatal("Screendump is gone")
+		t.Fatal("no `line.Run`; the transport that serialises commands is gone")
 	}
-	end := strings.Index(src[start:], "\n}\n")
-	if end < 0 {
-		t.Fatal("cannot find the end of Screendump")
+	rest := src[start:]
+	if end := strings.Index(rest[1:], "\nfunc "); end > 0 {
+		rest = rest[:end+1]
 	}
-	fn := src[start : start+end]
-
-	if !strings.Contains(fn, "c.wire.Lock()") {
-		t.Error("Screendump does not take `wire`. Two readers share this connection - the " +
-			"recording sampler ticks every second - and without serialisation they interleave " +
-			"their QMP commands. Measured on macos-setup: 14 of ~180 polls read a frame and 166 " +
-			"failed silently")
-	}
-	if !strings.Contains(fn, "defer c.wire.Unlock()") {
-		t.Error("Screendump takes `wire` without releasing it on every path")
-	}
-	// AND THE WHOLE DUMP IS INSIDE IT. A lock taken after `raw.Screendump` is a lock that guards
-	// the bookkeeping and not the conversation. COMMENTS ARE STRIPPED FIRST: the note above the
-	// lock mentions `raw.Screendump` by name, and matching that made this check fail on code that
-	// was right.
 	var code []string
-	for _, line := range strings.Split(fn, "\n") {
+	for _, line := range strings.Split(rest, "\n") {
 		if t := strings.TrimSpace(line); strings.HasPrefix(t, "//") {
 			continue
 		}
 		code = append(code, line)
 	}
-	lines := strings.Join(code, "\n")
-	iLock := strings.Index(lines, "c.wire.Lock()")
-	// THE DUMP GOES THROUGH `c.mon.Run` NOW, because PNG needs a `format:` argument the library's
-	// `raw.Screendump` does not pass - so the call to serialise is that one.
-	iDump := strings.Index(lines, "c.mon.Run(cmd)")
-	if iDump < 0 {
-		iDump = strings.Index(lines, "raw.Screendump")
+	fn := strings.Join(code, "\n")
+
+	lock := strings.Index(fn, "l.mu.Lock()")
+	if lock < 0 {
+		t.Fatal("`line.Run` takes no lock, so two readers interleave their commands and replies on " +
+			"one socket - measured as 166 of 180 polls reading nothing")
 	}
-	if iLock < 0 || iDump < 0 || iLock > iDump {
-		t.Errorf("`wire` is not taken before the screendump call (lock at %d, dump at %d), so it "+
-			"does not serialise it", iLock, iDump)
+	unlock := strings.Index(fn, "defer l.mu.Unlock()")
+	if unlock < 0 {
+		t.Fatal("`line.Run` takes the lock without releasing it on every path")
 	}
-	// `mu` MUST NOT BE HELD ACROSS THE WAIT: the wait is up to five seconds and `screen()` takes
-	// `mu` for every click.
-	if strings.Contains(fn, "defer c.mu.Unlock()") {
-		t.Error("Screendump holds `mu` for its whole body; `mu` guards the struct's state and a " +
-			"five-second wait under it stops every click")
+	write := strings.Index(fn, "l.nc.Write(command)")
+	read := strings.Index(fn, "dec.Decode(&reply)")
+	if write < 0 || read < 0 {
+		t.Fatal("`line.Run` no longer writes a command and reads a reply")
+	}
+	if lock > write || lock > read {
+		t.Fatalf("the lock is taken AFTER the socket work (lock %d, write %d, read %d), so it "+
+			"guards nothing", lock, write, read)
+	}
+
+	// AND EVERY COMMAND HAS A DEADLINE, which is what turns "qemu stopped answering" into an error
+	// instead of a caller parked forever - the seven-minute hang.
+	if !strings.Contains(fn, "SetDeadline(") {
+		t.Fatal("`line.Run` sets no deadline, so a qemu that stops answering parks the caller " +
+			"forever. Measured as `boot the recovery image` sitting seven minutes past its own " +
+			"`timeout:`")
+	}
+
+	// AND `Close` MUST NOT WANT THE SAME LOCK, or a close during a command waits for a reply that is
+	// never coming - measured as a `destroy` that never returned.
+	cs := strings.Index(src, "func (l *line) Close() error {")
+	if cs < 0 {
+		t.Fatal("no `line.Close`")
+	}
+	crest := src[cs:]
+	if end := strings.Index(crest[1:], "\nfunc "); end > 0 {
+		crest = crest[:end+1]
+	}
+	if strings.Contains(crest, "l.mu.Lock()") {
+		t.Fatal("`line.Close` takes `mu`, the lock a command holds while it waits for a reply. A " +
+			"close during a command then waits for that reply, which is the hang this transport " +
+			"replaced. It must close the descriptor instead")
 	}
 }
 
@@ -515,5 +543,192 @@ func TestAFrameIsCompleteWhenItDecodes(t *testing.T) {
 		}
 	case <-time.After(4 * time.Second):
 		t.Fatal("waitForStable never accepted a complete frame")
+	}
+}
+
+// A peer that speaks QMP: the greeting, then one JSON object per line for every command.
+//
+// IT DECODES BY JSON AND NOT BY NEWLINE COUNTING, AND THAT IS THE BUG THIS FILE HAD ONCE. The first
+// version read replies with `bufio.ReadBytes('\n')`, but `json.Marshal` writes no trailing newline - so
+// the peer never answered, every command parked in `<-mon.stream`, and the test "found" a deadlock in
+// the vendored library that was really its own scaffolding.
+type fakeQMP struct {
+	ln   net.Listener
+	path string
+	// reply is what each command gets. A nil function means `{"return":{}}`.
+	reply func(command string) (string, bool)
+	// silent makes the peer accept commands and never answer them, which is what a qemu that has
+	// stopped responding looks like.
+	silent bool
+}
+
+func newFakeQMP(t *testing.T) *fakeQMP {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "qmp.sock")
+	ln, err := net.Listen("unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := &fakeQMP{ln: ln}
+	t.Cleanup(func() { _ = ln.Close() })
+	f.path = path
+	go f.serve()
+	return f
+}
+
+func (f *fakeQMP) serve() {
+	for {
+		conn, err := f.ln.Accept()
+		if err != nil {
+			return
+		}
+		go func(nc net.Conn) {
+			defer nc.Close()
+			_ = nc.SetDeadline(time.Now().Add(30 * time.Second))
+			_, _ = io.WriteString(nc, `{"QMP":{"version":{"qemu":{"major":11,"minor":1,"micro":0,"package":""}},"capabilities":["oob"]}}`+"\n")
+			dec := json.NewDecoder(nc)
+			for {
+				var cmd struct {
+					Execute string `json:"execute"`
+				}
+				if err := dec.Decode(&cmd); err != nil {
+					return
+				}
+				// THE CAPABILITY HANDSHAKE IS ALWAYS ANSWERED: `silent` models a qemu that stops
+				// responding to COMMANDS, not one that never greets, because an unanswered greeting is
+				// a different failure - the socket is held by another client.
+				if f.silent && cmd.Execute != "qmp_capabilities" {
+					continue
+				}
+				body := `{"return":{}}`
+				if f.reply != nil {
+					if r, ok := f.reply(cmd.Execute); ok {
+						body = r
+					}
+				}
+				// A NEWLINE AFTER THE JSON, because that is what the transport decodes against. QMP is
+				// newline-delimited, and a peer that omits it is a peer that never answers.
+				if _, err := io.WriteString(nc, body+"\n"); err != nil {
+					return
+				}
+			}
+		}(conn)
+	}
+}
+
+// THE CONNECTION REPORTS WHAT THE GREETING SAID, so a caller can tell an old qemu from a broken one.
+func TestOpenReadsTheGreeting(t *testing.T) {
+	f := newFakeQMP(t)
+	c, err := Open(f.path, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	v := c.l.Version()
+	if v.Major != 11 || v.Minor != 1 {
+		t.Fatalf("the greeting said qemu %d.%d, wanted 11.1", v.Major, v.Minor)
+	}
+	if caps := c.l.capabilities(); len(caps) != 1 || caps[0] != "oob" {
+		t.Fatalf("capabilities %v, wanted [oob]", caps)
+	}
+}
+
+// A CLOSED CONNECTION IS AN ERROR, NOT A NIL DEREFERENCE, AND NOT A HANG.
+//
+// THIS IS THE EXACT CRASH THAT TOOK A DAEMON DOWN AS PID 1:
+//
+//	panic: runtime error: invalid memory address or nil pointer dereference
+//	qmp.(*SocketMonitor).RunWithFile(0x0, ...)     <- the receiver was nil
+//	daemon.(*Driver).Frame()
+//	run.(*Executor).sampler.func1()                <- the recorder's 1 Hz tick
+//
+// `destroy` closed the connection; the recorder's sampler had ALREADY been handed that `*Conn` and
+// called `Screendump` a moment later. And the second half: a `Close` while a command is in flight must
+// return, not wait for a reply that will never come.
+func TestCloseIsSafeWhileACommandIsInFlight(t *testing.T) {
+	f := newFakeQMP(t)
+	// A PEER THAT NEVER ANSWERS is what makes this the hard case: a command blocked in Read can only be
+	// released by the socket closing.
+	f.reply = func(string) (string, bool) { return "", false }
+	f.silent = true
+
+	c, err := Open(f.path, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var wg sync.WaitGroup
+	problems := make(chan error, 64)
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					problems <- fmt.Errorf("a command on a closing connection panicked: %v", r)
+				}
+			}()
+			if err := c.SystemPowerdown(); err != nil && !errors.Is(err, ErrClosed) {
+				problems <- err
+			}
+		}()
+	}
+	// GIVE THE COMMANDS TIME TO BE INSIDE THE SOCKET, so the close genuinely races them.
+	time.Sleep(50 * time.Millisecond)
+	closed := make(chan error, 1)
+	go func() { closed <- c.Close() }()
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Errorf("Close returned %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close did not return within 5s while commands were blocked on a silent peer. " +
+			"This is the seven-minute hang: a close that waits for a reply nobody will send")
+	}
+	wg.Wait()
+	close(problems)
+	for err := range problems {
+		t.Error(err)
+	}
+
+	// AND AFTERWARDS THE ANSWER IS ALWAYS ErrClosed, EVERY TIME, NOT A PANIC.
+	if err := c.Click(10, 10); !errors.Is(err, ErrClosed) {
+		t.Fatalf("Click after Close returned %v, wanted ErrClosed", err)
+	}
+	if err := c.SystemPowerdown(); !errors.Is(err, ErrClosed) {
+		t.Fatalf("SystemPowerdown after Close returned %v, wanted ErrClosed", err)
+	}
+	if err := c.Close(); err != nil {
+		t.Fatalf("the second Close returned %v", err)
+	}
+}
+
+// A COMMAND HAS A DEADLINE, so a machine that stops answering fails the step instead of the leg.
+//
+// WITHOUT THIS the failure mode is not an error, it is NOTHING: `Run` waits on a channel that qemu will
+// never write to. MEASURED as `boot the recovery image` sitting for seven minutes past its own
+// `timeout:` - the walk could not report the hang because the code was inside it.
+func TestACommandOnASilentPeerTimesOut(t *testing.T) {
+	if testing.Short() {
+		t.Skip("waits out the command deadline")
+	}
+	f := newFakeQMP(t)
+	f.silent = true
+	c, err := Open(f.path, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+
+	start := time.Now()
+	err = c.SystemPowerdown()
+	if err == nil {
+		t.Fatal("a command against a peer that never answers returned nil")
+	}
+	// IT MUST BE THE DEADLINE, NOT AN EOF: the socket is still open, the peer is merely quiet.
+	if elapsed := time.Since(start); elapsed > commandTimeout+10*time.Second {
+		t.Fatalf("the command took %s, and the deadline is %s", elapsed, commandTimeout)
 	}
 }

@@ -217,6 +217,21 @@ func (e *Executor) sampler(dir string) error {
 				// the machine spent those minutes doing nothing.
 				f, err := e.Driver.Frame()
 				if err != nil {
+					// A MACHINE THAT HAS GONE IS NOT A DROPPED TICK, AND THE DIFFERENCE IS A LIE IN
+					// THE LOG.
+					//
+					// `destroy` closes the machine while a recording may still be running - a `record:`
+					// step before a `boot:`, or a walk that failed and left the sampler up until
+					// `finishRecording` joins it. Counting those as "lost ticks" would report a video
+					// that is shorter than the run, which is FALSE: the run ended. So the sampler asks
+					// the driver whether the machine is still there, and stops counting when it is not.
+					//
+					// IT STILL STOPS ON `done`, not here: `finishRecording` joins this goroutine, and a
+					// goroutine that returns early would make that join succeed while `rec` is being
+					// encoded - the race the comment above `pendingRecorder` describes.
+					if !driverHasAMachine(e.Driver) {
+						continue
+					}
 					rec.mu.Lock()
 					rec.missed++
 					rec.mu.Unlock()
@@ -371,4 +386,22 @@ func (e *Executor) finishRecording() {
 	if err := rec.encode(video, e.Driver.Log); err != nil {
 		e.Driver.Log(fmt.Sprintf("  recording NOT written: %v", err))
 	}
+}
+
+// driverHasAMachine reports whether a step could still read the screen.
+//
+// IT IS A CAPABILITY RATHER THAN A METHOD ON `Driver`, so a fake driver in a test keeps working: what
+// this answers is "has the guest gone away", and a driver that cannot answer is assumed to have one.
+func driverHasAMachine(d Driver) bool {
+	if d == nil {
+		return false
+	}
+	m := d.Machine()
+	if m == nil {
+		return false
+	}
+	if alive, ok := m.(interface{ IsRunning() bool }); ok {
+		return alive.IsRunning()
+	}
+	return true
 }

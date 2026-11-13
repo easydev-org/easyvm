@@ -29,24 +29,22 @@ import (
 // number. Two modes, two endings, no duration in the rule.
 
 // startSandbox boots the machine a file describes and returns, leaving it running.
+//
+// THE SLOT DECIDES, NOT A FLAG. This used to read `d.sandbox` and `d.ex` and never `d.machine`, so
+// `create` on a daemon already running a `run`'s machine built a SECOND driver, overwrote the closer
+// and left the first qemu unreachable holding /dev/kvm. `reserve` is one operation: it answers "may a
+// machine be built" and claims the slot, so there is no window between the two.
 func (d *Daemon) startSandbox(req Request) Response {
-	d.mu.Lock()
-	if d.sandbox {
-		st := d.st
-		d.mu.Unlock()
-		return Response{OK: false, Error: "a sandbox is already running; destroy it first",
-			State: &st}
-	}
-	if d.ex != nil {
-		st := d.st
-		d.mu.Unlock()
-		return Response{OK: false, Error: "a run is in progress; stop it first", State: &st}
-	}
 	if req.File == "" {
-		d.mu.Unlock()
 		return Response{OK: false, Error: "`create` needs a walkthrough file that describes " +
 			"the machine - its `boot:` steps are the shape"}
 	}
+	if _, err := d.reserve(ownerCreate); err != nil {
+		st := d.snapshot()
+		return Response{OK: false, Error: err.Error(), State: &st}
+	}
+
+	d.mu.Lock()
 	work := d.work
 	d.st = State{
 		Status:  "starting",
@@ -98,7 +96,7 @@ func (d *Daemon) bootSandbox(req Request, work string, done chan struct{}) {
 		return
 	}
 
-	driver, closeDriver, err := NewDriver(file, work, req.BootDisk, file.SSHPort,
+	driver, closeDriver, err := NewDriver(d, file, work, req.BootDisk, file.SSHPort,
 		req.Password)
 	if err != nil {
 		fail("the machine could not be prepared", err)
@@ -142,8 +140,16 @@ func (d *Daemon) bootSandbox(req Request, work string, done chan struct{}) {
 	}
 
 	d.mu.Lock()
-	d.sandbox = true
-	d.sandboxClose = closeDriver
+	// THE SLOT'S OWNER CHANGES TO `create`, BECAUSE THE MACHINE NOW OUTLIVES THE STEPS.
+	//
+	// This is the one thing a successful `create` has to record: the driver and its closer were put in
+	// the slot by `runWalkthroughFile` with `ownerRun`, and a bake closes its machine when the file
+	// ends. A sandbox must not - there is no last step - so the owner is what says so, rather than a
+	// `sandbox` flag beside the slot that could disagree with it.
+	d.mu.Lock()
+	if d.machine != nil {
+		d.machine.owner = ownerCreate
+	}
 	d.ex = nil
 	d.st.Status = "running"
 	d.st.Answered = res.Answered
@@ -175,22 +181,48 @@ func bootSteps(f *walk.File) []walk.Step {
 //
 // IT IS THE ONLY ENDING A SANDBOX HAS, and it is the SAME CLOSER a bake uses - the difference is only
 // WHEN it is called. A bake calls it when its steps end; a sandbox calls it here.
+// WHICH IS THE ONLY WAY A MACHINE GOES AWAY.
+//
+// THE SLOT IS HELD UNTIL THE TEARDOWN HAS FINISHED, AND THAT IS THE POINT. The obvious version is
+//
+//	d.machine = nil
+//	closeFn()                  // and now take your time
+//
+// which publishes "there is no machine" while a disk is still being closed and an overlay is still
+// being verified. A `boot` arriving in that window starts a second qemu against a disk the first one
+// is still writing, and the failure appears much later as a corrupt image - or as qemu refusing
+// `drive.sock.qmp` because the previous client has not let go of it.
+//
+// SO `closing` IS SET BEFORE THE LOCK IS RELEASED, the slot is cleared AFTERWARDS, and a caller that
+// arrives in the meantime is told "the previous machine is still closing" rather than "there is no
+// machine" - two facts a `machine == nil` test cannot tell apart.
 func (d *Daemon) destroySandbox() Response {
 	d.mu.Lock()
-	closeFn := d.machineClose
-	machine := d.machine
-	d.machineClose = nil
-	d.machine = nil
-	was := d.sandbox
-	d.sandbox = false
+	slot := d.machine
+	if slot == nil || slot.phase == slotAbsent {
+		d.mu.Unlock()
+		return Response{OK: false, Error: "no machine is running"}
+	}
+	if slot.phase == slotStopping {
+		st := d.st
+		d.mu.Unlock()
+		return Response{OK: false, Error: ErrMachineClosing.Error(), State: &st}
+	}
+	// THE PHASE GOES TO `stopping` BEFORE THE LOCK IS RELEASED, and that is what makes the teardown
+	// safe: `reserve` refuses a `starting`/`stopping` slot, so no boot can start against a disk this
+	// is still writing. The slot is published as `absent` only AFTER the close has finished.
+	slot.phase = slotStopping
+	closeFn := slot.close
 	d.mu.Unlock()
 
+	// THE TEARDOWN RUNS WITHOUT THE LOCK. `closeFn` kills a qemu and waits for it, stops an smbd and
+	// verifies an overlay - none of which may block `status`, the console page, or a `stop` that is
+	// trying to help.
 	if closeFn != nil {
 		closeFn()
-	} else if machine == nil && !was {
-		return Response{OK: false, Error: "no sandbox is running"}
 	}
 
+	d.release(slot)
 	d.mu.Lock()
 	d.st.Status = "destroyed"
 	d.st.Message = "the machine was stopped"
@@ -256,10 +288,6 @@ func (d *Daemon) runBootOnly(req Request, work string, done chan struct{}) {
 	// THE SAME FILE, WITH ONLY ITS MACHINE STEPS, so `runWalkthrough` needs no second code path.
 	narrowed := *file
 	narrowed.Steps = prep
-
-	d.mu.Lock()
-	d.sandbox = true
-	d.mu.Unlock()
 
 	d.runWalkthroughFile(req, work, done, &narrowed)
 }

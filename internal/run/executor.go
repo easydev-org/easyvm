@@ -537,33 +537,46 @@ func (e *Executor) doRequireSSH(s walk.Step) error {
 	e.Driver.Log(fmt.Sprintf("  ssh answers on port %d after %s",
 		target.Port, time.Since(start).Round(time.Second)))
 
-	// AND THE DRIVER'S CACHED CONNECTION IS DROPPED, BECAUSE "SSHD IS READY" MEANS THE OLD ONE IS NOT.
+	// THE CONNECTION IS NOT DROPPED HERE ANY MORE, AND THAT IS THE IMPROVEMENT.
 	//
-	// `require_ssh` PROBES WITH A FRESH CONNECTION, but the driver keeps ONE connection for the run -
-	// so a step sequence of `reboot:` -> `require_ssh:` -> `ssh:` had the probe succeed and the next
-	// `ssh:` write into the pre-reboot socket:
+	// `require_ssh` USED TO DROP THE DRIVER'S CACHED CONNECTION AFTER A SUCCESSFUL PROBE, because the
+	// probe dials fresh while the driver kept one for the run - so
+	//
+	//	reboot: -> require_ssh: -> ssh:
+	//
+	// had the probe succeed and the next `ssh:` write into the pre-reboot socket:
 	//
 	//	status: failed step 20/20 "read what this boot did"
 	//	error: read what this boot did: ssh session: EOF
 	//
-	// Measured on opensuse-tumbleweed, whose last step is exactly that. `Reboot()` already closes the
-	// cache; a `reboot:` done INSIDE an `ssh:` command - `systemctl reboot` - does not go through it,
-	// and that is the case the probe above exists for. Closing here covers both: whichever way the
-	// machine restarted, the connection that survives a successful probe is the one the probe made.
-	if closer, ok := e.Driver.(interface{ DropGuest() }); ok {
-		closer.DropGuest()
-	}
+	// MEASURED on opensuse-tumbleweed, whose last step is exactly that pair. The fix then was a call
+	// here, which meant EVERY OTHER PATH THAT RESTARTED THE GUEST had to remember it too - and
+	// `ssh: systemctl reboot` does not come through this function at all.
+	//
+	// THE SESSION NOW REPAIRS ITSELF: `sshSession.Do` retries once on a fresh connection when an
+	// operation fails because the session died. So there is nothing for this step to remember, and a
+	// reboot is repaired by whichever step needs the guest next.
 	return nil
 }
 
 func (e *Executor) doSSH(s walk.Step) error {
-	client := e.Driver.Guest()
-	if client == nil {
-		return fail(s.Name, "no ssh connection; a `require_ssh:` step must come first")
-	}
 	command := s.Get("ssh")
 	timeout := seconds(s, "timeout", 900)
-	res, err := client.Run(command, timeout)
+
+	var res guest.Result
+	run := func(client *guest.Client) error {
+		var runErr error
+		res, runErr = client.Run(command, timeout)
+		return runErr
+	}
+	// THE COMMAND GOES THROUGH THE DRIVER'S SESSION WHEN IT HAS ONE, so a connection that died while
+	// the guest rebooted is repaired here rather than failing the step.
+	//
+	// MEASURED, on opensuse-tumbleweed, whose last step is `reboot:` followed by an `ssh:`: without the
+	// repair it reported `ssh session: EOF` and pointed at the step, while the cause was the reboot
+	// three steps earlier. WITH it, the step dials once more and succeeds - and the log still shows the
+	// command's own output, because the retry is the connection's business and not the step's.
+	err := e.withGuest(run)
 	e.Driver.Log(fmt.Sprintf("  ssh: %s -> %d", oneLine(command), res.Status))
 	for _, line := range headAndTail(res.Combined(), 18, 6) {
 		e.Driver.Log("    " + line)
@@ -575,6 +588,25 @@ func (e *Executor) doSSH(s walk.Step) error {
 		return fail(s.Name, "the command exited %d", res.Status)
 	}
 	return nil
+}
+
+// withGuest runs one operation against the guest, repairing a dead ssh session once when the driver
+// knows how.
+//
+// THE CAPABILITY IS OPTIONAL ON PURPOSE. A fake driver in a test has no session to repair, and a
+// transport other than ssh would not have this failure at all - so this is a type assertion rather
+// than a method on `Driver`, the same way `DropGuest` used to be.
+func (e *Executor) withGuest(fn func(*guest.Client) error) error {
+	if doer, ok := e.Driver.(interface {
+		DoGuest(func(*guest.Client) error) error
+	}); ok {
+		return doer.DoGuest(fn)
+	}
+	client := e.Driver.Guest()
+	if client == nil {
+		return fail("", "no ssh connection; a `require_ssh:` step must come first")
+	}
+	return fn(client)
 }
 
 // oneLine shortens a command for a log line without hiding that it was shortened.

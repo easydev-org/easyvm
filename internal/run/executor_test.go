@@ -362,33 +362,59 @@ func TestDiskGBCreatesTheSizeItSays(t *testing.T) {
 //
 // THE RULE: whichever way the guest restarted, the connection that survives a successful probe is the
 // one the probe made.
-func TestRequireSSHDropsTheCachedConnection(t *testing.T) {
-	body, err := os.ReadFile("executor.go")
+func TestAStepThatNeedsTheGuestRepairsADeadSession(t *testing.T) {
+	// THE DRIVER OWNS THE REPAIR, NOT THE STEP, AND THAT IS THE POINT.
+	//
+	// `require_ssh:` USED TO DROP THE CACHED CONNECTION after a successful probe, because the probe
+	// dials fresh while the driver kept one for the run. The fix worked for the one path that had it
+	// and missed the other:
+	//
+	//	reboot: -> require_ssh: -> ssh:          the probe drops it, the ssh step reconnects
+	//	ssh: systemctl reboot -> ssh:            NOTHING drops it, and the step reports `ssh session: EOF`
+	//
+	// MEASURED on opensuse-tumbleweed, whose last step is the second shape. So the repair moved to the
+	// session: `sshSession.Do` retries once on a fresh connection when an operation fails because the
+	// session died.
+	//
+	// THIS TEST READS WHICH LAYER HOLDS IT, because the property is "a step after a reboot works" and
+	// the way it fails is silent: a type assertion against a method that does not exist compiles and
+	// does nothing.
+	sess, err := os.ReadFile("../daemon/sshsession.go")
+	if err != nil {
+		t.Skipf("no ssh session here (%v)", err)
+	}
+	src := withoutComments(string(sess))
+	if !strings.Contains(src, "func (s *sshSession) Do(fn func(*guest.Client) error) error {") {
+		t.Fatal("the ssh session has no `Do`, so nothing repairs a connection that died with a " +
+			"reboot - and every step has to remember to DropGuest instead")
+	}
+	i := strings.Index(src, "func (s *sshSession) Do(")
+	body := src[i:]
+	if end := strings.Index(body[1:], "\nfunc "); end > 0 {
+		body = body[:end+1]
+	}
+	if !strings.Contains(body, "isSessionGone(") {
+		t.Fatal("`sshSession.Do` retries unconditionally or not at all; it must retry ONLY when the " +
+			"error means the session died, or a failing command runs twice")
+	}
+	if !strings.Contains(body, "s.Drop()") || !strings.Contains(body, "s.Get()") {
+		t.Fatal("`sshSession.Do` does not drop the dead connection and dial a new one, so the retry " +
+			"uses the same broken socket")
+	}
+
+	// AND THE STEP ASKS THE DRIVER TO DO IT, when the driver has the capability.
+	exec, err := os.ReadFile("executor.go")
 	if err != nil {
 		t.Fatal(err)
 	}
-	src := string(body)
-	start := strings.Index(src, "func (e *Executor) doRequireSSH(")
-	if start < 0 {
-		t.Fatal("no doRequireSSH")
+	esrc := withoutComments(string(exec))
+	if !strings.Contains(esrc, "DoGuest(func(*guest.Client) error) error") {
+		t.Fatal("`doSSH` does not go through the driver's repairing entry point, so its connection " +
+			"drops are back to being every step's problem")
 	}
-	rest := src[start:]
-	end := strings.Index(rest[1:], "\nfunc ")
-	if end > 0 {
-		rest = rest[:end+1]
-	}
-	if !strings.Contains(rest, "DropGuest()") {
-		t.Fatal("`require_ssh:` does not drop the driver's cached connection, so a step after a " +
-			"guest-initiated reboot writes into a dead socket and reports `ssh session: EOF`")
-	}
-	// AND THE DRIVER MUST HAVE THE METHOD, OR THE TYPE ASSERTION SILENTLY DOES NOTHING.
-	driver, err := os.ReadFile("../daemon/driver.go")
-	if err != nil {
-		t.Skipf("no daemon driver here (%v)", err)
-	}
-	if !strings.Contains(string(driver), "func (d *Driver) DropGuest()") {
-		t.Fatal("DropGuest exists in the executor's type assertion and not on the driver, so the " +
-			"assertion fails silently and nothing is dropped")
+	if strings.Contains(esrc, "closer.DropGuest()") {
+		t.Fatal("`require_ssh:` still drops the connection itself; that is the per-path fix that " +
+			"missed `ssh: systemctl reboot`, and it is now the session's job")
 	}
 }
 
@@ -783,4 +809,18 @@ func TestAStepThatNeedsNoGuestSurvivesAShutdown(t *testing.T) {
 			}
 		})
 	}
+}
+
+// withoutComments drops whole-line `//` comments, so a test that looks for code cannot be satisfied by
+// prose that mentions it. It is a local copy rather than a shared helper because `internal/run` has no
+// other source-reading test and a new exported helper for one caller is worse than eight lines.
+func withoutComments(src string) string {
+	var out []string
+	for _, line := range strings.Split(src, "\n") {
+		if t := strings.TrimSpace(line); strings.HasPrefix(t, "//") {
+			continue
+		}
+		out = append(out, line)
+	}
+	return strings.Join(out, "\n")
 }
