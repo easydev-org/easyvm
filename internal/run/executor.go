@@ -76,6 +76,11 @@ type Executor struct {
 	// is created on first write because an Executor is built by value in places.
 	seen map[string][]string
 
+	// machineSeen is whether a `boot:` has succeeded in this walk, so "the guest is gone" is only a
+	// verdict once there was a guest. The first steps of every install create a disk and fetch an ISO,
+	// and none of them has a machine yet.
+	machineSeen bool
+
 	// facts is what a `check:` step decided, by the name it gave the boolean.
 	//
 	// THE THIRD OF THREE. `ocr:` produces TEXT, `check:` compares that text and produces a BOOLEAN,
@@ -121,6 +126,29 @@ func (e *Executor) Run(steps []walk.Step) (Result, error) {
 			e.Driver.Log("stopping at the step boundary as asked")
 			res.Err = errStopped
 			return res, res.Err
+		}
+		// A GUEST THAT IS GONE ENDS THE WALK AT THE NEXT STEP BOUNDARY.
+		//
+		// MEASURED ON macos-setup: qemu exited during `wait for the recovery menu`, and the loop spent
+		// its full `max: 180` - THIRTY MINUTES - on
+		//
+		//	attempt 40 could not read the screen (screendump: ... write: broken pipe); trying again
+		//
+		// against a machine that was never coming back. Every later step is a sentence about a guest
+		// that does not exist, and the run should say so once.
+		//
+		// THE CHECK IS HERE AND NOT IN THE LOOP because "is there a machine" is a fact about the walk,
+		// not about the step: a `boot:` that has not run yet has no machine either, and the first steps
+		// of every install are exactly that. So it is asked only AFTER a machine has been seen.
+		if e.machineSeen && i > 0 {
+			if m := e.Driver.Machine(); m != nil {
+				if alive, ok := m.(interface{ IsRunning() bool }); ok && !alive.IsRunning() {
+					res.Err = fail(s.Name, "the guest is no longer running, so this step cannot be "+
+						"done. The machine exited during the step before it - its qemu is gone and "+
+						"nothing that follows can be true of it")
+					return res, res.Err
+				}
+			}
 		}
 		if e.OnStep != nil {
 			e.OnStep(i+1, len(steps), s.Name)
@@ -191,7 +219,11 @@ func (e *Executor) runOne(s walk.Step) error {
 	case s.Has("boot"), s.Has("boot_from"):
 		// BOTH START A MACHINE; ONLY THE STARTING STATE DIFFERS. `doBoot` reads `boot_from:` and
 		// passes it as the migration stream, so the two keys were never two implementations.
-		return e.doBoot(s)
+		if err := e.doBoot(s); err != nil {
+			return err
+		}
+		e.machineSeen = true
+		return nil
 	case s.Has("shutdown"):
 		return e.doShutdown(s)
 	case s.Has("reboot"):

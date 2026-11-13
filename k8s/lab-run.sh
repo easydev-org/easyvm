@@ -93,6 +93,19 @@ echo "=== reset the machine slot"
 #
 # SO THE ORDER IS `stop` THEN `destroy`: stop ends the walk and its machine, destroy clears anything a
 # `create` left. Both are best-effort, because on a fresh pod there is nothing to stop.
+# A PROCESS NAME IS TRUNCATED TO 15 CHARACTERS IN `comm`, AND `pkill -f` MATCHES THIS SCRIPT ITSELF
+# (its own command line contains the pattern), WHICH KILLS THE SHELL THAT IS RUNNING IT:
+#
+#	$ sh lab-run.sh windows install
+#	<killed, exit 137>
+#
+# So the pid list comes from `comm`, which is truncated but unambiguous, and the kill is by pid.
+kill_guest() {
+    for p in $(ps -eo pid,comm 2>/dev/null | awk '$2 ~ /qemu-system/ { print $1 }'); do
+        kill -9 "$p" 2>/dev/null || true
+    done
+}
+
 echo "=== stop the run in progress, if any"
 easyvm stop --work /work >/dev/null 2>&1 || true
 
@@ -116,9 +129,23 @@ while [ $i -lt 15 ]; do
     i=$((i + 1)); sleep 1
 done
 if [ "$i" -ge 15 ]; then
-    echo "=== the run did not stop in 15s; killing the guest" >&2
-    pkill -9 -f "qemu-system-x86_64" 2>/dev/null || true
-    sleep 3
+    # A STEP BLOCKED INSIDE A CALL THAT NEVER RETURNS CANNOT BE STOPPED FROM OUTSIDE THE PROCESS.
+    #
+    # `ShouldStop` is read between steps, so a `boot:` or a guest round trip that is already blocked
+    # never sees the flag - measured as `easyvm stop` printing `stopping` and `status` still saying
+    # `running step 5/16 "boot the installer"` twenty minutes later, with qemu alive at 9% CPU.
+    #
+    # THE CONTAINER IS THE ONLY THING THAT CAN END IT, and that is what `restartPolicy: Always` is for:
+    # killing PID 1 restarts the pod with an empty /work, a fresh daemon and every port released. The
+    # PVC keeps the disks. This is the local loop's definition of a reset, so it is used rather than
+    # emulated with kills that cannot reach the blocked goroutine.
+    echo "=== the run cannot be stopped from inside; restarting the container" >&2
+    kill_guest
+    kill -TERM 1 2>/dev/null || true
+    sleep 1
+    kill -9 1 2>/dev/null || true
+    # this shell dies with the container; nothing after here runs
+    sleep 30
 fi
 
 echo "=== destroy whatever a create left behind"
@@ -144,6 +171,14 @@ wait_port_free() {
 #	qemu-system-x86_64: -vnc 127.0.0.1:0: Failed to find an available port: Address already in use
 #
 # MEASURED: port 5900 LISTENing, qemu pid 153 alive, `destroy` reporting success.
+# A ZOMBIE IS NOT A RUNNING QEMU. This container's PID 1 is not a reaper for anything except its own
+# children, so a killed qemu stays in the table as `<defunct>` and a `ps | grep` keeps finding it:
+#
+#	206   Z   qemu-system-x86
+#	16888 Z   qemu-system-x86
+#
+# MEASURED: this loop waited its full thirty seconds for processes that were already gone, on every
+# reset, which is the same mistake `pgrep` caused for the daemon.
 qemu_alive() {
     ps -eo stat=,cmd= 2>/dev/null | awk '$1 !~ /^Z/ && $2 ~ /qemu-system/ { f = 1 } END { exit !f }'
 }
@@ -153,7 +188,7 @@ while qemu_alive && [ $i -lt 30 ]; do
 done
 if qemu_alive; then
     echo "=== a qemu outlived its run; killing it" >&2
-    pkill -9 -f "qemu-system-x86_64" 2>/dev/null || true
+    kill_guest
     sleep 2
 fi
 for port in 5900 8080; do

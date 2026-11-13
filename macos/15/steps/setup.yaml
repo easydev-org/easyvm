@@ -83,7 +83,21 @@ steps:
   - 1142
   - 586
   wait_after: 5
-- name: choose the target disk by capacity
+# THE DISK IS CHOSEN BY ITS DEVICE NAME, NOT BY ITS SIZE.
+#
+# MEASURED: the sidebar shows the virtio disk TWICE - the whole device and the partition the firmware
+# left on it - and BOTH report `137.44 GB`. A capacity test cannot tell them apart, so the loop stopped
+# on whichever the cursor happened to reach, and the details pane then said `Device: disk1`.
+#
+# ERASE ACTS ON THE WRONG ONE, OR ON NOTHING: the erase sheet never opened, and the step failed with
+#
+#	did not advance: wanted "erase deleted" or "free space" or "security option"
+#
+# against a pane showing a partition rather than a disk.
+#
+# `Device: disk0` IS THE WHOLE DEVICE and is what must be formatted; `disk1` is a child of it. That is a
+# reading with ONE answer, which is the property a stop condition needs.
+- name: choose the whole disk, not the partition on it
   loop:
     max: 8
     do:
@@ -102,14 +116,12 @@ steps:
       scale: 4
       wait: 3
     check:
-      name: right_disk
+      name: whole_disk
       from: disk
-      mode: size_between
-      range:
-      - 60
-      - 200
+      mode: contains
+      text: disk0
     until:
-      fact: right_disk
+      fact: whole_disk
 # THE WINDOW'S POSITION MOVES BETWEEN RUNS, AND ITS BRIGHTNESS IS NOT 200.
 #
 # MEASURED ACROSS TWO RUNS, sampling column x=500 of the same dialog:
@@ -124,9 +136,22 @@ steps:
 #
 # A THRESHOLD BETWEEN THE TWO IS THE MEASUREMENT: 40 is above the wallpaper and below the title bar.
 - name: erase - open the sheet
+  # (1289, 15), WHICH IS THE REFERENCE IMPLEMENTATION'S OWN MEASUREMENT AND THE ONE THING I GOT WRONG.
+  #
+  # `lib/steps.py` records two consecutive CI runs of this same stage:
+  #
+  #	run 42567290197   window top y=294  height 521   Erase icon y=309   -> dy = 15
+  #	run 42570035685   window top y=256  height 599   Erase icon y=271   -> dy = 15
+  #
+  # and the icon's x spanned 1283..1295 (centre 1289) in BOTH. The offset from the window is what
+  # survives; an absolute y is wrong on whichever run has the other height.
+  #
+  # MY 33 AND 36 WERE MEASURED OFF A BRIGHTNESS SCAN THAT INCLUDED THE BUTTON'S BORDER AND ITS LABEL,
+  # so the "centre" it found was the label's, three pixels below the icon - and a click there lands on
+  # the button's lower edge, which on this toolbar is outside the hit area.
   at_window:
   - 1289
-  - 36
+  - 15
   window_x: 500
   window_from: 180
   window_to: 400

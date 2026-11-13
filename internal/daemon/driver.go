@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -937,11 +938,44 @@ func (m machineControl) OS() string {
 	return d.guestOS
 }
 
+// IsRunning reports whether the guest's qemu process is alive - NOT whether a `*exec.Cmd` is non-nil.
+//
+// THE DIFFERENCE COST THIRTY MINUTES, TWICE. `d.proc != nil` stays true after qemu has exited, so every
+// caller that asks "is there a machine" got YES for a machine that was gone:
+//
+//	status            `running step 7/31`      <- nothing was running
+//	screen.png        409 from a dead socket
+//	screendump        `write: broken pipe`     <- retried to the loop's ceiling
+//
+// and the walk's `wait for the recovery menu` spent its full `max: 180` on captures that could not
+// succeed. THE STATE WAS WRONG; the retry loops were merely the symptom.
+//
+// `Signal(0)` ASKS THE KERNEL WHETHER THE PROCESS EXISTS, which is the fact. A process that has exited
+// and been reaped gives `os.ErrProcessDone`; one that exited and has not been reaped is a zombie, which
+// `Signal` also refuses - and in this container that is the normal state, because PID 1 is the daemon
+// and it reaps only when it gets round to it.
 func (m machineControl) IsRunning() bool {
 	d := m.d
 	d.mu.Lock()
-	defer d.mu.Unlock()
-	return d.proc != nil
+	proc := d.proc
+	d.mu.Unlock()
+	if proc == nil || proc.Process == nil {
+		return false
+	}
+	if err := proc.Process.Signal(syscall.Signal(0)); err != nil {
+		return false
+	}
+	// A ZOMBIE IS NOT RUNNING. `/proc/<pid>/stat` reports `Z` for one, and on Linux that file is the
+	// only place the difference between "exited" and "exited and waiting to be reaped" is visible.
+	if state, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", proc.Process.Pid)); err == nil {
+		// the state is the first field after the parenthesised command name
+		if i := strings.LastIndexByte(string(state), ')'); i >= 0 && i+2 < len(state) {
+			if state[i+2] == 'Z' {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // qmpSocket opens the connection, once - WITHOUT HOLDING THE LOCK WHILE IT WAITS.
@@ -1155,3 +1189,16 @@ func (d *Driver) VNCPort() int {
 	}
 	return d.vncPort
 }
+
+// ErrMachineGone is what a caller gets once the guest's qemu has exited.
+//
+// IT IS A SENTINEL RATHER THAN A STRING because the executor has to tell it apart from an ordinary
+// capture failure. MEASURED ON macos-setup: qemu exited, and the walk's `wait for the recovery menu`
+// loop ran to its `max: 180` ceiling - THIRTY MINUTES of
+//
+//	attempt 40 could not read the screen (screendump: png refused (write: broken pipe) ...); trying again
+//
+// against a machine that was never coming back. A loop whose condition can no longer be evaluated must
+// fail, not retry: "the guest is gone" is the answer, and every further attempt is a minute of somebody's
+// afternoon spent confirming it.
+var ErrMachineGone = errors.New("the guest is no longer running")

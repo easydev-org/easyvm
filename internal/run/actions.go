@@ -778,6 +778,32 @@ func (e *Executor) doCompress(s walk.Step) error {
 		return fail(s.Name, "no disk is known; a `disk:` step must come first")
 	}
 
+	// AN EMPTY DISK IS NOT A PRODUCT, AND PUBLISHING ONE IS THE WORST KIND OF SUCCESS.
+	//
+	// MEASURED ON ghostbsd: the walk ran all 25 steps, reported `finished`, and left
+	//
+	//	/disks/os/ghostbsd/install.qcow2   198656 bytes
+	//
+	// - the size `qemu-img create` writes for a disk nobody has touched. Its `installation runs` step
+	// is `wait: 1800`, A FIXED THIRTY MINUTES WITH NO CHECK THAT ANYTHING IS HAPPENING, so a guest whose
+	// installer never started still "completes".
+	//
+	// THE FLOOR IS THE CHECK THAT CANNOT BE FAKED. 512 MiB is well above a fresh qcow2's metadata and
+	// well below any real install - the smallest system here is ~1.2 GiB - so it separates "an
+	// installer wrote a system" from "nothing wrote anything" with no judgement in between.
+	//
+	// IT IS `disk_min_mb:` WHEN A FILE SAYS SO, because a file that produces a deliberately small
+	// artifact should be able to say what small means for it.
+	floor, _ := s.Float("disk_min_mb", 512)
+	if size := allocatedBytes(disk); size >= 0 && floor > 0 {
+		if mb := float64(size) / (1 << 20); mb < floor {
+			return fail(s.Name, "the disk is %.0f MiB, below the %.0f MiB floor for an installed "+
+				"system. This is a qcow2 header with nothing written to it - the steps above ran "+
+				"without installing anything, and publishing it would put an empty disk behind a "+
+				"tag the next stage pulls", mb, floor)
+		}
+	}
+
 	// `qemu-img convert` READS THE WHOLE BACKING CHAIN AND WRITES ONE FILE, so it is the flatten.
 	// There is no second call for an overlay: what this step publishes is either the disk the run
 	// wrote (an install) or the diff on top of the disk it was given, and convert reads both.
