@@ -353,29 +353,20 @@ func cmdServe(args []string) int {
 	d := daemon.New()
 	fmt.Printf("[easyvm] daemon for %s\n", *work)
 
-	// THE BROWSER SURFACE IS THE DAEMON'S ONE FRONT END, listening beside the socket-less state and
-	// sharing its state. It is not a second service: every click and key it receives goes through the
-	// same `handle` the CLI uses, and the QMP connection is the one this daemon already holds.
-	if *httpAddr != "" {
-		go func() {
-			if err := d.ServeHTTP(daemon.HTTPServeOptions{
-				Addr: *httpAddr,
-				Ready: func(addr string) {
-					fmt.Printf("[easyvm] browser surface on http://%s/\n", addr)
-				},
-			}); err != nil {
-				fmt.Fprintf(os.Stderr, "[easyvm] http surface stopped: %v\n", err)
-			}
-		}()
-	}
-
+	// ONE LISTENER, STARTED BY `Serve`. It used to be started HERE as a goroutine and again inside
+	// `Serve`, which bound :8080 twice and produced
+	//
+	//	FAILED: http listen :8080: listen tcp :8080: bind: address already in use
+	//
+	// on a daemon that had done nothing wrong. The address is `Serve`'s business now, and this is the
+	// only place it is decided.
 	err := d.Serve(daemon.ServeOptions{
-		Work: *work,
-		Ready: func(sock string) {
+		Work:     *work,
+		HTTPAddr: *httpAddr,
+		Ready: func(addr string) {
 			// THE READY LINE IS A CONTRACT. A supervisor - or a test - waits for it rather than
-			// polling for the socket file, because a file that exists is not a daemon that
-			// answers.
-			fmt.Printf("[easyvm] listening on %s\n", sock)
+			// polling for a socket file, because a file that exists is not a daemon that answers.
+			fmt.Printf("[easyvm] listening on http://%s/\n", addr)
 		},
 	})
 	if err != nil {
