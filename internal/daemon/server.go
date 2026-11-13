@@ -285,11 +285,50 @@ func (d *Daemon) startRun(req Request) Response {
 	d.mu.Lock()
 	if d.ex != nil {
 		st := d.st
+		machine := d.machine
 		d.mu.Unlock()
-		return Response{OK: false,
-			Error: fmt.Sprintf("a run is already in progress (step %q); stop it first",
-				st.Step),
-			State: &st}
+
+		// A RUN WHOSE MACHINE IS GONE IS NOT A RUN, AND `stop` CANNOT END IT.
+		//
+		// MEASURED: `easyvm stop` returned, `d.stopping` was set, qemu was killed by hand - and the leg
+		// went on reporting
+		//
+		//	status: running step 22/25 "installation runs"
+		//	REFUSED: a run is already in progress (step "installation runs"); stop it first
+		//
+		// for twenty more minutes. `ShouldStop` is only read BETWEEN steps, so a step blocked inside a
+		// guest round trip never sees it, and the daemon has no way to end a run whose machine no longer
+		// exists - so every later leg is refused and the pod is wedged.
+		//
+		// THE FIX IS TO NOTICE THE MACHINE IS GONE and take the slot back. The abandoned goroutine is
+		// left to fail on its own read; its `d.ex = nil` assignment is guarded by the same lock and
+		// cannot resurrect it.
+		// A RUN THAT HAS NOT MADE A MACHINE YET IS STILL A RUN. `machine == nil` means the executor is
+		// loading the file or preparing a disk - ordinary work - so the slot stays taken. Only a machine
+		// that EXISTED and is now gone is evidence the run is dead.
+		alive := true
+		if machine == nil {
+			alive = true
+		} else if m, ok := machine.(interface{ IsRunning() bool }); ok {
+			alive = m.IsRunning()
+		}
+		if !alive {
+			d.mu.Lock()
+			if d.ex != nil {
+				d.ex = nil
+				d.machine = nil
+				d.st.Status = "failed"
+				d.st.Error = "the machine went away while a step was running; the run was abandoned"
+				d.stopping = false
+			}
+			d.mu.Unlock()
+		} else {
+			return Response{OK: false,
+				Error: fmt.Sprintf("a run is already in progress (step %q); stop it first",
+					st.Step),
+				State: &st}
+		}
+		d.mu.Lock()
 	}
 	if req.File == "" {
 		d.mu.Unlock()

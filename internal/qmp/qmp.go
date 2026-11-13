@@ -741,22 +741,60 @@ func (c *Conn) Key(name string) error {
 // qcodes, so a name like "ctrl" has to be resolved through the library's own table. That is the
 // dependency earning its place - the table is 200 keys long and is generated from qemu's schema.
 func (c *Conn) Stroke(modifiers []string, key string) error {
-	all := make([]raw.KeyValue, 0, len(modifiers)+1)
+	// DOWN AND UP IN ONE EVENT LIST, AND NO `hold` AT ALL.
+	//
+	// `send-key` TAKES A `hold-time` AND QEMU SENDS THE RELEASE ITSELF, which means the guest's keyboard
+	// driver sees a key that stays DOWN for that long - long enough, on some layouts, to trigger
+	// autorepeat:
+	//
+	//	typed "vmuser"      the field said "vwmuserrrr"
+	//	                      ^       ^^^^
+	//	                      |       three extra `r`s: the last key repeated
+	//	                      an extra `w` between `v` and `m`
+	//
+	// MEASURED on ubuntu's installer, on two separate runs, and no amount of per-character pacing helps:
+	// `type_gap` sleeps BETWEEN calls, so it cannot shorten a hold QEMU is already applying.
+	//
+	// THE REFERENCE IMPLEMENTATION NEVER PASSES A HOLD: `lib/qmp.py` sends
+	//
+	//	input-send-event [ {key: qcode, down: true}, {key: qcode, down: false} ]
+	//
+	// and its own comment explains the other half of why - ONE REQUEST, so a shared socket cannot
+	// interleave another thread's traffic between the down and the up and leave a modifier stuck:
+	//
+	//	"sending down and up as one events list keeps the pair inside a single lock acquisition"
+	//
+	// A CHORD IS THE SAME SHAPE with more events: modifiers down, the key down and up, modifiers up in
+	// reverse order. That is what makes ctrl+alt+t one keystroke rather than five.
+	events := make([]raw.InputEvent, 0, len(modifiers)*2+2)
 	for _, m := range modifiers {
 		code, err := qcodeByName(m)
 		if err != nil {
 			return err
 		}
-		all = append(all, raw.KeyValueQcode(code))
+		events = append(events, raw.InputEventKey(raw.InputKeyEvent{
+			Down: true, Key: raw.KeyValueQcode(code),
+		}))
 	}
 	code, err := qcodeByName(key)
 	if err != nil {
 		return err
 	}
-	all = append(all, raw.KeyValueQcode(code))
-	hold := int64(100)
-	if err := c.raw.SendKey(all, &hold); err != nil {
-		return fmt.Errorf("send-key %v+%s: %w", modifiers, key, err)
+	events = append(events,
+		raw.InputEventKey(raw.InputKeyEvent{Down: true, Key: raw.KeyValueQcode(code)}),
+		raw.InputEventKey(raw.InputKeyEvent{Down: false, Key: raw.KeyValueQcode(code)}),
+	)
+	for i := len(modifiers) - 1; i >= 0; i-- {
+		code, err := qcodeByName(modifiers[i])
+		if err != nil {
+			return err
+		}
+		events = append(events, raw.InputEventKey(raw.InputKeyEvent{
+			Down: false, Key: raw.KeyValueQcode(code),
+		}))
+	}
+	if err := c.raw.InputSendEvent(nil, nil, events); err != nil {
+		return fmt.Errorf("input-send-event %v+%s: %w", modifiers, key, err)
 	}
 	return nil
 }

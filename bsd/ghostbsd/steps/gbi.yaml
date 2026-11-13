@@ -308,10 +308,19 @@ steps:
   - 1331
   - 785
   wait_after: 14
+# THE CHECK BOX IS AT (810,376), MEASURED OFF THE FRAME.
+#
+# The pane draws one drive row - `vtbd0 131072` - and the box that selects it sits in the Check column.
+# Until it is ticked, **Next is drawn greyed out**, so a click on Next does nothing and the walk reports
+# `did not advance` against a button that was never enabled.
+#
+# THE NUMBERS WERE 592,495 (the reference implementation's, for ITS gbi) and then 804,382 (a guess off a
+# scaled crop). This one is read from the pixels: the box outline's light pixels span x=792..829 and
+# y=368..385, so the centre is (810,376).
 - name: tick the zfs disk
   click:
-  - 804
-  - 382
+  - 810
+  - 376
   wait_after: 5
 - name: zfs configuration
   click:

@@ -96,6 +96,31 @@ echo "=== reset the machine slot"
 echo "=== stop the run in progress, if any"
 easyvm stop --work /work >/dev/null 2>&1 || true
 
+# A STOP IS A REQUEST, AND A STEP BLOCKED IN A GUEST ROUND TRIP DOES NOT HEAR IT.
+#
+# MEASURED: `easyvm stop` returned, `d.stopping` was set, and the leg went on reporting
+#
+#	status: running step 22/25 "installation runs"
+#	REFUSED: a run is already in progress (step "installation runs"); stop it first
+#
+# for another twenty minutes. `StopNow` asks the MACHINE to stop, and that call takes the driver's lock -
+# which the blocked step is holding while it waits for the guest.
+#
+# SO THE WAIT IS BOUNDED AND THE FALLBACK IS THE PROCESS. This script's job is to put the pod back to an
+# empty machine slot; if asking does not do it in fifteen seconds, killing qemu does, and the walk then
+# fails on its own read error rather than holding the slot.
+i=0
+while [ $i -lt 15 ]; do
+    busy=$(easyvm status --work /work 2>/dev/null | grep -c "status: running" || true)
+    [ "$busy" = "0" ] && break
+    i=$((i + 1)); sleep 1
+done
+if [ "$i" -ge 15 ]; then
+    echo "=== the run did not stop in 15s; killing the guest" >&2
+    pkill -9 -f "qemu-system-x86_64" 2>/dev/null || true
+    sleep 3
+fi
+
 echo "=== destroy whatever a create left behind"
 easyvm destroy --work /work >/dev/null 2>&1 || true
 

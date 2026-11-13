@@ -110,9 +110,19 @@ steps:
       - 200
     until:
       fact: right_disk
-# THE OFFSET IS MEASURED FROM THE FRAME, NOT COPIED: the Disk Utility window's top edge sits at
-# y=255 and the Erase button's centre at y=291, so the button is 36 px below the top. It said 15, which
-# is INSIDE THE TITLE BAR - a click there drags the window rather than pressing anything.
+# THE WINDOW'S POSITION MOVES BETWEEN RUNS, AND ITS BRIGHTNESS IS NOT 200.
+#
+# MEASURED ACROSS TWO RUNS, sampling column x=500 of the same dialog:
+#
+#	run 1   window top y=256   Erase button y=291
+#	run 2   window top y=294   Erase button y=334
+#
+# SO THE OFFSET IS STABLE (36 px below the top) AND THE ABSOLUTE POSITION IS NOT. That is exactly what
+# `at_window` is for, and it needs the right `window_brightness`: the desktop wallpaper there is
+# luminance 21-23 and the window's title bar is 56, so the default threshold of 200 finds NOTHING in a
+# dark-mode window and the search walks past it.
+#
+# A THRESHOLD BETWEEN THE TWO IS THE MEASUREMENT: 40 is above the wallpaper and below the title bar.
 - name: erase - open the sheet
   at_window:
   - 1289
@@ -120,6 +130,7 @@ steps:
   window_x: 500
   window_from: 180
   window_to: 400
+  window_brightness: 40
   expect_any:
   - - erase
     - deleted
