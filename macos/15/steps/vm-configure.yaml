@@ -12,6 +12,9 @@ vars:
   host:
     from: args.host
     default: 172.30.0.1
+  out:
+    from: args.out
+    default: out/distro.qcow2
 ssh_user: vmuser
 ssh_port: 2222
 boot_disk: from_caller
@@ -117,12 +120,11 @@ steps:
   - /tmp/smbmount.plist
   timeout: 300
 - name: install the login agent and the mount daemon
-  ssh: "set -e\nlaunchd_home=$(eval echo \"~$(id -un)\")\nmkdir -p \"$launchd_home/Library/LaunchAgents\"\ncp /tmp/bootstrap-launcher.sh \"$launchd_home/bootstrap-launcher.sh\"\nchmod +x \"$launchd_home/bootstrap-launcher.sh\"\
-    \nsed 's|__LAUNCHER__|'\"$launchd_home\"'/bootstrap-launcher.sh|' /tmp/bootstrap.plist > \"$launchd_home/Library/LaunchAgents/org.vm.bootstrap.plist\"\nprintf '%s\\n' '{{ password }}' | sudo -S -p ''\
-    \ sh -c '\n  mkdir -p /Library/LaunchDaemons /usr/local/bin\n  cp /tmp/smbmount.sh /usr/local/bin/vm-smbmount.sh\n  chmod 700 /usr/local/bin/vm-smbmount.sh\n  chown root:wheel /usr/local/bin/vm-smbmount.sh\n\
-    \  sed \"s|__SCRIPT__|/usr/local/bin/vm-smbmount.sh|\" /tmp/smbmount.plist > /Library/LaunchDaemons/org.vm.smbmount.plist\n  chmod 644 /Library/LaunchDaemons/org.vm.smbmount.plist\n  chown root:wheel\
-    \ /Library/LaunchDaemons/org.vm.smbmount.plist'\nprintf '%s\\n' '{{ password }}' | sudo -S -p '' launchctl bootout system/org.vm.smbmount 2>/dev/null || true\nprintf '%s\\n' '{{ password }}' | sudo\
-    \ -S -p '' launchctl bootstrap system /Library/LaunchDaemons/org.vm.smbmount.plist\necho INSTALLED_FOR_NEXT_LOGIN\n"
+  ssh: "set -e\nlaunchd_home=$(eval echo \"~$(id -un)\")\nmkdir -p \"$launchd_home/Library/LaunchAgents\"\ncp /tmp/bootstrap-launcher.sh \"$launchd_home/bootstrap-launcher.sh\"\nchmod +x \"$launchd_home/bootstrap-launcher.sh\"\nsed 's|__LAUNCHER__|'\"\
+    $launchd_home\"'/bootstrap-launcher.sh|' /tmp/bootstrap.plist > \"$launchd_home/Library/LaunchAgents/org.vm.bootstrap.plist\"\nprintf '%s\\n' '{{ password }}' | sudo -S -p '' sh -c '\n  mkdir -p /Library/LaunchDaemons /usr/local/bin\n  cp /tmp/smbmount.sh\
+    \ /usr/local/bin/vm-smbmount.sh\n  chmod 700 /usr/local/bin/vm-smbmount.sh\n  chown root:wheel /usr/local/bin/vm-smbmount.sh\n  sed \"s|__SCRIPT__|/usr/local/bin/vm-smbmount.sh|\" /tmp/smbmount.plist > /Library/LaunchDaemons/org.vm.smbmount.plist\n\
+    \  chmod 644 /Library/LaunchDaemons/org.vm.smbmount.plist\n  chown root:wheel /Library/LaunchDaemons/org.vm.smbmount.plist'\nprintf '%s\\n' '{{ password }}' | sudo -S -p '' launchctl bootout system/org.vm.smbmount 2>/dev/null || true\nprintf '%s\\\
+    n' '{{ password }}' | sudo -S -p '' launchctl bootstrap system /Library/LaunchDaemons/org.vm.smbmount.plist\necho INSTALLED_FOR_NEXT_LOGIN\n"
   timeout: 300
 - name: prove the mount daemon is installed
   ssh: 'ls -l /Library/LaunchDaemons/org.vm.smbmount.plist /usr/local/bin/vm-smbmount.sh &&
@@ -147,5 +149,10 @@ steps:
 
     '
   timeout: 60
+- name: stop the machine
+  shutdown: ssh
+  timeout: 300
+- name: publish the disk
+  compress: '{{ out }}'
 - name: stop recording
   record: false

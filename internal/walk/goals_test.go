@@ -1572,7 +1572,10 @@ func TestTypedWindowsCommandsCarryNoBackslashOrPipe(t *testing.T) {
 // other eleven and ghostbsd were fixed in the same pass.
 func TestAnSSHLegWritesTheDiskItsWorkflowPublishes(t *testing.T) {
 	root := filepath.Join("..", "..")
-	files, err := filepath.Glob(filepath.Join(root, "*", "*", "steps", "ssh.yaml"))
+	// EVERY LEG THAT DECLARES AN `out:` WRITES IT, NOT JUST `ssh`. The same omission was found
+	// again on windows-vm-configure and macos-vm-configure - both published a file neither wrote -
+	// and on the `dev` walkthroughs. `install` and every linux `vm-configure` already had it.
+	files, err := filepath.Glob(filepath.Join(root, "*", "*", "steps", "*.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1583,19 +1586,32 @@ func TestAnSSHLegWritesTheDiskItsWorkflowPublishes(t *testing.T) {
 			continue
 		}
 		rel, _ := filepath.Rel(root, path)
-		checked++
-		writes := false
+		// ONLY A WALKTHROUGH THAT PRODUCES A DISK IS CHECKED. A `record:`-only file or an
+		// assistant file writes none, and demanding `compress:` from those would be wrong.
+		produces := false
 		for _, s := range doc.Steps {
 			if s.Has("compress") {
-				writes = true
+				produces = true
 				break
 			}
 		}
-		if !writes {
-			t.Errorf("%s has no `compress:` step, so its workflow publishes a disk that is never "+
-				"written. Measured on linux-ubuntu-ssh: every proof passed and `publish the disk` "+
-				"reported `no disk to publish at .../linux-ubuntu-ssh.qcow2`", rel)
+		if !produces {
+			// an ssh, vm-configure or dev walkthrough is a disk leg; install always flattens
+			base := filepath.Base(path)
+			dir := filepath.Base(filepath.Dir(filepath.Dir(path)))
+			_ = dir
+			switch base {
+			case "ssh.yaml", "vm-configure.yaml", "dev.yaml", "install.yaml":
+				checked++
+				t.Errorf("%s has no `compress:` step, so its workflow publishes a disk that is "+
+					"never written. Measured twice: linux-ubuntu-ssh's every proof passed and "+
+					"`publish the disk` reported `no disk to publish at .../linux-ubuntu-ssh.qcow2`, "+
+					"and windows-vm-configure said the same for windows11-vm-configure.qcow2 after "+
+					"a SUCCESSFUL mount", rel)
+			}
+			continue
 		}
+		checked++
 	}
 	if checked == 0 {
 		t.Fatal("no ssh walkthroughs were found")

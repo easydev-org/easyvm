@@ -12,6 +12,9 @@ vars:
   shutdown:
     from: args.shutdown
     default: ssh
+  out:
+    from: args.out
+    default: out/distro.qcow2
 ssh_user: vmuser
 ssh_port: 2222
 boot_disk: from_caller
@@ -39,15 +42,14 @@ steps:
   - '{{ work }}/Xcode_26.3_Universal.xip'
   - /tmp/Xcode.xip
 - name: expand and select xcode
-  script: "#!/bin/bash\nset -euo pipefail\n\n# THE PASSWORD IS AN ARGUMENT BECAUSE SUDO OVER SSH HAS NO TTY: `sudo` on this channel answers\n# \"a password is required\" and has nowhere to read it from.\n\
-    PASSWORD='{{ password }}'\nXIP=/tmp/Xcode.xip\nDEST=/Applications\nWORK=/Users/{{ user }}/xcode-expand\n\n# `xip -x` WRITES THE EXPANDED BUNDLE BESIDE A DIRECTORY, so the working directory decides\n\
-    # where 15 GiB lands. It goes in the user's home, not /tmp, whose volume is small on macOS.\nrm -rf \"$WORK\"\nmkdir -p \"$WORK\"\ncd \"$WORK\"\necho \"expanding $XIP (this prints nothing for about\
-    \ twenty minutes)\"\nxip -x \"$XIP\"\necho \"expanded\"\n\nAPP=\"$(/usr/bin/find \"$WORK\" -maxdepth 2 -name 'Xcode*.app' -type d | head -1)\"\nif [ -z \"$APP\" ]; then\n  echo \"NO Xcode.app in $WORK\
-    \ after xip -x\" >&2\n  ls -la \"$WORK\" >&2\n  exit 1\nfi\necho \"found $APP\"\n\n# MOVED WITH `ditto`, which preserves the code signature and the extended attributes that a\n# plain `mv` across volumes\
-    \ can drop.\nrm -rf \"$DEST/Xcode.app\"\n/usr/bin/ditto \"$APP\" \"$DEST/Xcode.app\"\n\n# THE LICENCE FIRST, BECAUSE EVERYTHING ELSE ASKS XCODE A QUESTION.\nif [ -x /usr/bin/sudo ]; then\n  printf '%s\\\
-    n' \"$PASSWORD\" | sudo -S -p '' /usr/bin/xcode-select -s \"$DEST/Xcode.app/Contents/Developer\"\n  printf '%s\\n' \"$PASSWORD\" | sudo -S -p '' /usr/bin/xcodebuild -license accept\n  printf '%s\\n'\
-    \ \"$PASSWORD\" | sudo -S -p '' /usr/bin/xcodebuild -runFirstLaunch\nelse\n  /usr/bin/xcode-select -s \"$DEST/Xcode.app/Contents/Developer\"\n  /usr/bin/xcodebuild -license accept\n  /usr/bin/xcodebuild\
-    \ -runFirstLaunch\nfi\necho \"selected: $(/usr/bin/xcode-select -p)\"\n\n# AND THE DISK IT WAS EXPANDED INTO IS REMOVED, because it is 15 GiB and nothing reads it again.\nrm -rf \"$WORK\"\n"
+  script: "#!/bin/bash\nset -euo pipefail\n\n# THE PASSWORD IS AN ARGUMENT BECAUSE SUDO OVER SSH HAS NO TTY: `sudo` on this channel answers\n# \"a password is required\" and has nowhere to read it from.\nPASSWORD='{{ password }}'\nXIP=/tmp/Xcode.xip\n\
+    DEST=/Applications\nWORK=/Users/{{ user }}/xcode-expand\n\n# `xip -x` WRITES THE EXPANDED BUNDLE BESIDE A DIRECTORY, so the working directory decides\n# where 15 GiB lands. It goes in the user's home, not /tmp, whose volume is small on macOS.\nrm -rf\
+    \ \"$WORK\"\nmkdir -p \"$WORK\"\ncd \"$WORK\"\necho \"expanding $XIP (this prints nothing for about twenty minutes)\"\nxip -x \"$XIP\"\necho \"expanded\"\n\nAPP=\"$(/usr/bin/find \"$WORK\" -maxdepth 2 -name 'Xcode*.app' -type d | head -1)\"\nif [ -z\
+    \ \"$APP\" ]; then\n  echo \"NO Xcode.app in $WORK after xip -x\" >&2\n  ls -la \"$WORK\" >&2\n  exit 1\nfi\necho \"found $APP\"\n\n# MOVED WITH `ditto`, which preserves the code signature and the extended attributes that a\n# plain `mv` across volumes\
+    \ can drop.\nrm -rf \"$DEST/Xcode.app\"\n/usr/bin/ditto \"$APP\" \"$DEST/Xcode.app\"\n\n# THE LICENCE FIRST, BECAUSE EVERYTHING ELSE ASKS XCODE A QUESTION.\nif [ -x /usr/bin/sudo ]; then\n  printf '%s\\n' \"$PASSWORD\" | sudo -S -p '' /usr/bin/xcode-select\
+    \ -s \"$DEST/Xcode.app/Contents/Developer\"\n  printf '%s\\n' \"$PASSWORD\" | sudo -S -p '' /usr/bin/xcodebuild -license accept\n  printf '%s\\n' \"$PASSWORD\" | sudo -S -p '' /usr/bin/xcodebuild -runFirstLaunch\nelse\n  /usr/bin/xcode-select -s \"\
+    $DEST/Xcode.app/Contents/Developer\"\n  /usr/bin/xcodebuild -license accept\n  /usr/bin/xcodebuild -runFirstLaunch\nfi\necho \"selected: $(/usr/bin/xcode-select -p)\"\n\n# AND THE DISK IT WAS EXPANDED INTO IS REMOVED, because it is 15 GiB and nothing\
+    \ reads it again.\nrm -rf \"$WORK\"\n"
   script_shell: sh
   script_name: run-xcode-install.sh
   timeout: 7200
@@ -61,30 +63,26 @@ steps:
   - '{{ work }}/packages.tar'
   - /tmp/packages.tar
 - name: install node
-  script: "#!/bin/bash\n# NODE FROM nodejs.org, x64 .pkg. The official installer puts it in\n# /usr/local/bin and links node/npm/npx there, which is on the default PATH.\nset -uo pipefail\nif command -v\
-    \ node >/dev/null 2>&1; then\n  echo \"node is already installed: $(node --version)\"\n  exit 0\nfi\nPKG=/tmp/node.pkg\nif [ ! -f \"$PKG\" ]; then\n  echo \"=== NO NODE PACKAGE AT $PKG ===\"\n  exit\
-    \ 1\nfi\nexport PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin\nprintf '%s\\n' '{{ password }}' | sudo -S -p '' installer -pkg \"$PKG\" -target / 2>&1 | tail -5\nrm -f \"$PKG\"\nhash -r 2>/dev/null\
-    \ || true\ncommand -v node && node --version && npm --version\n"
+  script: "#!/bin/bash\n# NODE FROM nodejs.org, x64 .pkg. The official installer puts it in\n# /usr/local/bin and links node/npm/npx there, which is on the default PATH.\nset -uo pipefail\nif command -v node >/dev/null 2>&1; then\n  echo \"node is already\
+    \ installed: $(node --version)\"\n  exit 0\nfi\nPKG=/tmp/node.pkg\nif [ ! -f \"$PKG\" ]; then\n  echo \"=== NO NODE PACKAGE AT $PKG ===\"\n  exit 1\nfi\nexport PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin\nprintf '%s\\n' '{{ password }}' | sudo\
+    \ -S -p '' installer -pkg \"$PKG\" -target / 2>&1 | tail -5\nrm -f \"$PKG\"\nhash -r 2>/dev/null || true\ncommand -v node && node --version && npm --version\n"
   script_shell: sh
   script_name: install-node.sh
   timeout: 1800
 - name: install python
-  script: "#!/bin/bash\n# PYTHON FROM python.org, macos11 .pkg - the Intel-capable build. It installs into\n# /Library/Frameworks/Python.framework and links python3 into /usr/local/bin.\nset -uo pipefail\n\
-    if /usr/local/bin/python3 -c 'import sys; print(sys.version)' >/dev/null 2>&1; then\n  echo \"python3 is already installed: $(/usr/local/bin/python3 --version)\"\n  exit 0\nfi\nPKG=/tmp/python.pkg\n\
-    if [ ! -f \"$PKG\" ]; then\n  echo \"=== NO PYTHON PACKAGE AT $PKG ===\"\n  exit 1\nfi\nexport PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin\nprintf '%s\\n' '{{ password }}' | sudo -S -p '' installer\
-    \ -pkg \"$PKG\" -target / 2>&1 | tail -5\nrm -f \"$PKG\"\nhash -r 2>/dev/null || true\n/usr/local/bin/python3 --version && /usr/local/bin/pip3 --version\n"
+  script: "#!/bin/bash\n# PYTHON FROM python.org, macos11 .pkg - the Intel-capable build. It installs into\n# /Library/Frameworks/Python.framework and links python3 into /usr/local/bin.\nset -uo pipefail\nif /usr/local/bin/python3 -c 'import sys; print(sys.version)'\
+    \ >/dev/null 2>&1; then\n  echo \"python3 is already installed: $(/usr/local/bin/python3 --version)\"\n  exit 0\nfi\nPKG=/tmp/python.pkg\nif [ ! -f \"$PKG\" ]; then\n  echo \"=== NO PYTHON PACKAGE AT $PKG ===\"\n  exit 1\nfi\nexport PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin\n\
+    printf '%s\\n' '{{ password }}' | sudo -S -p '' installer -pkg \"$PKG\" -target / 2>&1 | tail -5\nrm -f \"$PKG\"\nhash -r 2>/dev/null || true\n/usr/local/bin/python3 --version && /usr/local/bin/pip3 --version\n"
   script_shell: sh
   script_name: install-python.sh
   timeout: 1800
 - name: prove the toolchain
-  script: "#!/bin/bash\n# THE CHECK IS THE PATH, NOT THE VERSION.\n#\n# /usr/bin/python3 exists on every macOS and answers --version perfectly - it is the one\n# Xcode's command line tools install, and\
-    \ its pip refuses to write. A check that only\n# read a version would pass on a disk whose python cannot install anything.\n#\n# WITH HOMEBREW OUT, THE EXPECTED PREFIX IS DIFFERENT: node and python\
-    \ come from\n# publishers' .pkg files and land in /usr/local, while git and the compilers come from\n# Xcode and live under /Applications/Xcode.app or /usr/bin.\nset -uo pipefail\nexport PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin\n\
-    bad=0\n\n# FROM THE PUBLISHERS' PACKAGES: /usr/local.\nfor t in node npm python3 pip3; do\n  path=$(command -v \"$t\" 2>/dev/null || true)\n  if [ -z \"$path\" ]; then\n    echo \"MISSING  $t\"\n  \
-    \  bad=1\n    continue\n  fi\n  case \"$path\" in\n    /usr/local/*) echo \"ok       $t -> $path\" ;;\n    *) echo \"WRONG    $t -> $path (not from /usr/local)\"; bad=1 ;;\n  esac\ndone\n\n# FROM XCODE'S\
-    \ COMMAND LINE TOOLS: /usr/bin, but only after the dev dir is selected.\nfor t in git clang swift; do\n  path=$(command -v \"$t\" 2>/dev/null || true)\n  if [ -z \"$path\" ]; then\n    echo \"MISSING\
-    \  $t\"\n    bad=1\n  else\n    echo \"ok       $t -> $path\"\n  fi\ndone\n\nif [ \"$bad\" -ne 0 ]; then\n  echo \"=== THE TOOLCHAIN IS NOT COMPLETE ===\"\n  exit 1\nfi\nnode --version\npython3 --version\n\
-    git --version\necho \"TOOLCHAIN_OK\"\n"
+  script: "#!/bin/bash\n# THE CHECK IS THE PATH, NOT THE VERSION.\n#\n# /usr/bin/python3 exists on every macOS and answers --version perfectly - it is the one\n# Xcode's command line tools install, and its pip refuses to write. A check that only\n# read\
+    \ a version would pass on a disk whose python cannot install anything.\n#\n# WITH HOMEBREW OUT, THE EXPECTED PREFIX IS DIFFERENT: node and python come from\n# publishers' .pkg files and land in /usr/local, while git and the compilers come from\n# Xcode\
+    \ and live under /Applications/Xcode.app or /usr/bin.\nset -uo pipefail\nexport PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin\nbad=0\n\n# FROM THE PUBLISHERS' PACKAGES: /usr/local.\nfor t in node npm python3 pip3; do\n  path=$(command -v \"$t\"\
+    \ 2>/dev/null || true)\n  if [ -z \"$path\" ]; then\n    echo \"MISSING  $t\"\n    bad=1\n    continue\n  fi\n  case \"$path\" in\n    /usr/local/*) echo \"ok       $t -> $path\" ;;\n    *) echo \"WRONG    $t -> $path (not from /usr/local)\"; bad=1\
+    \ ;;\n  esac\ndone\n\n# FROM XCODE'S COMMAND LINE TOOLS: /usr/bin, but only after the dev dir is selected.\nfor t in git clang swift; do\n  path=$(command -v \"$t\" 2>/dev/null || true)\n  if [ -z \"$path\" ]; then\n    echo \"MISSING  $t\"\n    bad=1\n\
+    \  else\n    echo \"ok       $t -> $path\"\n  fi\ndone\n\nif [ \"$bad\" -ne 0 ]; then\n  echo \"=== THE TOOLCHAIN IS NOT COMPLETE ===\"\n  exit 1\nfi\nnode --version\npython3 --version\ngit --version\necho \"TOOLCHAIN_OK\"\n"
   script_shell: sh
   script_name: prove-toolchain.sh
   timeout: 300
@@ -92,17 +90,18 @@ steps:
   ssh: xcode-select -p && xcodebuild -version
   timeout: 300
 - name: prove swift compiles
-  script: "#!/bin/bash\nset -uo pipefail\nwork=$(mktemp -d)\ncat > \"$work/hello.swift\" <<'SWIFT'\nprint(\"hello-from-swift\")\nSWIFT\nif ! swiftc \"$work/hello.swift\" -o \"$work/hello\"; then\n  echo\
-    \ \"SWIFT_COMPILE_FAILED\"\n  exit 1\nfi\n\"$work/hello\" || exit 1\necho \"SWIFT_OK\"\nrm -rf \"$work\"\n"
+  script: "#!/bin/bash\nset -uo pipefail\nwork=$(mktemp -d)\ncat > \"$work/hello.swift\" <<'SWIFT'\nprint(\"hello-from-swift\")\nSWIFT\nif ! swiftc \"$work/hello.swift\" -o \"$work/hello\"; then\n  echo \"SWIFT_COMPILE_FAILED\"\n  exit 1\nfi\n\"$work/hello\"\
+    \ || exit 1\necho \"SWIFT_OK\"\nrm -rf \"$work\"\n"
   script_shell: sh
   script_name: swift-check.sh
   timeout: 1800
 - name: note what is present
-  ssh: export PATH=/usr/local/bin:$PATH; echo "node=$(node --version)"; echo "python=$(python3 --version)"; echo "git=$(git --version)"; echo "swift=$(swift --version 2>&1 | head -1)"; echo "xcode=$(xcodebuild
-    -version | head -1)"
+  ssh: export PATH=/usr/local/bin:$PATH; echo "node=$(node --version)"; echo "python=$(python3 --version)"; echo "git=$(git --version)"; echo "swift=$(swift --version 2>&1 | head -1)"; echo "xcode=$(xcodebuild -version | head -1)"
   timeout: 300
 - name: stop the machine
   shutdown: '{{ shutdown }}'
   timeout: 300
+- name: publish the disk
+  compress: '{{ out }}'
 - name: stop recording
   record: false

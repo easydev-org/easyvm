@@ -9,6 +9,9 @@ vars:
   password:
     from: args.password
     default: admin
+  out:
+    from: args.out
+    default: out/distro.qcow2
 ssh_user: vmuser
 ssh_port: 2222
 boot_disk: from_caller
@@ -27,204 +30,167 @@ steps:
   ssh_probe: echo ok
   timeout: 900
 - name: wait for winget to have an index
-  script: "$winget = $null\n$dirs = @()\nforeach ($scope in @('Machine', 'User')) {\n  try { $dirs += ([Environment]::GetEnvironmentVariable('Path', $scope) -split ';') } catch { }\n}\n$dirs += @(\"$env:LOCALAPPDATA\\\
-    Microsoft\\WindowsApps\", \"$env:ProgramFiles\\WindowsApps\")\nforeach ($d in $dirs) {\n  if (-not $d) { continue }\n  $cand = Join-Path $d 'winget.exe'\n  if (Test-Path $cand) { $winget = $cand; break\
-    \ }\n}\nif (-not $winget) {\n  # A WINDOWS 11 GUEST MAY NOT SHIP winget AT ALL, so its absence is reported rather than waited\n  # on - the step after this one needs a different install path entirely.\n\
-    \  Write-Output 'WINGET_NOT_FOUND'\n  exit 1\n}\n# THE QUERY IS THE READINESS TEST: `winget search` answers from the index, so a successful\n# search is the index existing.\n$deadline = (Get-Date).AddMinutes(10)\n\
-    do {\n  $out = & $winget search --id Microsoft.VisualStudio.2022.BuildTools --exact `\n    --accept-source-agreements --disable-interactivity 2>&1 | Out-String\n  if ($LASTEXITCODE -eq 0 -and $out -match\
-    \ 'BuildTools') {\n    Write-Output 'WINGET_READY'\n    exit 0\n  }\n  Write-Output ('waiting for the winget index: ' + ($out -replace \"`r?`n\", ' ').Trim())\n  Start-Sleep -Seconds 15\n} while ((Get-Date)\
-    \ -lt $deadline)\nWrite-Output 'WINGET_INDEX_NEVER_READY'\nexit 1\n"
+  script: "$winget = $null\n$dirs = @()\nforeach ($scope in @('Machine', 'User')) {\n  try { $dirs += ([Environment]::GetEnvironmentVariable('Path', $scope) -split ';') } catch { }\n}\n$dirs += @(\"$env:LOCALAPPDATA\\Microsoft\\WindowsApps\", \"$env:ProgramFiles\\\
+    WindowsApps\")\nforeach ($d in $dirs) {\n  if (-not $d) { continue }\n  $cand = Join-Path $d 'winget.exe'\n  if (Test-Path $cand) { $winget = $cand; break }\n}\nif (-not $winget) {\n  # A WINDOWS 11 GUEST MAY NOT SHIP winget AT ALL, so its absence\
+    \ is reported rather than waited\n  # on - the step after this one needs a different install path entirely.\n  Write-Output 'WINGET_NOT_FOUND'\n  exit 1\n}\n# THE QUERY IS THE READINESS TEST: `winget search` answers from the index, so a successful\n\
+    # search is the index existing.\n$deadline = (Get-Date).AddMinutes(10)\ndo {\n  $out = & $winget search --id Microsoft.VisualStudio.2022.BuildTools --exact `\n    --accept-source-agreements --disable-interactivity 2>&1 | Out-String\n  if ($LASTEXITCODE\
+    \ -eq 0 -and $out -match 'BuildTools') {\n    Write-Output 'WINGET_READY'\n    exit 0\n  }\n  Write-Output ('waiting for the winget index: ' + ($out -replace \"`r?`n\", ' ').Trim())\n  Start-Sleep -Seconds 15\n} while ((Get-Date) -lt $deadline)\nWrite-Output\
+    \ 'WINGET_INDEX_NEVER_READY'\nexit 1\n"
   script_shell: powershell
   script_name: wait-winget.ps1
   timeout: 900
 - name: install the build tools
-  script: "# WINGET IS AN ALIAS UNDER %LOCALAPPDATA%\\Microsoft\\WindowsApps AND IS NOT ON THE MACHINE\n# PATH, so an `ssh exec` shell - which gets the environment sshd captured, not the user's\n# profile\
-    \ - cannot name it. Resolved here, per step, because every step is a new process.\n$winget = $null\n$dirs = @()\nforeach ($scope in @('Machine', 'User')) {\n  try { $dirs += ([Environment]::GetEnvironmentVariable('Path',\
-    \ $scope) -split ';') } catch { }\n}\n$dirs += (Join-Path $env:LOCALAPPDATA 'Microsoft\\WindowsApps')\nforeach ($dir in ($dirs | Where-Object { $_ })) {\n  $cand = Join-Path $dir 'winget.exe'\n  if\
-    \ (Test-Path $cand) { $winget = $cand; break }\n}\nif (-not $winget) {\n  Write-Output 'WINGET_NOT_FOUND'\n  exit 1\n}\n# THE PINNED VERSION AND THE WORKLOAD ARE WHY THIS IS A SCRIPT AND NOT A ONE-LINER:\
-    \ the\n# `--override` string carries spaces, quotes and a comma-free workload list, and by the\n# time it has been through ssh and cmd the quotes are gone. windows/11/devtools.py holds\n# the measurements\
-    \ that chose 17.14.44 over 17.9.7 and over the aka.ms bootstrapper.\n# `--quiet`, `--wait` AND `--norestart` ARE NOT ALLOWED BESIDE `--override`, and the file\n# already said so eight hundred lines\
-    \ up: \"a package with an --override also cannot take\n# --accept-package-agreements - override replaces winget's own switch set\". Run 42965954028\n# proved it for three more of them:\n#\n#     Argument\
-    \ name was not recognized for the current command: '--quiet'\n#\n# The override string is passed to the Visual Studio bootstrapper itself, so the switches\n# that would have controlled winget are carried\
-    \ INSIDE it instead:\n#\n#     --quiet --wait --norestart\n#\n# and `--disable-interactivity` is winget's own and stays outside, because it is what stops\n# a first-run agreement prompt from waiting\
-    \ for a console that does not exist.\n& $winget install --id Microsoft.VisualStudio.2022.BuildTools --exact --source winget `\n  --scope machine --version 17.14.44 --accept-source-agreements --disable-interactivity\
-    \ `\n  --override \"--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended\" `\n  # THE EXIT CODE IS READ ON THE LINE IMMEDIATELY AFTER THE NATIVE CALL. `$LASTEXITCODE`\n\
-    # belongs to the last native command, and a version of this step read it after a twenty-line\n# comment block and printed nothing at all.\n$rc = $LASTEXITCODE\nWrite-Output (\"WINGET_EXIT=\" + $rc)\n\
-    \n# \"ALREADY INSTALLED\" IS A SUCCESS, IN THE SAME RULE THE SIX STEPS BELOW ALREADY USE.\n#\n# Measured on windows-dev, step 5 of 18, and it is the only install step that lacked this:\n#\n#     wait\
-    \ for winget to have an index -> 0, WINGET_READY\n#     install the build tools -> 2316632107\n#     Found an existing package already installed. Trying to upgrade the installed package...\n#     No\
-    \ available upgrade found.\n#     No newer package versions are available from the configured sources.\n#\n# 2316632107 IS 0x8A15002B, WHICH IS NOT \"NO SUCH PACKAGE\" - IT IS\n# APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE:\
-    \ the package is present and there is nothing to\n# upgrade to. The disk this stage starts from already has the build tools, so `winget install`\n# takes its upgrade path and reports that there is nothing\
-    \ to do.\n#\n# AN EARLIER FIX GUESSED THE INDEX WAS NOT SYNCED and added a wait for `winget search` to answer.\n# IT NOW ANSWERS - `WINGET_READY` - AND THE SAME CODE CAME BACK, which is what makes this\
-    \ the\n# explanation rather than another hypothesis: the index was never the problem.\n#\n# THE MASK IS THE RULE. `$LASTEXITCODE` is an int32 carrying an HRESULT: -1978335189 & 0xFF is\n# 0x2B, 43,\
-    \ which is the number a POSIX shell reports and the number `lib/steps.py` logs as\n# `-> 43`. Comparing `$rc -eq 43` never matched, three attempts in a row, on the other steps.\n$low = $rc -band 0xFF\n\
-    if ($low -eq 43) {\n  Write-Output 'ALREADY_PRESENT (winget 0x8A15002B: no upgrade applicable)'\n  exit 0\n}\nif ($rc -ne 0) {\n  Write-Output (\"WINGET_INSTALL_FAILED \" + $rc)\n  exit $rc\n}\nWrite-Output\
-    \ 'BUILD_TOOLS_INSTALLED'\nexit 0\n"
+  script: "# WINGET IS AN ALIAS UNDER %LOCALAPPDATA%\\Microsoft\\WindowsApps AND IS NOT ON THE MACHINE\n# PATH, so an `ssh exec` shell - which gets the environment sshd captured, not the user's\n# profile - cannot name it. Resolved here, per step, because\
+    \ every step is a new process.\n$winget = $null\n$dirs = @()\nforeach ($scope in @('Machine', 'User')) {\n  try { $dirs += ([Environment]::GetEnvironmentVariable('Path', $scope) -split ';') } catch { }\n}\n$dirs += (Join-Path $env:LOCALAPPDATA 'Microsoft\\\
+    WindowsApps')\nforeach ($dir in ($dirs | Where-Object { $_ })) {\n  $cand = Join-Path $dir 'winget.exe'\n  if (Test-Path $cand) { $winget = $cand; break }\n}\nif (-not $winget) {\n  Write-Output 'WINGET_NOT_FOUND'\n  exit 1\n}\n# THE PINNED VERSION\
+    \ AND THE WORKLOAD ARE WHY THIS IS A SCRIPT AND NOT A ONE-LINER: the\n# `--override` string carries spaces, quotes and a comma-free workload list, and by the\n# time it has been through ssh and cmd the quotes are gone. windows/11/devtools.py holds\n\
+    # the measurements that chose 17.14.44 over 17.9.7 and over the aka.ms bootstrapper.\n# `--quiet`, `--wait` AND `--norestart` ARE NOT ALLOWED BESIDE `--override`, and the file\n# already said so eight hundred lines up: \"a package with an --override\
+    \ also cannot take\n# --accept-package-agreements - override replaces winget's own switch set\". Run 42965954028\n# proved it for three more of them:\n#\n#     Argument name was not recognized for the current command: '--quiet'\n#\n# The override string\
+    \ is passed to the Visual Studio bootstrapper itself, so the switches\n# that would have controlled winget are carried INSIDE it instead:\n#\n#     --quiet --wait --norestart\n#\n# and `--disable-interactivity` is winget's own and stays outside, because\
+    \ it is what stops\n# a first-run agreement prompt from waiting for a console that does not exist.\n& $winget install --id Microsoft.VisualStudio.2022.BuildTools --exact --source winget `\n  --scope machine --version 17.14.44 --accept-source-agreements\
+    \ --disable-interactivity `\n  --override \"--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended\" `\n  # THE EXIT CODE IS READ ON THE LINE IMMEDIATELY AFTER THE NATIVE CALL. `$LASTEXITCODE`\n# belongs to the\
+    \ last native command, and a version of this step read it after a twenty-line\n# comment block and printed nothing at all.\n$rc = $LASTEXITCODE\nWrite-Output (\"WINGET_EXIT=\" + $rc)\n\n# \"ALREADY INSTALLED\" IS A SUCCESS, IN THE SAME RULE THE SIX\
+    \ STEPS BELOW ALREADY USE.\n#\n# Measured on windows-dev, step 5 of 18, and it is the only install step that lacked this:\n#\n#     wait for winget to have an index -> 0, WINGET_READY\n#     install the build tools -> 2316632107\n#     Found an existing\
+    \ package already installed. Trying to upgrade the installed package...\n#     No available upgrade found.\n#     No newer package versions are available from the configured sources.\n#\n# 2316632107 IS 0x8A15002B, WHICH IS NOT \"NO SUCH PACKAGE\"\
+    \ - IT IS\n# APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE: the package is present and there is nothing to\n# upgrade to. The disk this stage starts from already has the build tools, so `winget install`\n# takes its upgrade path and reports that there\
+    \ is nothing to do.\n#\n# AN EARLIER FIX GUESSED THE INDEX WAS NOT SYNCED and added a wait for `winget search` to answer.\n# IT NOW ANSWERS - `WINGET_READY` - AND THE SAME CODE CAME BACK, which is what makes this the\n# explanation rather than another\
+    \ hypothesis: the index was never the problem.\n#\n# THE MASK IS THE RULE. `$LASTEXITCODE` is an int32 carrying an HRESULT: -1978335189 & 0xFF is\n# 0x2B, 43, which is the number a POSIX shell reports and the number `lib/steps.py` logs as\n# `-> 43`.\
+    \ Comparing `$rc -eq 43` never matched, three attempts in a row, on the other steps.\n$low = $rc -band 0xFF\nif ($low -eq 43) {\n  Write-Output 'ALREADY_PRESENT (winget 0x8A15002B: no upgrade applicable)'\n  exit 0\n}\nif ($rc -ne 0) {\n  Write-Output\
+    \ (\"WINGET_INSTALL_FAILED \" + $rc)\n  exit $rc\n}\nWrite-Output 'BUILD_TOOLS_INSTALLED'\nexit 0\n"
   script_shell: powershell
   script_name: install-buildtools.ps1
   timeout: 3600
 - name: install the windows sdk
-  script: "# WINGET IS AN ALIAS UNDER %LOCALAPPDATA%\\Microsoft\\WindowsApps AND IS NOT ON THE MACHINE\n# PATH, so an `ssh exec` shell - which gets the environment sshd captured, not the user's\n# profile\
-    \ - cannot name it. This is the same lookup windows/11/probe.ps1 does for `pwsh`,\n# for the same reason. Resolved in THIS process so no state has to survive between steps.\n$winget = $null\n$dirs =\
-    \ @()\nforeach ($scope in @('Machine', 'User')) {\n  try { $dirs += ([Environment]::GetEnvironmentVariable('Path', $scope) -split ';') } catch { }\n}\n$dirs += (Join-Path $env:LOCALAPPDATA 'Microsoft\\\
-    WindowsApps')\nforeach ($dir in ($dirs | Where-Object { $_ })) {\n  $cand = Join-Path $dir 'winget.exe'\n  if (Test-Path $cand) { $winget = $cand; break }\n}\nif (-not $winget) {\n  Write-Output 'WINGET_NOT_FOUND'\n\
-    \  exit 1\n}\n& $winget install --id Microsoft.WindowsSDK.10.0.26100 --exact --source winget --scope machine `\n  --accept-source-agreements --accept-package-agreements --disable-interactivity\n# THE\
-    \ EXIT CODE IS READ ON THE LINE IMMEDIATELY AFTER THE NATIVE CALL, and that placement\n# is itself a fix. The first version read it after a twenty-line comment block and printed\n# nothing at all:\n\
-    #\n#     script install-the-windows-sdk.ps1 (powershell) -> 43\n#     Found an existing package already installed. ...\n#\n# with no `ALREADY_PRESENT`, so the `if` never saw the 43 that the exit status\
-    \ carried.\n# `$LASTEXITCODE` belongs to the last native command; read it adjacent or do not trust it.\n$rc = $LASTEXITCODE\n#\n# \"ALREADY INSTALLED\" IS A SUCCESS, AND WINGET REPORTS IT AS EXIT CODE\
-    \ 43.\n#\n# Run 42966695727: the BuildTools install took 13m42s and exited 0 - the VCTools workload\n# brought the Windows SDK with it, which is what this file says it does (\"The Windows SDK\n# and\
-    \ CMake come with the workload, which is why they are not installed separately here\").\n# The next step then asked winget for the SDK and got:\n#\n#     Found an existing package already installed.\
-    \ Trying to upgrade ...\n#     No available upgrade found.\n#     No newer package versions are available from the configured sources.\n#     -> 43\n#\n# 43 is APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE:\
-    \ the package is present and there is\n# nothing to do. Treating that as a failure makes this stage impossible to pass on a disk\n# that already has the toolchain - which is the state THIS STAGE ITSELF\
-    \ creates.\n#\n# `windows/11/devtools.py` holds this judgement in Python already. The YAML had no\n# equivalent, so the rule lived in one place and its duplicates did not.\n#\n# ANY OTHER NON-ZERO IS\
-    \ STILL A FAILURE, named rather than swallowed:\n# THE VALUE IS PRINTED UNCONDITIONALLY, BECAUSE THE FIRST TWO ATTEMPTS AT THIS CHECK\n# COULD NOT BE READ. The script exited 43 - so the 43 reached `exit`\
-    \ - and `ALREADY_PRESENT`\n# never appeared, which admits two explanations and the log could not tell them apart:\n# the branch did not run, or its output was cut off by the forty-line cap `lib/steps.py`\n\
-    # puts on a script's output. One line removes the ambiguity, and it is cheap enough to\n# keep: the next reader should not have to reconstruct this from an exit code.\nWrite-Output (\"WINGET_EXIT=\"\
-    \ + $rc)\n# COMPARED ON THE LOW BYTE, BECAUSE $LASTEXITCODE IS NOT THE NUMBER THE SHELL REPORTS.\n#\n# Three attempts failed here on `$rc -eq 43`. The printed value, added this time, is what\n# finally\
-    \ said why:\n#\n#     WINGET_EXIT=-1978335189\n#\n# -1978335189 is 0x8A15002B: winget's HRESULT for APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE,\n# as PowerShell carries it (signed 32-bit). `-1978335189\
-    \ & 0xFF` is 0x2B, which is 43 - the\n# number a POSIX shell would have reported, and the number `lib/steps.py` logs as `-> 43`.\n#\n# So the exit status in the log and the value in the variable are\
-    \ the same fact spelled two\n# ways, and the branch compared one against the other. `0x8A15002B` AND `43` are not equal\n# and never were.\n#\n# THE MASK IS THE RULE, NOT A WORKAROUND FOR THIS ONE CODE:\
-    \ `$LASTEXITCODE` in PowerShell is\n# an int32 carrying an HRESULT when the program returns one, and every winget error would\n# have hit the same trap.\n$low = $rc -band 0xFF\nif ($low -eq 43) {\n\
-    \  Write-Output 'ALREADY_PRESENT (winget 0x8A15002B: no upgrade applicable)'\n  exit 0\n}\nexit $rc\n"
+  script: "# WINGET IS AN ALIAS UNDER %LOCALAPPDATA%\\Microsoft\\WindowsApps AND IS NOT ON THE MACHINE\n# PATH, so an `ssh exec` shell - which gets the environment sshd captured, not the user's\n# profile - cannot name it. This is the same lookup windows/11/probe.ps1\
+    \ does for `pwsh`,\n# for the same reason. Resolved in THIS process so no state has to survive between steps.\n$winget = $null\n$dirs = @()\nforeach ($scope in @('Machine', 'User')) {\n  try { $dirs += ([Environment]::GetEnvironmentVariable('Path',\
+    \ $scope) -split ';') } catch { }\n}\n$dirs += (Join-Path $env:LOCALAPPDATA 'Microsoft\\WindowsApps')\nforeach ($dir in ($dirs | Where-Object { $_ })) {\n  $cand = Join-Path $dir 'winget.exe'\n  if (Test-Path $cand) { $winget = $cand; break }\n}\n\
+    if (-not $winget) {\n  Write-Output 'WINGET_NOT_FOUND'\n  exit 1\n}\n& $winget install --id Microsoft.WindowsSDK.10.0.26100 --exact --source winget --scope machine `\n  --accept-source-agreements --accept-package-agreements --disable-interactivity\n\
+    # THE EXIT CODE IS READ ON THE LINE IMMEDIATELY AFTER THE NATIVE CALL, and that placement\n# is itself a fix. The first version read it after a twenty-line comment block and printed\n# nothing at all:\n#\n#     script install-the-windows-sdk.ps1 (powershell)\
+    \ -> 43\n#     Found an existing package already installed. ...\n#\n# with no `ALREADY_PRESENT`, so the `if` never saw the 43 that the exit status carried.\n# `$LASTEXITCODE` belongs to the last native command; read it adjacent or do not trust it.\n\
+    $rc = $LASTEXITCODE\n#\n# \"ALREADY INSTALLED\" IS A SUCCESS, AND WINGET REPORTS IT AS EXIT CODE 43.\n#\n# Run 42966695727: the BuildTools install took 13m42s and exited 0 - the VCTools workload\n# brought the Windows SDK with it, which is what this\
+    \ file says it does (\"The Windows SDK\n# and CMake come with the workload, which is why they are not installed separately here\").\n# The next step then asked winget for the SDK and got:\n#\n#     Found an existing package already installed. Trying\
+    \ to upgrade ...\n#     No available upgrade found.\n#     No newer package versions are available from the configured sources.\n#     -> 43\n#\n# 43 is APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE: the package is present and there is\n# nothing to\
+    \ do. Treating that as a failure makes this stage impossible to pass on a disk\n# that already has the toolchain - which is the state THIS STAGE ITSELF creates.\n#\n# `windows/11/devtools.py` holds this judgement in Python already. The YAML had no\n\
+    # equivalent, so the rule lived in one place and its duplicates did not.\n#\n# ANY OTHER NON-ZERO IS STILL A FAILURE, named rather than swallowed:\n# THE VALUE IS PRINTED UNCONDITIONALLY, BECAUSE THE FIRST TWO ATTEMPTS AT THIS CHECK\n# COULD NOT BE\
+    \ READ. The script exited 43 - so the 43 reached `exit` - and `ALREADY_PRESENT`\n# never appeared, which admits two explanations and the log could not tell them apart:\n# the branch did not run, or its output was cut off by the forty-line cap `lib/steps.py`\n\
+    # puts on a script's output. One line removes the ambiguity, and it is cheap enough to\n# keep: the next reader should not have to reconstruct this from an exit code.\nWrite-Output (\"WINGET_EXIT=\" + $rc)\n# COMPARED ON THE LOW BYTE, BECAUSE $LASTEXITCODE\
+    \ IS NOT THE NUMBER THE SHELL REPORTS.\n#\n# Three attempts failed here on `$rc -eq 43`. The printed value, added this time, is what\n# finally said why:\n#\n#     WINGET_EXIT=-1978335189\n#\n# -1978335189 is 0x8A15002B: winget's HRESULT for APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE,\n\
+    # as PowerShell carries it (signed 32-bit). `-1978335189 & 0xFF` is 0x2B, which is 43 - the\n# number a POSIX shell would have reported, and the number `lib/steps.py` logs as `-> 43`.\n#\n# So the exit status in the log and the value in the variable\
+    \ are the same fact spelled two\n# ways, and the branch compared one against the other. `0x8A15002B` AND `43` are not equal\n# and never were.\n#\n# THE MASK IS THE RULE, NOT A WORKAROUND FOR THIS ONE CODE: `$LASTEXITCODE` in PowerShell is\n# an int32\
+    \ carrying an HRESULT when the program returns one, and every winget error would\n# have hit the same trap.\n$low = $rc -band 0xFF\nif ($low -eq 43) {\n  Write-Output 'ALREADY_PRESENT (winget 0x8A15002B: no upgrade applicable)'\n  exit 0\n}\nexit $rc\n"
   script_shell: powershell
   script_name: install-the-windows-sdk.ps1
   timeout: 2400
 - name: install the dotnet sdk
-  script: "# WINGET IS AN ALIAS UNDER %LOCALAPPDATA%\\Microsoft\\WindowsApps AND IS NOT ON THE MACHINE\n# PATH, so an `ssh exec` shell - which gets the environment sshd captured, not the user's\n# profile\
-    \ - cannot name it. This is the same lookup windows/11/probe.ps1 does for `pwsh`,\n# for the same reason. Resolved in THIS process so no state has to survive between steps.\n$winget = $null\n$dirs =\
-    \ @()\nforeach ($scope in @('Machine', 'User')) {\n  try { $dirs += ([Environment]::GetEnvironmentVariable('Path', $scope) -split ';') } catch { }\n}\n$dirs += (Join-Path $env:LOCALAPPDATA 'Microsoft\\\
-    WindowsApps')\nforeach ($dir in ($dirs | Where-Object { $_ })) {\n  $cand = Join-Path $dir 'winget.exe'\n  if (Test-Path $cand) { $winget = $cand; break }\n}\nif (-not $winget) {\n  Write-Output 'WINGET_NOT_FOUND'\n\
-    \  exit 1\n}\n& $winget install --id Microsoft.DotNet.SDK.10 --exact --source winget --scope machine `\n  --accept-source-agreements --accept-package-agreements --disable-interactivity\n# THE EXIT CODE\
-    \ IS READ ON THE LINE IMMEDIATELY AFTER THE NATIVE CALL, and that placement\n# is itself a fix. The first version read it after a twenty-line comment block and printed\n# nothing at all:\n#\n#     script\
-    \ install-the-windows-sdk.ps1 (powershell) -> 43\n#     Found an existing package already installed. ...\n#\n# with no `ALREADY_PRESENT`, so the `if` never saw the 43 that the exit status carried.\n\
-    # `$LASTEXITCODE` belongs to the last native command; read it adjacent or do not trust it.\n$rc = $LASTEXITCODE\n#\n# \"ALREADY INSTALLED\" IS A SUCCESS, AND WINGET REPORTS IT AS EXIT CODE 43.\n#\n\
-    # Run 42966695727: the BuildTools install took 13m42s and exited 0 - the VCTools workload\n# brought the Windows SDK with it, which is what this file says it does (\"The Windows SDK\n# and CMake come\
-    \ with the workload, which is why they are not installed separately here\").\n# The next step then asked winget for the SDK and got:\n#\n#     Found an existing package already installed. Trying to\
-    \ upgrade ...\n#     No available upgrade found.\n#     No newer package versions are available from the configured sources.\n#     -> 43\n#\n# 43 is APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE: the\
-    \ package is present and there is\n# nothing to do. Treating that as a failure makes this stage impossible to pass on a disk\n# that already has the toolchain - which is the state THIS STAGE ITSELF\
-    \ creates.\n#\n# `windows/11/devtools.py` holds this judgement in Python already. The YAML had no\n# equivalent, so the rule lived in one place and its duplicates did not.\n#\n# ANY OTHER NON-ZERO IS\
-    \ STILL A FAILURE, named rather than swallowed:\n# THE VALUE IS PRINTED UNCONDITIONALLY, BECAUSE THE FIRST TWO ATTEMPTS AT THIS CHECK\n# COULD NOT BE READ. The script exited 43 - so the 43 reached `exit`\
-    \ - and `ALREADY_PRESENT`\n# never appeared, which admits two explanations and the log could not tell them apart:\n# the branch did not run, or its output was cut off by the forty-line cap `lib/steps.py`\n\
-    # puts on a script's output. One line removes the ambiguity, and it is cheap enough to\n# keep: the next reader should not have to reconstruct this from an exit code.\nWrite-Output (\"WINGET_EXIT=\"\
-    \ + $rc)\n# COMPARED ON THE LOW BYTE, BECAUSE $LASTEXITCODE IS NOT THE NUMBER THE SHELL REPORTS.\n#\n# Three attempts failed here on `$rc -eq 43`. The printed value, added this time, is what\n# finally\
-    \ said why:\n#\n#     WINGET_EXIT=-1978335189\n#\n# -1978335189 is 0x8A15002B: winget's HRESULT for APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE,\n# as PowerShell carries it (signed 32-bit). `-1978335189\
-    \ & 0xFF` is 0x2B, which is 43 - the\n# number a POSIX shell would have reported, and the number `lib/steps.py` logs as `-> 43`.\n#\n# So the exit status in the log and the value in the variable are\
-    \ the same fact spelled two\n# ways, and the branch compared one against the other. `0x8A15002B` AND `43` are not equal\n# and never were.\n#\n# THE MASK IS THE RULE, NOT A WORKAROUND FOR THIS ONE CODE:\
-    \ `$LASTEXITCODE` in PowerShell is\n# an int32 carrying an HRESULT when the program returns one, and every winget error would\n# have hit the same trap.\n$low = $rc -band 0xFF\nif ($low -eq 43) {\n\
-    \  Write-Output 'ALREADY_PRESENT (winget 0x8A15002B: no upgrade applicable)'\n  exit 0\n}\nexit $rc\n"
+  script: "# WINGET IS AN ALIAS UNDER %LOCALAPPDATA%\\Microsoft\\WindowsApps AND IS NOT ON THE MACHINE\n# PATH, so an `ssh exec` shell - which gets the environment sshd captured, not the user's\n# profile - cannot name it. This is the same lookup windows/11/probe.ps1\
+    \ does for `pwsh`,\n# for the same reason. Resolved in THIS process so no state has to survive between steps.\n$winget = $null\n$dirs = @()\nforeach ($scope in @('Machine', 'User')) {\n  try { $dirs += ([Environment]::GetEnvironmentVariable('Path',\
+    \ $scope) -split ';') } catch { }\n}\n$dirs += (Join-Path $env:LOCALAPPDATA 'Microsoft\\WindowsApps')\nforeach ($dir in ($dirs | Where-Object { $_ })) {\n  $cand = Join-Path $dir 'winget.exe'\n  if (Test-Path $cand) { $winget = $cand; break }\n}\n\
+    if (-not $winget) {\n  Write-Output 'WINGET_NOT_FOUND'\n  exit 1\n}\n& $winget install --id Microsoft.DotNet.SDK.10 --exact --source winget --scope machine `\n  --accept-source-agreements --accept-package-agreements --disable-interactivity\n# THE EXIT\
+    \ CODE IS READ ON THE LINE IMMEDIATELY AFTER THE NATIVE CALL, and that placement\n# is itself a fix. The first version read it after a twenty-line comment block and printed\n# nothing at all:\n#\n#     script install-the-windows-sdk.ps1 (powershell)\
+    \ -> 43\n#     Found an existing package already installed. ...\n#\n# with no `ALREADY_PRESENT`, so the `if` never saw the 43 that the exit status carried.\n# `$LASTEXITCODE` belongs to the last native command; read it adjacent or do not trust it.\n\
+    $rc = $LASTEXITCODE\n#\n# \"ALREADY INSTALLED\" IS A SUCCESS, AND WINGET REPORTS IT AS EXIT CODE 43.\n#\n# Run 42966695727: the BuildTools install took 13m42s and exited 0 - the VCTools workload\n# brought the Windows SDK with it, which is what this\
+    \ file says it does (\"The Windows SDK\n# and CMake come with the workload, which is why they are not installed separately here\").\n# The next step then asked winget for the SDK and got:\n#\n#     Found an existing package already installed. Trying\
+    \ to upgrade ...\n#     No available upgrade found.\n#     No newer package versions are available from the configured sources.\n#     -> 43\n#\n# 43 is APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE: the package is present and there is\n# nothing to\
+    \ do. Treating that as a failure makes this stage impossible to pass on a disk\n# that already has the toolchain - which is the state THIS STAGE ITSELF creates.\n#\n# `windows/11/devtools.py` holds this judgement in Python already. The YAML had no\n\
+    # equivalent, so the rule lived in one place and its duplicates did not.\n#\n# ANY OTHER NON-ZERO IS STILL A FAILURE, named rather than swallowed:\n# THE VALUE IS PRINTED UNCONDITIONALLY, BECAUSE THE FIRST TWO ATTEMPTS AT THIS CHECK\n# COULD NOT BE\
+    \ READ. The script exited 43 - so the 43 reached `exit` - and `ALREADY_PRESENT`\n# never appeared, which admits two explanations and the log could not tell them apart:\n# the branch did not run, or its output was cut off by the forty-line cap `lib/steps.py`\n\
+    # puts on a script's output. One line removes the ambiguity, and it is cheap enough to\n# keep: the next reader should not have to reconstruct this from an exit code.\nWrite-Output (\"WINGET_EXIT=\" + $rc)\n# COMPARED ON THE LOW BYTE, BECAUSE $LASTEXITCODE\
+    \ IS NOT THE NUMBER THE SHELL REPORTS.\n#\n# Three attempts failed here on `$rc -eq 43`. The printed value, added this time, is what\n# finally said why:\n#\n#     WINGET_EXIT=-1978335189\n#\n# -1978335189 is 0x8A15002B: winget's HRESULT for APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE,\n\
+    # as PowerShell carries it (signed 32-bit). `-1978335189 & 0xFF` is 0x2B, which is 43 - the\n# number a POSIX shell would have reported, and the number `lib/steps.py` logs as `-> 43`.\n#\n# So the exit status in the log and the value in the variable\
+    \ are the same fact spelled two\n# ways, and the branch compared one against the other. `0x8A15002B` AND `43` are not equal\n# and never were.\n#\n# THE MASK IS THE RULE, NOT A WORKAROUND FOR THIS ONE CODE: `$LASTEXITCODE` in PowerShell is\n# an int32\
+    \ carrying an HRESULT when the program returns one, and every winget error would\n# have hit the same trap.\n$low = $rc -band 0xFF\nif ($low -eq 43) {\n  Write-Output 'ALREADY_PRESENT (winget 0x8A15002B: no upgrade applicable)'\n  exit 0\n}\nexit $rc\n"
   script_shell: powershell
   script_name: install-the-dotnet-sdk.ps1
   timeout: 2400
 - name: install powershell 7
-  script: "# WINGET IS AN ALIAS UNDER %LOCALAPPDATA%\\Microsoft\\WindowsApps AND IS NOT ON THE MACHINE\n# PATH, so an `ssh exec` shell - which gets the environment sshd captured, not the user's\n# profile\
-    \ - cannot name it. This is the same lookup windows/11/probe.ps1 does for `pwsh`,\n# for the same reason. Resolved in THIS process so no state has to survive between steps.\n$winget = $null\n$dirs =\
-    \ @()\nforeach ($scope in @('Machine', 'User')) {\n  try { $dirs += ([Environment]::GetEnvironmentVariable('Path', $scope) -split ';') } catch { }\n}\n$dirs += (Join-Path $env:LOCALAPPDATA 'Microsoft\\\
-    WindowsApps')\nforeach ($dir in ($dirs | Where-Object { $_ })) {\n  $cand = Join-Path $dir 'winget.exe'\n  if (Test-Path $cand) { $winget = $cand; break }\n}\nif (-not $winget) {\n  Write-Output 'WINGET_NOT_FOUND'\n\
-    \  exit 1\n}\n# `--installer-type wix` IS THE FIX, AND `--scope machine` ALONE IS NOT ENOUGH.\n#\n# Run 42973132779, the first run where this step got past its own exit-code check:\n#\n#     Found PowerShell\
-    \ [Microsoft.PowerShell] Version 7.6.10.0\n#     This application is licensed to you by its owner.\n#     Successfully verified installer hash\n#     The current system configuration does not support\
-    \ the installation of this package.\n#     WINGET_EXIT=-1978334957          (0x8A150113)\n#\n# READ THE MISSING LINE. The dotnet SDK, which installed in the same run, printed\n#\n#     Downloading https://download.microsoft.com/.../dotnet-sdk-10.0.404-win-x64.exe\n\
-    #\n# and this one went straight from \"licensed to you by its owner\" to \"Successfully verified\n# installer hash\" - no download at all. It was not fetching the 107 MB MSI; it had selected a\n# DIFFERENT\
-    \ INSTALLER TYPE that was already present, and a packaged app (MSIX) cannot be\n# installed in the system context. That is precisely what the message says.\n#\n# THE FILE ALREADY NAMED THE TWO INSTALLER\
-    \ TYPES, FOUR SENTENCES ABOVE THIS STEP:\n#\n#     Architecture: x64, InstallerType: wix, Scope: machine\n#     Platform: Windows.Universal, InstallerType: msix\n#\n# and concluded that `--scope machine`\
-    \ \"selects the wix/MSI variant\". It selects a scope; it\n# does not exclude an installer TYPE. winget's own maintainer says so in\n# microsoft/winget-pkgs#367912: \"if the default installer type isn't\
-    \ the same as what's\n# installed, WinGet may install the other installer type. You can use `--installer-type` to\n# force WinGet to use the desired installer type.\" The same thread shows 7.5.4 downloading\n\
-    # its MSI and 7.5.5+ failing exactly as this run did.\n#\n# SO THE TYPE IS NAMED. `wix` is the manifest's own name for the MSI variant of this\n# package, and it is the one that lands in C:\\Program\
-    \ Files\\PowerShell\\7 and puts `pwsh`\n# on the machine PATH - which the `prove powershell 7` step below depends on.\n& $winget install --id Microsoft.PowerShell --exact --source winget --scope machine\
-    \ `\n  --installer-type wix `\n  --accept-source-agreements --accept-package-agreements --disable-interactivity\n# THE EXIT CODE IS READ ON THE LINE IMMEDIATELY AFTER THE NATIVE CALL, and that placement\n\
-    # is itself a fix. The first version read it after a twenty-line comment block and printed\n# nothing at all:\n#\n#     script install-the-windows-sdk.ps1 (powershell) -> 43\n#     Found an existing\
-    \ package already installed. ...\n#\n# with no `ALREADY_PRESENT`, so the `if` never saw the 43 that the exit status carried.\n# `$LASTEXITCODE` belongs to the last native command; read it adjacent or\
-    \ do not trust it.\n$rc = $LASTEXITCODE\n#\n# \"ALREADY INSTALLED\" IS A SUCCESS, AND WINGET REPORTS IT AS EXIT CODE 43.\n#\n# Run 42966695727: the BuildTools install took 13m42s and exited 0 - the\
-    \ VCTools workload\n# brought the Windows SDK with it, which is what this file says it does (\"The Windows SDK\n# and CMake come with the workload, which is why they are not installed separately here\"\
-    ).\n# The next step then asked winget for the SDK and got:\n#\n#     Found an existing package already installed. Trying to upgrade ...\n#     No available upgrade found.\n#     No newer package versions\
-    \ are available from the configured sources.\n#     -> 43\n#\n# 43 is APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE: the package is present and there is\n# nothing to do. Treating that as a failure makes\
-    \ this stage impossible to pass on a disk\n# that already has the toolchain - which is the state THIS STAGE ITSELF creates.\n#\n# `windows/11/devtools.py` holds this judgement in Python already. The\
-    \ YAML had no\n# equivalent, so the rule lived in one place and its duplicates did not.\n#\n# ANY OTHER NON-ZERO IS STILL A FAILURE, named rather than swallowed:\n# THE VALUE IS PRINTED UNCONDITIONALLY,\
-    \ BECAUSE THE FIRST TWO ATTEMPTS AT THIS CHECK\n# COULD NOT BE READ. The script exited 43 - so the 43 reached `exit` - and `ALREADY_PRESENT`\n# never appeared, which admits two explanations and the\
-    \ log could not tell them apart:\n# the branch did not run, or its output was cut off by the forty-line cap `lib/steps.py`\n# puts on a script's output. One line removes the ambiguity, and it is cheap\
-    \ enough to\n# keep: the next reader should not have to reconstruct this from an exit code.\nWrite-Output (\"WINGET_EXIT=\" + $rc)\n# COMPARED ON THE LOW BYTE, BECAUSE $LASTEXITCODE IS NOT THE NUMBER\
-    \ THE SHELL REPORTS.\n#\n# Three attempts failed here on `$rc -eq 43`. The printed value, added this time, is what\n# finally said why:\n#\n#     WINGET_EXIT=-1978335189\n#\n# -1978335189 is 0x8A15002B:\
-    \ winget's HRESULT for APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE,\n# as PowerShell carries it (signed 32-bit). `-1978335189 & 0xFF` is 0x2B, which is 43 - the\n# number a POSIX shell would have reported,\
-    \ and the number `lib/steps.py` logs as `-> 43`.\n#\n# So the exit status in the log and the value in the variable are the same fact spelled two\n# ways, and the branch compared one against the other.\
-    \ `0x8A15002B` AND `43` are not equal\n# and never were.\n#\n# THE MASK IS THE RULE, NOT A WORKAROUND FOR THIS ONE CODE: `$LASTEXITCODE` in PowerShell is\n# an int32 carrying an HRESULT when the program\
-    \ returns one, and every winget error would\n# have hit the same trap.\n$low = $rc -band 0xFF\nif ($low -eq 43) {\n  Write-Output 'ALREADY_PRESENT (winget 0x8A15002B: no upgrade applicable)'\n  exit\
-    \ 0\n}\nexit $rc\n"
+  script: "# WINGET IS AN ALIAS UNDER %LOCALAPPDATA%\\Microsoft\\WindowsApps AND IS NOT ON THE MACHINE\n# PATH, so an `ssh exec` shell - which gets the environment sshd captured, not the user's\n# profile - cannot name it. This is the same lookup windows/11/probe.ps1\
+    \ does for `pwsh`,\n# for the same reason. Resolved in THIS process so no state has to survive between steps.\n$winget = $null\n$dirs = @()\nforeach ($scope in @('Machine', 'User')) {\n  try { $dirs += ([Environment]::GetEnvironmentVariable('Path',\
+    \ $scope) -split ';') } catch { }\n}\n$dirs += (Join-Path $env:LOCALAPPDATA 'Microsoft\\WindowsApps')\nforeach ($dir in ($dirs | Where-Object { $_ })) {\n  $cand = Join-Path $dir 'winget.exe'\n  if (Test-Path $cand) { $winget = $cand; break }\n}\n\
+    if (-not $winget) {\n  Write-Output 'WINGET_NOT_FOUND'\n  exit 1\n}\n# `--installer-type wix` IS THE FIX, AND `--scope machine` ALONE IS NOT ENOUGH.\n#\n# Run 42973132779, the first run where this step got past its own exit-code check:\n#\n#     Found\
+    \ PowerShell [Microsoft.PowerShell] Version 7.6.10.0\n#     This application is licensed to you by its owner.\n#     Successfully verified installer hash\n#     The current system configuration does not support the installation of this package.\n#\
+    \     WINGET_EXIT=-1978334957          (0x8A150113)\n#\n# READ THE MISSING LINE. The dotnet SDK, which installed in the same run, printed\n#\n#     Downloading https://download.microsoft.com/.../dotnet-sdk-10.0.404-win-x64.exe\n#\n# and this one went\
+    \ straight from \"licensed to you by its owner\" to \"Successfully verified\n# installer hash\" - no download at all. It was not fetching the 107 MB MSI; it had selected a\n# DIFFERENT INSTALLER TYPE that was already present, and a packaged app (MSIX)\
+    \ cannot be\n# installed in the system context. That is precisely what the message says.\n#\n# THE FILE ALREADY NAMED THE TWO INSTALLER TYPES, FOUR SENTENCES ABOVE THIS STEP:\n#\n#     Architecture: x64, InstallerType: wix, Scope: machine\n#     Platform:\
+    \ Windows.Universal, InstallerType: msix\n#\n# and concluded that `--scope machine` \"selects the wix/MSI variant\". It selects a scope; it\n# does not exclude an installer TYPE. winget's own maintainer says so in\n# microsoft/winget-pkgs#367912: \"\
+    if the default installer type isn't the same as what's\n# installed, WinGet may install the other installer type. You can use `--installer-type` to\n# force WinGet to use the desired installer type.\" The same thread shows 7.5.4 downloading\n# its\
+    \ MSI and 7.5.5+ failing exactly as this run did.\n#\n# SO THE TYPE IS NAMED. `wix` is the manifest's own name for the MSI variant of this\n# package, and it is the one that lands in C:\\Program Files\\PowerShell\\7 and puts `pwsh`\n# on the machine\
+    \ PATH - which the `prove powershell 7` step below depends on.\n& $winget install --id Microsoft.PowerShell --exact --source winget --scope machine `\n  --installer-type wix `\n  --accept-source-agreements --accept-package-agreements --disable-interactivity\n\
+    # THE EXIT CODE IS READ ON THE LINE IMMEDIATELY AFTER THE NATIVE CALL, and that placement\n# is itself a fix. The first version read it after a twenty-line comment block and printed\n# nothing at all:\n#\n#     script install-the-windows-sdk.ps1 (powershell)\
+    \ -> 43\n#     Found an existing package already installed. ...\n#\n# with no `ALREADY_PRESENT`, so the `if` never saw the 43 that the exit status carried.\n# `$LASTEXITCODE` belongs to the last native command; read it adjacent or do not trust it.\n\
+    $rc = $LASTEXITCODE\n#\n# \"ALREADY INSTALLED\" IS A SUCCESS, AND WINGET REPORTS IT AS EXIT CODE 43.\n#\n# Run 42966695727: the BuildTools install took 13m42s and exited 0 - the VCTools workload\n# brought the Windows SDK with it, which is what this\
+    \ file says it does (\"The Windows SDK\n# and CMake come with the workload, which is why they are not installed separately here\").\n# The next step then asked winget for the SDK and got:\n#\n#     Found an existing package already installed. Trying\
+    \ to upgrade ...\n#     No available upgrade found.\n#     No newer package versions are available from the configured sources.\n#     -> 43\n#\n# 43 is APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE: the package is present and there is\n# nothing to\
+    \ do. Treating that as a failure makes this stage impossible to pass on a disk\n# that already has the toolchain - which is the state THIS STAGE ITSELF creates.\n#\n# `windows/11/devtools.py` holds this judgement in Python already. The YAML had no\n\
+    # equivalent, so the rule lived in one place and its duplicates did not.\n#\n# ANY OTHER NON-ZERO IS STILL A FAILURE, named rather than swallowed:\n# THE VALUE IS PRINTED UNCONDITIONALLY, BECAUSE THE FIRST TWO ATTEMPTS AT THIS CHECK\n# COULD NOT BE\
+    \ READ. The script exited 43 - so the 43 reached `exit` - and `ALREADY_PRESENT`\n# never appeared, which admits two explanations and the log could not tell them apart:\n# the branch did not run, or its output was cut off by the forty-line cap `lib/steps.py`\n\
+    # puts on a script's output. One line removes the ambiguity, and it is cheap enough to\n# keep: the next reader should not have to reconstruct this from an exit code.\nWrite-Output (\"WINGET_EXIT=\" + $rc)\n# COMPARED ON THE LOW BYTE, BECAUSE $LASTEXITCODE\
+    \ IS NOT THE NUMBER THE SHELL REPORTS.\n#\n# Three attempts failed here on `$rc -eq 43`. The printed value, added this time, is what\n# finally said why:\n#\n#     WINGET_EXIT=-1978335189\n#\n# -1978335189 is 0x8A15002B: winget's HRESULT for APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE,\n\
+    # as PowerShell carries it (signed 32-bit). `-1978335189 & 0xFF` is 0x2B, which is 43 - the\n# number a POSIX shell would have reported, and the number `lib/steps.py` logs as `-> 43`.\n#\n# So the exit status in the log and the value in the variable\
+    \ are the same fact spelled two\n# ways, and the branch compared one against the other. `0x8A15002B` AND `43` are not equal\n# and never were.\n#\n# THE MASK IS THE RULE, NOT A WORKAROUND FOR THIS ONE CODE: `$LASTEXITCODE` in PowerShell is\n# an int32\
+    \ carrying an HRESULT when the program returns one, and every winget error would\n# have hit the same trap.\n$low = $rc -band 0xFF\nif ($low -eq 43) {\n  Write-Output 'ALREADY_PRESENT (winget 0x8A15002B: no upgrade applicable)'\n  exit 0\n}\nexit $rc\n"
   script_shell: powershell
   script_name: install-powershell-7.ps1
   timeout: 2400
 - name: install python
-  script: "# WINGET IS AN ALIAS UNDER %LOCALAPPDATA%\\Microsoft\\WindowsApps AND IS NOT ON THE MACHINE\n# PATH, so an `ssh exec` shell - which gets the environment sshd captured, not the user's\n# profile\
-    \ - cannot name it. This is the same lookup windows/11/probe.ps1 does for `pwsh`,\n# for the same reason. Resolved in THIS process so no state has to survive between steps.\n$winget = $null\n$dirs =\
-    \ @()\nforeach ($scope in @('Machine', 'User')) {\n  try { $dirs += ([Environment]::GetEnvironmentVariable('Path', $scope) -split ';') } catch { }\n}\n$dirs += (Join-Path $env:LOCALAPPDATA 'Microsoft\\\
-    WindowsApps')\nforeach ($dir in ($dirs | Where-Object { $_ })) {\n  $cand = Join-Path $dir 'winget.exe'\n  if (Test-Path $cand) { $winget = $cand; break }\n}\nif (-not $winget) {\n  Write-Output 'WINGET_NOT_FOUND'\n\
-    \  exit 1\n}\n& $winget install --id Python.Python.3.13 --exact --source winget --scope machine `\n  --accept-source-agreements --accept-package-agreements --disable-interactivity\n# THE EXIT CODE IS\
-    \ READ ON THE LINE IMMEDIATELY AFTER THE NATIVE CALL, and that placement\n# is itself a fix. The first version read it after a twenty-line comment block and printed\n# nothing at all:\n#\n#     script\
-    \ install-the-windows-sdk.ps1 (powershell) -> 43\n#     Found an existing package already installed. ...\n#\n# with no `ALREADY_PRESENT`, so the `if` never saw the 43 that the exit status carried.\n\
-    # `$LASTEXITCODE` belongs to the last native command; read it adjacent or do not trust it.\n$rc = $LASTEXITCODE\n#\n# \"ALREADY INSTALLED\" IS A SUCCESS, AND WINGET REPORTS IT AS EXIT CODE 43.\n#\n\
-    # Run 42966695727: the BuildTools install took 13m42s and exited 0 - the VCTools workload\n# brought the Windows SDK with it, which is what this file says it does (\"The Windows SDK\n# and CMake come\
-    \ with the workload, which is why they are not installed separately here\").\n# The next step then asked winget for the SDK and got:\n#\n#     Found an existing package already installed. Trying to\
-    \ upgrade ...\n#     No available upgrade found.\n#     No newer package versions are available from the configured sources.\n#     -> 43\n#\n# 43 is APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE: the\
-    \ package is present and there is\n# nothing to do. Treating that as a failure makes this stage impossible to pass on a disk\n# that already has the toolchain - which is the state THIS STAGE ITSELF\
-    \ creates.\n#\n# `windows/11/devtools.py` holds this judgement in Python already. The YAML had no\n# equivalent, so the rule lived in one place and its duplicates did not.\n#\n# ANY OTHER NON-ZERO IS\
-    \ STILL A FAILURE, named rather than swallowed:\n# THE VALUE IS PRINTED UNCONDITIONALLY, BECAUSE THE FIRST TWO ATTEMPTS AT THIS CHECK\n# COULD NOT BE READ. The script exited 43 - so the 43 reached `exit`\
-    \ - and `ALREADY_PRESENT`\n# never appeared, which admits two explanations and the log could not tell them apart:\n# the branch did not run, or its output was cut off by the forty-line cap `lib/steps.py`\n\
-    # puts on a script's output. One line removes the ambiguity, and it is cheap enough to\n# keep: the next reader should not have to reconstruct this from an exit code.\nWrite-Output (\"WINGET_EXIT=\"\
-    \ + $rc)\n# COMPARED ON THE LOW BYTE, BECAUSE $LASTEXITCODE IS NOT THE NUMBER THE SHELL REPORTS.\n#\n# Three attempts failed here on `$rc -eq 43`. The printed value, added this time, is what\n# finally\
-    \ said why:\n#\n#     WINGET_EXIT=-1978335189\n#\n# -1978335189 is 0x8A15002B: winget's HRESULT for APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE,\n# as PowerShell carries it (signed 32-bit). `-1978335189\
-    \ & 0xFF` is 0x2B, which is 43 - the\n# number a POSIX shell would have reported, and the number `lib/steps.py` logs as `-> 43`.\n#\n# So the exit status in the log and the value in the variable are\
-    \ the same fact spelled two\n# ways, and the branch compared one against the other. `0x8A15002B` AND `43` are not equal\n# and never were.\n#\n# THE MASK IS THE RULE, NOT A WORKAROUND FOR THIS ONE CODE:\
-    \ `$LASTEXITCODE` in PowerShell is\n# an int32 carrying an HRESULT when the program returns one, and every winget error would\n# have hit the same trap.\n$low = $rc -band 0xFF\nif ($low -eq 43) {\n\
-    \  Write-Output 'ALREADY_PRESENT (winget 0x8A15002B: no upgrade applicable)'\n  exit 0\n}\nexit $rc\n"
+  script: "# WINGET IS AN ALIAS UNDER %LOCALAPPDATA%\\Microsoft\\WindowsApps AND IS NOT ON THE MACHINE\n# PATH, so an `ssh exec` shell - which gets the environment sshd captured, not the user's\n# profile - cannot name it. This is the same lookup windows/11/probe.ps1\
+    \ does for `pwsh`,\n# for the same reason. Resolved in THIS process so no state has to survive between steps.\n$winget = $null\n$dirs = @()\nforeach ($scope in @('Machine', 'User')) {\n  try { $dirs += ([Environment]::GetEnvironmentVariable('Path',\
+    \ $scope) -split ';') } catch { }\n}\n$dirs += (Join-Path $env:LOCALAPPDATA 'Microsoft\\WindowsApps')\nforeach ($dir in ($dirs | Where-Object { $_ })) {\n  $cand = Join-Path $dir 'winget.exe'\n  if (Test-Path $cand) { $winget = $cand; break }\n}\n\
+    if (-not $winget) {\n  Write-Output 'WINGET_NOT_FOUND'\n  exit 1\n}\n& $winget install --id Python.Python.3.13 --exact --source winget --scope machine `\n  --accept-source-agreements --accept-package-agreements --disable-interactivity\n# THE EXIT CODE\
+    \ IS READ ON THE LINE IMMEDIATELY AFTER THE NATIVE CALL, and that placement\n# is itself a fix. The first version read it after a twenty-line comment block and printed\n# nothing at all:\n#\n#     script install-the-windows-sdk.ps1 (powershell) ->\
+    \ 43\n#     Found an existing package already installed. ...\n#\n# with no `ALREADY_PRESENT`, so the `if` never saw the 43 that the exit status carried.\n# `$LASTEXITCODE` belongs to the last native command; read it adjacent or do not trust it.\n$rc\
+    \ = $LASTEXITCODE\n#\n# \"ALREADY INSTALLED\" IS A SUCCESS, AND WINGET REPORTS IT AS EXIT CODE 43.\n#\n# Run 42966695727: the BuildTools install took 13m42s and exited 0 - the VCTools workload\n# brought the Windows SDK with it, which is what this\
+    \ file says it does (\"The Windows SDK\n# and CMake come with the workload, which is why they are not installed separately here\").\n# The next step then asked winget for the SDK and got:\n#\n#     Found an existing package already installed. Trying\
+    \ to upgrade ...\n#     No available upgrade found.\n#     No newer package versions are available from the configured sources.\n#     -> 43\n#\n# 43 is APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE: the package is present and there is\n# nothing to\
+    \ do. Treating that as a failure makes this stage impossible to pass on a disk\n# that already has the toolchain - which is the state THIS STAGE ITSELF creates.\n#\n# `windows/11/devtools.py` holds this judgement in Python already. The YAML had no\n\
+    # equivalent, so the rule lived in one place and its duplicates did not.\n#\n# ANY OTHER NON-ZERO IS STILL A FAILURE, named rather than swallowed:\n# THE VALUE IS PRINTED UNCONDITIONALLY, BECAUSE THE FIRST TWO ATTEMPTS AT THIS CHECK\n# COULD NOT BE\
+    \ READ. The script exited 43 - so the 43 reached `exit` - and `ALREADY_PRESENT`\n# never appeared, which admits two explanations and the log could not tell them apart:\n# the branch did not run, or its output was cut off by the forty-line cap `lib/steps.py`\n\
+    # puts on a script's output. One line removes the ambiguity, and it is cheap enough to\n# keep: the next reader should not have to reconstruct this from an exit code.\nWrite-Output (\"WINGET_EXIT=\" + $rc)\n# COMPARED ON THE LOW BYTE, BECAUSE $LASTEXITCODE\
+    \ IS NOT THE NUMBER THE SHELL REPORTS.\n#\n# Three attempts failed here on `$rc -eq 43`. The printed value, added this time, is what\n# finally said why:\n#\n#     WINGET_EXIT=-1978335189\n#\n# -1978335189 is 0x8A15002B: winget's HRESULT for APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE,\n\
+    # as PowerShell carries it (signed 32-bit). `-1978335189 & 0xFF` is 0x2B, which is 43 - the\n# number a POSIX shell would have reported, and the number `lib/steps.py` logs as `-> 43`.\n#\n# So the exit status in the log and the value in the variable\
+    \ are the same fact spelled two\n# ways, and the branch compared one against the other. `0x8A15002B` AND `43` are not equal\n# and never were.\n#\n# THE MASK IS THE RULE, NOT A WORKAROUND FOR THIS ONE CODE: `$LASTEXITCODE` in PowerShell is\n# an int32\
+    \ carrying an HRESULT when the program returns one, and every winget error would\n# have hit the same trap.\n$low = $rc -band 0xFF\nif ($low -eq 43) {\n  Write-Output 'ALREADY_PRESENT (winget 0x8A15002B: no upgrade applicable)'\n  exit 0\n}\nexit $rc\n"
   script_shell: powershell
   script_name: install-python.ps1
   timeout: 2400
 - name: install node
-  script: "# WINGET IS AN ALIAS UNDER %LOCALAPPDATA%\\Microsoft\\WindowsApps AND IS NOT ON THE MACHINE\n# PATH, so an `ssh exec` shell - which gets the environment sshd captured, not the user's\n# profile\
-    \ - cannot name it. This is the same lookup windows/11/probe.ps1 does for `pwsh`,\n# for the same reason. Resolved in THIS process so no state has to survive between steps.\n$winget = $null\n$dirs =\
-    \ @()\nforeach ($scope in @('Machine', 'User')) {\n  try { $dirs += ([Environment]::GetEnvironmentVariable('Path', $scope) -split ';') } catch { }\n}\n$dirs += (Join-Path $env:LOCALAPPDATA 'Microsoft\\\
-    WindowsApps')\nforeach ($dir in ($dirs | Where-Object { $_ })) {\n  $cand = Join-Path $dir 'winget.exe'\n  if (Test-Path $cand) { $winget = $cand; break }\n}\nif (-not $winget) {\n  Write-Output 'WINGET_NOT_FOUND'\n\
-    \  exit 1\n}\n& $winget install --id OpenJS.NodeJS.LTS --exact --source winget --scope machine `\n  --accept-source-agreements --accept-package-agreements --disable-interactivity\n# THE EXIT CODE IS\
-    \ READ ON THE LINE IMMEDIATELY AFTER THE NATIVE CALL, and that placement\n# is itself a fix. The first version read it after a twenty-line comment block and printed\n# nothing at all:\n#\n#     script\
-    \ install-the-windows-sdk.ps1 (powershell) -> 43\n#     Found an existing package already installed. ...\n#\n# with no `ALREADY_PRESENT`, so the `if` never saw the 43 that the exit status carried.\n\
-    # `$LASTEXITCODE` belongs to the last native command; read it adjacent or do not trust it.\n$rc = $LASTEXITCODE\n#\n# \"ALREADY INSTALLED\" IS A SUCCESS, AND WINGET REPORTS IT AS EXIT CODE 43.\n#\n\
-    # Run 42966695727: the BuildTools install took 13m42s and exited 0 - the VCTools workload\n# brought the Windows SDK with it, which is what this file says it does (\"The Windows SDK\n# and CMake come\
-    \ with the workload, which is why they are not installed separately here\").\n# The next step then asked winget for the SDK and got:\n#\n#     Found an existing package already installed. Trying to\
-    \ upgrade ...\n#     No available upgrade found.\n#     No newer package versions are available from the configured sources.\n#     -> 43\n#\n# 43 is APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE: the\
-    \ package is present and there is\n# nothing to do. Treating that as a failure makes this stage impossible to pass on a disk\n# that already has the toolchain - which is the state THIS STAGE ITSELF\
-    \ creates.\n#\n# `windows/11/devtools.py` holds this judgement in Python already. The YAML had no\n# equivalent, so the rule lived in one place and its duplicates did not.\n#\n# ANY OTHER NON-ZERO IS\
-    \ STILL A FAILURE, named rather than swallowed:\n# THE VALUE IS PRINTED UNCONDITIONALLY, BECAUSE THE FIRST TWO ATTEMPTS AT THIS CHECK\n# COULD NOT BE READ. The script exited 43 - so the 43 reached `exit`\
-    \ - and `ALREADY_PRESENT`\n# never appeared, which admits two explanations and the log could not tell them apart:\n# the branch did not run, or its output was cut off by the forty-line cap `lib/steps.py`\n\
-    # puts on a script's output. One line removes the ambiguity, and it is cheap enough to\n# keep: the next reader should not have to reconstruct this from an exit code.\nWrite-Output (\"WINGET_EXIT=\"\
-    \ + $rc)\n# COMPARED ON THE LOW BYTE, BECAUSE $LASTEXITCODE IS NOT THE NUMBER THE SHELL REPORTS.\n#\n# Three attempts failed here on `$rc -eq 43`. The printed value, added this time, is what\n# finally\
-    \ said why:\n#\n#     WINGET_EXIT=-1978335189\n#\n# -1978335189 is 0x8A15002B: winget's HRESULT for APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE,\n# as PowerShell carries it (signed 32-bit). `-1978335189\
-    \ & 0xFF` is 0x2B, which is 43 - the\n# number a POSIX shell would have reported, and the number `lib/steps.py` logs as `-> 43`.\n#\n# So the exit status in the log and the value in the variable are\
-    \ the same fact spelled two\n# ways, and the branch compared one against the other. `0x8A15002B` AND `43` are not equal\n# and never were.\n#\n# THE MASK IS THE RULE, NOT A WORKAROUND FOR THIS ONE CODE:\
-    \ `$LASTEXITCODE` in PowerShell is\n# an int32 carrying an HRESULT when the program returns one, and every winget error would\n# have hit the same trap.\n$low = $rc -band 0xFF\nif ($low -eq 43) {\n\
-    \  Write-Output 'ALREADY_PRESENT (winget 0x8A15002B: no upgrade applicable)'\n  exit 0\n}\nexit $rc\n"
+  script: "# WINGET IS AN ALIAS UNDER %LOCALAPPDATA%\\Microsoft\\WindowsApps AND IS NOT ON THE MACHINE\n# PATH, so an `ssh exec` shell - which gets the environment sshd captured, not the user's\n# profile - cannot name it. This is the same lookup windows/11/probe.ps1\
+    \ does for `pwsh`,\n# for the same reason. Resolved in THIS process so no state has to survive between steps.\n$winget = $null\n$dirs = @()\nforeach ($scope in @('Machine', 'User')) {\n  try { $dirs += ([Environment]::GetEnvironmentVariable('Path',\
+    \ $scope) -split ';') } catch { }\n}\n$dirs += (Join-Path $env:LOCALAPPDATA 'Microsoft\\WindowsApps')\nforeach ($dir in ($dirs | Where-Object { $_ })) {\n  $cand = Join-Path $dir 'winget.exe'\n  if (Test-Path $cand) { $winget = $cand; break }\n}\n\
+    if (-not $winget) {\n  Write-Output 'WINGET_NOT_FOUND'\n  exit 1\n}\n& $winget install --id OpenJS.NodeJS.LTS --exact --source winget --scope machine `\n  --accept-source-agreements --accept-package-agreements --disable-interactivity\n# THE EXIT CODE\
+    \ IS READ ON THE LINE IMMEDIATELY AFTER THE NATIVE CALL, and that placement\n# is itself a fix. The first version read it after a twenty-line comment block and printed\n# nothing at all:\n#\n#     script install-the-windows-sdk.ps1 (powershell) ->\
+    \ 43\n#     Found an existing package already installed. ...\n#\n# with no `ALREADY_PRESENT`, so the `if` never saw the 43 that the exit status carried.\n# `$LASTEXITCODE` belongs to the last native command; read it adjacent or do not trust it.\n$rc\
+    \ = $LASTEXITCODE\n#\n# \"ALREADY INSTALLED\" IS A SUCCESS, AND WINGET REPORTS IT AS EXIT CODE 43.\n#\n# Run 42966695727: the BuildTools install took 13m42s and exited 0 - the VCTools workload\n# brought the Windows SDK with it, which is what this\
+    \ file says it does (\"The Windows SDK\n# and CMake come with the workload, which is why they are not installed separately here\").\n# The next step then asked winget for the SDK and got:\n#\n#     Found an existing package already installed. Trying\
+    \ to upgrade ...\n#     No available upgrade found.\n#     No newer package versions are available from the configured sources.\n#     -> 43\n#\n# 43 is APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE: the package is present and there is\n# nothing to\
+    \ do. Treating that as a failure makes this stage impossible to pass on a disk\n# that already has the toolchain - which is the state THIS STAGE ITSELF creates.\n#\n# `windows/11/devtools.py` holds this judgement in Python already. The YAML had no\n\
+    # equivalent, so the rule lived in one place and its duplicates did not.\n#\n# ANY OTHER NON-ZERO IS STILL A FAILURE, named rather than swallowed:\n# THE VALUE IS PRINTED UNCONDITIONALLY, BECAUSE THE FIRST TWO ATTEMPTS AT THIS CHECK\n# COULD NOT BE\
+    \ READ. The script exited 43 - so the 43 reached `exit` - and `ALREADY_PRESENT`\n# never appeared, which admits two explanations and the log could not tell them apart:\n# the branch did not run, or its output was cut off by the forty-line cap `lib/steps.py`\n\
+    # puts on a script's output. One line removes the ambiguity, and it is cheap enough to\n# keep: the next reader should not have to reconstruct this from an exit code.\nWrite-Output (\"WINGET_EXIT=\" + $rc)\n# COMPARED ON THE LOW BYTE, BECAUSE $LASTEXITCODE\
+    \ IS NOT THE NUMBER THE SHELL REPORTS.\n#\n# Three attempts failed here on `$rc -eq 43`. The printed value, added this time, is what\n# finally said why:\n#\n#     WINGET_EXIT=-1978335189\n#\n# -1978335189 is 0x8A15002B: winget's HRESULT for APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE,\n\
+    # as PowerShell carries it (signed 32-bit). `-1978335189 & 0xFF` is 0x2B, which is 43 - the\n# number a POSIX shell would have reported, and the number `lib/steps.py` logs as `-> 43`.\n#\n# So the exit status in the log and the value in the variable\
+    \ are the same fact spelled two\n# ways, and the branch compared one against the other. `0x8A15002B` AND `43` are not equal\n# and never were.\n#\n# THE MASK IS THE RULE, NOT A WORKAROUND FOR THIS ONE CODE: `$LASTEXITCODE` in PowerShell is\n# an int32\
+    \ carrying an HRESULT when the program returns one, and every winget error would\n# have hit the same trap.\n$low = $rc -band 0xFF\nif ($low -eq 43) {\n  Write-Output 'ALREADY_PRESENT (winget 0x8A15002B: no upgrade applicable)'\n  exit 0\n}\nexit $rc\n"
   script_shell: powershell
   script_name: install-node.ps1
   timeout: 2400
 - name: install git
-  script: "# WINGET IS AN ALIAS UNDER %LOCALAPPDATA%\\Microsoft\\WindowsApps AND IS NOT ON THE MACHINE\n# PATH, so an `ssh exec` shell - which gets the environment sshd captured, not the user's\n# profile\
-    \ - cannot name it. This is the same lookup windows/11/probe.ps1 does for `pwsh`,\n# for the same reason. Resolved in THIS process so no state has to survive between steps.\n$winget = $null\n$dirs =\
-    \ @()\nforeach ($scope in @('Machine', 'User')) {\n  try { $dirs += ([Environment]::GetEnvironmentVariable('Path', $scope) -split ';') } catch { }\n}\n$dirs += (Join-Path $env:LOCALAPPDATA 'Microsoft\\\
-    WindowsApps')\nforeach ($dir in ($dirs | Where-Object { $_ })) {\n  $cand = Join-Path $dir 'winget.exe'\n  if (Test-Path $cand) { $winget = $cand; break }\n}\nif (-not $winget) {\n  Write-Output 'WINGET_NOT_FOUND'\n\
-    \  exit 1\n}\n& $winget install --id Git.Git --exact --source winget --scope machine `\n  --accept-source-agreements --accept-package-agreements --disable-interactivity\n# THE EXIT CODE IS READ ON THE\
-    \ LINE IMMEDIATELY AFTER THE NATIVE CALL, and that placement\n# is itself a fix. The first version read it after a twenty-line comment block and printed\n# nothing at all:\n#\n#     script install-the-windows-sdk.ps1\
-    \ (powershell) -> 43\n#     Found an existing package already installed. ...\n#\n# with no `ALREADY_PRESENT`, so the `if` never saw the 43 that the exit status carried.\n# `$LASTEXITCODE` belongs to\
-    \ the last native command; read it adjacent or do not trust it.\n$rc = $LASTEXITCODE\n#\n# \"ALREADY INSTALLED\" IS A SUCCESS, AND WINGET REPORTS IT AS EXIT CODE 43.\n#\n# Run 42966695727: the BuildTools\
-    \ install took 13m42s and exited 0 - the VCTools workload\n# brought the Windows SDK with it, which is what this file says it does (\"The Windows SDK\n# and CMake come with the workload, which is why\
-    \ they are not installed separately here\").\n# The next step then asked winget for the SDK and got:\n#\n#     Found an existing package already installed. Trying to upgrade ...\n#     No available\
-    \ upgrade found.\n#     No newer package versions are available from the configured sources.\n#     -> 43\n#\n# 43 is APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE: the package is present and there is\n\
-    # nothing to do. Treating that as a failure makes this stage impossible to pass on a disk\n# that already has the toolchain - which is the state THIS STAGE ITSELF creates.\n#\n# `windows/11/devtools.py`\
-    \ holds this judgement in Python already. The YAML had no\n# equivalent, so the rule lived in one place and its duplicates did not.\n#\n# ANY OTHER NON-ZERO IS STILL A FAILURE, named rather than swallowed:\n\
-    # THE VALUE IS PRINTED UNCONDITIONALLY, BECAUSE THE FIRST TWO ATTEMPTS AT THIS CHECK\n# COULD NOT BE READ. The script exited 43 - so the 43 reached `exit` - and `ALREADY_PRESENT`\n# never appeared,\
-    \ which admits two explanations and the log could not tell them apart:\n# the branch did not run, or its output was cut off by the forty-line cap `lib/steps.py`\n# puts on a script's output. One line\
-    \ removes the ambiguity, and it is cheap enough to\n# keep: the next reader should not have to reconstruct this from an exit code.\nWrite-Output (\"WINGET_EXIT=\" + $rc)\n# COMPARED ON THE LOW BYTE,\
-    \ BECAUSE $LASTEXITCODE IS NOT THE NUMBER THE SHELL REPORTS.\n#\n# Three attempts failed here on `$rc -eq 43`. The printed value, added this time, is what\n# finally said why:\n#\n#     WINGET_EXIT=-1978335189\n\
-    #\n# -1978335189 is 0x8A15002B: winget's HRESULT for APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE,\n# as PowerShell carries it (signed 32-bit). `-1978335189 & 0xFF` is 0x2B, which is 43 - the\n# number\
-    \ a POSIX shell would have reported, and the number `lib/steps.py` logs as `-> 43`.\n#\n# So the exit status in the log and the value in the variable are the same fact spelled two\n# ways, and the branch\
-    \ compared one against the other. `0x8A15002B` AND `43` are not equal\n# and never were.\n#\n# THE MASK IS THE RULE, NOT A WORKAROUND FOR THIS ONE CODE: `$LASTEXITCODE` in PowerShell is\n# an int32\
-    \ carrying an HRESULT when the program returns one, and every winget error would\n# have hit the same trap.\n$low = $rc -band 0xFF\nif ($low -eq 43) {\n  Write-Output 'ALREADY_PRESENT (winget 0x8A15002B:\
-    \ no upgrade applicable)'\n  exit 0\n}\nexit $rc\n"
+  script: "# WINGET IS AN ALIAS UNDER %LOCALAPPDATA%\\Microsoft\\WindowsApps AND IS NOT ON THE MACHINE\n# PATH, so an `ssh exec` shell - which gets the environment sshd captured, not the user's\n# profile - cannot name it. This is the same lookup windows/11/probe.ps1\
+    \ does for `pwsh`,\n# for the same reason. Resolved in THIS process so no state has to survive between steps.\n$winget = $null\n$dirs = @()\nforeach ($scope in @('Machine', 'User')) {\n  try { $dirs += ([Environment]::GetEnvironmentVariable('Path',\
+    \ $scope) -split ';') } catch { }\n}\n$dirs += (Join-Path $env:LOCALAPPDATA 'Microsoft\\WindowsApps')\nforeach ($dir in ($dirs | Where-Object { $_ })) {\n  $cand = Join-Path $dir 'winget.exe'\n  if (Test-Path $cand) { $winget = $cand; break }\n}\n\
+    if (-not $winget) {\n  Write-Output 'WINGET_NOT_FOUND'\n  exit 1\n}\n& $winget install --id Git.Git --exact --source winget --scope machine `\n  --accept-source-agreements --accept-package-agreements --disable-interactivity\n# THE EXIT CODE IS READ\
+    \ ON THE LINE IMMEDIATELY AFTER THE NATIVE CALL, and that placement\n# is itself a fix. The first version read it after a twenty-line comment block and printed\n# nothing at all:\n#\n#     script install-the-windows-sdk.ps1 (powershell) -> 43\n#  \
+    \   Found an existing package already installed. ...\n#\n# with no `ALREADY_PRESENT`, so the `if` never saw the 43 that the exit status carried.\n# `$LASTEXITCODE` belongs to the last native command; read it adjacent or do not trust it.\n$rc = $LASTEXITCODE\n\
+    #\n# \"ALREADY INSTALLED\" IS A SUCCESS, AND WINGET REPORTS IT AS EXIT CODE 43.\n#\n# Run 42966695727: the BuildTools install took 13m42s and exited 0 - the VCTools workload\n# brought the Windows SDK with it, which is what this file says it does (\"\
+    The Windows SDK\n# and CMake come with the workload, which is why they are not installed separately here\").\n# The next step then asked winget for the SDK and got:\n#\n#     Found an existing package already installed. Trying to upgrade ...\n#   \
+    \  No available upgrade found.\n#     No newer package versions are available from the configured sources.\n#     -> 43\n#\n# 43 is APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE: the package is present and there is\n# nothing to do. Treating that as\
+    \ a failure makes this stage impossible to pass on a disk\n# that already has the toolchain - which is the state THIS STAGE ITSELF creates.\n#\n# `windows/11/devtools.py` holds this judgement in Python already. The YAML had no\n# equivalent, so the\
+    \ rule lived in one place and its duplicates did not.\n#\n# ANY OTHER NON-ZERO IS STILL A FAILURE, named rather than swallowed:\n# THE VALUE IS PRINTED UNCONDITIONALLY, BECAUSE THE FIRST TWO ATTEMPTS AT THIS CHECK\n# COULD NOT BE READ. The script exited\
+    \ 43 - so the 43 reached `exit` - and `ALREADY_PRESENT`\n# never appeared, which admits two explanations and the log could not tell them apart:\n# the branch did not run, or its output was cut off by the forty-line cap `lib/steps.py`\n# puts on a script's\
+    \ output. One line removes the ambiguity, and it is cheap enough to\n# keep: the next reader should not have to reconstruct this from an exit code.\nWrite-Output (\"WINGET_EXIT=\" + $rc)\n# COMPARED ON THE LOW BYTE, BECAUSE $LASTEXITCODE IS NOT THE\
+    \ NUMBER THE SHELL REPORTS.\n#\n# Three attempts failed here on `$rc -eq 43`. The printed value, added this time, is what\n# finally said why:\n#\n#     WINGET_EXIT=-1978335189\n#\n# -1978335189 is 0x8A15002B: winget's HRESULT for APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE,\n\
+    # as PowerShell carries it (signed 32-bit). `-1978335189 & 0xFF` is 0x2B, which is 43 - the\n# number a POSIX shell would have reported, and the number `lib/steps.py` logs as `-> 43`.\n#\n# So the exit status in the log and the value in the variable\
+    \ are the same fact spelled two\n# ways, and the branch compared one against the other. `0x8A15002B` AND `43` are not equal\n# and never were.\n#\n# THE MASK IS THE RULE, NOT A WORKAROUND FOR THIS ONE CODE: `$LASTEXITCODE` in PowerShell is\n# an int32\
+    \ carrying an HRESULT when the program returns one, and every winget error would\n# have hit the same trap.\n$low = $rc -band 0xFF\nif ($low -eq 43) {\n  Write-Output 'ALREADY_PRESENT (winget 0x8A15002B: no upgrade applicable)'\n  exit 0\n}\nexit $rc\n"
   script_shell: powershell
   script_name: install-git.ps1
   timeout: 2400
@@ -233,24 +199,22 @@ steps:
   ssh_probe: echo ok
   timeout: 600
 - name: build and run a C program
-  script: "$ErrorActionPreference = 'Continue'\n$vswhere = \"${env:ProgramFiles(x86)}\\Microsoft Visual Studio\\Installer\\vswhere.exe\"\nWrite-Output \"vswhere: $vswhere\"\nif (-not (Test-Path $vswhere))\
-    \ {\n  Write-Output \"VSWHERE_MISSING\"\n  exit 1\n}\n$root = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath\nWrite-Output \"installation:\
-    \ $root\"\nif (-not $root) {\n  Write-Output \"VCTOOLS_MISSING\"\n  exit 1\n}\n$vcvars = Join-Path $root 'VC\\Auxiliary\\Build\\vcvars64.bat'\nWrite-Output \"vcvars: $vcvars\"\nif (-not (Test-Path $vcvars))\
-    \ {\n  Write-Output \"VCVARS_MISSING\"\n  exit 1\n}\n$dir = Join-Path $env:TEMP 'msvc-check'\nNew-Item -ItemType Directory -Force -Path $dir | Out-Null\n$src = Join-Path $dir 'hello.c'\nSet-Content\
-    \ -Path $src -Value '#include <stdio.h>' -Encoding ASCII\nAdd-Content -Path $src -Value 'int main(void){ printf(\"hello-from-msvc\\n\"); return 0; }' -Encoding ASCII\n$bat = Join-Path $dir 'build.bat'\n\
-    Set-Content -Path $bat -Value \"@call `\"$vcvars`\"\" -Encoding ASCII\nAdd-Content -Path $bat -Value \"cl /nologo `\"$src`\" /Fe:`\"$dir\\hello.exe`\"\" -Encoding ASCII\nAdd-Content -Path $bat -Value\
-    \ \"exit /b %ERRORLEVEL%\" -Encoding ASCII\n& cmd /c $bat\n$clcode = $LASTEXITCODE\nWrite-Output \"cl exit: $clcode\"\nif ($clcode -ne 0) { Write-Output \"COMPILE_FAILED\"; exit 1 }\n$exe = Join-Path\
-    \ $dir 'hello.exe'\nif (-not (Test-Path $exe)) { Write-Output \"NO_EXE\"; exit 1 }\n& $exe\nif ($LASTEXITCODE -ne 0) { Write-Output \"RUN_FAILED\"; exit 1 }\nWrite-Output \"COMPILE_OK\"\n"
+  script: "$ErrorActionPreference = 'Continue'\n$vswhere = \"${env:ProgramFiles(x86)}\\Microsoft Visual Studio\\Installer\\vswhere.exe\"\nWrite-Output \"vswhere: $vswhere\"\nif (-not (Test-Path $vswhere)) {\n  Write-Output \"VSWHERE_MISSING\"\n  exit 1\n\
+    }\n$root = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath\nWrite-Output \"installation: $root\"\nif (-not $root) {\n  Write-Output \"VCTOOLS_MISSING\"\n  exit 1\n}\n$vcvars = Join-Path\
+    \ $root 'VC\\Auxiliary\\Build\\vcvars64.bat'\nWrite-Output \"vcvars: $vcvars\"\nif (-not (Test-Path $vcvars)) {\n  Write-Output \"VCVARS_MISSING\"\n  exit 1\n}\n$dir = Join-Path $env:TEMP 'msvc-check'\nNew-Item -ItemType Directory -Force -Path $dir\
+    \ | Out-Null\n$src = Join-Path $dir 'hello.c'\nSet-Content -Path $src -Value '#include <stdio.h>' -Encoding ASCII\nAdd-Content -Path $src -Value 'int main(void){ printf(\"hello-from-msvc\\n\"); return 0; }' -Encoding ASCII\n$bat = Join-Path $dir 'build.bat'\n\
+    Set-Content -Path $bat -Value \"@call `\"$vcvars`\"\" -Encoding ASCII\nAdd-Content -Path $bat -Value \"cl /nologo `\"$src`\" /Fe:`\"$dir\\hello.exe`\"\" -Encoding ASCII\nAdd-Content -Path $bat -Value \"exit /b %ERRORLEVEL%\" -Encoding ASCII\n& cmd\
+    \ /c $bat\n$clcode = $LASTEXITCODE\nWrite-Output \"cl exit: $clcode\"\nif ($clcode -ne 0) { Write-Output \"COMPILE_FAILED\"; exit 1 }\n$exe = Join-Path $dir 'hello.exe'\nif (-not (Test-Path $exe)) { Write-Output \"NO_EXE\"; exit 1 }\n& $exe\nif ($LASTEXITCODE\
+    \ -ne 0) { Write-Output \"RUN_FAILED\"; exit 1 }\nWrite-Output \"COMPILE_OK\"\n"
   script_shell: powershell
   script_name: msvc-check.ps1
   timeout: 900
 - name: build and run a dotnet app
-  script: "$ErrorActionPreference = 'Continue'\n$dotnet = Join-Path $env:ProgramFiles 'dotnet\\dotnet.exe'\nWrite-Output \"dotnet: $dotnet\"\nWrite-Output \"exists: $(Test-Path $dotnet)\"\nif (-not (Test-Path\
-    \ $dotnet)) {\n  $onPath = Get-Command dotnet -ErrorAction SilentlyContinue\n  Write-Output \"on path: $($onPath.Source)\"\n  if (-not $onPath) { Write-Output \"DOTNET_MISSING\"; exit 1 }\n  $dotnet\
-    \ = $onPath.Source\n}\n$sdks = & $dotnet --list-sdks 2>&1\nWrite-Output \"sdks:\"\n$sdks | ForEach-Object { Write-Output \"  $_\" }\nif (-not $sdks) { Write-Output \"NO_SDK\"; exit 1 }\n$dir = Join-Path\
-    \ $env:TEMP 'dotnet-check'\nif (Test-Path $dir) { Remove-Item -Recurse -Force $dir }\nNew-Item -ItemType Directory -Force -Path $dir | Out-Null\n& $dotnet new console --output $dir --force 2>&1 | ForEach-Object\
-    \ { Write-Output \"  $_\" }\n$newcode = $LASTEXITCODE\nWrite-Output \"new exit: $newcode\"\nif ($newcode -ne 0) { Write-Output \"TEMPLATE_FAILED\"; exit 1 }\n& $dotnet run --project $dir 2>&1 | ForEach-Object\
-    \ { Write-Output \"  $_\" }\n$runcode = $LASTEXITCODE\nWrite-Output \"run exit: $runcode\"\nif ($runcode -ne 0) { Write-Output \"BUILD_FAILED\"; exit 1 }\nWrite-Output \"DOTNET_OK\"\n"
+  script: "$ErrorActionPreference = 'Continue'\n$dotnet = Join-Path $env:ProgramFiles 'dotnet\\dotnet.exe'\nWrite-Output \"dotnet: $dotnet\"\nWrite-Output \"exists: $(Test-Path $dotnet)\"\nif (-not (Test-Path $dotnet)) {\n  $onPath = Get-Command dotnet\
+    \ -ErrorAction SilentlyContinue\n  Write-Output \"on path: $($onPath.Source)\"\n  if (-not $onPath) { Write-Output \"DOTNET_MISSING\"; exit 1 }\n  $dotnet = $onPath.Source\n}\n$sdks = & $dotnet --list-sdks 2>&1\nWrite-Output \"sdks:\"\n$sdks | ForEach-Object\
+    \ { Write-Output \"  $_\" }\nif (-not $sdks) { Write-Output \"NO_SDK\"; exit 1 }\n$dir = Join-Path $env:TEMP 'dotnet-check'\nif (Test-Path $dir) { Remove-Item -Recurse -Force $dir }\nNew-Item -ItemType Directory -Force -Path $dir | Out-Null\n& $dotnet\
+    \ new console --output $dir --force 2>&1 | ForEach-Object { Write-Output \"  $_\" }\n$newcode = $LASTEXITCODE\nWrite-Output \"new exit: $newcode\"\nif ($newcode -ne 0) { Write-Output \"TEMPLATE_FAILED\"; exit 1 }\n& $dotnet run --project $dir 2>&1\
+    \ | ForEach-Object { Write-Output \"  $_\" }\n$runcode = $LASTEXITCODE\nWrite-Output \"run exit: $runcode\"\nif ($runcode -ne 0) { Write-Output \"BUILD_FAILED\"; exit 1 }\nWrite-Output \"DOTNET_OK\"\n"
   script_shell: powershell
   script_name: dotnet-check.ps1
   timeout: 1800
@@ -261,16 +225,19 @@ steps:
   ssh: powershell -Command "if (Test-Path 'C:\Program Files (x86)\Windows Kits\10\Include') { Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\Include' -Name } else { 'SDK_MISSING' }"
   timeout: 120
 - name: prove python node and git
-  script: "$ErrorActionPreference = 'Continue'\n$bad = 0\nforeach ($t in @('python', 'node', 'git')) {\n  $c = Get-Command \"$t.exe\" -ErrorAction SilentlyContinue\n  if ($c) {\n    Write-Output \"ok  \
-    \    $t -> $($c.Source)\"\n  } else {\n    Write-Output \"MISSING $t\"\n    $bad = 1\n  }\n}\nif ($bad -ne 0) {\n  Write-Output \"=== THE THREE THE macOS DISK ALSO HAS ARE NOT ALL HERE ===\"\n  exit\
-    \ 1\n}\nWrite-Output \"PYTHON_NODE_GIT_OK\"\n"
+  script: "$ErrorActionPreference = 'Continue'\n$bad = 0\nforeach ($t in @('python', 'node', 'git')) {\n  $c = Get-Command \"$t.exe\" -ErrorAction SilentlyContinue\n  if ($c) {\n    Write-Output \"ok      $t -> $($c.Source)\"\n  } else {\n    Write-Output\
+    \ \"MISSING $t\"\n    $bad = 1\n  }\n}\nif ($bad -ne 0) {\n  Write-Output \"=== THE THREE THE macOS DISK ALSO HAS ARE NOT ALL HERE ===\"\n  exit 1\n}\nWrite-Output \"PYTHON_NODE_GIT_OK\"\n"
   script_shell: powershell
   script_name: prove-python-node-git.ps1
   timeout: 300
 - name: note what the toolchain reports
-  ssh: powershell -Command "'SDK=' + (Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\Include' -Name -ErrorAction SilentlyContinue | Select-Object -Last 1) + ' DOTNET=' + ((& 'C:\Program Files\dotnet\dotnet.exe'
-    --version) 2>&1)"
+  ssh: powershell -Command "'SDK=' + (Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\Include' -Name -ErrorAction SilentlyContinue | Select-Object -Last 1) + ' DOTNET=' + ((& 'C:\Program Files\dotnet\dotnet.exe' --version) 2>&1)"
   timeout: 180
   optional: true
+- name: stop the machine
+  shutdown: ssh
+  timeout: 300
+- name: publish the disk
+  compress: '{{ out }}'
 - name: stop recording
   record: false
