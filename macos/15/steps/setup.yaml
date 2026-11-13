@@ -256,37 +256,77 @@ steps:
 #
 # `x=200` AND NOT `x=100`: the sidebar's left margin holds the disk ICON, and the table treats the icon
 # as its own widget - a click at x=100 selects nothing.
-- name: find the uninitialised disk
-  loop:
-    max: 8
-    do:
-    - click:
-      - 200
-      - 110
-    - wait: 2
-    # THE MOVE IS WHAT MAKES THE SEARCH A SEARCH: the second attempt clicks row 1 and steps to row 2,
-    # the third steps to row 3, and the reading after each says whether to stop.
-    - key: down
-    - wait: 2
-    ocr:
-      name: details
-      region:
-      - 360
-      - 100
-      - 1000
-      - 160
-      region_at:
-      - 1920
-      - 1080
-      scale: 4
-      wait: 0
-    check:
-      name: uninitialised
-      from: details
-      mode: contains
-      text: Uninitialized
-    until:
-      fact: uninitialised
+- name: read the first disk
+  # ROW 1 IS ALREADY SELECTED WHEN DISK UTILITY OPENS, so this step only reads it. Which row is the
+  # target SWAPS BETWEEN RUNS, so it cannot be assumed:
+  #
+  #	run A   row 1 = 137.44 GB  Uninitialized      row 2 = 268.4 MB   GUID Partition Map
+  #	run B   row 1 = 268.4 MB   GUID Partition Map row 2 = 137.44 GB  Uninitialized
+  #
+  # AND THE 268.4 MB ROW IS THE OPENCORE BOOT IMAGE, NOT A DISK: `boot.img` is 256 MiB, which Disk
+  # Utility reports as 268.4 MB. Erasing it erases the walk's own boot loader.
+  click:
+  - 200
+  - 112
+  wait_after: 2
+- name: is the first disk the uninitialised one
+  ocr:
+    name: details
+    # THE NAME AND THE STATE LINE UNDER IT, NOT THE CAPACITY BOX ON THE RIGHT.
+    #
+    # `Uninitialized` IS DRAWN AT ABOUT 12 PX; at `scale: 2` tesseract returned only
+    # `Apple Inc. VirtlO Block Media`, so the state line was absent and no check of it could ever pass.
+    region:
+    - 360
+    - 100
+    - 1000
+    - 160
+    region_at:
+    - 1920
+    - 1080
+    scale: 4
+    wait: 0
+- name: the first disk is the uninitialised one
+  check:
+    name: uninitialised
+    from: details
+    mode: contains
+    text: Uninitialized
+- name: step down to the uninitialised disk
+  # `down` WALKS THE LIST, AND ONLY RUNS WHEN ROW 1 WAS NOT THE TARGET.
+  #
+  # THE ORDER INSIDE A `loop:` ATTEMPT IS `do:` THEN THE READING, so `down` here means attempt 1 reads
+  # row 2, attempt 2 reads row 3, and so on. Row 1 was read by the step above, which is why this step
+  # can start by MOVING rather than by clicking - an earlier version clicked row 1 again inside the
+  # loop, so `down` and the click cancelled out and every attempt read the same row:
+  #
+  #	find the uninitialised disk [ocr]: 12 word(s): ... GUID Partition Map     (six times)
+  if: uninitialised
+  else:
+    - loop:
+        max: 4
+        do:
+        - key: down
+        - wait: 1
+        ocr:
+          name: details
+          region:
+          - 360
+          - 100
+          - 1000
+          - 160
+          region_at:
+          - 1920
+          - 1080
+          scale: 4
+          wait: 0
+        check:
+          name: uninitialised
+          from: details
+          mode: contains
+          text: Uninitialized
+        until:
+          fact: uninitialised
 # THE WINDOW'S POSITION MOVES BETWEEN RUNS, AND ITS BRIGHTNESS IS NOT 200.
 #
 # MEASURED ACROSS TWO RUNS, sampling column x=500 of the same dialog:
@@ -301,25 +341,63 @@ steps:
 #
 # A THRESHOLD BETWEEN THE TWO IS THE MEASUREMENT: 40 is above the wallpaper and below the title bar.
 - name: erase - open the sheet
-  # A FIXED COORDINATE, BECAUSE THE WINDOW IS THE SCREEN NOW.
+  # THE CLICK IS REPEATED UNTIL THE SHEET IS READ, BECAUSE A CLICK ON A TOOLBAR THAT IS STILL DRAWING IS
+  # DROPPED - and `expect_any:` could not help, because it reads ONCE and does not wait.
   #
-  # This used to be `at_window: [1289, 15]` with a brightness scan to find the window's top edge, and
-  # every part of that was a measurement that could be wrong: the threshold, the scan column, the
-  # offset, and whether the edge it found was the window or the wallpaper. It was wrong four times.
+  # MEASURED, ON THIS STEP, WITH THE CLICK API AGAINST THE LIVE WINDOW:
   #
-  # After `make disk utility full screen` the toolbar is at y=57 on EVERY run, so the Erase icon is at
-  # (1681, 57) and there is nothing left to measure. THE FULL-SCREEN STEP IS WHY THIS IS A CONSTANT.
-  click:
-  - 1681
-  - 57
-  expect_any:
-  - - erase
-    - deleted
-  - - free
-    - space
-  - - security
-    - option
-  wait_after: 6
+  #	click (1699, 60)  ->  nothing at all (the toolbar's own vertical band is y=44..76, and this is
+  #	                      inside it - the button simply had not finished laying out)
+  #	click (1681, 57)  ->  the sheet opens
+  #
+  # AND THE FIRST VERSION OF THIS STEP FAILED WITH
+  #
+  #	erase - open the sheet: did not advance: wanted "erase deleted" or "free space" or
+  #	"security option", read "@& = Diskutility File Edit Images View Window Help B
+  #
+  # - the reading was of the TOOLBAR, because `expect_any:` does ONE capture immediately after the
+  # click. A sheet takes a moment to appear, so the one reading that decides the step is the one least
+  # likely to see it.
+  #
+  # SO THE CLICK AND THE READING ARE A LOOP, which is the same shape as the disk list above.
+  loop:
+    max: 6
+    do:
+    - click:
+      - 1681
+      - 57
+    - wait: 3
+    ocr:
+      name: sheet
+      # THE SHEET'S OWN TEXT, MEASURED AT 715,425 - 1210,675 on this 1920x1080 screen. `Erase` appears
+      # in the title line ("Erase \"Apple Inc. VirtIO Block Media\"?"), so one word is enough - but two
+      # are asked for, because a window title elsewhere could say it too.
+      region:
+      - 715
+      - 425
+      - 1210
+      - 675
+      region_at:
+      - 1920
+      - 1080
+      scale: 2
+      wait: 0
+    check:
+      name: sheet_up
+      from: sheet
+      mode: says_any
+      words:
+      - - erase
+        - deleted
+      - - free
+        - space
+      - - security
+        - option
+      - - cancel
+        - erase
+    until:
+      fact: sheet_up
+  wait_after: 4
 - name: erase - clear the name field
   key: backspace
   wait_after: 3
@@ -427,11 +505,25 @@ steps:
     - wait: 10
     ocr:
       name: instaload
+      # THE DIALOG'S OWN TWO LINES, MEASURED ON THE SCREEN THIS RUN PRODUCED.
+      #
+      # The region used to be y=380..500 and every attempt read ZERO WORDS while the installer was
+      # plainly on screen:
+      #
+      #	wait for the installer to load [ocr]: 0 word(s) -> ocr/instaload.txt
+      #
+      # MEASURED against the live frame, the dialog's text is at y=570..630:
+      #
+      #	400,560 - 1520,700  ->  "macOS Sequoia" / "To set up the installation of macOS Sequoia,
+      #	                          click Continue."
+      #
+      # 380..500 is empty panel between the icon and the text. A region is a MEASUREMENT, and the
+      # previous one was taken from a run whose window sat higher.
       region:
-      - 440
-      - 380
-      - 1480
-      - 500
+      - 400
+      - 560
+      - 1520
+      - 700
       region_at:
       - 1920
       - 1080
