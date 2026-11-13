@@ -26,6 +26,25 @@ steps:
   os: bsd
   iso: installer_iso
   timeout: 1800
+  # 8 GiB, AND THE NUMBER IS MEASURED RATHER THAN GENEROUS.
+  #
+  # GhostBSD's installation media does not run from the ISO - it copies its whole system image into a
+  # SWAP-BASED MEMDISK and runs from there. On the 26.3 image that copy is 1909 MiB, and 4096 MiB
+  # leaves it short:
+  #
+  #	==> Replicate system image to swap-based memdisk
+  #	cannot receive new filesystem stream: out of space 114.024s, 27 MB/s
+  #	Enter full pathname of shell or RETURN for /rescue/sh:
+  #
+  # THE SCREEN AFTER THAT IS THE TRAP: the failure looks like a hang, because the walk was waiting for
+  # an X-driver menu that the installer never reached, and reported `choose the X driver` sixty times
+  # while the machine sat at a rescue prompt.
+  #
+  # 4096 WAS RIGHT FOR 24.10.1, whose image is smaller - the reference implementation's own
+  # `--mem 4096` is what this number started as. The release is pinned to 26.3 here, so the number
+  # moves with it: the memdisk needs the image plus the kernel plus the copy's own working set, and
+  # 8 GiB is that with room, on a runner that has 16.
+  memory_mb: 8192
 - name: the boot menu is counting down
   until_console: any other key for boot menu
   timeout: 600

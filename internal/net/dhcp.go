@@ -51,6 +51,37 @@ func startDHCP() error {
 	// the old machine also believes it owns.
 	_ = os.WriteFile(dhcpLeasePath, nil, 0o644)
 
+	// THE LOG AND THE PID FILE ARE REMOVED, NOT JUST OVERWRITTEN, AND THE REASON IS A RESTART THAT
+	// WAS BLOCKED BY ITS OWN PREVIOUS RUN:
+	//
+	//	dnsmasq: exit status 3 (dnsmasq: cannot open log /tmp/easyvm-dnsmasq.log: Permission denied)
+	//
+	// dnsmasq DROPS PRIVILEGES after start-up, so the log it creates is owned by `nobody`:
+	//
+	//	-rw-rw---- 1 nobody root   477 /tmp/easyvm-dnsmasq.log      <- mode 0660
+	//	-rw-r--r-- 1 nobody nogroup  6 /tmp/easyvm-dnsmasq.pid      <- mode 0644
+	//
+	// THE NEXT RUN STARTS BEFORE IT DROPS them, and root cannot open a 0660 file it does not own:
+	//
+	//	dnsmasq: cannot open log /tmp/probe.log: Permission denied      exit=3
+	//
+	// REPRODUCED BY HAND with `touch /tmp/probe.log; chown nobody:root; chmod 660` and the same
+	// `--log-facility`. The paths are fixed on purpose (one container holds one guest, so there is
+	// nothing to disambiguate), which is exactly why the stale file has to go rather than be trusted.
+	//
+	// THIS IS NOT A POD-RESTART PROBLEM. `/tmp` here is the container's overlay upper layer, not a
+	// tmpfs, so it survives for as long as the CONTAINER does - and a pod that is up for hours serves
+	// many runs with `restartCount: 0`. CI starts a fresh container per job and never sees this; the
+	// local loop, which re-runs a failing step on a machine that stays up, sees it every time.
+	//
+	// A REMOVAL RATHER THAN A CHMOD: the file is dnsmasq's, and recreating it is how dnsmasq itself
+	// would have made it.
+	for _, stale := range []string{dhcpLogPath, dhcpPIDPath} {
+		if err := os.Remove(stale); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("removing the previous run's %s: %w", stale, err)
+		}
+	}
+
 	cmd := exec.Command("dnsmasq",
 		"--conf-file="+dhcpConfPath,
 		"--pid-file="+dhcpPIDPath,

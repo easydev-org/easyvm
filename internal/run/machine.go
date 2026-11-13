@@ -212,6 +212,15 @@ func machineFromSteps(f *walk.File) (MachineSpec, []walk.Step, error) {
 			})
 		case s.Has("boot") || s.Has("boot_from"):
 			step := s
+			// THE SIZE IS READ WHEREVER IT IS WRITTEN, because a walkthrough that has no `machine:`
+			// block states it on its `boot:` step - and `create` must see the same machine `run`
+			// would start, not a default-shaped one.
+			if mb, ok := toFloat(step.Spec["memory_mb"]); ok {
+				m.MemoryMB = int(mb)
+			}
+			if n, ok := toFloat(step.Spec["cpus"]); ok {
+				m.CPUs = int(n)
+			}
 			m.Boot = &step
 			i++
 			goto done
@@ -269,7 +278,30 @@ func MachineSteps(m MachineSpec) []walk.Step {
 		out = append(out, walk.Step{Name: "fetch " + f.Kind, Spec: spec})
 	}
 	if m.Boot != nil {
-		out = append(out, *m.Boot)
+		boot := *m.Boot
+		// THE MACHINE'S SIZE RIDES ON THE BOOT STEP, because the boot step is the only thing that
+		// reaches qemu. `memory_mb:` and `cpus:` used to be READ AND DROPPED here: `machineFromBlock`
+		// stored them on the MachineSpec, nothing copied them onto a step, and `doBoot` never asked -
+		// so EVERY GUEST RAN WITH THE 4096 MiB DEFAULT whatever the file said.
+		//
+		// MEASURED ON ghostbsd, which is the guest that needs the answer: its installer copies a
+		// 1909 MiB uzip image into a SWAP-BASED MEMDISK, the copy stops with
+		//
+		//	cannot receive new filesystem stream: out of space 114.024s, 27 MB/s
+		//	Enter full pathname of shell or RETURN for /rescue/sh:
+		//
+		// and the walker, still waiting for an X-driver menu that could never appear, reported
+		// `choose the X driver` for sixty attempts.
+		//
+		// IT IS COPIED RATHER THAN READ FROM THE FILE LATER because `create` narrows the file to its
+		// machine steps: a `machine:` block's own keys are gone by then, and the step is what is left.
+		if m.MemoryMB > 0 {
+			boot.Spec["memory_mb"] = float64(m.MemoryMB)
+		}
+		if m.CPUs > 0 {
+			boot.Spec["cpus"] = float64(m.CPUs)
+		}
+		out = append(out, boot)
 	}
 	return out
 }

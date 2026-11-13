@@ -199,3 +199,83 @@ func keysOf(s walk.Step) []string {
 	}
 	return out
 }
+
+// THE GUEST'S SIZE HAS TO REACH QEMU, AND FOR ONE RELEASE IT DID NOT.
+//
+// `memory_mb:` and `cpus:` were read off a `machine:` block into `MachineSpec` and then dropped:
+// `MachineSteps` emitted the disk, the fetches and the boot, and neither key was on the boot step, so
+// `doBoot` had nothing to pass and qemu got `machine.DefaultMemMB` whatever the file said.
+//
+// THE GUEST THAT MEASURED IT was ghostbsd. Its installer copies a 1909 MiB system image into a
+// SWAP-BASED MEMDISK, and at 4096 MiB the copy stops:
+//
+//	cannot receive new filesystem stream: out of space 114.024s, 27 MB/s
+//	Enter full pathname of shell or RETURN for /rescue/sh:
+//
+// The walk then waited sixty times for an X-driver menu that could never appear.
+//
+// SO THIS TEST IS ABOUT THE CABLE, NOT THE VALUE: whatever a file writes must be on the step the
+// executor runs, in both spellings - the `machine:` block and a plain `boot:` step.
+func TestTheGuestSizeReachesTheBootStep(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		doc  map[string]any
+	}{
+		{"machine block", map[string]any{
+			"name": "sized",
+			"machine": map[string]any{
+				"disk_gb":   128,
+				"memory_mb": 8192,
+				"cpus":      4,
+				"boot":      map[string]any{"os": "bsd", "iso": "installer_iso"},
+			},
+			// A `machine:` file states its own steps; the block is the machine, not the walk.
+			"steps": []any{
+				map[string]any{"name": "wait", "wait": 5},
+			},
+		}},
+		{"boot step", map[string]any{
+			"name": "sized",
+			"steps": []any{
+				map[string]any{"name": "disk", "disk": "disk.qcow2", "disk_gb": 128},
+				map[string]any{"name": "boot it", "boot": true, "os": "bsd",
+					"memory_mb": 8192, "cpus": 4},
+				map[string]any{"name": "wait", "wait": 5},
+			},
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			doc, err := loadFixture(t, tc.doc)
+			if err != nil {
+				t.Fatal(err)
+			}
+			spec, _, err := machineOf(doc)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if spec.MemoryMB != 8192 {
+				t.Errorf("the machine is %d MiB, and the file says 8192 - a size that stops at the "+
+					"struct is a size qemu never sees", spec.MemoryMB)
+			}
+
+			// AND THE STEPS ARE WHAT THE EXECUTOR ACTUALLY RUNS, so the number has to survive the
+			// round trip. `create` narrows a file to exactly this list.
+			var boot *walk.Step
+			for i, s := range MachineSteps(spec) {
+				if s.Has("boot") {
+					boot = &MachineSteps(spec)[i]
+				}
+			}
+			if boot == nil {
+				t.Fatal("the machine's steps contain no boot, so nothing would start")
+			}
+			if got, _ := boot.Float("memory_mb", 0); int(got) != 8192 {
+				t.Errorf("the boot step says memory_mb=%v, and the file says 8192 - qemu reads the "+
+					"step, so this is the number that decides the guest", got)
+			}
+			if got, _ := boot.Float("cpus", 0); int(got) != 4 {
+				t.Errorf("the boot step says cpus=%v, and the file says 4", got)
+			}
+		})
+	}
+}

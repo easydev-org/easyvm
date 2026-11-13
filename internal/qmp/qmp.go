@@ -141,7 +141,20 @@ func (c *Conn) Screendump(dir string) (Frame, error) {
 	if err := c.raw.Screendump(path); err != nil {
 		return Frame{}, fmt.Errorf("screendump: %w", err)
 	}
-	if err := waitForStable(path, 5*time.Second); err != nil {
+	// THIRTY SECONDS, NOT FIVE, AND THE FIVE WAS MEASURED WRONG ON A LOADED GUEST.
+	//
+	// The wait is "the frame decodes", so it is bounded by how long qemu takes to WRITE 6.2 MB of PPM
+	// plus however long a 1920x1080 decode takes. On an idle host that is a few hundred milliseconds.
+	// ON A GUEST WHOSE RECOVERY SYSTEM IS BOOTING IT IS NOT: macos-setup's gate reported
+	//
+	//	180 attempt(s) and never read a frame: frame-000837.ppm was not readable within 5s
+	//
+	// for EVERY attempt, and the frames on disk are 6,220,817 bytes - the exact size of a complete
+	// 1920x1080 P6 frame. The file was fine; the reader gave up first.
+	//
+	// A CAP ON THE CAP: thirty seconds is longer than any screendump takes, and the attempt ceiling of
+	// the caller still bounds a guest whose frames never arrive at all.
+	if err := waitForStable(path, 30*time.Second); err != nil {
 		return Frame{}, err
 	}
 	w, h, err := ppmSize(path)

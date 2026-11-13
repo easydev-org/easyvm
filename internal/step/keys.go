@@ -137,6 +137,22 @@ var Keys = map[string]Key{
 	"cpu": {Name: "cpu", Kind: KindString,
 		Summary: "the guest's -cpu model when the disk's packages need a fixed one; empty is " +
 			"-cpu host"},
+	// --- how big the guest is ------------------------------------------------------------
+	//
+	// THESE ARE ON THE BOOT STEP RATHER THAN ONLY IN A `machine:` BLOCK, because the boot step is
+	// what reaches qemu. A `machine:` block's own `memory_mb:` is copied onto the boot step when the
+	// machine is turned back into steps, so both spellings end up here.
+	//
+	// THE SIZE WAS READ AND DROPPED FOR ONE RELEASE: `machineFromBlock` stored it on the spec,
+	// nothing put it on a step, `doBoot` had nothing to pass, and every guest ran with the 4096 MiB
+	// default whatever the file said - which is why ghostbsd's installer ran out of memdisk.
+	"memory_mb": {Name: "memory_mb", Kind: KindInt,
+		Summary: "the guest's RAM in MiB; 4096 when not said. A guest that installs from a " +
+			"memdisk needs more than the default"},
+	"mem_mb": {Name: "mem_mb", Kind: KindInt,
+		Summary: "the older spelling of memory_mb, kept so a file that has not been renamed runs"},
+	"cpus": {Name: "cpus", Kind: KindInt,
+		Summary: "how many vCPUs the guest gets; 4 when not said"},
 	"reboot": {Name: "reboot", Kind: KindMapping,
 		Summary: "reset the guest and wait for it to come back"},
 	"shutdown": {Name: "shutdown", Kind: KindString,

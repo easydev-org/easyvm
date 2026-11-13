@@ -152,8 +152,34 @@ jobs:
         # else names one tag. `matrix.pull` is a string, and an empty one is how "I start a chain" is
         # spelled.
         if: matrix.pull != ''
+        # THE TOKEN IS NOT OPTIONAL, AND ITS ABSENCE READS LIKE A MISSING TAG.
+        #
+        # MEASURED ON RUN 43382281309 (`linux-ubuntu-ssh`, step 6):
+        #
+        #	GITHUB_TOKEN is empty; a private package needs it and an anonymous pull answers 401
+        #	linux-ubuntu is not in the package. This leg pulls the disk the leg before it published
+        #
+        # The install leg HAD published `linux-ubuntu`. An anonymous GET of a private package is a
+        # 401, `pull-artifact.sh` reports that as "not in the package", and the leg then failed with a
+        # message pointing at the job BEFORE it - which was fine. The diagnosis cost a full round trip
+        # through two logs.
+        #
+        # THIS STEP IS A `run:` BLOCK RATHER THAN AN ACTION, so `TestEveryRegistryActionIsGivenAToken`
+        # could not see it: that test checks `with: token:` on `oci-pull`/`oci-push`/`log-stream`.
+        # The token here is an `env:` variable, and it is the same credential.
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -eu
+          # A FAILURE HERE IS SAID PLAINLY, because the one thing a reader must not have to do is
+          # work out whether "not in the package" means the tag is absent or the credential is.
+          [ -n "${GITHUB_TOKEN:-}" ] || {
+            echo "::error::GITHUB_TOKEN is empty, so this pull would be anonymous and would answer"
+            echo "::error::401 - which this script reports as a missing tag. The step's `env:` block"
+            echo "::error::is what carries it, and the job's `packages:` permission is what makes it"
+            echo "::error::non-empty at all."
+            exit 1
+          }
           tag="${{ matrix.pull }}"
           [ -n "$tag" ] || { echo "this leg has no pull:"; exit 0; }
           echo "=== pull $tag"

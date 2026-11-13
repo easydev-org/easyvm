@@ -84,6 +84,23 @@ func (e *Executor) doBoot(s walk.Step) error {
 		Recovery: e.assetPath(s.Get("recovery")),
 		Incoming: resumeFrom,
 	}
+	// THE SIZE COMES OFF THE STEP, WHICH IS WHERE `MachineSteps` PUT IT.
+	//
+	// WITHOUT THIS THE TWO KEYS WERE DECORATION: `machineFromBlock` read `memory_mb:` into the spec,
+	// `MachineSteps` emitted the steps and dropped it, and qemu always got the 4096 MiB default. See
+	// the long comment in machine.go for the guest that measured it.
+	// BOTH SPELLINGS: `mem_mb` is what the vocabulary's own summary named, and a file written
+	// against that sentence must not be a machine that silently keeps the default.
+	mb, err := s.Float("memory_mb", 0)
+	if err != nil || mb == 0 {
+		mb, _ = s.Float("mem_mb", 0)
+	}
+	if mb > 0 {
+		spec.MemMB = int(mb)
+	}
+	if n, err := s.Float("cpus", 0); err == nil && n > 0 {
+		spec.CPUs = int(n)
+	}
 	// THE OPENCORE FILES ARE NEEDED BY EVERY MACOS BOOT, AND ONLY SOME OF THEM ATTACH THE
 	// RECOVERY IMAGE. They are built from it - Apple's APFS driver comes out of that image - but
 	// that is HOST work done by an earlier step, and the guest is not given the image on an
