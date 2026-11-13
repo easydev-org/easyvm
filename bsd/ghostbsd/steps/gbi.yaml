@@ -175,7 +175,16 @@ steps:
         - auto
     until:
       fact: booted
-- name: is the X driver menu the thing on screen
+# ONE STEP DOES ONE THING: an `ocr:` reads and a `check:` decides, and THEY ARE SEPARATE STEPS.
+#
+# THEY WERE ONE, and the second half never ran: the dispatcher's first branch is `case s.Has("ocr")`,
+# which calls `doOCR` and RETURNS - so the `check:` in the same step was read from the file, accepted
+# by the vocabulary, and silently skipped. The next step then failed with
+#
+#	`if: menu` names a boolean no `check:` step has made
+#
+# which is a true statement about a file that looks like it made one.
+- name: read the screen again
   ocr:
     name: screen
     region:
@@ -190,6 +199,7 @@ steps:
     # NO PAUSE: the loop above has just read this screen and the question is about THAT reading. A
     # `wait:` here would be a second look at a later frame, and the two answers could disagree.
     wait: 0
+- name: is the X driver menu the thing on screen
   check:
     name: menu
     from: screen

@@ -246,3 +246,40 @@ steps:
 		t.Fatal("a duplicate key must be refused, because the runner refuses the file it appears in")
 	}
 }
+
+// A STEP THAT CARRIES `ocr:` AND `check:` TOGETHER IS REFUSED, BECAUSE THE SECOND HALF NEVER RUNS.
+//
+// THE DISPATCHER'S FIRST MATCHING BRANCH WINS: `case s.Has("ocr")` calls `doOCR` and returns, so a
+// `check:` in the same step is read from the file, accepted by the vocabulary, and silently skipped.
+// MEASURED on bsd/ghostbsd/steps/gbi.yaml, whose step read a screen and decided from it:
+//
+//	is the X driver menu the thing on screen: 37 word(s) -> ocr/screen.txt      <- the reading
+//	                                                                             <- and no `check:`
+//
+// and the next step failed with `if: menu` names a boolean no `check:` step has made - a true
+// statement about a file that looks like it made one.
+//
+// THE RULE IS THE ONE THE WHOLE DSL RESTS ON: one step does one thing. A reading and a decision are
+// two, and a vocabulary that accepts them together is a vocabulary that lets a file say something it
+// does not mean.
+func TestAnOCRStepCannotAlsoCheck(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "x.yaml")
+	body := `name: probe
+steps:
+- name: read and decide
+  ocr: {name: screen, region: [0, 0, 100, 100], region_at: [1920, 1080], scale: 1, wait: 0}
+  check: {name: done, from: screen, mode: says_any, words: [[ok]]}
+`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(path, nil)
+	if err == nil {
+		t.Fatal("a step with both `ocr:` and `check:` loaded, and the `check:` would never run - the " +
+			"dispatcher calls `doOCR` and returns. Split it into two steps.")
+	}
+	if !strings.Contains(err.Error(), "one thing") && !strings.Contains(err.Error(), "check") {
+		t.Fatalf("the error should say why: %v", err)
+	}
+}

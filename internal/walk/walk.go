@@ -215,6 +215,26 @@ func Load(path string, overrides map[string]string) (*File, error) {
 		if err := step.Validate(name, mapping); err != nil {
 			return nil, fmt.Errorf("%s: %w", path, err)
 		}
+		// ONE STEP DOES ONE THING, AND `ocr:` WITH `check:` BREAKS THAT IN SILENCE.
+		//
+		// The dispatcher's first matching branch wins: `case s.Has("ocr")` calls `doOCR` and returns,
+		// so a `check:` written beside an `ocr:` is validated, accepted, and NEVER RUN. MEASURED on
+		// bsd/ghostbsd/steps/gbi.yaml, whose step read a screen and decided from it:
+		//
+		//	is the X driver menu the thing on screen: 37 word(s) -> ocr/screen.txt
+		//	                                                <- and no `check:`
+		//
+		// and the step after it failed with `if: menu` names a boolean no `check:` step has made -
+		// which is true, and points at the wrong step.
+		//
+		// A REFUSAL RATHER THAN A DISPATCH ORDER THAT HAPPENS TO WORK: silently running both would
+		// make the file mean something the dispatcher's shape decided, and the next reader would
+		// have to know that order to read the file.
+		if has(mapping, "ocr") && has(mapping, "check") {
+			return nil, fmt.Errorf("%s: step %q says both `ocr:` and `check:`; one step does one "+
+				"thing, and the check would never run - the dispatcher reads `ocr:` and returns. "+
+				"Split it into two steps", path, name)
+		}
 		substituted, err := substitute(mapping, f.Vars)
 		if err != nil {
 			return nil, fmt.Errorf("%s: step %q: %w", path, name, err)
@@ -399,4 +419,10 @@ func validateDocument(doc map[string]any) error {
 			key, strings.Join(names, ", "))
 	}
 	return nil
+}
+
+// has reports whether a mapping carries this key at all, including a false or empty value.
+func has(mapping map[string]any, key string) bool {
+	_, ok := mapping[key]
+	return ok
 }
