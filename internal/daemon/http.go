@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/easydev-org/easyvm/internal/protocol"
@@ -76,14 +77,30 @@ func (d *Daemon) ServeHTTP(opts HTTPServeOptions) error {
 	// A DAEMON WITH NO MACHINE STILL HAS TO ANSWER SOMETHING, and it says so rather than showing a
 	// console that cannot connect. `d.console()` is nil until a guest has booted.
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		page := d.console()
-		if page == nil {
+		// A DAEMON WITH NO PAGE IS NOT AN ERROR TO HIDE, IT IS A PACKAGE TO INSTALL - and a machine
+		// with no page gets a sentence rather than a console that cannot connect.
+		if _, err := os.Stat(filepath.Join(novncRoot, "vnc.html")); err != nil {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = io.WriteString(w, noPageHTML)
+			return
+		}
+		if d.vncPort() == 0 {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.WriteHeader(http.StatusServiceUnavailable)
 			_, _ = io.WriteString(w, noMachineHTML)
 			return
 		}
-		page.mux.ServeHTTP(w, r)
+		// THE PAGE AND EVERYTHING IT ASKS FOR: app/, core/, vendor/, images/.
+		//
+		// http.FileServer refuses a path that escapes its root, so serving the directory is safe. The
+		// root redirect is spelled out because a browser pointed at the Service should land on the
+		// console rather than on a directory listing.
+		if r.URL.Path == "/" {
+			http.Redirect(w, r, "/vnc.html", http.StatusFound)
+			return
+		}
+		http.FileServer(http.Dir(novncRoot)).ServeHTTP(w, r)
 	})
 	mux.HandleFunc("/api/state", d.handleState)
 	mux.HandleFunc("/api/screen", d.handleScreenJSON)
@@ -98,14 +115,7 @@ func (d *Daemon) ServeHTTP(opts HTTPServeOptions) error {
 	mux.HandleFunc("/api/command", d.handleCommand)
 	// THE SOCKET noVNC CONNECTS TO. It is the same path the console's own mux uses, and it is
 	// registered here because this listener is the one a browser reaches.
-	mux.HandleFunc(wsPath, func(w http.ResponseWriter, r *http.Request) {
-		page := d.console()
-		if page == nil {
-			http.Error(w, "no machine is running", http.StatusServiceUnavailable)
-			return
-		}
-		page.bridge(w, r)
-	})
+	mux.HandleFunc(wsPath, d.handleBridge)
 
 	srv := &http.Server{
 		Handler: mux,
@@ -250,21 +260,58 @@ func (w *writerOnly) Write(p []byte) (int, error) {
 var _ = image.Rect
 var _ = os.Getenv
 
-// console is the running machine's noVNC surface, or nil when nothing is booted.
+// vncPort is the port the CURRENT machine's VNC listener is on, or 0 when there is no machine.
 //
-// THE DAEMON OWNS THE MACHINE AND THE PAGE IS THE MACHINE'S, so the two are asked for together: a page
-// from a previous guest would be a console attached to a VNC port that no longer exists, which noVNC
-// reports as "Failed to connect to server" - a message about the network for a problem that is about
-// which machine is running.
-func (d *Daemon) console() *consoleServer {
+// IT IS ASKED FOR RATHER THAN STORED, because the port belongs to the guest and this daemon runs
+// several: `destroy` stops the machine and the next `run` starts a new qemu on a new port. A value
+// captured at startup would point the browser at a socket that was closed when the previous guest went
+// away - and noVNC reports that as "Failed to connect to server", which reads as a broken console.
+func (d *Daemon) vncPort() int {
 	d.mu.Lock()
 	machine := d.machine
 	d.mu.Unlock()
-	if c, ok := machine.(interface{ Console() *consoleServer }); ok {
-		return c.Console()
+	if p, ok := machine.(interface{ VNCPort() int }); ok {
+		return p.VNCPort()
 	}
-	return nil
+	return 0
 }
+
+// handleBridge is the whole of what websockify did, attached to the daemon's own listener.
+//
+// THERE IS NO SECOND PORT ANY MORE. The console used to be a `consoleServer` on :6080 - a second HTTP
+// server inside the same process, with its own mux, its own lifecycle and its own class of bug:
+//
+//	boot: port 6080 is already in use, so the noVNC page cannot be served
+//
+// which was a daemon trying to take a port it already owned. 8080 serves the page, the assets and this
+// socket, and the listener lives as long as the daemon does.
+func (d *Daemon) handleBridge(w http.ResponseWriter, r *http.Request) {
+	addr := ""
+	if port := d.vncPort(); port > 0 {
+		addr = net.JoinHostPort("127.0.0.1", fmt.Sprint(port))
+	}
+	bridgeWebSocket(w, r, addr)
+}
+
+// noPageHTML is what a browser gets from an image without the noVNC package.
+//
+// IT NAMES THE PACKAGE, because "503" on a console URL is a message about the console and this is a
+// message about the image.
+const noPageHTML = `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>easyvm</title>
+<style>
+ body{margin:0;height:100vh;display:flex;align-items:center;justify-content:center;
+      background:#16181d;color:#e6e6e6;font:16px/1.6 system-ui,sans-serif}
+ div{max-width:34rem;padding:2rem}
+ h1{font-size:1.1rem;font-weight:600;margin:0 0 .75rem}
+ p{margin:.4rem 0;color:#a8adb8}
+ code{background:#22262e;padding:.15rem .4rem;border-radius:4px;color:#e6e6e6}
+</style></head><body><div>
+<h1>This image has no noVNC page</h1>
+<p>The console needs <code>/usr/share/novnc/vnc.html</code>, which the <code>novnc</code> package provides.</p>
+<p>The machine itself is unaffected: <code>GET /api/state</code> and <code>GET /screen.png</code> work.</p>
+</div></body></html>
+`
 
 // noMachineHTML is what a browser gets before a machine exists.
 //

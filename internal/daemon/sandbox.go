@@ -49,10 +49,9 @@ func (d *Daemon) startSandbox(req Request) Response {
 	}
 	work := d.work
 	d.st = State{
-		Status:    "starting",
-		File:      req.File,
-		Started:   time.Now(),
-		NoVNCPort: req.NoVNCPort,
+		Status:  "starting",
+		File:    req.File,
+		Started: time.Now(),
 	}
 	done := make(chan struct{})
 	d.done = done
@@ -100,7 +99,7 @@ func (d *Daemon) bootSandbox(req Request, work string, done chan struct{}) {
 	}
 
 	driver, closeDriver, err := NewDriver(file, work, req.BootDisk, file.SSHPort,
-		req.Password, req.NoVNCPort)
+		req.Password)
 	if err != nil {
 		fail("the machine could not be prepared", err)
 		return

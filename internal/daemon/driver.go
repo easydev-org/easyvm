@@ -47,7 +47,6 @@ type Driver struct {
 	pass    string
 
 	// novncPort is where the browser page listens; 0 disables it.
-	novncPort int
 
 	mu       sync.Mutex
 	proc     *exec.Cmd
@@ -61,7 +60,6 @@ type Driver struct {
 	// flattenFrom is the diff a `compress:` step must read instead of diskPath - the same file as
 	// diff.Path, kept because the file may already be gone by the time the step asks.
 	flattenFrom string
-	page        *consoleServer
 	vncPort     int
 	// frameMu serialises screen capture. ONE FRAME AT A TIME, because three readers of one screen do
 	// not need three screendumps and interleaved 6.2 MB writes produce unreadable files.
@@ -73,18 +71,17 @@ type Driver struct {
 }
 
 // NewDriver builds the driver and returns a closer for the caller's defer.
-func NewDriver(f *walk.File, work, bootDisk string, port int, password string,
-	novncPort int) (run.Driver, func(), error) {
+func NewDriver(f *walk.File, work, bootDisk string, port int,
+	password string) (run.Driver, func(), error) {
 	if err := os.MkdirAll(work, 0o755); err != nil {
 		return nil, nil, err
 	}
 	d := &Driver{
-		file:      f,
-		work:      work,
-		port:      port,
-		pass:      password,
-		diskPath:  bootDisk,
-		novncPort: novncPort,
+		file:     f,
+		work:     work,
+		port:     port,
+		pass:     password,
+		diskPath: bootDisk,
 		logf: func(msg string) {
 			fmt.Printf("[easyvm] %s\n", msg)
 		},
@@ -658,37 +655,15 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 	d.proc = cmd
 	d.qmpReg = qmp.NewRegistry()
 
-	// THE PAGE, ONCE THE MACHINE IS UP - AND THE PREVIOUS ONE IS CLOSED FIRST.
+	// NO CONSOLE IS STARTED HERE ANY MORE, AND THAT IS THE POINT.
 	//
-	// THE CONSOLE'S PORT BELONGS TO THE DAEMON, NOT TO THE GUEST, and this was learned from a leg that
-	// could not boot at all:
+	// The page, its assets and the WebSocket to the guest are served by the DAEMON'S OWN LISTENER on
+	// :8080 - one port, bound once, alive as long as the daemon. It used to be a second HTTP server on
+	// :6080 that had to be started per boot, which produced
 	//
 	//	boot: port 6080 is already in use, so the noVNC page cannot be served
 	//
-	// A daemon runs several legs - `destroy` stops the machine and keeps the server - so the SECOND
-	// boot found its own console from the first still bound to 6080. `d.page` is replaced rather than
-	// closed, and the socket it held was never released.
-	//
-	// CLOSING IT IS ALSO THE RIGHT UX: the page from the previous guest is a console attached to a VNC
-	// port that no longer exists, and noVNC reports that as a connection failure rather than as "the
-	// machine changed".
-	if d.novncPort > 0 {
-		d.mu.Lock()
-		old := d.page
-		d.page = nil
-		d.mu.Unlock()
-		if old != nil {
-			old.stop()
-		}
-		page, err := startConsole("127.0.0.1", d.novncPort, d.vncPort, d.logf)
-		if err != nil {
-			_ = cmd.Process.Kill()
-			_ = cmd.Wait()
-			d.proc = nil
-			return err
-		}
-		d.page = page
-	}
+	// on the SECOND leg of a daemon that had been running the first one. See `Daemon.handleBridge`.
 
 	// WAIT FOR THE SOCKET BEFORE RETURNING, so the next step can act on the machine rather than
 	// racing its creation.
@@ -795,12 +770,7 @@ func (m machineControl) Stop(method string) error {
 		return err
 	}
 	d.mu.Lock()
-	page := d.page
-	d.page = nil
 	d.mu.Unlock()
-	if page != nil {
-		page.stop()
-	}
 	// `waitForExit` ALREADY REAPED IT - CALLING `Wait` AGAIN BLOCKS FOREVER.
 	//
 	// Measured on ubuntu-vm: the leg sat in `follow it` for thirty minutes with `status` still saying
@@ -1053,10 +1023,6 @@ func (d *Driver) shutdown() {
 		d.qmpReg = nil
 		d.qmpConn = nil
 	}
-	if d.page != nil {
-		d.page.stop()
-		d.page = nil
-	}
 	if d.proc != nil {
 		_ = d.proc.Process.Kill()
 		_ = d.proc.Wait()
@@ -1183,28 +1149,16 @@ func humanBytes(n int64) string {
 // commands live in the daemon rather than in a process of their own.
 func (d *Driver) QMP() (*qmp.Conn, error) { return d.qmpSocket() }
 
-// ConsolePort is where the noVNC page is actually listening, or 0 when there is none.
+// VNCPort is where the CURRENT machine's VNC listener is, or 0 when there is no machine.
 //
-// IT ANSWERED A LIE: `status` printed a URL for `req.NoVNCPort`, the number on the command line, so
-// a daemon whose image lacked /usr/share/novnc reported `http://127.0.0.1:6080/vnc.html` for a port
-// nothing was bound to. The console server is the only thing that knows, and this is how the daemon
-// asks it.
-func (d *Driver) ConsolePort() int {
+// THE CONSOLE'S URL NO LONGER DEPENDS ON IT, and that is the improvement: there is one listener, on the
+// daemon's own port, and it asks this question each time a browser connects. What this answers is
+// therefore "is there a guest to look at", which is what a page needs to know before it tries.
+func (d *Driver) VNCPort() int {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if d.page == nil {
+	if d.proc == nil {
 		return 0
 	}
-	return d.novncPort
-}
-
-// Console is the noVNC surface for the machine this driver started, or nil.
-//
-// THE PAGE IS THE MACHINE'S, so it is asked for by the thing that holds the machine. A caller that
-// keeps the console's address instead - a port on a struct - can report a console for a guest that has
-// already stopped, which noVNC shows as a connection failure.
-func (d *Driver) Console() *consoleServer {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	return d.page
+	return d.vncPort
 }

@@ -52,7 +52,7 @@ TWO MODES, AND THEY DIFFER IN WHEN THE MACHINE STOPS:
   easyvm run     FILE [flags]                    A BAKE: run every step, then stop the machine.
   easyvm create  FILE [flags]                    A SANDBOX: boot and STAY UP until destroy.
 
-  easyvm serve   --work DIR [--novnc-port N]     start the owner
+  easyvm serve   --work DIR                       start the owner
   easyvm status  [--work DIR]                    where is it now, and is the guest up
   easyvm stop    [--work DIR]                    stop the run and the machine
   easyvm destroy [--work DIR]                    stop a sandbox's machine (its only ending)
@@ -68,7 +68,6 @@ run flags:
   --boot-disk PATH  the disk a boot: step starts from
   --out PATH        where a compress: step writes
   --password PW     the guest account's password
-  --novnc-port N    where the browser page listens; 0 disables it
   --name=value       set one of the file's own variables (e.g. --shutdown=kill)
 
 every guest starts with -cpu ` + machine.CPUModel + `; -cpu host is refused.
@@ -341,7 +340,6 @@ func cmdPull(args []string) int {
 func cmdServe(args []string) int {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	work := fs.String("work", "", "the directory the socket and the frames live in")
-	novncPort := fs.Int("novnc-port", daemon.DefaultNovNCPort, "where the noVNC page listens; 0 disables it")
 	httpAddr := fs.String("http", daemon.DefaultHTTPAddr, "the browser surface: a live screen, a "+
 		"click map, keys and typing. Empty disables it")
 	if err := fs.Parse(args); err != nil {
@@ -372,8 +370,7 @@ func cmdServe(args []string) int {
 	}
 
 	err := d.Serve(daemon.ServeOptions{
-		Work:      *work,
-		NoVNCPort: *novncPort,
+		Work: *work,
 		Ready: func(sock string) {
 			// THE READY LINE IS A CONTRACT. A supervisor - or a test - waits for it rather than
 			// polling for the socket file, because a file that exists is not a daemon that
@@ -452,7 +449,6 @@ func cmdRun(args []string) int {
 		// THE DAEMON'S OWN --novnc-port WINS, because the page's port is a fact about the
 		// machine's host rather than about this file. A client that passed one here would be
 		// overriding a decision it cannot see.
-		NoVNCPort: 0,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "FAILED: %v\n", err)
@@ -602,9 +598,6 @@ func printState(st *daemon.State) {
 	if st.File != "" {
 		fmt.Printf("  file:    %s\n", st.File)
 	}
-	if st.NoVNCPort > 0 {
-		fmt.Printf("  noVNC:   http://127.0.0.1:%d/vnc.html\n", st.NoVNCPort)
-	}
 	if st.SSH != "" {
 		fmt.Printf("  ssh:     %s\n", st.SSH)
 	}
@@ -687,7 +680,6 @@ func cmdCreate(args []string) int {
 	work := fs.String("work", "", "the daemon's directory")
 	password := fs.String("password", "admin", "the guest account's password")
 	disk := fs.String("boot-disk", "", "the disk to start, when the file does not name one")
-	novnc := fs.Int("novnc", 0, "the browser page's port; 0 uses the daemon's")
 	timeout := fs.Duration("wait", 10*time.Minute, "how long to wait for the machine to be up")
 	set := map[string]string{}
 	if err := fs.Parse(args); err != nil {
@@ -711,12 +703,11 @@ func cmdCreate(args []string) int {
 	defer cl.Close()
 
 	resp, err := cl.Do(client.Request{
-		Command:   protocol.CommandCreate,
-		File:      *file,
-		BootDisk:  *disk,
-		Password:  *password,
-		NoVNCPort: *novnc,
-		Vars:      set,
+		Command:  protocol.CommandCreate,
+		File:     *file,
+		BootDisk: *disk,
+		Password: *password,
+		Vars:     set,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "FAILED: %v\n", err)

@@ -71,7 +71,6 @@ type Daemon struct {
 	// shutdown asks Serve to return.
 	shutdown chan struct{}
 	// novncPort is the page's port for runs this daemon starts.
-	novncPort int
 	// work is this daemon's directory: its socket, its frames and its disks.
 	work string
 	// sandbox says a `create` is holding a machine that must outlive its steps, and sandboxClose is
@@ -148,10 +147,6 @@ func (d *Daemon) Serve(opts ServeOptions) error {
 	}
 	d.listener = ln
 	d.work = opts.Work
-	d.novncPort = opts.NoVNCPort
-	if opts.NoVNCPort < 0 {
-		d.novncPort = 0
-	}
 	if opts.Ready != nil {
 		opts.Ready(sock)
 	}
@@ -312,14 +307,10 @@ func (d *Daemon) startRun(req Request) Response {
 	if work == "" {
 		work = filepath.Dir(req.File)
 	}
-	if req.NoVNCPort == 0 {
-		req.NoVNCPort = d.novncPort
-	}
 	d.st = State{
-		Status:    "starting",
-		File:      req.File,
-		Started:   time.Now(),
-		NoVNCPort: req.NoVNCPort,
+		Status:  "starting",
+		File:    req.File,
+		Started: time.Now(),
 	}
 	done := make(chan struct{})
 	d.done = done
@@ -338,25 +329,10 @@ func (d *Daemon) snapshot() State {
 	machine := d.machine
 	d.mu.Unlock()
 
-	// THE noVNC PORT IS THE ONE THAT IS LISTENING, NOT THE ONE THAT WAS ASKED FOR.
-	//
-	// `run` used to record `req.NoVNCPort` - a NUMBER FROM THE COMMAND LINE - and `status` printed it
-	// as a URL. When the image had no /usr/share/novnc the console refused to start, said so in the
-	// log, and `status` still printed
-	//
-	//	noVNC:   http://127.0.0.1:6080/vnc.html
-	//
-	// for a port with nothing on it. A reader who clicked it got a connection refused and had no way
-	// to tell a missing package from a broken bridge.
-	//
-	// THE DRIVER KNOWS, because it holds the console it started. Asking it is the only answer that
-	// cannot be stale or optimistic.
-	if c, ok := machine.(interface{ ConsolePort() int }); ok {
-		st.NoVNCPort = c.ConsolePort()
-	} else if machine == nil {
-		// a daemon with no machine has no console, whatever the flag said
-		st.NoVNCPort = 0
-	}
+	// THE CONSOLE HAS NO PORT OF ITS OWN ANY MORE. The page, its assets and the WebSocket are served
+	// by the daemon's listener on :8080, so a person opens the Service URL - there is no second port to
+	// report, and no URL that can point at something that is not listening.
+	_ = machine
 	return st
 }
 

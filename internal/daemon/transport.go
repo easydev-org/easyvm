@@ -184,7 +184,7 @@ func (d *Daemon) runWalkthroughFile(req Request, work string, done chan struct{}
 
 	if driver == nil {
 		fresh, closeFresh, err := NewDriver(file, work, req.BootDisk, file.SSHPort,
-			req.Password, req.NoVNCPort)
+			req.Password)
 		if err != nil {
 			fail("the machine could not be prepared", err)
 			return

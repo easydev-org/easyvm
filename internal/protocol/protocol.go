@@ -45,8 +45,6 @@ type State struct {
 	Message string `json:"message,omitempty"`
 	// Error is why it failed, when Status is failed.
 	Error string `json:"error,omitempty"`
-	// NoVNCPort is where a browser can look, 0 when there is no page.
-	NoVNCPort int `json:"novnc_port,omitempty"`
 	// SSH is host:port a client can reach the guest on, for a human.
 	SSH string `json:"ssh,omitempty"`
 	// Started is when this run began.
@@ -66,8 +64,6 @@ type Request struct {
 	Port     int    `json:"port,omitempty"`
 	// Password is the guest account's password.
 	Password string `json:"password,omitempty"`
-	// NoVNCPort is where the page should listen; 0 uses the default.
-	NoVNCPort int `json:"novnc_port,omitempty"`
 	// Vars are the file's own variables, overridden from the command line.
 	//
 	// IT IS A MAP RATHER THAN MORE FIELDS, AND THAT IS THE POINT. Each stage names run facts of its
