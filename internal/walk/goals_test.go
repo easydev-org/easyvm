@@ -1869,11 +1869,20 @@ func TestGhostBSDSetsTheLoaderVariableThatMakesClicksWork(t *testing.T) {
 	// which selects another boot entry.
 	confirmed := false
 	for _, s := range doc.Steps {
-		// the guard now lives inside `repeat_until`, which presses and reads in one loop
+		// THE GUARD IS A `loop:` WITH AN `ocr:` AND A `check:` NOW, and it used to be
+		// `repeat_until: until_any:`. Both spellings are read here because this test's question is
+		// "does something confirm the prompt", not "which key spells it".
 		sets, _ := s.Spec["until_any"].([]any)
 		if inner, ok := s.Spec["repeat_until"].(map[string]any); ok {
 			if nested, ok := inner["until_any"].([]any); ok {
 				sets = nested
+			}
+		}
+		if inner, ok := s.Spec["loop"].(map[string]any); ok {
+			if chk, ok := inner["check"].(map[string]any); ok {
+				if nested, ok := chk["words"].([]any); ok {
+					sets = nested
+				}
 			}
 		}
 		for _, raw := range sets {

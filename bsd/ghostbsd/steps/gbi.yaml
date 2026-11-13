@@ -45,28 +45,94 @@ steps:
   # moves with it: the memdisk needs the image plus the kernel plus the copy's own working set, and
   # 8 GiB is that with room, on a runner that has 16.
   memory_mb: 8192
-- name: the boot menu is counting down
-  until_console: any other key for boot menu
-  timeout: 600
-  poll: 1
-  blind_after: 240
+# THE MENU'S OWN COUNTDOWN IS THE THING TO READ, AND IT IS READ ON THE SCREEN.
+#
+# `until_console: any other key for boot menu` WATCHED THE SERIAL PORT, and the serial port is not
+# where the countdown is: it printed the menu and then `Exiting menu!` while this file was still
+# waiting, so the `3` that followed landed on a kernel that had already started. MEASURED, from the
+# console log of the run that failed at `welcome` with a click that did nothing:
+#
+#	[Enter] boot now, any other key for boot menu... 2
+#	Welcome to GhostBSD
+#	1. Boot Multi user [Enter]  2. Boot Single user  3. Escape to loader prompt  ...
+#	Exiting menu!
+#
+# AND THE UNTIL THAT FOLLOWED CHECKED THE WRONG THING. `the loader prompt is up` looked for the words
+# `detailed help` / `list of commands`, which are the LOADER's help text - and it "succeeded" on a
+# screen reading `sd Plt Ned Probie 2 Lect LO ee es ene`: kernel output, read as if it were a prompt.
+# Everything typed after that went into a booting kernel, `hw.usb.usbhid.enable=1` was never set, and
+# THE FIRST CLICK OF THE INSTALLER LANDED NOWHERE - which is the failure this file was chasing.
+#
+# SO THE MENU IS CONFIRMED BY ITS OWN WORDS BEFORE THE HOTKEY IS PRESSED, which is what the reference
+# implementation does in the same place (`if "multi user" in joined and "escape" in joined`).
+- name: wait for the boot menu
+  loop:
+    max: 120
+    do:
+    - wait: 3
+    ocr:
+      name: screen
+      region:
+      - 0
+      - 0
+      - 1920
+      - 1080
+      region_at:
+      - 1920
+      - 1080
+      scale: 1
+      wait: 0
+    check:
+      name: menu_up
+      from: screen
+      mode: says_any
+      words:
+      # THE MENU SAYS `Boot Multi user` AND A BARE `Escape`, and the reference implementation's own
+      # note is that the menu carries no `loader` word at all.
+      - - multi
+        - user
+      - - escape
+        - to
+        - loader
+    until:
+      fact: menu_up
 - name: escape to the loader prompt
   key: '3'
   wait_after: 3
-- name: the loader prompt is up
-  repeat_until:
-    attempts: 20
-    until_any:
-    - - detailed
-      - help
-    - - list
-      - of
-      - commands
-    actions:
-    - key: '3'
-      wait_after: 2
-    wait_after: 2
-  timeout: 120
+- name: wait for the loader prompt
+  loop:
+    max: 30
+    do:
+    - wait: 3
+    ocr:
+      name: screen
+      region:
+      - 0
+      - 0
+      - 1920
+      - 1080
+      region_at:
+      - 1920
+      - 1080
+      scale: 1
+      wait: 0
+    check:
+      name: prompt_up
+      from: screen
+      mode: says_any
+      words:
+      # THE PROMPT IS `OK` AND NOTHING ELSE, so the evidence is the help line the loader prints under
+      # it. `Type '?' for a list of commands` is on every FreeBSD loader prompt and on no other
+      # screen of this boot.
+      - - list
+        - of
+        - commands
+      - - type
+        - for
+        - a
+        - list
+    until:
+      fact: prompt_up
 - name: clear the loader command line
   key: ctrl+u
   wait_after: 1
