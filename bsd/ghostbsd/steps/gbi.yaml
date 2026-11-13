@@ -9,7 +9,12 @@ vars:
   password:
     from: args.password
     default: admin
+  out:
+    from: args.out
+    default: out/distro.qcow2
 steps:
+- name: start recording
+  record: ghostbsd-install.mp4
 - name: create the empty disk
   disk: disk.qcow2
   disk_gb: 128
@@ -21,6 +26,47 @@ steps:
   os: bsd
   iso: installer_iso
   timeout: 1800
+- name: escape to the loader prompt
+  key: '3'
+  repeat:
+  - 3
+  - 2
+  settle: 4
+- name: the loader prompt is up
+  until_any:
+  - - detailed
+    - help
+  - - list
+    - of
+    - commands
+  timeout: 120
+  poll: 3
+- name: clear the loader command line
+  key: ctrl+u
+  settle: 1
+- name: set the usb hid setting
+  type: set hw.usb.usbhid.enable=1
+  type_gap: 0.15
+  settle: 2
+- name: run the setting
+  key: ret
+  settle: 3
+- name: the loader accepted the setting
+  until_any:
+  - - detailed
+    - help
+  - - list
+    - of
+    - commands
+  timeout: 60
+  poll: 2
+- name: boot the live system
+  type: boot
+  type_gap: 0.15
+  settle: 1
+- name: start the boot
+  key: ret
+  settle: 10
 - name: choose the X driver, when the menu appears
   until_any:
   - - start
@@ -31,7 +77,6 @@ steps:
     - auto
   timeout: 300
   poll: 5
-  optional: true
 - name: reach scfb with four downs
   key: down
   repeat:
@@ -100,3 +145,10 @@ steps:
 - name: installation runs
   wait: 1800
   keep_alive: true
+- name: stop the machine
+  shutdown: kill
+  timeout: 120
+- name: publish the disk
+  compress: '{{ out }}'
+- name: stop recording
+  record: false
