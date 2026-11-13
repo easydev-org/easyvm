@@ -514,8 +514,54 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 			easyvmnet.TapName),
 		"-device", fmt.Sprintf("virtio-net-pci,netdev=net0,mac=%s,romfile=,host_mtu=%d",
 			easyvmnet.TapMAC, easyvmnet.UplinkMTU()),
-		"-device", "virtio-tablet-pci",
 	)
+	// THE POINTER IS A PER-FAMILY CHOICE, BECAUSE FREEBSD DOES NOT DRIVE virtio-tablet.
+	//
+	// MEASURED ON ghostbsd AT 26.3, on a machine where the keyboard worked perfectly:
+	//
+	//	key down x2     -> the language list moved, the dialog re-labelled itself in Arabic
+	//	click (1293,781) -> the pointer did not move AT ALL, and gbi's `Next` never activated
+	//
+	// `virtio-tablet-pci` is one device for every guest and the obvious default: Linux and Windows
+	// have a driver for it in the box, and macOS does not need one because it is not what this build
+	// gives a mac.
+	//
+	// FREEBSD HAS NO virtio-input DRIVER AT ALL. THE ISO SAYS SO - there is nothing to guess:
+	//
+	//	$ 7z l GhostBSD-26.3.iso | grep virtio
+	//	virtio.ko  virtio_balloon.ko  virtio_blk.ko  virtio_console.ko
+	//	virtio_p9fs.ko  virtio_pci.ko  virtio_random.ko  virtio_scsi.ko
+	//	                    <- no virtio_input.ko, no virtio_tablet.ko
+	//
+	// and the same listing has `ums.ko` and `uhid.ko`, which are the USB HID pointer path. So the
+	// device enumerated on the PCI bus, no driver claimed it, and EVERY ABSOLUTE REPORT WAS DISCARDED
+	// - the guest drew a pointer at the centre of the screen and never moved it, while the keyboard,
+	// on a different device, worked perfectly.
+	//
+	// A BSD GETS `usb-tablet`, WHICH IS WHAT THE REFERENCE IMPLEMENTATION USES and the reason its
+	// walkthrough opens with a `set hw.usb.usbhid.enable=1` at the loader prompt: usb-tablet is HID,
+	// uhid(4) claims it by default, and ums(4) - the pointer driver - declines it until usbhid is
+	// enabled. So the device AND that loader line are ONE fix, and neither half works alone: this
+	// build had the loader line and the wrong device, which is why the line had no effect.
+	//
+	// A USB TABLET NEEDS A CONTROLLER, and on the x86 machines here there is one on the q35 chipset
+	// (uhci/ehci) that qemu creates by default. `usb-tablet` with no `bus=` lands on it.
+	if boot.OS == machine.BSD {
+		// THE CONTROLLER IS NOT OPTIONAL, AND qemu SAID SO RATHER THAN GUESSING:
+		//
+		//	qemu-system-x86_64: -device usb-tablet: No 'usb-bus' bus found for device 'usb-tablet'
+		//
+		// q35 has no USB controller unless one is created - the legacy UHCI/ehci pair that a
+		// PC machine gets for free is not part of it. So the tablet names a bus that exists because
+		// this line created it, the same `qemu-xhci,id=xhci` the macOS branch uses for its recovery
+		// disk.
+		args = append(args,
+			"-device", "qemu-xhci,id=xhci",
+			"-device", "usb-tablet,bus=xhci.0",
+		)
+	} else {
+		args = append(args, "-device", "virtio-tablet-pci")
+	}
 
 	// FIRMWARE. OVMF for Windows and Linux, OpenCore for macOS - and the variables file is COPIED
 	// rather than referenced, because qemu writes to it.
@@ -1051,4 +1097,15 @@ func (d *Driver) ConsolePort() int {
 		return 0
 	}
 	return d.novncPort
+}
+
+// Console is the noVNC surface for the machine this driver started, or nil.
+//
+// THE PAGE IS THE MACHINE'S, so it is asked for by the thing that holds the machine. A caller that
+// keeps the console's address instead - a port on a struct - can report a console for a guest that has
+// already stopped, which noVNC shows as a connection failure.
+func (d *Driver) Console() *consoleServer {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.page
 }

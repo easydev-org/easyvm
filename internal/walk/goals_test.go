@@ -1821,88 +1821,68 @@ func TestEveryCreatedDiskIs128GiB(t *testing.T) {
 	t.Logf("checked %d disk(s)", checked)
 }
 
-// GHOSTBSD NEEDS THE LOADER VARIABLE, OR EVERY CLICK LANDS IN THE TOP-LEFT CORNER.
+// GHOSTBSD'S POINTER WORKS, AND THE WAY IT WORKS IS A DEVICE RATHER THAN A LOADER VARIABLE.
 //
-// THE MEASUREMENT IS THE PYTHON IMPLEMENTATION'S, AND IT IS A KERNEL FACT RATHER THAN A GUESS:
+// THIS TEST USED TO REQUIRE `hw.usb.usbhid.enable=1` AT THE LOADER PROMPT, on the Python
+// implementation's measurement:
 //
-//	ugen0.2: <QEMU Tablet Adomax Technology Co., Ltd> at usbus0
-//	uhid0:   <QEMU QEMU USB Tablet, class 0/0, rev 2.00/2.00, addr 1> on usbus0
+//	uhid0: <QEMU QEMU USB Tablet, class 0/0, rev 2.00/2.00, addr 1> on usbus0
 //
-// THE TABLET IS ATTACHED - TO uhid(4). It reports HID subclass 0 / protocol 0, the non-boot
-// protocol; ums(4) accepts only subclass 1 / protocol 2, declines it, and uhid takes the raw
-// reports without ever writing a position into the input layer. THE POINTER THEN SITS AT THE
-// TOP-LEFT CORNER whatever coordinate the host sends, so every `at:` in the walkthrough presses
-// the same pixel and the run produces a 0 MiB disk.
+// - the tablet attached to uhid(4) instead of ums(4), so no position reached the input layer and the
+// pointer sat at the top-left corner whatever the host sent.
 //
-// ONE LOADER VARIABLE FIXES IT, AND IT HAS TO BE THE LOADER: `sysctl hw.usb.usbhid.enable=1`
-// from a root shell changes the value and does nothing, because the sysctl is read when a device
-// is enumerated and this one is already open by uhid.
+// THAT WAS TRUE FOR THE RELEASE IT WAS MEASURED ON, AND IT IS NOT TRUE FOR 26.3. MEASURED HERE, with
+// the same usb-tablet and NO LOADER AT ALL: the pointer moved to an absolute position, every click
+// landed, and gbi's Next button advanced the installer. FreeBSD 14 enabled usbhid by default, so the
+// setting is redundant on this image.
 //
-//	sett hw.usb.usbhid.enable=1
-//	boot
+// AND THE STEP IT REQUIRED WAS EXPENSIVE. `hw.usb.usbhid.enable=1` lives at the loader prompt, the
+// loader prompt is behind a THREE-SECOND boot menu, and reaching it meant a burst of blind `3`s
+// before any reading could happen - three runs died on that race, and one typed nine `3`s into the
+// installer's own search box because the machine had already autobooted past the menu.
 //
-// The port dropped this step entirely, which means the walkthrough could never have worked even
-// if the desktop had appeared.
-func TestGhostBSDSetsTheLoaderVariableThatMakesClicksWork(t *testing.T) {
+// SO WHAT IS ASSERTED NOW IS THE THING THAT ACTUALLY DECIDES: the walkthrough must not depend on a
+// loader round trip, and the machine must be given a pointer FreeBSD has a driver for. The second
+// half cannot be seen in a YAML - `internal/daemon/driver.go` is where `usb-tablet` is chosen for a
+// BSD - so this test guards the first: nothing in the file may wait for a loader prompt again.
+func TestGhostBSDDoesNotDependOnALoaderRoundTrip(t *testing.T) {
 	root := filepath.Join("..", "..")
 	path := filepath.Join(root, "bsd", "ghostbsd", "steps", "gbi.yaml")
 	doc, err := Load(path, nil)
 	if err != nil {
 		t.Fatalf("%s: %v", path, err)
 	}
-	sets := false
 	for _, s := range doc.Steps {
 		body := s.Get("type")
-		if strings.Contains(body, "hw.usb.usbhid.enable=1") {
-			sets = true
-			break
+		if strings.Contains(body, "hw.usb.usbhid") {
+			t.Errorf("bsd/ghostbsd/steps/gbi.yaml sets %q again. That requires the loader prompt, "+
+				"which is behind a three-second countdown, and 26.3 does not need it: the pointer "+
+				"works with no loader at all", body)
 		}
-	}
-	if !sets {
-		t.Fatal("bsd/ghostbsd/steps/gbi.yaml never sets `hw.usb.usbhid.enable=1` in the loader. " +
-			"Without it usb-tablet is claimed by uhid(4), ums(4) declines it, and the pointer sits " +
-			"in the top-left corner - so every `at:` presses the same pixel and the install writes " +
-			"nothing. It must be the LOADER, not a runtime sysctl: the value is read at enumeration")
-	}
-	// AND THE PROMPT IS CONFIRMED BEFORE ANYTHING IS TYPED INTO IT. Typing the command into the
-	// BOOT MENU instead means its characters are read as hotkeys - the string contains a `1`,
-	// which selects another boot entry.
-	confirmed := false
-	for _, s := range doc.Steps {
-		// THE GUARD IS A `loop:` WITH AN `ocr:` AND A `check:` NOW, and it used to be
-		// `repeat_until: until_any:`. Both spellings are read here because this test's question is
-		// "does something confirm the prompt", not "which key spells it".
-		sets, _ := s.Spec["until_any"].([]any)
-		if inner, ok := s.Spec["repeat_until"].(map[string]any); ok {
-			if nested, ok := inner["until_any"].([]any); ok {
-				sets = nested
-			}
-		}
-		if inner, ok := s.Spec["loop"].(map[string]any); ok {
-			if chk, ok := inner["check"].(map[string]any); ok {
-				if nested, ok := chk["words"].([]any); ok {
-					sets = nested
+		// A LOADER PROMPT IS READ BY ITS HELP LINE, and a step that waits for it is the round trip
+		// this file no longer takes.
+		if s.Has("loop") {
+			if inner, ok := s.Spec["loop"].(map[string]any); ok {
+				if chk, ok := inner["check"].(map[string]any); ok {
+					if words, ok := chk["words"].([]any); ok {
+						for _, raw := range words {
+							if list, ok := raw.([]any); ok {
+								var parts []string
+								for _, w := range list {
+									if str, ok := w.(string); ok {
+										parts = append(parts, str)
+									}
+								}
+								if strings.Contains(strings.Join(parts, " "), "list of commands") {
+									t.Errorf("step %q waits for the loader prompt. The installer boots "+
+										"without it - see the measurement in this comment", s.Name)
+								}
+							}
+						}
+					}
 				}
 			}
 		}
-		for _, raw := range sets {
-			words, _ := raw.([]any)
-			var parts []string
-			for _, w := range words {
-				if str, ok := w.(string); ok {
-					parts = append(parts, str)
-				}
-			}
-			joined := strings.Join(parts, " ")
-			if strings.Contains(joined, "detailed help") || strings.Contains(joined, "list of commands") {
-				confirmed = true
-			}
-		}
-	}
-	if !confirmed {
-		t.Error("nothing confirms the loader prompt is up before the setting is typed. The boot " +
-			"menu reads characters as hotkeys - the command contains a `1`, which selects another " +
-			"boot entry - so the guard is not a formality")
 	}
 }
 

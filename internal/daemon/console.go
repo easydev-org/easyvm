@@ -50,8 +50,20 @@ type consoleServer struct {
 	// vncAddr is qemu's own VNC listener.
 	vncAddr string
 	srv     *http.Server
+	// mux is the page and the bridge, kept so the DAEMON'S OWN LISTENER can serve the same two
+	// things. The front end is one page on one port: a person opens the Service URL and lands on
+	// the console, rather than being told that the console lives on another port.
+	mux *http.ServeMux
 	// errc receives a listener failure that happened after Start returned.
 	errc chan error
+}
+
+// Handler is the noVNC page and its WebSocket bridge, for a listener this package does not own.
+func (c *consoleServer) Handler() http.Handler {
+	if c == nil {
+		return nil
+	}
+	return c.mux
 }
 
 // startConsole serves the noVNC page and bridges its WebSocket to qemu.
@@ -101,6 +113,7 @@ func startConsole(host string, port, vncPort int, log func(string)) (*consoleSer
 		http.FileServer(http.Dir(novncRoot)).ServeHTTP(w, r)
 	})
 
+	c.mux = mux
 	c.srv = &http.Server{Addr: c.addr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 
 	ln, err := net.Listen("tcp", c.addr)

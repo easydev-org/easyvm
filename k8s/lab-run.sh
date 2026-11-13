@@ -66,8 +66,38 @@ mkdir -p "$dir" /disks/os
 # COMPLETELY RESET, EVERY TIME. The run directory, the daemon, and the tap the last run left behind -
 # so a rerun cannot be polluted by its own previous frames, overlay or network device.
 echo "=== reset $run"
+# WAIT FOR THE OLD DAEMON TO ACTUALLY BE GONE, BECAUSE `pkill` ONLY ASKS.
+#
+# MEASURED, and it produced a machine that ran with NO BROWSER PAGE:
+#
+#	[easyvm] http surface stopped: http listen :8080: bind: address already in use
+#
+# The previous daemon was still closing when this one started, so it took the socket, bound 8080
+# first, and the new daemon's HTTP surface died - while its qemu started normally. The run then looked
+# healthy from `status` and `screen.png` was a 000 from outside, which reads as a network problem.
+#
+# `pkill` IS A REQUEST AND THE DAEMON HAS WORK TO DO ON THE WAY OUT (stop the guest, close the socket,
+# close the page), so the wait is on the PROCESS, not on a fixed second.
 pkill easyvm 2>/dev/null || true
-sleep 1
+# A ZOMBIE IS NOT A RUNNING DAEMON, AND `pgrep` CANNOT TELL THE DIFFERENCE.
+#
+# MEASURED: this container's PID 1 is `sleep infinity`, which never reaps anything, so every daemon
+# that has exited stays in the table as `<defunct>`. `pgrep -x easyvm` matched fourteen of them and
+# this loop waited the full thirty seconds for processes that were already gone - then `pkill -9`ed
+# nothing. The check has to ask whether any easyvm is in a NON-ZOMBIE state.
+daemons_alive() {
+    ps -eo stat=,cmd= 2>/dev/null | awk '$1 !~ /^Z/ && $2 ~ /easyvm/ { found = 1 } END { exit !found }'
+}
+i=0
+while daemons_alive && [ $i -lt 30 ]; do
+    i=$((i + 1))
+    sleep 1
+done
+if daemons_alive; then
+    echo "=== the previous daemon did not exit in 30s; killing it" >&2
+    pkill -9 easyvm 2>/dev/null || true
+    sleep 2
+fi
 ip link del qemutap0 2>/dev/null || true
 rm -rf "$run"
 mkdir -p "$run"

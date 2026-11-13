@@ -45,154 +45,65 @@ steps:
   # moves with it: the memdisk needs the image plus the kernel plus the copy's own working set, and
   # 8 GiB is that with room, on a runner that has 16.
   memory_mb: 8192
-# THE MENU'S OWN COUNTDOWN IS THE THING TO READ, AND IT IS READ ON THE SCREEN.
+# THE MENU IS TWO SECONDS LONG, SO IT IS PRESSED AT RATHER THAN WAITED FOR.
 #
-# `until_console: any other key for boot menu` WATCHED THE SERIAL PORT, and the serial port is not
-# where the countdown is: it printed the menu and then `Exiting menu!` while this file was still
-# waiting, so the `3` that followed landed on a kernel that had already started. MEASURED, from the
-# console log of the run that failed at `welcome` with a click that did nothing:
+# MEASURED, from this machine's console log:
 #
 #	[Enter] boot now, any other key for boot menu... 2
-#	Welcome to GhostBSD
 #	1. Boot Multi user [Enter]  2. Boot Single user  3. Escape to loader prompt  ...
 #	Exiting menu!
 #
-# AND THE UNTIL THAT FOLLOWED CHECKED THE WRONG THING. `the loader prompt is up` looked for the words
-# `detailed help` / `list of commands`, which are the LOADER's help text - and it "succeeded" on a
-# screen reading `sd Plt Ned Probie 2 Lect LO ee es ene`: kernel output, read as if it were a prompt.
-# Everything typed after that went into a booting kernel, `hw.usb.usbhid.enable=1` was never set, and
-# THE FIRST CLICK OF THE INSTALLER LANDED NOWHERE - which is the failure this file was chasing.
+# TWO SECONDS. A loop that WAITS and then reads - `wait: 3`, then an OCR, then a check - spends longer
+# than the window deciding whether the window is open, and the machine autoboots past it while the
+# walk is still reading. The first version of this file did exactly that, and the `3` that followed
+# landed in a booting kernel.
 #
-# SO THE MENU IS CONFIRMED BY ITS OWN WORDS BEFORE THE HOTKEY IS PRESSED, which is what the reference
-# implementation does in the same place (`if "multi user" in joined and "escape" in joined`).
-- name: wait for the boot menu
-  loop:
-    max: 120
-    do:
-    - wait: 3
-    ocr:
-      name: screen
-      region:
-      - 0
-      - 0
-      - 1920
-      - 1080
-      region_at:
-      - 1920
-      - 1080
-      scale: 1
-      wait: 0
-    check:
-      name: menu_up
-      from: screen
-      mode: says_any
-      words:
-      # THE MENU SAYS `Boot Multi user` AND A BARE `Escape`, and the reference implementation's own
-      # note is that the menu carries no `loader` word at all.
-      - - multi
-        - user
-      - - escape
-        - to
-        - loader
-    until:
-      fact: menu_up
-- name: escape to the loader prompt
-  key: '3'
-  wait_after: 3
-- name: wait for the loader prompt
-  loop:
-    max: 30
-    do:
-    - wait: 3
-    ocr:
-      name: screen
-      region:
-      - 0
-      - 0
-      - 1920
-      - 1080
-      region_at:
-      - 1920
-      - 1080
-      scale: 1
-      wait: 0
-    check:
-      name: prompt_up
-      from: screen
-      mode: says_any
-      words:
-      # THE PROMPT IS `OK` AND NOTHING ELSE, so the evidence is the help line the loader prints under
-      # it. `Type '?' for a list of commands` is on every FreeBSD loader prompt and on no other
-      # screen of this boot.
-      - - list
-        - of
-        - commands
-      - - type
-        - for
-        - a
-        - list
-    until:
-      fact: prompt_up
-- name: clear the loader command line
-  key: ctrl+u
-  wait_after: 1
-- name: set the usb hid setting
-  type: set hw.usb.usbhid.enable=1
-  type_gap: 0.15
-  wait_after: 2
-- name: run the setting
-  key: ret
-  wait_after: 3
-- name: the loader accepted the setting
-  loop:
-    max: 30
-    do:
-    - wait: 2
-    ocr:
-      name: screen
-      region:
-      - 0
-      - 0
-      - 1920
-      - 1080
-      region_at:
-      - 1920
-      - 1080
-      scale: 1
-      wait: 0
-    check:
-      name: done
-      from: screen
-      mode: says_any
-      words:
-      - - detailed
-        - help
-      - - list
-        - of
-        - commands
-    until:
-      fact: done
-- name: boot the live system
-  type: boot
-  type_gap: 0.15
-  wait_after: 1
-- name: start the boot
-  key: ret
-  wait_after: 10
-# THE X DRIVER MENU MAY NEVER APPEAR, AND WAITING FOR IT IS NOT THE SAME AS WAITING FOR THE DESKTOP.
+# SO EVERY ROUND PRESSES AND THEN READS, which is what the reference implementation does in
+# `_press_until_prompt`: press the menu's own hotkey, look, and repeat until the prompt is there. The
+# key is safe outside the menu - `3` means nothing to OVMF, nothing to the kernel's console, and at
+# the loader prompt it is one character that the next step clears with ctrl+u.
 #
-# MEASURED, on the local pod at 26.3: the machine boots to a fully drawn MATE desktop, X starts on the
-# default driver, and gbi opens its own "Welcome to GhostBSD / Please select your language" window. THE
-# MENU IS NOT SHOWN, because it exists only when X CANNOT start - and the old version of this file
-# waited sixty times for a title that was never going to be drawn.
+# THE PROMPT IS `OK` AND NOTHING ELSE, so the evidence is the help line under it. `list of commands`
+# is printed on every FreeBSD loader prompt and on no other screen of this boot - and, unlike the
+# kernel output that fooled the first version, it cannot be mistaken for a complaint.
+# THE COUNTDOWN IS THREE SECONDS, AND ONE HOTKEY IS ALL IT TAKES - IF IT ARRIVES IN TIME.
 #
-# THE REFERENCE IMPLEMENTATION SAYS SO IN ITS OWN WORDS: "IT MAY NOT APPEAR, and that is not a
-# failure: the menu is shown when X cannot start on the default driver ... the driver treats 'the
-# desktop is already up' and 'the menu was answered' as the same success."
+# MEASURED, on this machine's serial console:
 #
-# SO THE QUESTION IS ASKED FIRST AND THE ANSWER PICKS THE PATH. A `check:` produces a boolean, an
-# `if:` branches on it, and each branch does one thing - which is why this is three steps rather than
-# one that waits for either.
+#	[Enter] boot now, any other key for boot menu... 2
+#	[Enter] boot now, any other key for boot menu... 1
+#	[Enter] boot now, any other key for boot menu... 0
+#	Loading kernel...
+#
+# THREE TICKS. The previous version pressed `3` once, waited two seconds, took a screenshot and read
+# it - and one OCR round trip is longer than the whole window, so the machine was loading a kernel
+# while the walk was deciding whether the menu had appeared. It never had.
+#
+# SO THE PRESSES ARE SEPARATE FROM THE READING, AND THE PRESSES ARE A BURST. A keypress costs
+# milliseconds; the reading costs seconds. Pressing `3` ten times over five seconds spans the window
+# with presses and nothing else, and `3` is harmless outside the menu: OVMF ignores it, the loader
+# prompt takes it as one character that the next step clears, and the kernel ignores it.
+#
+# ONLY THEN IS THE RESULT VERIFIED. A prompt that is still not there after the burst is a real
+# failure and says so, rather than pressing into a booting kernel for sixty rounds.
+# NO LOADER ROUND TRIP AT ALL, AND THAT IS MEASURED RATHER THAN ASSUMED.
+#
+# THIS FILE USED TO REACH THE LOADER PROMPT AND SET `hw.usb.usbhid.enable=1`, and the reason was the
+# reference implementation, which does exactly that - because it gives its guest a `usb-tablet` and
+# FreeBSD's `ums(4)` declines a HID tablet until usbhid is enabled.
+#
+# MEASURED ON 26.3, WITH THE SAME usb-tablet AND NO LOADER AT ALL: the pointer moved to an absolute
+# position and every click landed. The language dialog's Next button advanced the installer. FreeBSD 14
+# and later enable usbhid by default, so the setting is not needed on this release - and the whole
+# dance it required was the worst kind of cost:
+#
+#	THE COUNTDOWN IS THREE SECONDS, and pressing `3` through it meant a burst of blind keys before any
+#	reading could happen. Three runs were spent on that race, and one of them typed nine `3`s into the
+#	installer's search box because the machine had already autobooted past the menu.
+#
+# SO THE INSTALLER IS BOOTED AND THE DESKTOP IS WAITED FOR, which is what the other walkthroughs do.
+# The device is still `usb-tablet` on a BSD - see `internal/daemon/driver.go` for why it cannot be
+# `virtio-tablet-pci` - and that is the only part of this that had to change.
 - name: wait for the desktop or the X driver menu
   loop:
     max: 60

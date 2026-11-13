@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"image"
 	"image/png"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -61,7 +62,29 @@ func (d *Daemon) ServeHTTP(opts HTTPServeOptions) error {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", d.handlePage)
+	// THE FRONT END IS THE OFFICIAL noVNC PAGE, AND IT IS THE ROOT.
+	//
+	// THIS WAS A HAND-WRITTEN PAGE THAT POLLED /screen.png ONCE A SECOND. It worked, and it was still
+	// the wrong thing: a screenshot a second is not a console, the page had to answer "where is my
+	// click" with its own arithmetic, and the keyboard was a text field rather than a keyboard. The
+	// repository already contained the noVNC bridge - `console.go`, the whole websockify replacement -
+	// and it was serving a second port nobody opened.
+	//
+	// SO THERE IS ONE PAGE ON ONE PORT: the distro's `vnc.html` and the bridge that feeds it, mounted
+	// here beside the API rather than on :6080. A person opens the Service URL and gets the machine.
+	//
+	// A DAEMON WITH NO MACHINE STILL HAS TO ANSWER SOMETHING, and it says so rather than showing a
+	// console that cannot connect. `d.console()` is nil until a guest has booted.
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		page := d.console()
+		if page == nil {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = io.WriteString(w, noMachineHTML)
+			return
+		}
+		page.mux.ServeHTTP(w, r)
+	})
 	mux.HandleFunc("/api/state", d.handleState)
 	mux.HandleFunc("/api/screen", d.handleScreenJSON)
 	mux.HandleFunc("/screen.png", d.handleScreenPNG)
@@ -73,6 +96,16 @@ func (d *Daemon) ServeHTTP(opts HTTPServeOptions) error {
 	// browser has no use for `run`, but a CLI talking over HTTP needs all eleven commands and a route
 	// per command would be eleven lines of nothing.
 	mux.HandleFunc("/api/command", d.handleCommand)
+	// THE SOCKET noVNC CONNECTS TO. It is the same path the console's own mux uses, and it is
+	// registered here because this listener is the one a browser reaches.
+	mux.HandleFunc(wsPath, func(w http.ResponseWriter, r *http.Request) {
+		page := d.console()
+		if page == nil {
+			http.Error(w, "no machine is running", http.StatusServiceUnavailable)
+			return
+		}
+		page.bridge(w, r)
+	})
 
 	srv := &http.Server{
 		Handler: mux,
@@ -216,3 +249,39 @@ func (w *writerOnly) Write(p []byte) (int, error) {
 // it is also an io.Writer for png.Encoder, which is the only thing that writes to it.
 var _ = image.Rect
 var _ = os.Getenv
+
+// console is the running machine's noVNC surface, or nil when nothing is booted.
+//
+// THE DAEMON OWNS THE MACHINE AND THE PAGE IS THE MACHINE'S, so the two are asked for together: a page
+// from a previous guest would be a console attached to a VNC port that no longer exists, which noVNC
+// reports as "Failed to connect to server" - a message about the network for a problem that is about
+// which machine is running.
+func (d *Daemon) console() *consoleServer {
+	d.mu.Lock()
+	machine := d.machine
+	d.mu.Unlock()
+	if c, ok := machine.(interface{ Console() *consoleServer }); ok {
+		return c.Console()
+	}
+	return nil
+}
+
+// noMachineHTML is what a browser gets before a machine exists.
+//
+// IT IS NOT AN ERROR PAGE IN THE USUAL SENSE: nothing is wrong, and the same URL works as soon as a
+// run starts. Saying so is more useful than a console that cannot connect.
+const noMachineHTML = `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>easyvm</title>
+<style>
+ body{margin:0;height:100vh;display:flex;align-items:center;justify-content:center;
+      background:#16181d;color:#e6e6e6;font:16px/1.6 system-ui,sans-serif}
+ div{max-width:34rem;padding:2rem}
+ h1{font-size:1.1rem;font-weight:600;margin:0 0 .75rem}
+ p{margin:.4rem 0;color:#a8adb8}
+ code{background:#22262e;padding:.15rem .4rem;border-radius:4px;color:#e6e6e6}
+</style></head><body><div>
+<h1>No machine is running</h1>
+<p>This page is the console, and it appears when a guest boots.</p>
+<p>Start one with <code>easyvm run &lt;file&gt;</code>, or read the state with <code>GET /api/state</code>.</p>
+</div></body></html>
+`
