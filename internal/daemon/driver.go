@@ -658,8 +658,28 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 	d.proc = cmd
 	d.qmpReg = qmp.NewRegistry()
 
-	// THE PAGE, ONCE THE MACHINE IS UP.
+	// THE PAGE, ONCE THE MACHINE IS UP - AND THE PREVIOUS ONE IS CLOSED FIRST.
+	//
+	// THE CONSOLE'S PORT BELONGS TO THE DAEMON, NOT TO THE GUEST, and this was learned from a leg that
+	// could not boot at all:
+	//
+	//	boot: port 6080 is already in use, so the noVNC page cannot be served
+	//
+	// A daemon runs several legs - `destroy` stops the machine and keeps the server - so the SECOND
+	// boot found its own console from the first still bound to 6080. `d.page` is replaced rather than
+	// closed, and the socket it held was never released.
+	//
+	// CLOSING IT IS ALSO THE RIGHT UX: the page from the previous guest is a console attached to a VNC
+	// port that no longer exists, and noVNC reports that as a connection failure rather than as "the
+	// machine changed".
 	if d.novncPort > 0 {
+		d.mu.Lock()
+		old := d.page
+		d.page = nil
+		d.mu.Unlock()
+		if old != nil {
+			old.stop()
+		}
 		page, err := startConsole("127.0.0.1", d.novncPort, d.vncPort, d.logf)
 		if err != nil {
 			_ = cmd.Process.Kill()

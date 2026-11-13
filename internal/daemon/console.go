@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -184,6 +185,37 @@ func (c *consoleServer) stop() {
 	defer cancel()
 	_ = c.srv.Shutdown(ctx)
 	c.srv = nil
+
+	// AND THE PORT IS WAITED FOR, BECAUSE `Shutdown` RETURNS WHEN THE HANDLERS ARE DONE - NOT WHEN THE
+	// LISTENER IS CLOSED. A second boot that binds immediately can still find the socket in TIME_WAIT
+	// or in the kernel's close path:
+	//
+	//	boot: port 6080 is already in use, so the noVNC page cannot be served
+	//
+	// The wait is short and bounded: the listener is already shutting down, so this is the gap between
+	// "shutdown finished" and "the port is free", not a retry of a port somebody else owns.
+	if port := c.portNumber(); port > 0 {
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) && portInUse(port) {
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+}
+
+// portNumber is the listening port, for a caller that has to wait for it to be released.
+func (c *consoleServer) portNumber() int {
+	if c == nil || c.addr == "" {
+		return 0
+	}
+	_, portStr, err := net.SplitHostPort(c.addr)
+	if err != nil {
+		return 0
+	}
+	n, err := strconv.Atoi(portStr)
+	if err != nil {
+		return 0
+	}
+	return n
 }
 
 // err reports a listener failure, for a daemon that wants to know.

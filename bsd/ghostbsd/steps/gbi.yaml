@@ -293,8 +293,6 @@ steps:
         - layout
     until:
       fact: advanced
-- name: welcome
-  wait_after: 2
 - name: keyboard
   click:
   - 1331
