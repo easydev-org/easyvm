@@ -140,7 +140,21 @@ func (e *Executor) Run(steps []walk.Step) (Result, error) {
 		// THE CHECK IS HERE AND NOT IN THE LOOP because "is there a machine" is a fact about the walk,
 		// not about the step: a `boot:` that has not run yet has no machine either, and the first steps
 		// of every install are exactly that. So it is asked only AFTER a machine has been seen.
-		if e.machineSeen && i > 0 {
+		// A STEP THAT DOES NOT NEED THE GUEST IS STILL VALID AFTER THE GUEST IS GONE.
+		//
+		// THE FIRST VERSION OF THIS CHECK REFUSED EVERY STEP ONCE THE MACHINE HAD EXITED, and it broke
+		// the most ordinary ending a walk has:
+		//
+		//	shut the installed system down       <- the step's whole purpose is to stop the machine
+		//	publish the disk                     <- `qemu-img convert`, which needs the FILE, not a guest
+		//
+		//	error: publish the disk: the guest is no longer running, so this step cannot be done
+		//
+		// A SHUTDOWN IS NOT A FAILURE, and neither is anything that reads the disk afterwards:
+		// `compress:`, `publish:`, `snapshot:`, `record: false`, `stop recording`, `shutdown:` itself.
+		// What cannot survive is a step that expects an ANSWER - a click, a keystroke, a reading, an ssh
+		// command - so those are the steps this refuses.
+		if e.machineSeen && i > 0 && stepNeedsAGuest(s) {
 			if m := e.Driver.Machine(); m != nil {
 				if alive, ok := m.(interface{ IsRunning() bool }); ok && !alive.IsRunning() {
 					res.Err = fail(s.Name, "the guest is no longer running, so this step cannot be "+
@@ -669,3 +683,26 @@ func scriptName(s walk.Step) string {
 
 // errStopped is returned when a `stop` request ended the walk at a step boundary.
 var errStopped = errors.New("stopped as asked")
+
+// stepNeedsAGuest reports whether a step expects something to ANSWER.
+//
+// IT IS AN ALLOWLIST OF THE OPPOSITE: the steps that work on FILES are listed, and everything else is
+// assumed to need the machine. That way a key added to the vocabulary without a thought here is refused
+// after a shutdown - noisy and correct - rather than silently writing into a guest that is not there.
+func stepNeedsAGuest(s walk.Step) bool {
+	switch {
+	// the ending of a walk, and anything that turns files into other files
+	case s.Has("shutdown"), s.Has("compress"), s.Has("publish"), s.Has("snapshot"):
+		return false
+	case hasKey(s, "record"):
+		// `record: false` stops the sampler; the string form starts one and needs a screen.
+		//
+		// IT IS `hasKey` AND NOT `s.Has` BECAUSE `Has` IS ABOUT TRUTH, NOT PRESENCE: it answers false for
+		// a `false` value, so `record: false` looked like a step without a `record:` key at all.
+		if v, ok := s.Spec["record"].(bool); ok && !v {
+			return false
+		}
+		return true
+	}
+	return true
+}

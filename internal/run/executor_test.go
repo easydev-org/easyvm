@@ -741,3 +741,46 @@ func TestActionsAreDispatchedBeforeTheirChecks(t *testing.T) {
 		t.Error("`at_button` is dispatched AFTER `expect`, for the same reason")
 	}
 }
+
+// A SHUTDOWN IS NOT A FAILURE, AND NEITHER IS ANYTHING THAT READS THE DISK AFTERWARDS.
+//
+// The dead-guest check refused EVERY step once the machine had exited, which broke the most ordinary
+// ending a walk has:
+//
+//	shut the installed system down       <- the step's whole purpose is to stop the machine
+//	publish the disk                     <- `qemu-img convert`, which needs the FILE, not a guest
+//
+//	error: publish the disk: the guest is no longer running, so this step cannot be done
+//
+// MEASURED ON windows, at step 14 of 16, after a complete installation.
+//
+// WHAT CANNOT SURVIVE is a step that expects an ANSWER - a click, a keystroke, a reading, an ssh
+// command - so those are what the check refuses. The split is an allowlist of the file steps rather
+// than a denylist of the guest ones: a key added later without a thought here is refused noisily after
+// a shutdown, which is the safer way to be wrong.
+func TestAStepThatNeedsNoGuestSurvivesAShutdown(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		spec  map[string]any
+		needs bool
+	}{
+		{"shutdown", map[string]any{"name": "x", "shutdown": "kill"}, false},
+		{"compress", map[string]any{"name": "x", "compress": "out.qcow2"}, false},
+		{"publish", map[string]any{"name": "x", "publish": "tag"}, false},
+		{"snapshot", map[string]any{"name": "x", "snapshot": "s.img"}, false},
+		{"stop recording", map[string]any{"name": "x", "record": false}, false},
+		{"start recording", map[string]any{"name": "x", "record": "v.mp4"}, true},
+		{"a click", map[string]any{"name": "x", "click": []any{1, 2}}, true},
+		{"a reading", map[string]any{"name": "x", "ocr": map[string]any{"name": "s"}}, true},
+		{"a key", map[string]any{"name": "x", "key": "ret"}, true},
+		{"a wait", map[string]any{"name": "x", "wait": 5}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := walk.Step{Name: tc.name, Spec: tc.spec}
+			if got := stepNeedsAGuest(s); got != tc.needs {
+				t.Errorf("stepNeedsAGuest = %v, want %v; getting this wrong either refuses a step "+
+					"that would have worked or lets one run against a machine that is gone", got, tc.needs)
+			}
+		})
+	}
+}
