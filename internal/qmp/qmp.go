@@ -412,14 +412,27 @@ func (r *Registry) CloseAll() error {
 // AND THE RELEASE FOLLOWS IN ITS OWN REQUEST after 150ms, because a widget that polls needs to see the
 // button DOWN for at least one poll: sent back to back, the guest reads up/up and opens nothing.
 func (c *Conn) Click(x, y int) error {
-	w, h := c.screen()
-	ax, ay := toAxis(x, w), toAxis(y, h)
-
-	if err := c.raw.InputSendEvent(nil, nil, []raw.InputEvent{
-		raw.InputEventAbs(raw.InputMoveEvent{Axis: raw.InputAxisX, Value: ax}),
-		raw.InputEventAbs(raw.InputMoveEvent{Axis: raw.InputAxisY, Value: ay}),
-		raw.InputEventBtn(raw.InputBtnEvent{Down: true, Button: raw.InputButtonLeft}),
-	}); err != nil {
+	// THE MOVE COMES FIRST, AS ITS OWN REQUEST, AND THIS IS THE DIFFERENCE BETWEEN A CLICK THAT
+	// LANDS AND ONE THAT DOES NOTHING.
+	//
+	// MEASURED ON ghostbsd's installer, on a machine where the keyboard worked and `double:` worked:
+	//
+	//	POST /api/click  {"x":1331,"y":785}  -> the pointer did not move AT ALL
+	//	POST /api/double {"x":400,"y":300}   -> the pointer moved to (400,300)
+	//
+	// Both go through this file. `DoubleClick` calls `moveTo` first and `Click` did not - it sent the
+	// two axes and the press in ONE `input-send-event`. The comment below used to argue that was
+	// better; the guest disagrees. A HID tablet reports position and buttons separately, so a guest
+	// that receives "x, y, pressed" in one report may apply the press at the position it had BEFORE
+	// the axes - which is (0,0) or wherever the pointer was left, not where the caller asked.
+	//
+	// `moveTo` ALSO ESTABLISHES THE POSITION TWICE (a corner, then the target), because the first
+	// absolute report after enumeration can be ignored. That is not decoration either: it is the same
+	// reason this now works and the one-request version did not.
+	if err := c.moveTo(x, y); err != nil {
+		return err
+	}
+	if err := c.button(raw.InputButtonLeft, true); err != nil {
 		return fmt.Errorf("click at (%d, %d): %w", x, y, err)
 	}
 	time.Sleep(150 * time.Millisecond)

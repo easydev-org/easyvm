@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/coder/websocket"
@@ -209,3 +211,194 @@ func portInUse(port int) bool {
 
 // unused keeps the strings import honest while the mux's pattern matching is the only use.
 var _ = strings.TrimSpace
+
+// --- the pointer, through VNC rather than QMP ------------------------------------------------
+//
+// WHY THIS EXISTS AT ALL, MEASURED ON ghostbsd AT 26.3:
+//
+//	POST /api/click {"x":1331,"y":785}   -> the pointer did not move AT ALL, no QMP error
+//	POST /api/double {"x":100,"y":100}   -> the pointer stayed at the CENTRE of the screen
+//	a click in the browser console       -> the installer advanced
+//
+// `input-send-event` was accepted every time - no error, no refusal - and nothing reached the guest's
+// input layer. The keyboard over QMP worked on the same machine, so the connection was fine and the
+// absolute-pointer path was not.
+//
+// THE TWO PATHS CONVERGE INSIDE QEMU, so the difference is not the device: qemu's VNC server handles a
+// `PointerEvent` itself, and QMP's `input-send-event` goes through a different entry that this guest
+// apparently never consumes. What matters is that ONE OF THEM IS KNOWN TO WORK - it is the one every
+// person who opened the browser console used - so the walkthroughs use it too.
+//
+// AND IT HAS TO BE THE EXISTING CONNECTION. qemu's VNC server accepts ONE client:
+//
+//	second connection: banner "RFB 003.008\n", then EOF at ServerInit
+//
+// so a second socket is refused as long as the browser bridge is attached. The console keeps a
+// connection of its own and both the page and the pointer share it - with a mutex, because VNC is a
+// byte stream and interleaving two writers would corrupt the protocol.
+
+// vncConn is one RFB session, used for pointer and key events.
+type vncConn struct {
+	conn net.Conn
+	mu   sync.Mutex
+	w, h int
+}
+
+// dialVNC opens one RFB session and completes the handshake.
+//
+// THE HANDSHAKE IS FOUR STEPS AND EVERY ONE IS REQUIRED: the server speaks first, the client echoes a
+// version, the server offers security types, the client chooses one, and only then does ServerInit
+// arrive. A session that skips to sending events gets them ignored.
+func dialVNC(addr string) (*vncConn, error) {
+	c, err := net.DialTimeout("tcp", addr, 10*time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("vnc dial %s: %w", addr, err)
+	}
+	_ = c.SetDeadline(time.Now().Add(30 * time.Second))
+
+	banner := make([]byte, 12)
+	if _, err := io.ReadFull(c, banner); err != nil {
+		_ = c.Close()
+		return nil, fmt.Errorf("vnc banner: %w", err)
+	}
+	if _, err := c.Write([]byte("RFB 003.008\n")); err != nil {
+		_ = c.Close()
+		return nil, fmt.Errorf("vnc version: %w", err)
+	}
+	n := make([]byte, 1)
+	if _, err := io.ReadFull(c, n); err != nil {
+		_ = c.Close()
+		return nil, fmt.Errorf("vnc security count: %w", err)
+	}
+	types := make([]byte, n[0])
+	if _, err := io.ReadFull(c, types); err != nil {
+		_ = c.Close()
+		return nil, fmt.Errorf("vnc security types: %w", err)
+	}
+	// TYPE 1 IS "NONE", which is what a qemu with no VNC password offers. Anything else would need a
+	// credential this daemon does not have, and saying so is better than a handshake that hangs.
+	none := false
+	for _, t := range types {
+		if t == 1 {
+			none = true
+		}
+	}
+	if !none {
+		_ = c.Close()
+		return nil, fmt.Errorf("vnc at %s offers security types %v and this daemon only speaks None",
+			addr, types)
+	}
+	if _, err := c.Write([]byte{1}); err != nil {
+		_ = c.Close()
+		return nil, fmt.Errorf("vnc security choose: %w", err)
+	}
+	res := make([]byte, 4)
+	if _, err := io.ReadFull(c, res); err != nil {
+		_ = c.Close()
+		return nil, fmt.Errorf("vnc security result: %w", err)
+	}
+	if binary.BigEndian.Uint32(res) != 0 {
+		_ = c.Close()
+		return nil, fmt.Errorf("vnc at %s refused the None security type", addr)
+	}
+	if _, err := c.Write([]byte{1}); err != nil {
+		_ = c.Close()
+		return nil, fmt.Errorf("vnc client init: %w", err)
+	}
+	init := make([]byte, 24)
+	if _, err := io.ReadFull(c, init); err != nil {
+		_ = c.Close()
+		return nil, fmt.Errorf("vnc server init: %w", err)
+	}
+	vc := &vncConn{
+		conn: c,
+		w:    int(binary.BigEndian.Uint16(init[0:2])),
+		h:    int(binary.BigEndian.Uint16(init[2:4])),
+	}
+	// SERVERINIT IS THE LAST THING THE HANDSHAKE NEEDS, and the name that follows it is not: it is
+	// read and discarded so the stream is positioned at the first server message.
+	nameLen := binary.BigEndian.Uint32(init[20:24])
+	if nameLen > 0 {
+		name := make([]byte, nameLen)
+		_, _ = io.ReadFull(c, name)
+	}
+	_ = c.SetDeadline(time.Time{})
+	return vc, nil
+}
+
+// Pointer sends one absolute pointer event, in GUEST PIXELS.
+//
+// NO 0..32767 SCALING, which is the other reason this path is simpler than QMP's: RFB's PointerEvent
+// carries x and y in the framebuffer's own coordinates.
+func (v *vncConn) Pointer(x, y int, mask byte) error {
+	if v == nil {
+		return errors.New("no VNC session")
+	}
+	if x < 0 {
+		x = 0
+	}
+	if y < 0 {
+		y = 0
+	}
+	if v.w > 0 && x >= v.w {
+		x = v.w - 1
+	}
+	if v.h > 0 && y >= v.h {
+		y = v.h - 1
+	}
+	ev := make([]byte, 6)
+	ev[0] = 5 // PointerEvent
+	ev[1] = mask
+	binary.BigEndian.PutUint16(ev[2:4], uint16(x))
+	binary.BigEndian.PutUint16(ev[4:6], uint16(y))
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	_ = v.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	_, err := v.conn.Write(ev)
+	return err
+}
+
+// Click moves, presses, and releases - in THREE events, because RFB's button mask is part of the
+// PointerEvent and a press is a mask bit rather than a separate message.
+func (v *vncConn) Click(x, y int) error {
+	if err := v.Pointer(x, y, 0); err != nil {
+		return err
+	}
+	// A WIDGET THAT POLLS NEEDS TO SEE THE BUTTON DOWN, which is the same reason the QMP path waited
+	// between press and release.
+	time.Sleep(120 * time.Millisecond)
+	if err := v.Pointer(x, y, 1); err != nil {
+		return err
+	}
+	time.Sleep(150 * time.Millisecond)
+	return v.Pointer(x, y, 0)
+}
+
+// Key sends one RFB KeyEvent.
+//
+// THE KEYSYM IS X11'S, not qemu's qcode: RFB predates qemu and carries X keysyms, which is why this
+// is a second table rather than a reuse of the QMP one.
+func (v *vncConn) Key(keysym uint32, down bool) error {
+	if v == nil {
+		return errors.New("no VNC session")
+	}
+	ev := make([]byte, 8)
+	ev[0] = 4 // KeyEvent
+	if down {
+		ev[1] = 1
+	}
+	binary.BigEndian.PutUint32(ev[4:8], keysym)
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	_ = v.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	_, err := v.conn.Write(ev)
+	return err
+}
+
+// Close ends the session.
+func (v *vncConn) Close() error {
+	if v == nil {
+		return nil
+	}
+	return v.conn.Close()
+}

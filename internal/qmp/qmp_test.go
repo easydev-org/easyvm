@@ -251,22 +251,30 @@ func com_itoa(v int) string {
 	return string(b)
 }
 
-// `input-send-event` DOES NOT TAKE PIXELS, AND A CLICK SPLIT ACROSS REQUESTS LANDS WHERE THE POINTER WAS.
+// A CLICK MOVES THE POINTER FIRST, AS ITS OWN REQUEST, AND THE PRESS FOLLOWS.
 //
-// MEASURED ON popos-install, AND THE RECORDING IS THE PROOF: the installer's Select button was pressed
-// four times across 250 seconds, and the video is BYTE-IDENTICAL from the 90th second to the 340th.
-// The pointer never moved; every press arrived at the position the guest still held, which was (0,0).
+// THE PREVIOUS VERSION OF THIS TEST ASSERTED THE OPPOSITE, on a real measurement from popos-install:
+// three requests - move, press, release - produced a pointer that never left the top-left corner, and
+// the conclusion drawn was "the position and the press must be one event list".
 //
-// THREE THINGS WERE WRONG, AND THE REFERENCE IMPLEMENTATION HAD ALL THREE RIGHT:
+// THAT CONCLUSION WAS WRONG, AND ghostbsd SHOWED IT ON ONE MACHINE, WITH THE KEYBOARD WORKING:
 //
-//	1  an `abs` axis value is in the DEVICE'S RANGE (0..32767), not in pixels. A pixel value in a
-//	   1920-wide frame is six percent of the way across, which is the left edge whatever was asked for.
-//	2  THE POSITION AND THE PRESS MUST BE ONE EVENT LIST. Three requests leave the guest free to handle
-//	   the button before it applied the coordinates - "a click delivered at the OLD pointer position is
-//	   what the frames show: the dock redrawing around the cursor and no launch".
-//	3  THE RELEASE MUST WAIT. A widget that polls needs the button DOWN for at least one poll; sent
-//	   back to back, the guest reads up/up and opens nothing.
-func TestAClickScalesAndPressesInOneList(t *testing.T) {
+//	POST /api/click  {"x":1331,"y":785}  -> the pointer did not move AT ALL
+//	POST /api/double {"x":400,"y":300}   -> the pointer moved to (400,300)
+//
+// `DoubleClick` called `moveTo` first; `Click` did not. The popos measurement's real cause was the
+// one-request version applying the press at the position the guest held BEFORE the axes - a HID
+// tablet reports position and buttons separately, so "x, y, pressed" in one report is "the button
+// went down somewhere, and the pointer is now at x,y".
+//
+// THE TWO THINGS THAT MUST BE TRUE, AND BOTH ARE ASSERTED:
+//
+//	1  the move is `moveTo`, which scales pixels into the DEVICE'S RANGE (0..32767) and ESTABLISHES
+//	   the position twice - a corner, then the target - because the first absolute report after
+//	   enumeration can be ignored
+//	2  the press and release are separate requests with a delay between them, because a widget that
+//	   polls needs to see the button DOWN for at least one poll
+func TestAClickMovesBeforeItPresses(t *testing.T) {
 	body, err := os.ReadFile("qmp.go")
 	if err != nil {
 		t.Fatal(err)
@@ -286,22 +294,23 @@ func TestAClickScalesAndPressesInOneList(t *testing.T) {
 		rest = rest[:end+1]
 	}
 	code := dropComments(rest)
-	if !strings.Contains(code, "toAxis(x, w)") {
-		t.Fatal("`Click` sends the pixel coordinate without converting it to the axis range, so the " +
-			"pointer lands near the left edge whatever was asked for")
+
+	// THE MOVE COMES FIRST, THROUGH `moveTo`.
+	moveAt := strings.Index(code, "c.moveTo(")
+	pressAt := strings.Index(code, "InputEventBtn")
+	if moveAt < 0 && pressAt < 0 {
+		// the press may be spelled `c.button`, which is the same thing
+		pressAt = strings.Index(code, "c.button(")
 	}
-	// AND THE PRESS IS IN THE SAME LIST AS THE MOVE.
-	if !strings.Contains(code, "InputEventBtn") {
-		t.Fatal("`Click` does not press inside the same `input-send-event` as the move, so the guest " +
-			"can handle the button before it applied the coordinates")
+	if moveAt < 0 {
+		t.Fatal("`Click` does not call `moveTo`, so the pointer stays where it was and the press " +
+			"lands there - measured on ghostbsd as a pointer that never moved")
 	}
-	// THE MOVE+PRESS IS ONE CALL IN `Click`; THE RELEASE IS `c.button(...)`, ITS OWN REQUEST.
-	if n := strings.Count(code, "InputSendEvent"); n != 1 {
-		t.Fatalf("`Click` makes %d `input-send-event` calls for the move-and-press; it must be exactly "+
-			"one, with the release in its own request afterwards", n)
+	if pressAt >= 0 && pressAt < moveAt {
+		t.Fatal("`Click` presses before it moves; the guest would act at the old position")
 	}
-	if !strings.Contains(code, "c.button(") {
-		t.Fatal("`Click` never releases the button")
+	if !strings.Contains(code, "toAxis(") && !strings.Contains(src, "func (c *Conn) moveTo") {
+		t.Fatal("no pixel-to-axis conversion anywhere; the pointer lands near the left edge")
 	}
 	// AND THE RELEASE IS DELAYED.
 	if !strings.Contains(code, "150 * time.Millisecond") {

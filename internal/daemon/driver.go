@@ -63,7 +63,12 @@ type Driver struct {
 	flattenFrom string
 	page        *consoleServer
 	vncPort     int
-	netUp       bool
+	// pointer is the VNC session used for pointer and key events, opened on first use.
+	//
+	// IT IS NOT THE QMP CONNECTION. `input-send-event` was accepted and ignored by this guest, and the
+	// VNC server is the path a person's click takes - see console.go for the measurement.
+	pointer *vncConn
+	netUp   bool
 	// share is the smbd this driver started, if a `share_serve:` step asked for one.
 	share *shareServer
 	logf  func(string)
@@ -122,11 +127,34 @@ func (f frame) Words() []string  { return nil } // no OCR in this build; see the
 // QMP'S ABSOLUTE POINTER TAKES ONE EVENT PAIR PER AXIS, and the guest's tablet scales them. That is
 // why the coordinates are the file's own measured pixels rather than anything the host computes.
 func (d *Driver) Click(x, y int) error {
-	conn, err := d.qmpSocket()
+	v, err := d.pointerConn()
 	if err != nil {
 		return err
 	}
-	return conn.Click(x, y)
+	return v.Click(x, y)
+}
+
+// pointerConn is the VNC session, opened lazily and reopened if the guest restarted.
+func (d *Driver) pointerConn() (*vncConn, error) {
+	d.mu.Lock()
+	v := d.pointer
+	port := d.vncPort
+	d.mu.Unlock()
+	if v != nil {
+		return v, nil
+	}
+	if port == 0 {
+		return nil, fmt.Errorf("no VNC port is known yet; the pointer can only be driven once " +
+			"the machine is up")
+	}
+	fresh, err := dialVNC(fmt.Sprintf("127.0.0.1:%d", port))
+	if err != nil {
+		return nil, err
+	}
+	d.mu.Lock()
+	d.pointer = fresh
+	d.mu.Unlock()
+	return fresh, nil
 }
 
 func (d *Driver) DoubleClick(x, y int) error {
@@ -515,52 +543,48 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 		"-device", fmt.Sprintf("virtio-net-pci,netdev=net0,mac=%s,romfile=,host_mtu=%d",
 			easyvmnet.TapMAC, easyvmnet.UplinkMTU()),
 	)
-	// THE POINTER IS A PER-FAMILY CHOICE, BECAUSE FREEBSD DOES NOT DRIVE virtio-tablet.
+	// EVERY GUEST GETS THE SAME POINTER: usb-tablet ON AN xHCI CONTROLLER.
 	//
-	// MEASURED ON ghostbsd AT 26.3, on a machine where the keyboard worked perfectly:
+	// IT WAS `virtio-tablet-pci` FOR EVERYTHING BUT A BSD, AND THAT WAS WRONG TWICE OVER.
 	//
-	//	key down x2     -> the language list moved, the dialog re-labelled itself in Arabic
-	//	click (1293,781) -> the pointer did not move AT ALL, and gbi's `Next` never activated
-	//
-	// `virtio-tablet-pci` is one device for every guest and the obvious default: Linux and Windows
-	// have a driver for it in the box, and macOS does not need one because it is not what this build
-	// gives a mac.
-	//
-	// FREEBSD HAS NO virtio-input DRIVER AT ALL. THE ISO SAYS SO - there is nothing to guess:
+	// FIRST, FREEBSD HAS NO virtio-input DRIVER AT ALL - the ISO's own file list is the proof, with
+	// nothing to infer:
 	//
 	//	$ 7z l GhostBSD-26.3.iso | grep virtio
 	//	virtio.ko  virtio_balloon.ko  virtio_blk.ko  virtio_console.ko
 	//	virtio_p9fs.ko  virtio_pci.ko  virtio_random.ko  virtio_scsi.ko
 	//	                    <- no virtio_input.ko, no virtio_tablet.ko
 	//
-	// and the same listing has `ums.ko` and `uhid.ko`, which are the USB HID pointer path. So the
-	// device enumerated on the PCI bus, no driver claimed it, and EVERY ABSOLUTE REPORT WAS DISCARDED
-	// - the guest drew a pointer at the centre of the screen and never moved it, while the keyboard,
-	// on a different device, worked perfectly.
+	// so the device enumerated, no driver claimed it, and every absolute report was discarded while
+	// the keyboard - a different device - worked.
 	//
-	// A BSD GETS `usb-tablet`, WHICH IS WHAT THE REFERENCE IMPLEMENTATION USES and the reason its
-	// walkthrough opens with a `set hw.usb.usbhid.enable=1` at the loader prompt: usb-tablet is HID,
-	// uhid(4) claims it by default, and ums(4) - the pointer driver - declines it until usbhid is
-	// enabled. So the device AND that loader line are ONE fix, and neither half works alone: this
-	// build had the loader line and the wrong device, which is why the line had no effect.
+	// SECOND, NOTHING ELSE NEEDED THE virtio TABLET EITHER. Linux and Windows drive a USB HID tablet
+	// with the driver they already load; macOS drives its own pointing device through OpenCore and has
+	// never been given either. ONE DEVICE FOR EVERY GUEST is one thing to reason about instead of two,
+	// and it is what the reference implementation does - `usb-tablet,bus=xhci.0` on the same
+	// controller that carries its macOS recovery disk.
 	//
-	// A USB TABLET NEEDS A CONTROLLER, and on the x86 machines here there is one on the q35 chipset
-	// (uhci/ehci) that qemu creates by default. `usb-tablet` with no `bus=` lands on it.
-	if boot.OS == machine.BSD {
-		// THE CONTROLLER IS NOT OPTIONAL, AND qemu SAID SO RATHER THAN GUESSING:
-		//
-		//	qemu-system-x86_64: -device usb-tablet: No 'usb-bus' bus found for device 'usb-tablet'
-		//
-		// q35 has no USB controller unless one is created - the legacy UHCI/ehci pair that a
-		// PC machine gets for free is not part of it. So the tablet names a bus that exists because
-		// this line created it, the same `qemu-xhci,id=xhci` the macOS branch uses for its recovery
-		// disk.
+	// THE CONTROLLER IS NOT OPTIONAL, AND qemu SAID SO RATHER THAN GUESSING:
+	//
+	//	qemu-system-x86_64: -device usb-tablet: No 'usb-bus' bus found for device 'usb-tablet'
+	//
+	// q35 has no USB controller unless one is created - the legacy UHCI/ehci pair a `pc` machine
+	// gets for free is not part of it. `qemu-xhci,id=xhci` is the same controller the macOS branch
+	// creates for its recovery disk, and qemu merges the two requests into one device because the id
+	// is the same.
+	// A MAC ALREADY HAS THE CONTROLLER, from the recovery disk's own args, and asking for the same id
+	// twice is a qemu error rather than a merge:
+	//
+	//	qemu-system-x86_64: -device qemu-xhci,id=xhci: Duplicate ID 'xhci' for device
+	//
+	// so only the tablet is added there. The bus is the one `StorageArgs` created.
+	if boot.OS == machine.MacOS {
+		args = append(args, "-device", "usb-tablet,bus=xhci.0")
+	} else {
 		args = append(args,
 			"-device", "qemu-xhci,id=xhci",
 			"-device", "usb-tablet,bus=xhci.0",
 		)
-	} else {
-		args = append(args, "-device", "virtio-tablet-pci")
 	}
 
 	// FIRMWARE. OVMF for Windows and Linux, OpenCore for macOS - and the variables file is COPIED
@@ -735,7 +759,15 @@ func (m machineControl) Stop(method string) error {
 	d.mu.Lock()
 	page := d.page
 	d.page = nil
+	pointer := d.pointer
+	d.pointer = nil
 	d.mu.Unlock()
+	// THE POINTER SESSION GOES WITH THE MACHINE. A VNC connection to a stopped qemu is a socket that
+	// reads until it errors, and the next `run` would find it and try to send events into the guest
+	// that was.
+	if pointer != nil {
+		_ = pointer.Close()
+	}
 	if page != nil {
 		page.stop()
 	}
