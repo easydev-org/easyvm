@@ -230,21 +230,33 @@ func (d *Daemon) runBootOnly(req Request, work string, done chan struct{}) {
 		close(done)
 		return
 	}
-	boots := bootSteps(file)
-	if len(boots) == 0 {
+	// A SANDBOX RUNS THE MACHINE HALF AND STOPS.
+	//
+	// THE OLD VERSION KEPT ONLY THE `boot:` STEPS, so a machine that boots an installer had nothing to
+	// boot from - its disk and its ISO were `disk:` and `fetch:` steps, and those were dropped:
+	//
+	//	create → `boot: booting needs a target disk: a `disk:` step must come first`
+	//
+	// THE MACHINE HALF IS THE PREPARATION AND THE BOOT TOGETHER, because they are one operation: a
+	// disk is created FOR a boot, an ISO is fetched FOR it. `machineOf` reads that half from a
+	// `machine:` block when the file has one and from the leading `disk:`/`fetch:`/`boot:` steps when
+	// it does not, so both shapes work and neither the 52 walkthroughs nor the browser has to know
+	// which one a file is.
+	machine, _, err := run.MachineHalf(file)
+	if err != nil {
 		d.mu.Lock()
 		d.st.Status = "failed"
-		d.st.Message = "nothing to boot"
-		d.st.Error = fmt.Sprintf("`%s` has no `boot:` step, so `create` has no machine to start",
-			req.File)
+		d.st.Message = "this file describes no machine"
+		d.st.Error = err.Error()
 		d.mu.Unlock()
 		close(done)
 		return
 	}
+	prep := run.MachineSteps(machine)
 
-	// THE SAME FILE, WITH ONLY ITS BOOT STEPS, so `runWalkthrough` needs no second code path.
+	// THE SAME FILE, WITH ONLY ITS MACHINE STEPS, so `runWalkthrough` needs no second code path.
 	narrowed := *file
-	narrowed.Steps = boots
+	narrowed.Steps = prep
 
 	d.mu.Lock()
 	d.sandbox = true

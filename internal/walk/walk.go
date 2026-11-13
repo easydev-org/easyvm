@@ -359,12 +359,17 @@ func toInt(v any) (int, bool) {
 // THESE ARE NOT STEPS - they describe the whole walk - so they are listed separately rather than
 // folded into the step vocabulary where they would look like things a step could say.
 var documentKeys = map[string]string{
-	"name":              "what the log calls this walkthrough",
-	"notes":             "the file's prose header, echoed into the log; where the measurements behind its numbers live",
-	"resolution":        "[width, height] the coordinates were measured at",
-	"ssh_port":          "the port the guest's sshd is forwarded to",
-	"ssh_user":          "the account the walk logs in as",
-	"vars":              "the file's own variables, some of which name command-line arguments",
+	"name":       "what the log calls this walkthrough",
+	"notes":      "the file's prose header, echoed into the log; where the measurements behind its numbers live",
+	"resolution": "[width, height] the coordinates were measured at",
+	"ssh_port":   "the port the guest's sshd is forwarded to",
+	"ssh_user":   "the account the walk logs in as",
+	"vars":       "the file's own variables, some of which name command-line arguments",
+	"machine": "HOW THIS GUEST IS BUILT AND STARTED, separately from what is done to it. " +
+		"A file may say `machine: {disk_gb: 128, fetch: {...}, boot: {...}}` and then keep " +
+		"`steps:` for the panes, typing and waiting - so a sandbox can start the machine " +
+		"without running the program against it. A file without this block is unchanged: its " +
+		"leading `disk:`/`fetch:`/`boot:` steps ARE its machine",
 	"steps":             "the steps, in file order",
 	"waits_for":         "a pane file's arrival gate: the words that mean the first pane is up",
 	"boot_timeout":      "how long a guest may take to reach its desktop",
