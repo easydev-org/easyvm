@@ -250,20 +250,32 @@ func (d *Daemon) runWalkthroughFile(req Request, work string, done chan struct{}
 
 	res, runErr := ex.Run(file.Steps)
 
-	// A BAKE CLOSES ITS MACHINE; A SANDBOX DOES NOT, AND THE FILE SAYS WHICH IT IS.
+	// A RUN THAT FINISHED CLOSES ITS MACHINE; A RUN THAT FAILED LEAVES IT UP.
 	//
-	// `run` IS UNCHANGED IN BEHAVIOUR: it closes the machine when the steps end, because that is what
-	// every CI leg needs and a machine that outlived its file would hold /dev/kvm. `create` sets
-	// `d.sandbox`, and a sandbox keeps the machine - which is the whole point of the mode.
+	// THE VERDICT IS THE EXIT CODE AND NOTHING ELSE. A failed run still reports `failed`, still
+	// returns the error and still exits non-zero, so a CI leg fails exactly as it did before. What
+	// changed is only whether qemu is still there afterwards.
 	//
-	// SO THE SAME `runWalkthrough` SERVES BOTH, and the only difference is whether the closer is
-	// called. That is the smallest change that makes "a YAML is a set of actions on a machine" true
-	// without making every bake leak a guest.
+	// WHY THAT IS THE RIGHT DEFAULT: A FAILED STEP IS THE ONE MOMENT A MACHINE IS WORTH KEEPING. The
+	// walk has just stopped at the step that did not work, the screen is in the state that proves why,
+	// and the first thing anyone does is look at it - over the browser console, over ssh, or by
+	// pressing the button again by hand. Closing it throws away the only copy of the evidence and
+	// costs a full re-run to get it back:
+	//
+	//	status: failed step 10/25 "welcome"
+	//	error:  welcome: did not advance: wanted "keyboard", read "... Please select your language"
+	//
+	// That is a screenshot away from being diagnosed, and the screenshot no longer existed.
+	//
+	// A SANDBOX KEEPS ITS MACHINE FOR A DIFFERENT REASON - it has no end except `destroy` - and both
+	// arrive at the same place, so one flag covers them.
 	d.mu.Lock()
-	keep := d.sandbox
+	keep := d.sandbox || runErr != nil
 	closeFn := d.machineClose
 	if !keep {
 		d.machine = nil
+		d.machineClose = nil
+	} else {
 		d.machineClose = nil
 	}
 	d.ex = nil
@@ -284,6 +296,13 @@ func (d *Daemon) runWalkthroughFile(req Request, work string, done chan struct{}
 
 	if !keep && closeFn != nil {
 		closeFn()
+		return
+	}
+	// A KEPT MACHINE IS SAID OUT LOUD. The next `run` reuses it - `doBoot` treats a boot on a running
+	// machine as a no-op - and a reader who was not told would think the second run never restarted
+	// anything, or that the daemon was confused.
+	if runErr != nil {
+		fmt.Printf("[easyvm]   the machine is still up after the failure; `easyvm destroy` closes it\n")
 	}
 }
 

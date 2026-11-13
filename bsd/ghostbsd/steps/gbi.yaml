@@ -238,24 +238,24 @@ steps:
       fact: done
 - name: welcome
   at:
-  - 1293
-  - 781
+  - 1331
+  - 785
   expect: keyboard
   wait_after: 12
 - name: keyboard
   at:
-  - 1293
-  - 781
+  - 1331
+  - 785
   wait_after: 12
 - name: time zone
   at:
-  - 1293
-  - 781
+  - 1331
+  - 785
   wait_after: 12
 - name: installation type
   at:
-  - 1293
-  - 781
+  - 1331
+  - 785
   wait_after: 14
 - name: tick the zfs disk
   at:
@@ -264,13 +264,13 @@ steps:
   wait_after: 5
 - name: zfs configuration
   at:
-  - 1293
-  - 781
+  - 1331
+  - 785
   wait_after: 14
 - name: boot option
   at:
-  - 1293
-  - 781
+  - 1331
+  - 785
   wait_after: 14
 - name: real name
   at:
@@ -294,8 +294,8 @@ steps:
   type: '{{ password }}'
 - name: install
   at:
-  - 1293
-  - 781
+  - 1331
+  - 785
   wait_after: 25
 - name: installation runs
   wait: 1800
