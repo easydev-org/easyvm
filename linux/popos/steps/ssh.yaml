@@ -21,7 +21,7 @@ steps:
   os: linux
   timeout: 900
 - name: greeter - the password box
-  at:
+  click:
   - 1120
   - 283
   optional: true
@@ -35,7 +35,7 @@ steps:
   optional: true
   wait_after: 12
 - name: open the terminal
-  at:
+  click:
   - 1092
   - 1048
   wait_after: 20

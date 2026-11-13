@@ -34,11 +34,11 @@ steps:
 - name: desktop - installer
   wait_after: 28
   do:
-  - at:
+  - click:
     - 81
     - 259
     wait_after: 3
-  - at:
+  - click:
     - 81
     - 259
     wait_after: 3
@@ -70,7 +70,7 @@ steps:
     until:
       fact: done
 - name: terms of use
-  at:
+  click:
   - 1482
   - 889
   wait_after: 14
@@ -103,7 +103,7 @@ steps:
     until:
       fact: done
 - name: installation type
-  at:
+  click:
   - 1482
   - 889
   wait_after: 16
@@ -134,12 +134,12 @@ steps:
     until:
       fact: done
 - name: installation confirmation - start
-  at:
+  click:
   - 1478
   - 889
   wait_after: 25
 - name: dismiss the invalid settings modal if it is up
-  at:
+  click:
   - 1069
   - 583
   wait_after: 4
@@ -172,7 +172,7 @@ steps:
     until:
       fact: done
 - name: swap file
-  at:
+  click:
   - 1482
   - 889
   wait_after: 18
@@ -203,7 +203,7 @@ steps:
     until:
       fact: done
 - name: computer identity
-  at:
+  click:
   - 1482
   - 889
   wait_after: 18
@@ -234,7 +234,7 @@ steps:
     until:
       fact: done
 - name: localization defaults
-  at:
+  click:
   - 1482
   - 889
   wait_after: 18
@@ -266,30 +266,30 @@ steps:
     until:
       fact: done
 - name: account - login name
-  at:
+  click:
   - 1210
   - 342
   type: '{{ user }}'
   wait_after: 2
 - name: account - password
-  at:
+  click:
   - 1210
   - 377
   type: '{{ password }}'
   wait_after: 2
 - name: account - confirm password
-  at:
+  click:
   - 1210
   - 412
   type: '{{ password }}'
   wait_after: 3
 - name: autologin
-  at:
+  click:
   - 700
   - 561
   wait_after: 4
 - name: default user login
-  at:
+  click:
   - 1482
   - 889
   wait_after: 25
@@ -297,7 +297,7 @@ steps:
   loop:
     max: 90
     do:
-    - at:
+    - click:
       - 420
       - 300
       wait_after: 20

@@ -266,7 +266,7 @@ steps:
   loop:
     max: 20
     do:
-    - at:
+    - click:
       - 1331
       - 785
     - wait: 3
@@ -296,57 +296,57 @@ steps:
 - name: welcome
   wait_after: 2
 - name: keyboard
-  at:
+  click:
   - 1331
   - 785
   wait_after: 12
 - name: time zone
-  at:
+  click:
   - 1331
   - 785
   wait_after: 12
 - name: installation type
-  at:
+  click:
   - 1331
   - 785
   wait_after: 14
 - name: tick the zfs disk
-  at:
+  click:
   - 592
   - 495
   wait_after: 5
 - name: zfs configuration
-  at:
+  click:
   - 1331
   - 785
   wait_after: 14
 - name: boot option
-  at:
+  click:
   - 1331
   - 785
   wait_after: 14
 - name: real name
-  at:
+  click:
   - 959
   - 457
   type: '{{ user }}'
 - name: user name
-  at:
+  click:
   - 959
   - 503
   type: '{{ user }}'
 - name: password
-  at:
+  click:
   - 959
   - 595
   type: '{{ password }}'
 - name: verify password
-  at:
+  click:
   - 959
   - 643
   type: '{{ password }}'
 - name: install
-  at:
+  click:
   - 1331
   - 785
   wait_after: 25

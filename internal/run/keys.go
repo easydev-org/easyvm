@@ -15,7 +15,7 @@ func ExecutableKeys() []string {
 		"require_ssh", "ssh", "scp", "script", "write", "asset", "build", "generate",
 		"desktop",
 		"share_serve", "share_mount",
-		"type", "key", "double", "at",
+		"type", "key", "double", "click",
 		"wait_for", "screenshot",
 		// THE THREE-STEP MODEL. `ocr:` reads one region and names it; `check:` answers from that
 		// name; `loop:` is the three parts written down. ONLY THESE THREE ARE DISPATCHED: `says`,

@@ -40,11 +40,11 @@ steps:
   - - location
   wait_after: 35
   do:
-  - at:
+  - click:
     - 960
     - 743
     wait_after: 0.8
-  - at:
+  - click:
     - 960
     - 743
     wait_after: 0.8
@@ -53,95 +53,95 @@ steps:
   - welcome
   wait_after: 40
   do:
-  - at:
+  - click:
     - 960
     - 743
     wait_after: 0.8
-  - at:
+  - click:
     - 960
     - 743
     wait_after: 0.8
 - name: welcome
-  at:
+  click:
   - 1352
   - 747
   wait_after: 20
 - name: location
-  at:
+  click:
   - 1352
   - 796
   wait_after: 20
 - name: keyboard
-  at:
+  click:
   - 1352
   - 796
   wait_after: 22
 - name: bootloader
-  at:
+  click:
   - 1352
   - 796
   wait_after: 22
 - name: partitions - erase the disk
-  at:
+  click:
   - 465
   - 367
   wait_after: 10
 - name: partitions
-  at:
+  click:
   - 1352
   - 796
   wait_after: 20
 - name: the erase confirmation's continue (if it is shown)
-  at:
+  click:
   - 1010
   - 640
   wait_after: 3
 - name: desktop
-  at:
+  click:
   - 1352
   - 796
   wait_after: 22
 - name: packages
-  at:
+  click:
   - 1352
   - 796
   wait_after: 25
 - name: users - full name
-  at:
+  click:
   - 516
   - 348
   type: '{{ user }}'
   wait_after: 2
 - name: users - login name
-  at:
+  click:
   - 516
   - 413
   type: '{{ user }}'
   wait_after: 2
 - name: users - password
-  at:
+  click:
   - 516
   - 546
   type: '{{ password }}'
   wait_after: 2
 - name: users - confirm password
-  at:
+  click:
   - 729
   - 546
   type: '{{ password }}'
   wait_after: 3
 - name: users
-  at:
+  click:
   - 1352
   - 796
   wait_after: 25
 - name: summary - install
-  at:
+  click:
   - 1365
   - 902
   wait_after: 18
 - name: the install confirmation's install now
-  at:
+  click:
   - 1018
   - 620
   wait_after: 30
@@ -149,7 +149,7 @@ steps:
   loop:
     max: 180
     do:
-    - at:
+    - click:
       - 420
       - 300
       wait_after: 20

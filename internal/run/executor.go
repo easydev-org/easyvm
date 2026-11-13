@@ -293,7 +293,7 @@ func (e *Executor) runOne(s walk.Step) error {
 		return e.doKey(s)
 	case s.Has("double"):
 		return e.doDoubleClick(s)
-	case s.Has("at"):
+	case s.Has("click"):
 		return e.doClick(s)
 	case s.Has("wait"):
 		return e.doWait(s)
@@ -321,7 +321,7 @@ func (e *Executor) dispatchRest(s walk.Step) error {
 // --- the actions ---------------------------------------------------------------------
 
 func (e *Executor) doClick(s walk.Step) error {
-	x, y, err := pair(s, "at")
+	x, y, err := pair(s, "click")
 	if err != nil {
 		return err
 	}
@@ -364,8 +364,8 @@ func (e *Executor) doType(s walk.Step) error {
 	// second has no `at` and types into whatever has focus - and a form that was going to be
 	// cleared is typed into instead. Measured in the Python implementation on a System Settings
 	// search field that remembered its last query.
-	if s.Has("at") {
-		x, y, err := pair(s, "at")
+	if s.Has("click") {
+		x, y, err := pair(s, "click")
 		if err != nil {
 			return err
 		}

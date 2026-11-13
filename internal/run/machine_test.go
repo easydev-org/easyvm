@@ -40,7 +40,7 @@ func TestTheMachineHalfIsThePreparationAndTheBoot(t *testing.T) {
 			map[string]any{"name": "the installer image", "asset": "linux_iso", "release": "ubuntu"},
 			map[string]any{"name": "boot the installer", "boot": true, "os": "linux", "iso": "installer_iso"},
 			map[string]any{"name": "wait for the desktop", "desktop": "linux"},
-			map[string]any{"name": "click Next", "at": []any{10, 20}},
+			map[string]any{"name": "click Next", "click": []any{10, 20}},
 		},
 	})
 	if err != nil {
@@ -159,7 +159,7 @@ func TestAnISOAndARecoveryAreTheSameShape(t *testing.T) {
 func TestAFileWithNoMachineIsRefused(t *testing.T) {
 	doc, err := loadFixture(t, map[string]any{
 		"name":  "probe",
-		"steps": []any{map[string]any{"name": "click", "at": []any{1, 2}}},
+		"steps": []any{map[string]any{"name": "click", "click": []any{1, 2}}},
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -19,7 +19,7 @@ import (
 // about what the FILES may say, not about what the executor can do.
 var allowedActionKeys = map[string]string{
 	// --- pure atoms ---
-	"at":         "one click",
+	"click":         "one click",
 	"double":     "one double-click",
 	"at_window":  "one click, placed relative to a window edge",
 	"key":        "one keystroke",
@@ -140,7 +140,7 @@ func TestTheDismissalKeepsItsMeasuredShape(t *testing.T) {
 				if !ok {
 					continue
 				}
-				if _, ok := m["at"]; ok {
+				if _, ok := m["click"]; ok {
 					clicks++
 					// FOUR SECONDS, NOT TWO. Two was measured short on a loaded guest.
 					if settle, ok := toFloat(m["wait_after"]); !ok || settle < 4 {
@@ -325,7 +325,7 @@ func TestAFileThatNeedsAGuestStartsOne(t *testing.T) {
 	// A STEP THAT TOUCHES THE GUEST. `fetch:`, `write:` and `disk_gb:` are HOST work and need no
 	// machine; everything here does.
 	needsGuest := map[string]bool{
-		"at": true, "at_button": true, "at_window": true, "at_bottom": true, "double": true,
+		"click": true, "at_button": true, "at_window": true, "at_bottom": true, "double": true,
 		"key": true, "type": true, "run": true, "ssh": true, "scp": true, "script": true,
 		"require_ssh": true, "desktop": true, "until": true, "until_any": true,
 		"until_console": true, "screenshot": true, "share_mount": true, "shutdown": true,

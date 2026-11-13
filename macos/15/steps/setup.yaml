@@ -74,12 +74,12 @@ steps:
     until:
       fact: done
 - name: select disk utility
-  at:
+  click:
   - 837
   - 514
   wait_after: 3
 - name: open disk utility
-  at:
+  click:
   - 1142
   - 586
   wait_after: 5
@@ -129,13 +129,13 @@ steps:
   key: backspace
   wait_after: 3
 - name: erase - name the volume
-  at:
+  click:
   - 960
   - 415
   type: '{{ disk_name }}'
   wait_after: 4
 - name: erase - confirm
-  at:
+  click:
   - 1155
   - 646
   wait_after: 5
@@ -168,7 +168,7 @@ steps:
     until:
       fact: done
 - name: erase - done
-  at:
+  click:
   - 1143
   - 601
   wait_after: 5
@@ -202,43 +202,43 @@ steps:
     until:
       fact: done
 - name: select reinstall macos
-  at:
+  click:
   - 837
   - 333
   wait_after: 3
 - name: open the installer
-  at:
+  click:
   - 1142
   - 586
   wait_after: 20
 - name: wait for the welcome pane
   wait: 10
 - name: welcome continue
-  at:
+  click:
   - 960
   - 712
   wait_after: 5
 - name: wait for the licence pane
   wait: 60
 - name: agree to the licence
-  at:
+  click:
   - 1005
   - 713
   wait_after: 5
 - name: wait for the licence sheet
   wait: 10
 - name: agree in the sheet
-  at:
+  click:
   - 1060
   - 530
   wait_after: 10
 - name: select the destination card
-  at:
+  click:
   - 850
   - 550
   wait_after: 5
 - name: destination continue
-  at:
+  click:
   - 1005
   - 712
   wait_after: 10

@@ -65,68 +65,50 @@ mkdir -p "$dir" /disks/os
 
 # COMPLETELY RESET, EVERY TIME. The run directory, the daemon, and the tap the last run left behind -
 # so a rerun cannot be polluted by its own previous frames, overlay or network device.
-echo "=== reset $run"
+echo "=== reset the machine slot"
 
-# ASK THE DAEMON TO CLOSE ITS OWN MACHINE FIRST, BECAUSE THAT IS WHAT IT IS FOR.
+# THIS SCRIPT DOES NOT START A DAEMON, BECAUSE THE POD HAS ONE.
 #
-# `easyvm destroy` stops the guest through the shutdown method the file chose - ssh, the agent, ACPI,
-# or a kill - and then closes the daemon. THAT IS THE ONLY PATH THAT KNOWS ABOUT BOTH PROCESSES, and
-# every `pkill` in this script is a fallback for a daemon that cannot answer.
+# `k8s/lab.yaml` runs `easyvm serve --work /work` as PID 1 with `restartPolicy: Always`, and ONE
+# DAEMON RUNS EVERY LEG - `destroy` stops the machine and keeps the server:
 #
-# THE FALLBACKS ARE NEEDED AND THAT IS NOT A REDUNDANCY: a daemon holding a half-broken qemu will not
-# always answer its own socket, and a container can be left with a machine whose QMP connection is
-# gone. What matters is the ORDER - ask first, kill second - because the reverse leaves an orphan:
+#	func (d *Daemon) destroySandbox() Response {
+#		closeFn()                      // the guest goes
+#		d.st.Status = "destroyed"      // the daemon stays
+#	}
 #
-#	$ pkill easyvm      <- the daemon dies
-#	$ ss -lntp | grep 5900
-#	LISTEN ... qemu-system-x86  <- and qemu is now nobody's child, holding the port
+# so install, then ssh, then vm-configure are three `run` requests to the same process, on one socket,
+# with one owner for the frames and the ports. THE VERSION THAT STARTED A DAEMON PER LEG is what put
+# two of them in one pod - the second bound 8080 while the first still held 6080 - and every `pkill`
+# in it was cleaning up after a supervision model that did not exist.
+echo "=== destroy whatever the last leg left behind"
+easyvm destroy --work /work >/dev/null 2>&1 || true
+
+# THE PORTS, BECAUSE A DESTROYED MACHINE'S LISTENERS CLOSE AFTER ITS QEMU IS REAPED. A boot that starts
+# in that gap fails with
 #
-# which is exactly the failure this comment used to describe as "the port is already in use" and
-# blame on qemu's argument parsing.
-if [ -S "$run/easyvm.sock" ]; then
-    echo "=== destroy the previous machine through the daemon"
-    easyvm destroy --work "$run" >/dev/null 2>&1 || true
+#	boot: port 6080 is already in use, so the noVNC page cannot be served
+wait_port_free() {
+    port=$1
     i=0
-    while [ $i -lt 20 ] && [ -S "$run/easyvm.sock" ]; do
-        i=$((i + 1)); sleep 1
+    while [ $i -lt 20 ]; do
+        ss -lnt 2>/dev/null | grep -q ":$port " || return 0
+        i=$((i + 1))
+        sleep 1
     done
-fi
-
-# THE DAEMON ITSELF, WHEN `destroy` COULD NOT REACH IT.
-#
-# A ZOMBIE IS NOT A RUNNING DAEMON, AND `pgrep` CANNOT TELL THE DIFFERENCE. This container's PID 1 is
-# `sleep infinity`, which never reaps anything, so every daemon that has exited stays in the table as
-# `<defunct>`; `pgrep -x easyvm` matched fourteen of them and a wait loop ran for processes that were
-# already gone.
-pkill easyvm 2>/dev/null || true
-daemons_alive() {
-    ps -eo stat=,cmd= 2>/dev/null | awk '$1 !~ /^Z/ && $2 ~ /easyvm/ { found = 1 } END { exit !found }'
+    return 1
 }
-i=0
-while daemons_alive && [ $i -lt 20 ]; do
-    i=$((i + 1))
-    sleep 1
+for port in 5900; do
+    wait_port_free "$port" || echo "=== port $port is still held after 20s" >&2
 done
 
-# AND THE GUEST, WHICH IS A SEPARATE PROCESS AND THE ONE THAT HOLDS THE PORTS.
-#
-# THE NAME IS TRUNCATED TO 15 CHARACTERS, which is why `pkill -x qemu-system-x86_64` matched nothing:
-#
-#	$ ps -o comm= -p 128
-#	qemu-system-x86
-#
-# so this matches the full command line instead. It is reached only when the daemon above could not
-# stop it, which is a real state after a failed run - a failed run KEEPS its machine on purpose, and
-# the local loop starts from nothing by definition.
-if ps -eo cmd= 2>/dev/null | grep -q "qemu-system-x86_64"; then
-    echo "=== a qemu outlived its daemon; killing it" >&2
-    pkill -9 -f "qemu-system-x86_64" 2>/dev/null || true
-    sleep 1
-fi
+# THE TAP IS A HOST DEVICE, NOT A PROCESS'S, so it outlives a machine that was killed. One guest per
+# container means one name, and a stale one makes qemu refuse to start.
 ip link del qemutap0 2>/dev/null || true
-rm -rf "$run"
-mkdir -p "$run"
 
+# THE LEG'S OWN SCRATCH IS THE DAEMON'S WORK DIRECTORY, because that is where its socket, frames and
+# overlay live - and there is exactly one of those per daemon. What belongs to the LEG and must
+# survive is the disk and the video, and those go to the PVC.
 # THE PARENT DISK, WHEN THIS LEG CONTINUES ONE. It is the PREVIOUS leg's output on this PVC; there is
 # no pull, because the file is already here.
 boot=""
@@ -136,7 +118,7 @@ if [ -n "$prev" ]; then
     done
     [ -n "$boot" ] || { echo "=== NO DISK TO CONTINUE: $dir has no $prev.qcow2" >&2; ls -la "$dir" >&2; exit 1; }
     echo "=== continuing from $boot"
-    cp "$boot" "$run/disk.qcow2"
+    cp "$boot" "/work/disk.qcow2"
 else
     echo "=== a fresh disk"
 fi
@@ -156,7 +138,7 @@ if [ -z "$prev" ]; then
         done
         if [ -n "$found" ]; then
             echo "=== installer: $found"
-            cp "$found" "$run/installer.iso"
+            cp "$found" "/work/installer.iso"
             break
         fi
     done
@@ -186,7 +168,7 @@ if [ "$os" = macos ]; then
         "OVMF_VARS-1920x1080.fd:OVMF_VARS-1920x1080.fd"
     do
         src="/artifacts/macos/${pair%%:*}"
-        dst="$run/${pair##*:}"
+        dst="/work/${pair##*:}"
         if [ -f "$src" ]; then
             echo "=== macos asset: $(basename "$src") -> $(basename "$dst")"
             cp "$src" "$dst"
@@ -201,8 +183,8 @@ if [ "$os" = windows ]; then
     for base in /disks/isos /artifacts/isos; do
         if [ -f "$base/windows11.iso" ]; then
             echo "=== windows image: $base/windows11.iso"
-            cp "$base/windows11.iso" "$run/windows11.iso"
-            cp "$base/virtio-win.iso" "$run/virtio-win.iso" 2>/dev/null || true
+            cp "$base/windows11.iso" /work/windows11.iso
+            cp "$base/virtio-win.iso" /work/virtio-win.iso 2>/dev/null || true
             break
         fi
     done
@@ -217,20 +199,11 @@ if [ -d /disks/repo-src/windows ]; then
     cd /disks/repo-src
 fi
 
-echo "=== daemon"
-easyvm serve --work "$run" > "$run/daemon.log" 2>&1 &
-i=0
-while [ $i -lt 40 ]; do
-    [ -S "$run/easyvm.sock" ] && break
-    i=$((i + 1)); sleep 1
-done
-[ -S "$run/easyvm.sock" ] || { echo "the daemon never listened" >&2; tail -20 "$run/daemon.log" >&2; exit 1; }
-
 echo "=== $walk"
 set +e
 easyvm run "$walk" \
-    --work "$run" \
-    --boot-disk "$run/disk.qcow2" \
+    --work /work \
+    --boot-disk /work/disk.qcow2 \
     --out "$dir/$leg.qcow2" \
     --password admin \
     > "$run/run.log" 2>&1
@@ -240,5 +213,10 @@ set -e
 echo "=== finished rc=$rc"
 tail -25 "$run/run.log"
 echo "=== products"
+# THE VIDEO IS IN THE DAEMON'S WORK DIRECTORY, so it is moved beside the disk the leg produced. One
+# place to look for "what did this leg make" is worth the copy, and the PVC is what survives the pod.
+for f in /work/*.mp4; do
+    [ -f "$f" ] && cp "$f" "$run/" 2>/dev/null
+done
 ls -la "$dir"/*.qcow2 "$run"/*.mp4 2>/dev/null | awk '{printf "  %-46s %6d MiB\n", $9, $5/1048576}' || true
 exit $rc

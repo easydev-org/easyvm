@@ -32,13 +32,44 @@ metadata:
   name: easyvm-lab
   labels:
     app: easyvm-lab
+# THE DAEMON IS THE CONTAINER, BECAUSE ONE DAEMON RUNS EVERY LEG.
+#
+# THIS POD WAS `sleep infinity` PLUS A `lab-run.sh` THAT STARTED ITS OWN DAEMON PER LEG, and that
+# arrangement is what produced two daemons in one pod:
+#
+#	PID 1     sleep infinity
+#	PID 142   easyvm   <- started by the first lab-run.sh
+#	PID 17282 easyvm   <- started by the second, because nothing had stopped the first
+#
+# the second machine then failed its own boot with `port 6080 is already in use, so the noVNC page
+# cannot be served`, and every `pkill` in that script existed to clean up after a supervision model
+# that was not there.
+#
+# A DAEMON DOES NOT HAVE TO DIE FOR THE NEXT LEG. `destroy` stops the machine and keeps the server:
+#
+#	func (d *Daemon) destroySandbox() Response {
+#		closeFn()                        // the guest goes
+#		d.st.Status = "destroyed"        // the daemon stays
+#	}
+#
+# so ONE daemon serves install, then ssh, then vm-configure - each leg a `run` after a `destroy`, on
+# the same socket, with the frames and the port ownership in one place.
+#
+# AND AS PID 1 IT IS SUPERVISED BY THE KUBELET: `restartPolicy: Always` means a daemon that crashes is
+# a container that restarts, with a clean /tmp, a clean tap name and every port released. THAT is the
+# reset `pkill` was imitating, and it is the only one that cannot leave a half-killed daemon behind.
+#
+# WHAT CHANGES FOR `lab-run.sh`: it no longer starts a daemon. It destroys the previous machine through
+# the one that is running, copies the disk in, and runs the leg.
 spec:
-  restartPolicy: Never
+  restartPolicy: Always
   terminationGracePeriodSeconds: 5
   containers:
     - name: easyvm
       image: ghcr.io/easydev-org/easyvm:latest
-      command: ["sleep", "infinity"]
+      # THE POD'S WORK DIRECTORY IS /work, NOT THE PVC: frames and the socket are per-container state
+      # that must not outlive a restart. /disks holds what must - the guest disks and the ISOs.
+      command: ["easyvm", "serve", "--work", "/work", "--http", ":8080", "--novnc-port", "6080"]
       securityContext:
         capabilities:
           add: ["NET_ADMIN"]

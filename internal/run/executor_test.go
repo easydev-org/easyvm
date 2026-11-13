@@ -99,12 +99,12 @@ func newExec(d Driver, steps ...map[string]any) (*Executor, []walk.Step) {
 func TestActionsReachTheRightChannel(t *testing.T) {
 	d := &fakeDriver{}
 	ex, steps := newExec(d,
-		map[string]any{"name": "click", "at": []any{100, 200}},
+		map[string]any{"name": "click", "click": []any{100, 200}},
 		map[string]any{"name": "double", "double": []any{10, 20}},
 		map[string]any{"name": "key", "key": "ret"},
 		map[string]any{"name": "combo", "key": "ctrl+alt+t"},
 		map[string]any{"name": "type", "type": "hello"},
-		map[string]any{"name": "type in field", "at": []any{5, 6}, "type": "world"},
+		map[string]any{"name": "type in field", "click": []any{5, 6}, "type": "world"},
 	)
 	res, err := ex.Run(steps)
 	if err != nil {
@@ -139,9 +139,9 @@ func TestActionsReachTheRightChannel(t *testing.T) {
 func TestFailureStopsTheWalk(t *testing.T) {
 	d := &fakeDriver{}
 	ex, steps := newExec(d,
-		map[string]any{"name": "one", "at": []any{1, 1}},
-		map[string]any{"name": "broken", "at": "not a pair"},
-		map[string]any{"name": "three", "at": []any{3, 3}},
+		map[string]any{"name": "one", "click": []any{1, 1}},
+		map[string]any{"name": "broken", "click": "not a pair"},
+		map[string]any{"name": "three", "click": []any{3, 3}},
 	)
 	res, err := ex.Run(steps)
 	if err == nil {
@@ -160,8 +160,8 @@ func TestFailureStopsTheWalk(t *testing.T) {
 func TestOptionalFailureIsLoggedAndPassed(t *testing.T) {
 	d := &fakeDriver{}
 	ex, steps := newExec(d,
-		map[string]any{"name": "flaky", "at": "not a pair", "optional": true},
-		map[string]any{"name": "after", "at": []any{9, 9}},
+		map[string]any{"name": "flaky", "click": "not a pair", "optional": true},
+		map[string]any{"name": "after", "click": []any{9, 9}},
 	)
 	res, err := ex.Run(steps)
 	if err != nil {
@@ -182,8 +182,8 @@ func TestOptionalFailureIsLoggedAndPassed(t *testing.T) {
 func TestAFailedStepIsNotCounted(t *testing.T) {
 	d := &fakeDriver{}
 	ex, steps := newExec(d,
-		map[string]any{"name": "click", "at": []any{1, 1}},
-		map[string]any{"name": "bad pair", "at": []any{1}},
+		map[string]any{"name": "click", "click": []any{1, 1}},
+		map[string]any{"name": "bad pair", "click": []any{1}},
 	)
 	res, _ := ex.Run(steps)
 	for _, name := range res.Answered {

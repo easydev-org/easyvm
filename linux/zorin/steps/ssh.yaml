@@ -24,13 +24,13 @@ steps:
   optional: true
   wait_after: 5
 - name: greeter - the user tile
-  at:
+  click:
   - 960
   - 488
   optional: true
   wait_after: 4
 - name: greeter - the password box
-  at:
+  click:
   - 960
   - 627
   type: '{{ password }}'
@@ -45,7 +45,7 @@ steps:
   key: ctrl+alt+t
   wait_after: 20
 - name: dismiss the software updater, if it is up
-  at:
+  click:
   - 968
   - 594
   optional: true
@@ -55,7 +55,7 @@ steps:
   terminal_wait: 0
   wait_after: 15
 - name: dismiss the software updater again
-  at:
+  click:
   - 968
   - 594
   optional: true

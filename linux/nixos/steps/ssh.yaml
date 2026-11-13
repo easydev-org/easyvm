@@ -23,12 +23,12 @@ steps:
   key: esc
   wait_after: 5
 - name: greeter - the user tile
-  at:
+  click:
   - 960
   - 488
   wait_after: 4
 - name: greeter - the password box
-  at:
+  click:
   - 936
   - 628
   type: '{{ password }}'
@@ -40,7 +40,7 @@ steps:
 - name: let the session finish starting
   wait: 240
 - name: skip the welcome dialog
-  at:
+  click:
   - 858
   - 748
   wait_after: 5
@@ -51,7 +51,7 @@ steps:
   loop:
     max: 12
     do:
-    - at:
+    - click:
       - 420
       - 300
       wait_after: 10
@@ -77,7 +77,7 @@ steps:
     until:
       fact: done
 - name: desktop - give the shell focus
-  at:
+  click:
   - 960
   - 700
   wait_after: 2
@@ -91,7 +91,7 @@ steps:
   loop:
     max: 18
     do:
-    - at:
+    - click:
       - 420
       - 300
       wait_after: 5
@@ -116,7 +116,7 @@ steps:
     until:
       fact: done
 - name: open the terminal
-  at:
+  click:
   - 960
   - 160
   wait_after: 20

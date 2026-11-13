@@ -39,7 +39,7 @@ steps:
   key: esc
   wait_after: 2
 - name: click the password field
-  at:
+  click:
   - 965
   - 981
   wait_after: 1
@@ -51,15 +51,15 @@ steps:
   wait_after: 20
 - name: dismiss the overlays macOS puts up on a first login
   do:
-  - at:
+  - click:
     - 1228
     - 826
     wait_after: 4
-  - at:
+  - click:
     - 1228
     - 826
     wait_after: 4
-  - at:
+  - click:
     - 1228
     - 826
     wait_after: 4
@@ -124,7 +124,7 @@ steps:
     until:
       fact: done
 - name: search for remote login
-  at:
+  click:
   - 715
   - 267
   type: remote login
@@ -162,7 +162,7 @@ steps:
     until:
       fact: done
 - name: open the remote login pane
-  at:
+  click:
   - 703
   - 336
   wait_after: 12
@@ -178,7 +178,7 @@ steps:
   - 1200
   - 715
   scale: 2
-  at:
+  click:
   - 703
   - 336
   wait_after: 12
@@ -226,7 +226,7 @@ steps:
   - 1200
   - 715
   scale: 2
-  at:
+  click:
   - 1145
   - 353
   wait_after: 4
@@ -263,7 +263,7 @@ steps:
     until:
       fact: done
 - name: close the pane
-  at:
+  click:
   - 1145
   - 679
   wait_after: 5

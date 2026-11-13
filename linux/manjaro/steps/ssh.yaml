@@ -20,7 +20,7 @@ steps:
   os: linux
   timeout: 900
 - name: greeter - the password box
-  at:
+  click:
   - 936
   - 628
   optional: true
@@ -38,7 +38,7 @@ steps:
   timeout: 900
   poll: 5
 - name: focus the desktop
-  at:
+  click:
   - 960
   - 540
   wait_after: 3

@@ -46,7 +46,7 @@ func TestAConditionBindsABooleanAndABranchReadsIt(t *testing.T) {
 	branch := walk.Step{Index: 2, Name: "close the nag", Spec: map[string]any{
 		"name": "close the nag",
 		"if":   "wizard_up",
-		"then": []any{map[string]any{"at": []any{10, 20}}},
+		"then": []any{map[string]any{"click": []any{10, 20}}},
 		"else": []any{map[string]any{"key": "esc"}},
 	}}
 	if err := ex.doIf(branch); err != nil {

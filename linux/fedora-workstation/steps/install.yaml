@@ -35,7 +35,7 @@ steps:
   loop:
     max: 60
     do:
-    - at:
+    - click:
       - 420
       - 300
       wait_after: 5
@@ -67,11 +67,11 @@ steps:
 - name: install fedora linux
   wait_after: 3
   do:
-  - at:
+  - click:
     - 838
     - 708
     wait_after: 3
-  - at:
+  - click:
     - 838
     - 708
     wait_after: 3
@@ -81,11 +81,11 @@ steps:
   - method
   wait_after: 25
   do:
-  - at:
+  - click:
     - 838
     - 708
     wait_after: 3
-  - at:
+  - click:
     - 838
     - 708
     wait_after: 3
@@ -95,11 +95,11 @@ steps:
   - method
   wait_after: 30
   do:
-  - at:
+  - click:
     - 838
     - 708
     wait_after: 3
-  - at:
+  - click:
     - 838
     - 708
     wait_after: 3
@@ -107,7 +107,7 @@ steps:
   loop:
     max: 30
     do:
-    - at:
+    - click:
       - 420
       - 300
       wait_after: 10
@@ -135,7 +135,7 @@ steps:
     until:
       fact: done
 - name: welcome
-  at:
+  click:
   - 729
   - 1002
   expect_any:
@@ -143,7 +143,7 @@ steps:
     - method
   wait_after: 15
 - name: installation method
-  at:
+  click:
   - 729
   - 1002
   expect_any:
@@ -154,7 +154,7 @@ steps:
     - almacenamiento
   wait_after: 12
 - name: storage configuration
-  at:
+  click:
   - 729
   - 1002
   expect_any:
@@ -166,7 +166,7 @@ steps:
     - instalar
   wait_after: 12
 - name: erase data and install
-  at:
+  click:
   - 780
   - 1002
   wait_after: 20
@@ -177,7 +177,7 @@ steps:
   poll: 20
   keep_alive: true
 - name: exit to the live desktop
-  at:
+  click:
   - 963
   - 364
   wait_after: 10
@@ -215,53 +215,53 @@ steps:
     until:
       fact: done
 - name: language - search for the United States
-  at:
+  click:
   - 960
   - 492
   type: united states
   wait_after: 5
 - name: language - pick English (United States)
-  at:
+  click:
   - 960
   - 550
   wait_after: 6
 - name: language
-  at:
+  click:
   - 1432
   - 181
   wait_after: 10
 - name: typing
-  at:
+  click:
   - 1432
   - 181
   wait_after: 10
 - name: location services off
-  at:
+  click:
   - 1209
   - 485
   wait_after: 2
 - name: automatic problem reporting off
-  at:
+  click:
   - 1209
   - 601
   wait_after: 2
 - name: privacy
-  at:
+  click:
   - 1432
   - 181
   wait_after: 10
 - name: time zone
-  at:
+  click:
   - 1432
   - 181
   wait_after: 12
 - name: third party repositories
-  at:
+  click:
   - 1432
   - 181
   wait_after: 10
 - name: about you - full name
-  at:
+  click:
   - 1000
   - 528
   type: '{{ user }}'
@@ -269,34 +269,34 @@ steps:
   - '{{ user }}'
   wait_after: 2
 - name: about you
-  at:
+  click:
   - 1432
   - 181
   wait_after: 10
 - name: password - password
-  at:
+  click:
   - 960
   - 493
   type: '{{ password }}'
   wait_after: 2
 - name: password - confirm
-  at:
+  click:
   - 960
   - 630
   type: '{{ password }}'
   wait_after: 3
 - name: password
-  at:
+  click:
   - 1432
   - 181
   wait_after: 20
 - name: start using fedora linux
-  at:
+  click:
   - 959
   - 709
   wait_after: 25
 - name: skip the tour
-  at:
+  click:
   - 852
   - 756
   wait_after: 12

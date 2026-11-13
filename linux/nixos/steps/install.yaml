@@ -38,11 +38,11 @@ steps:
   - - install
   wait_after: 8
   do:
-  - at:
+  - click:
     - 960
     - 640
     wait_after: 3
-  - at:
+  - click:
     - 960
     - 640
     wait_after: 3
@@ -52,11 +52,11 @@ steps:
   - language
   wait_after: 8
   do:
-  - at:
+  - click:
     - 88
     - 240
     wait_after: 3
-  - at:
+  - click:
     - 88
     - 240
     wait_after: 3
@@ -66,11 +66,11 @@ steps:
   - language
   wait_after: 25
   do:
-  - at:
+  - click:
     - 88
     - 240
     wait_after: 3
-  - at:
+  - click:
     - 88
     - 240
     wait_after: 3
@@ -78,7 +78,7 @@ steps:
   loop:
     max: 30
     do:
-    - at:
+    - click:
       - 420
       - 300
       wait_after: 10
@@ -120,13 +120,13 @@ steps:
   - 15
   wait_after: 15
 - name: users - what is your name
-  at:
+  click:
   - 700
   - 377
   type: '{{ user }}'
   wait_after: 2
 - name: users - login name, select all
-  at:
+  click:
   - 700
   - 429
   key: ctrl+a
@@ -135,36 +135,36 @@ steps:
   key: backspace
   wait_after: 1
 - name: users - login name
-  at:
+  click:
   - 700
   - 429
   type: '{{ user }}'
   wait_after: 2
 - name: users - allow a short password
-  at:
+  click:
   - 630
   - 532
   wait_after: 3
 - name: users - password
-  at:
+  click:
   - 700
   - 494
   type: '{{ password }}'
   wait_after: 2
 - name: users - repeat password
-  at:
+  click:
   - 900
   - 494
   type: '{{ password }}'
   wait_after: 2
 - name: users - administrator password
-  at:
+  click:
   - 700
   - 603
   type: '{{ password }}'
   wait_after: 2
 - name: users - administrator repeat password
-  at:
+  click:
   - 900
   - 603
   type: '{{ password }}'
@@ -175,7 +175,7 @@ steps:
   - 15
   wait_after: 18
 - name: choose gnome
-  at:
+  click:
   - 1000
   - 400
   wait_after: 4
@@ -190,7 +190,7 @@ steps:
   - 15
   wait_after: 12
 - name: partitions - erase the disk
-  at:
+  click:
   - 633
   - 390
   wait_after: 6

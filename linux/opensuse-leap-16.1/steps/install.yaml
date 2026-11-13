@@ -50,43 +50,43 @@ steps:
   - 34
   wait_after: 45
 - name: welcome
-  at:
+  click:
   - 1596
   - 859
   wait_after: 30
 - name: online repositories - no
-  at:
+  click:
   - 1004
   - 614
   wait_after: 20
 - name: role - desktop with kde plasma
-  at:
+  click:
   - 588
   - 333
   wait_after: 6
 - name: system role
-  at:
+  click:
   - 1596
   - 859
   wait_after: 30
 - name: suggested partitioning
-  at:
+  click:
   - 1596
   - 859
   wait_after: 25
 - name: clock and time zone
-  at:
+  click:
   - 1596
   - 859
   wait_after: 22
 - name: local user - full name
-  at:
+  click:
   - 1106
   - 418
   type: '{{ user }}'
   wait_after: 2
 - name: local user - user name, select all
-  at:
+  click:
   - 1106
   - 483
   wait_after: 2
@@ -100,19 +100,19 @@ steps:
   type: '{{ user }}'
   wait_after: 2
 - name: local user - password
-  at:
+  click:
   - 1106
   - 548
   type: '{{ password }}'
   wait_after: 2
 - name: local user - confirm password
-  at:
+  click:
   - 1106
   - 614
   type: '{{ password }}'
   wait_after: 3
 - name: local user
-  at:
+  click:
   - 1596
   - 859
   wait_after: 18
@@ -120,12 +120,12 @@ steps:
   key: ret
   wait_after: 22
 - name: install
-  at:
+  click:
   - 1587
   - 859
   wait_after: 15
 - name: the confirm installation dialog's install
-  at:
+  click:
   - 922
   - 707
   wait_after: 25

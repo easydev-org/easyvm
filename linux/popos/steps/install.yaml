@@ -45,7 +45,7 @@ steps:
   loop:
     max: 100
     do:
-    - at:
+    - click:
       - 420
       - 300
       wait_after: 3
@@ -107,7 +107,7 @@ steps:
   - 845
   wait_after: 21
 - name: clean install
-  at:
+  click:
   - 1180
   - 456
   wait_after: 8
@@ -119,7 +119,7 @@ steps:
   - 845
   wait_after: 21
 - name: select a drive
-  at:
+  click:
   - 1193
   - 498
   wait_after: 8
@@ -158,7 +158,7 @@ steps:
     until:
       fact: done
 - name: type the display name
-  at:
+  click:
   - 1188
   - 494
   type: VM User
@@ -207,14 +207,14 @@ steps:
   key: esc
   wait_after: 2
 - name: type the password
-  at:
+  click:
   - 1350
   - 447
   type: '{{ password }}'
   type_gap: 0.09
   wait_after: 2
 - name: confirm the password
-  at:
+  click:
   - 1350
   - 543
   type: '{{ password }}'
@@ -228,7 +228,7 @@ steps:
   - 845
   wait_after: 25
 - name: drive encryption - don't encrypt
-  at:
+  click:
   - 1081
   - 808
   wait_after: 35

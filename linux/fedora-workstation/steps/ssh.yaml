@@ -24,13 +24,13 @@ steps:
   optional: true
   wait_after: 5
 - name: greeter - the user tile
-  at:
+  click:
   - 960
   - 488
   optional: true
   wait_after: 4
 - name: greeter - the password box
-  at:
+  click:
   - 936
   - 628
   type: '{{ password }}'
@@ -42,7 +42,7 @@ steps:
   optional: true
   wait_after: 12
 - name: desktop - give the shell focus
-  at:
+  click:
   - 960
   - 700
   wait_after: 2
@@ -53,7 +53,7 @@ steps:
   type: terminal
   wait_after: 4
 - name: open the terminal
-  at:
+  click:
   - 960
   - 178
   wait_after: 20

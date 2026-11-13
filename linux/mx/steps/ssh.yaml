@@ -20,7 +20,7 @@ steps:
   os: linux
   timeout: 900
 - name: greeter - the password box
-  at:
+  click:
   - 259
   - 568
   optional: true

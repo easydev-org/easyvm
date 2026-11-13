@@ -50,88 +50,88 @@ steps:
   - 760
   wait_after: 40
 - name: welcome
-  at:
+  click:
   - 1325
   - 801
   wait_after: 18
 - name: location
-  at:
+  click:
   - 1325
   - 801
   wait_after: 18
 - name: keyboard
-  at:
+  click:
   - 1325
   - 801
   wait_after: 18
 - name: partitions - erase the disk
-  at:
+  click:
   - 653
   - 340
   wait_after: 6
 - name: partitions
-  at:
+  click:
   - 1325
   - 801
   wait_after: 20
 - name: users - full name
-  at:
+  click:
   - 741
   - 320
   type: '{{ user }}'
   wait_after: 2
 - name: users - login name
-  at:
+  click:
   - 741
   - 385
   type: '{{ user }}'
   wait_after: 2
 - name: users - password
-  at:
+  click:
   - 724
   - 523
   type: '{{ password }}'
   wait_after: 2
 - name: users - confirm password
-  at:
+  click:
   - 944
   - 523
   type: '{{ password }}'
   wait_after: 2
 - name: users - root password
-  at:
+  click:
   - 741
   - 650
   type: '{{ password }}'
   wait_after: 2
 - name: users - confirm root password
-  at:
+  click:
   - 944
   - 650
   type: '{{ password }}'
   wait_after: 3
 - name: users
-  at:
+  click:
   - 1325
   - 801
   wait_after: 20
 - name: office suite - no office suite
-  at:
+  click:
   - 700
   - 288
   wait_after: 6
 - name: office suite
-  at:
+  click:
   - 1334
   - 794
   wait_after: 20
 - name: summary - install
-  at:
+  click:
   - 1318
   - 799
   wait_after: 18
 - name: the install confirmation's install now
-  at:
+  click:
   - 1055
   - 537
   wait_after: 30
@@ -139,7 +139,7 @@ steps:
   loop:
     max: 180
     do:
-    - at:
+    - click:
       - 420
       - 300
       wait_after: 20

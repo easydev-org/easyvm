@@ -89,11 +89,11 @@ steps:
   - analytics
   - improve
   do:
-  - at:
+  - click:
     - 808
     - 513
     wait_after: 3
-  - at:
+  - click:
     - 1306
     - 810
     wait_after: 10
@@ -101,7 +101,7 @@ steps:
   when:
   - privacy
   - fundamental
-  at:
+  click:
   - 1306
   - 810
   wait_after: 8
@@ -109,7 +109,7 @@ steps:
   when:
   - spoken
   - languages
-  at:
+  click:
   - 1306
   - 810
   wait_after: 8
@@ -117,7 +117,7 @@ steps:
   when:
   - accessibility
   - individual
-  at:
+  click:
   - 1306
   - 806
   wait_after: 12
@@ -126,11 +126,11 @@ steps:
   - transfer
   - data
   do:
-  - at:
+  - click:
     - 825
     - 669
     wait_after: 4
-  - at:
+  - click:
     - 1306
     - 810
     wait_after: 10
@@ -139,16 +139,16 @@ steps:
   - country
   - region
   do:
-  - at:
+  - click:
     - 900
     - 500
     wait_after: 2
-  - at:
+  - click:
     - 900
     - 500
     type: united states
     wait_after: 3
-  - at:
+  - click:
     - 1306
     - 810
     wait_after: 8
@@ -168,25 +168,25 @@ steps:
   - 1080
   scale: 2
   do:
-  - at:
+  - click:
     - 945
     - 447
     type: '{{ user }}'
     modifier: meta_l
     wait_after: 3
-  - at:
+  - click:
     - 850
     - 531
     type: '{{ password }}'
     modifier: meta_l
     wait_after: 3
-  - at:
+  - click:
     - 1086
     - 531
     type: '{{ password }}'
     modifier: meta_l
     wait_after: 3
-  - at:
+  - click:
     - 1306
     - 810
     wait_after: 180
@@ -195,11 +195,11 @@ steps:
   - approximate
   - location
   do:
-  - at:
+  - click:
     - 1306
     - 810
     wait_after: 6
-  - at:
+  - click:
     - 960
     - 632
     wait_after: 3
@@ -209,7 +209,7 @@ steps:
   when:
   - screen
   - report
-  at:
+  click:
   - 619
   - 806
   wait_after: 8
@@ -217,7 +217,7 @@ steps:
   when:
   - time
   - zone
-  at:
+  click:
   - 1306
   - 806
   wait_after: 10
@@ -225,7 +225,7 @@ steps:
   when:
   - look
   - appearance
-  at:
+  click:
   - 1306
   - 805
   wait_after: 12
@@ -234,11 +234,11 @@ steps:
   - terms
   - conditions
   do:
-  - at:
+  - click:
     - 1298
     - 806
     wait_after: 8
-  - at:
+  - click:
     - 1019
     - 616
     wait_after: 10
@@ -246,7 +246,7 @@ steps:
   when:
   - welcome
   - mac
-  at:
+  click:
   - 960
   - 990
   wait_after: 12
@@ -254,7 +254,7 @@ steps:
   when:
   - keyboard
   - assistant
-  at:
+  click:
   - 1222
   - 818
   wait_after: 12
@@ -276,13 +276,13 @@ steps:
   - 1080
   scale: 2
   do:
-  - at:
+  - click:
     - 620
     - 811
     wait_after: 2
   - key: ret
     wait_after: 3
-  - at:
+  - click:
     - 1026
     - 634
     wait_after: 2
@@ -324,12 +324,12 @@ steps:
   when:
   - update
   - automatically
-  at:
+  click:
   - 1306
   - 810
   wait_after: 15
 - name: click the password field
-  at:
+  click:
   - 965
   - 981
   skip_when_unfinished: true
@@ -344,15 +344,15 @@ steps:
   wait_after: 20
 - name: dismiss the overlays macOS puts up on a first login
   do:
-  - at:
+  - click:
     - 1228
     - 826
     wait_after: 4
-  - at:
+  - click:
     - 1228
     - 826
     wait_after: 4
-  - at:
+  - click:
     - 1228
     - 826
     wait_after: 4

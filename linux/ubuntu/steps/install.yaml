@@ -35,7 +35,7 @@ steps:
   loop:
     max: 120
     do:
-    - at:
+    - click:
       - 420
       - 300
       wait_after: 5
@@ -65,101 +65,101 @@ steps:
     until:
       fact: done
 - name: welcome / language
-  at:
+  click:
   - 1355
   - 848
   wait_after: 12
 - name: accessibility
-  at:
+  click:
   - 1355
   - 848
   wait_after: 12
 - name: keyboard layout
-  at:
+  click:
   - 1355
   - 848
   wait_after: 12
 - name: internet connection
-  at:
+  click:
   - 1355
   - 848
   wait_after: 14
 - name: try or install
-  at:
+  click:
   - 1355
   - 848
   wait_after: 14
 - name: type of installation
-  at:
+  click:
   - 1355
   - 848
   wait_after: 14
 - name: applications
-  at:
+  click:
   - 1355
   - 848
   wait_after: 14
 - name: proprietary software
-  at:
+  click:
   - 1355
   - 848
   wait_after: 14
 - name: disk setup
-  at:
+  click:
   - 1355
   - 848
   wait_after: 20
 - name: encryption
-  at:
+  click:
   - 1355
   - 848
   wait_after: 14
 - name: create your account - full name
-  at:
+  click:
   - 1139
   - 393
   type: '{{ user }}'
   wait_after: 2
 - name: create your account - username
-  at:
+  click:
   - 1139
   - 501
   type: '{{ user }}'
   wait_after: 2
 - name: create your account - password
-  at:
+  click:
   - 1050
   - 563
   type: '{{ password }}'
   wait_after: 2
 - name: create your account - confirm password
-  at:
+  click:
   - 1139
   - 616
   type: '{{ password }}'
   wait_after: 3
 - name: clear 'require my password to log in'
-  at:
+  click:
   - 923
   - 670
   wait_after: 3
 - name: create your account
-  at:
+  click:
   - 1355
   - 848
   wait_after: 12
 - name: time zone - new york on the map
-  at:
+  click:
   - 762
   - 483
   wait_after: 4
 - name: time zone
-  at:
+  click:
   - 1355
   - 848
   wait_after: 14
 - name: ready to install - the green install button
-  at:
+  click:
   - 1355
   - 848
   wait_after: 30
@@ -167,7 +167,7 @@ steps:
   loop:
     max: 270
     do:
-    - at:
+    - click:
       - 420
       - 300
       wait_after: 20

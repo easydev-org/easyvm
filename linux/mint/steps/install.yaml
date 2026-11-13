@@ -43,7 +43,7 @@ steps:
   loop:
     max: 120
     do:
-    - at:
+    - click:
       - 420
       - 300
       wait_after: 5
@@ -84,60 +84,60 @@ steps:
   - - install
   wait_after: 25
 - name: welcome
-  at:
+  click:
   - 1306
   - 727
   wait_after: 12
 - name: keyboard
-  at:
+  click:
   - 1306
   - 727
   wait_after: 12
 - name: multimedia codecs
-  at:
+  click:
   - 1306
   - 727
   wait_after: 12
 - name: installation type
-  at:
+  click:
   - 1306
   - 727
   wait_after: 15
 - name: write the changes to disks
-  at:
+  click:
   - 1266
   - 663
   wait_after: 25
 - name: installation type - install now, after the modal
-  at:
+  click:
   - 1307
   - 726
   wait_after: 30
 - name: where are you
-  at:
+  click:
   - 1306
   - 727
   wait_after: 15
 - name: who are you - full name
-  at:
+  click:
   - 965
   - 347
   type: '{{ display_name }}'
   wait_after: 2
 - name: who are you - password
-  at:
+  click:
   - 877
   - 458
   type: '{{ password }}'
   wait_after: 2
 - name: who are you - confirm password
-  at:
+  click:
   - 877
   - 492
   type: '{{ password }}'
   wait_after: 3
 - name: who are you
-  at:
+  click:
   - 1306
   - 727
   wait_after: 20

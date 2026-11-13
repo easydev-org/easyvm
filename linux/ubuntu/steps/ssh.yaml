@@ -20,7 +20,7 @@ steps:
   os: linux
   timeout: 900
 - name: greeter - the password box
-  at:
+  click:
   - 936
   - 628
   wait_after: 3
@@ -64,7 +64,7 @@ steps:
   loop:
     max: 12
     do:
-    - at:
+    - click:
       - 1464
       - 194
       wait_after: 4

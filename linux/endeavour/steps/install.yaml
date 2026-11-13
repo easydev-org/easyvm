@@ -36,7 +36,7 @@ steps:
   terminal_wait: 10
   wait_after: 8
 - name: close the terminal
-  at:
+  click:
   - 1402
   - 310
   wait_after: 6
@@ -44,7 +44,7 @@ steps:
   loop:
     max: 120
     do:
-    - at:
+    - click:
       - 420
       - 300
       wait_after: 5
@@ -73,12 +73,12 @@ steps:
     until:
       fact: done
 - name: start the installer
-  at:
+  click:
   - 735
   - 425
   wait_after: 20
 - name: offline
-  at:
+  click:
   - 1069
   - 590
   expect_any:
@@ -86,71 +86,71 @@ steps:
   - - location
   wait_after: 55
 - name: welcome
-  at:
+  click:
   - 1406
   - 873
   wait_after: 20
 - name: location
-  at:
+  click:
   - 1406
   - 873
   wait_after: 20
 - name: keyboard
-  at:
+  click:
   - 1406
   - 873
   wait_after: 20
 - name: bootloader
-  at:
+  click:
   - 1406
   - 873
   wait_after: 20
 - name: partitions - erase the disk
-  at:
+  click:
   - 566
   - 258
   wait_after: 8
 - name: partitions
-  at:
+  click:
   - 1406
   - 873
   wait_after: 22
 - name: users - full name
-  at:
+  click:
   - 847
   - 302
   type: '{{ user }}'
   wait_after: 2
 - name: users - login name
-  at:
+  click:
   - 847
   - 356
   type: '{{ user }}'
   wait_after: 2
 - name: users - password
-  at:
+  click:
   - 700
   - 513
   type: '{{ password }}'
   wait_after: 2
 - name: users - confirm password
-  at:
+  click:
   - 982
   - 513
   type: '{{ password }}'
   wait_after: 3
 - name: users
-  at:
+  click:
   - 1406
   - 873
   wait_after: 22
 - name: summary - install
-  at:
+  click:
   - 1406
   - 873
   wait_after: 18
 - name: the install confirmation's install now
-  at:
+  click:
   - 1059
   - 542
   wait_after: 30

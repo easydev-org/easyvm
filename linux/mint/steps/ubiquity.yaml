@@ -27,57 +27,57 @@ steps:
   expect: welcome
   wait_after: 25
 - name: welcome
-  at:
+  click:
   - 1306
   - 727
   wait_after: 12
 - name: keyboard layout
-  at:
+  click:
   - 1306
   - 727
   wait_after: 12
 - name: multimedia codecs
-  at:
+  click:
   - 1306
   - 727
   wait_after: 12
 - name: installation type
-  at:
+  click:
   - 1306
   - 727
   wait_after: 15
 - name: write the changes to disks
-  at:
+  click:
   - 1269
   - 659
   wait_after: 20
 - name: time zone
-  at:
+  click:
   - 1306
   - 727
   wait_after: 15
 - name: full name
-  at:
+  click:
   - 965
   - 347
   type: '{{ user }}'
 - name: host name
-  at:
+  click:
   - 877
   - 375
   type: '{{ user }}'
 - name: password
-  at:
+  click:
   - 877
   - 458
   type: '{{ password }}'
 - name: confirm password
-  at:
+  click:
   - 877
   - 492
   type: '{{ password }}'
 - name: create the account
-  at:
+  click:
   - 1306
   - 727
   wait_after: 20

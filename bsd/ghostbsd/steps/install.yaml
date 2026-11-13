@@ -34,66 +34,66 @@ steps:
   double: true
   wait_after: 25
 - name: welcome
-  at:
+  click:
   - 1293
   - 781
   wait_after: 12
 - name: keyboard setup
-  at:
+  click:
   - 1293
   - 781
   wait_after: 12
 - name: time zone selection
-  at:
+  click:
   - 1293
   - 781
   wait_after: 12
 - name: installation type
-  at:
+  click:
   - 1293
   - 781
   wait_after: 14
 - name: zfs configuration - tick the disk
-  at:
+  click:
   - 592
   - 495
   wait_after: 5
 - name: zfs configuration
-  at:
+  click:
   - 1293
   - 781
   wait_after: 14
 - name: boot option
-  at:
+  click:
   - 1293
   - 781
   wait_after: 14
 - name: user admin - real name
-  at:
+  click:
   - 959
   - 457
   type: '{{ user }}'
   wait_after: 2
 - name: user admin - user name
-  at:
+  click:
   - 959
   - 503
   type: '{{ user }}'
   wait_after: 2
 - name: user admin - password
-  at:
+  click:
   - 959
   - 595
   type: '{{ password }}'
   wait_after: 2
 - name: user admin - verify password
-  at:
+  click:
   - 959
   - 643
   type: '{{ password }}'
   wait_after: 3
 - name: user admin - install
-  at:
+  click:
   - 1293
   - 781
   wait_after: 25

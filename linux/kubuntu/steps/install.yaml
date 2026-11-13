@@ -35,7 +35,7 @@ steps:
   loop:
     max: 120
     do:
-    - at:
+    - click:
       - 420
       - 300
       wait_after: 5
@@ -69,11 +69,11 @@ steps:
 - name: install kubuntu on the live desktop
   wait_after: 25
   do:
-  - at:
+  - click:
     - 1326
     - 841
     wait_after: 0.8
-  - at:
+  - click:
     - 1326
     - 841
     wait_after: 0.8
@@ -81,11 +81,11 @@ steps:
   repeat_until:
     attempts: 3
     actions:
-    - at:
+    - click:
       - 1757
       - 1058
       wait_after: 12
-    - at:
+    - click:
       - 1757
       - 1058
       wait_after: 12
@@ -98,11 +98,11 @@ steps:
   repeat_until:
     attempts: 3
     actions:
-    - at:
+    - click:
       - 1757
       - 1058
       wait_after: 12
-    - at:
+    - click:
       - 1757
       - 1058
       wait_after: 12
@@ -115,11 +115,11 @@ steps:
   repeat_until:
     attempts: 3
     actions:
-    - at:
+    - click:
       - 1757
       - 1058
       wait_after: 12
-    - at:
+    - click:
       - 1757
       - 1058
       wait_after: 12
@@ -132,11 +132,11 @@ steps:
   repeat_until:
     attempts: 3
     actions:
-    - at:
+    - click:
       - 1757
       - 1058
       wait_after: 12
-    - at:
+    - click:
       - 1757
       - 1058
       wait_after: 12
@@ -146,7 +146,7 @@ steps:
     - changed: true
     wait_after: 12
 - name: partitions - erase the disk
-  at:
+  click:
   - 208
   - 73
   wait_after: 4
@@ -154,11 +154,11 @@ steps:
   repeat_until:
     attempts: 3
     actions:
-    - at:
+    - click:
       - 1757
       - 1058
       wait_after: 15
-    - at:
+    - click:
       - 1757
       - 1058
       wait_after: 15
@@ -168,31 +168,31 @@ steps:
     - changed: true
     wait_after: 15
 - name: users - full name
-  at:
+  click:
   - 296
   - 52
   type: '{{ user }}'
   wait_after: 2
 - name: users - login name
-  at:
+  click:
   - 296
   - 120
   type: '{{ user }}'
   wait_after: 2
 - name: users - password
-  at:
+  click:
   - 296
   - 254
   type: '{{ password }}'
   wait_after: 2
 - name: users - confirm password
-  at:
+  click:
   - 500
   - 254
   type: '{{ password }}'
   wait_after: 3
 - name: log in automatically
-  at:
+  click:
   - 203
   - 297
   wait_after: 3
@@ -200,11 +200,11 @@ steps:
   repeat_until:
     attempts: 3
     actions:
-    - at:
+    - click:
       - 1757
       - 1058
       wait_after: 15
-    - at:
+    - click:
       - 1757
       - 1058
       wait_after: 15
@@ -214,12 +214,12 @@ steps:
     - changed: true
     wait_after: 15
 - name: summary - install
-  at:
+  click:
   - 1757
   - 1058
   wait_after: 12
 - name: the confirmation dialog's install now
-  at:
+  click:
   - 1058
   - 535
   wait_after: 25

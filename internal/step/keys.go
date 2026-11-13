@@ -195,11 +195,25 @@ var Keys = map[string]Key{
 		Summary: "with disk_settle: only start waiting once it holds this many allocated MiB"},
 
 	// --- the screen: act ---------------------------------------------------------------
-	"at": {Name: "at", Kind: KindPair,
+	// `click:` IS WHAT `at:` ALWAYS MEANT, AND THE OLD NAME WAS A PREPOSITION.
+	//
+	// A step that says `at: [1331, 785]` reads as "at this coordinate" and leaves the verb to be
+	// inferred from the key next to it. It is a CLICK - one press at one pixel - and beside `double:`
+	// the pair now says what they do:
+	//
+	//	- name: welcome
+	//	  click: [1331, 785]      one press
+	//	- name: open the pane
+	//	  double: [960, 540]      two presses, with the gap that makes them a double-click
+	//
+	// NO COMPATIBILITY ENTRY FOR `at:`. The rule in this repository is that a name is renamed in the
+	// same commit as its files, and a table of old spellings is a second vocabulary that drifts from
+	// the first - the same argument that deleted the `python:` entries.
+	"click": {Name: "click", Kind: KindPair,
 		Summary: "click this [x, y]. Fixed coordinates, never OCR - a button's position is a " +
 			"measured fact about a screen, and a search for it is a guess that moves"},
 	"double": {Name: "double", Kind: KindPair,
-		Summary: "double-click [x, y]; separate from `at` because the gap between the two " +
+		Summary: "double-click [x, y]; separate from `click` because the gap between the two " +
 			"clicks is what makes it a double-click"},
 	"at_button": {Name: "at_button", Kind: KindRect,
 		Summary: "[x0, y0, x1, y1] - click the centre of the coloured fill inside this region. " +
