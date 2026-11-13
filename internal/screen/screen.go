@@ -14,12 +14,22 @@ import (
 	"math"
 	"os"
 
-	// THE DECODER IS REGISTERED, NOT CALLED. github.com/kovidgoyal/imaging/netpbm's init() does
-	// `image.RegisterFormat("ppm", "P6", ...)`, so a frame qemu wrote is read by the STANDARD
-	// library - the same call that would read a PNG a recording produced. That is the whole reason
-	// this import is blank: there is nothing here to call, and a caller that had to name the
-	// decoder would have to change when the frame format did.
-	_ "github.com/kovidgoyal/imaging/netpbm"
+	// PNG IS THE ONLY FRAME FORMAT, AND THIS IMPORT IS THE WHOLE OF THAT.
+	//
+	// IT WAS MISSING ONCE, AND THE CONSEQUENCE WAS SILENT AND TOTAL. Frames moved from PPM to PNG
+	// (6.2 MB per 1920x1080 frame became 8 KB), the PPM decoder was still registered and PNG was not,
+	// so EVERY `screen.Load` CALL FAILED WITH
+	//
+	//	image: unknown format (is the write still in progress? format "")
+	//
+	// - a message that blames a half-written file and sends a reader looking at timing. MEASURED ON
+	// windows: the desktop was fully drawn, `vmuser` signed in, and `wait for the desktop` sat on
+	// `desktop: windows` for an hour because `IsWindowsDesktop` was never handed an image.
+	//
+	// THE PPM DECODER THAT USED TO SIT HERE IS GONE: `Screendump` writes PNG and has no fallback, because
+	// this image pins qemu (see `qmp.PinnedQEMU`). One format in, one decoder registered, and a frame
+	// that does not decode is a broken frame rather than a format this build forgot to register.
+	_ "image/png"
 )
 
 // The Windows test: a bright top band over a dark, varied bottom band.

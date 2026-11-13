@@ -1,7 +1,10 @@
 package qmp
 
 import (
-	"fmt"
+	"bytes"
+	"image"
+	"image/color"
+	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
@@ -437,7 +440,12 @@ func TestScreendumpHoldsTheWireForTheWholeConversation(t *testing.T) {
 	}
 	lines := strings.Join(code, "\n")
 	iLock := strings.Index(lines, "c.wire.Lock()")
-	iDump := strings.Index(lines, "raw.Screendump")
+	// THE DUMP GOES THROUGH `c.mon.Run` NOW, because PNG needs a `format:` argument the library's
+	// `raw.Screendump` does not pass - so the call to serialise is that one.
+	iDump := strings.Index(lines, "c.mon.Run(cmd)")
+	if iDump < 0 {
+		iDump = strings.Index(lines, "raw.Screendump")
+	}
 	if iLock < 0 || iDump < 0 || iLock > iDump {
 		t.Errorf("`wire` is not taken before the screendump call (lock at %d, dump at %d), so it "+
 			"does not serialise it", iLock, iDump)
@@ -450,62 +458,62 @@ func TestScreendumpHoldsTheWireForTheWholeConversation(t *testing.T) {
 	}
 }
 
-// A FRAME IS FINISHED WHEN ITS HEADER SAYS IT IS, NOT WHEN ITS SIZE STOPS MOVING.
+// A FRAME IS FINISHED WHEN IT DECODES, AND A PNG DECODES ONLY AT ITS IEND CHUNK.
 //
-// MEASURED ON macos-setup, ON EVERY POLL OF A THIRTY-MINUTE GATE:
+// MEASURED ON windows, AND THE FAILURE WAS SILENT: every frame was written as PNG and `screen.Load`
+// only had the PPM decoder registered, so `IsWindowsDesktop` was never handed an image -
 //
-//	165 of 178 poll(s) read no frame at all: frame-001972.ppm: unexpected EOF
-//	                                        (is the write still in progress? format "ppm")
+//	image: unknown format (is the write still in progress? format "")
 //
-// A 640x480 frame is 921 KB and a gap between qemu's write chunks rarely lands badly. A 1920x1080
-// frame is 6.2 MB, and the old check - "the size did not change for forty milliseconds" - read a
-// half-written image whenever a chunk boundary fell inside that window. The recorded video looked
-// perfect the whole time, because it is built from the frames that did decode.
+// - and `wait for the desktop` sat on a desktop that was fully drawn.
 //
-// THIS TEST WRITES A REAL 1920x1080 PPM IN TWO CHUNKS WITH A 100 ms GAP, which is far longer than the
-// old stability window. The old code accepted the file after the first chunk; the new one waits for
-// the header's own arithmetic.
-func TestAFrameIsCompleteWhenItsHeaderSaysSo(t *testing.T) {
+// THE ORDER IS: two polls must see the same size (a write that is still growing is not worth reading),
+// and THEN the file must decode. A PNG that is half-written fails `image.Decode` because the reader
+// reaches EOF before IEND, which is exactly the property this test asserts.
+func TestAFrameIsCompleteWhenItDecodes(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "frame-000001.ppm")
+	path := filepath.Join(dir, "frame-000001.png")
 
-	const w, h = 1920, 1080
-	header := fmt.Sprintf("P6\n%d %d\n255\n", w, h)
-	pixels := make([]byte, w*h*3)
-	for i := range pixels {
-		pixels[i] = byte(i)
+	// A COMPLETE 1920x1080 PNG, ENCODED BY THE STANDARD LIBRARY so the bytes are real.
+	img := image.NewRGBA(image.Rect(0, 0, 1920, 1080))
+	for y := 0; y < 1080; y += 8 {
+		for x := 0; x < 1920; x += 8 {
+			img.Set(x, y, color.RGBA{uint8(x % 255), uint8(y % 255), 64, 255})
+		}
 	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatal(err)
+	}
+	full := buf.Bytes()
 
-	// THE FIRST CHUNK IS THE HEADER AND PART OF THE PIXELS - a state the old check called "stable".
-	half := len(pixels) / 2
-	if err := os.WriteFile(path, append([]byte(header), pixels[:half]...), 0o644); err != nil {
+	// THE FIRST CHUNK IS MOST OF THE FILE, cut in the middle of the pixel data.
+	half := len(full) * 2 / 3
+	if err := os.WriteFile(path, full[:half], 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	done := make(chan error, 1)
 	go func() { done <- waitForStable(path, 5*time.Second) }()
 
-	// THE GAP THAT USED TO BE MISTAKEN FOR THE END OF THE WRITE.
-	time.Sleep(100 * time.Millisecond)
-
-	// A READER THAT IS RELEASED HERE WOULD SEE A TRUNCATED FILE. It must not be released yet.
+	// THE GAP IN WHICH THE OLD CODE WOULD HAVE RELEASED THE READER.
+	time.Sleep(300 * time.Millisecond)
 	select {
 	case err := <-done:
-		t.Fatalf("waitForStable returned after only half the pixels were written (err=%v); a "+
-			"reader released here decodes a truncated image, which is the `unexpected EOF` that "+
-			"made 165 of 178 polls of macos-setup's recovery-menu gate read nothing", err)
+		t.Fatalf("waitForStable released a reader on a TRUNCATED png (err=%v); a caller handed that "+
+			"file cannot decode it, which is what made `wait for the desktop` read nothing", err)
 	default:
 	}
 
-	if err := os.WriteFile(path, append([]byte(header), pixels...), 0o644); err != nil {
+	if err := os.WriteFile(path, full, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	select {
 	case err := <-done:
 		if err != nil {
-			t.Fatalf("waitForStable did not accept the finished frame: %v", err)
+			t.Fatalf("waitForStable did not accept a complete 1920x1080 png: %v", err)
 		}
 	case <-time.After(4 * time.Second):
-		t.Fatal("waitForStable never accepted a complete 1920x1080 frame")
+		t.Fatal("waitForStable never accepted a complete frame")
 	}
 }

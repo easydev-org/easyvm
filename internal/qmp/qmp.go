@@ -34,15 +34,9 @@ import (
 	"sync"
 	"time"
 
-	// TWO BLANK IMPORTS, BECAUSE TWO FORMATS ARE DECODED HERE.
-	//
-	// `netpbm` is the P6 PPM this package used to write, and it is still the fallback for a qemu that
-	// refuses `format: png`. `image/png` is what every frame is now. `image.Decode` dispatches on the
-	// file's own magic bytes, so registering both costs nothing and keeps "is this frame complete"
-	// answered by the same decoder that a caller uses.
+	// ONE FORMAT, ONE DECODER. Frames are PNG - `screendump` writes nothing else here - so the PPM
+	// decoder that used to be registered beside this one is gone with the PPM fallback.
 	_ "image/png"
-
-	_ "github.com/kovidgoyal/imaging/netpbm"
 
 	qemump "github.com/digitalocean/go-qemu/qmp"
 	"github.com/digitalocean/go-qemu/qmp/raw"
@@ -172,14 +166,23 @@ func (c *Conn) Screendump(dir string) (Frame, error) {
 		return Frame{}, err
 	}
 	if _, err := c.mon.Run(cmd); err != nil {
-		// A QEMU THAT DOES NOT KNOW `format` IS NOT A REASON TO LOSE THE FRAME, so the PPM path is
-		// still here as the fallback - and it says so, because a silent fallback would hide the
-		// version this build is running against.
-		ppm := filepath.Join(dir, fmt.Sprintf("frame-%06d.ppm", n))
-		if err2 := c.raw.Screendump(ppm); err2 != nil {
-			return Frame{}, fmt.Errorf("screendump: png refused (%v) and ppm failed: %w", err, err2)
-		}
-		path = ppm
+		// NO PPM FALLBACK, AND ITS ABSENCE IS THE POINT.
+		//
+		// `format: png` HAS BEEN IN `screendump` SINCE QEMU 9.0, and this image pins the emulator:
+		//
+		//	Containerfile: ARG VERSION_QEMU="1:11.1.0+ds-2"
+		//
+		// so a refusal here is not "an older qemu" - it is a broken build or a wrong argument, and
+		// falling back would hide it while writing the 6.2 MB-per-frame format whose size and the
+		// read/write races it caused are exactly what moving to PNG fixed:
+		//
+		//	screendump: frame-000294.ppm was not readable within 30s: unexpected EOF
+		//
+		// A FALLBACK THAT CAN NEVER BE TAKEN IS NOT DEFENSIVE, IT IS A SECOND FORMAT TO MAINTAIN and a
+		// silent downgrade of the one property this package was changed to get.
+		return Frame{}, fmt.Errorf("screendump with `format: png` was refused: %w. This image pins "+
+			"qemu %s, which supports it - a refusal means the build or the arguments are wrong",
+			err, PinnedQEMU)
 	}
 	// THIRTY SECONDS, NOT FIVE, AND THE FIVE WAS MEASURED WRONG ON A LOADED GUEST.
 	//
@@ -299,24 +302,21 @@ func waitForStable(path string, limit time.Duration) error {
 		//
 		// EITHER WAY THE LAST CHECK IS A DECODE, because a file of the right length can still be
 		// corrupt and a caller handed a path it cannot read has been told a lie.
-		need, _, ok := ppmExpectedSize(path)
-		if ok {
-			if fi.Size() < need {
-				lastSize, stable = fi.Size(), 0
-				time.Sleep(50 * time.Millisecond)
-				continue
-			}
-		} else {
-			if fi.Size() != lastSize {
-				lastSize, stable = fi.Size(), 0
-				time.Sleep(50 * time.Millisecond)
-				continue
-			}
-			stable++
-			if stable < 2 {
-				time.Sleep(50 * time.Millisecond)
-				continue
-			}
+		// A PNG'S FINAL SIZE IS NOT PREDICTABLE FROM ITS HEADER, so the test is "the size stopped
+		// growing" - two polls at the same length - and then a decode, which reads to the IEND chunk
+		// and is therefore a real verdict rather than a guess.
+		//
+		// THE PPM BRANCH THAT USED TO SIT HERE IS GONE with the format: a P6's length IS arithmetic
+		// from its header (header + w*h*3), which is why this function had two paths at all.
+		if fi.Size() != lastSize {
+			lastSize, stable = fi.Size(), 0
+			time.Sleep(50 * time.Millisecond)
+			continue
+		}
+		stable++
+		if stable < 2 {
+			time.Sleep(50 * time.Millisecond)
+			continue
 		}
 
 		fh, err := os.Open(path)
@@ -325,15 +325,26 @@ func waitForStable(path string, limit time.Duration) error {
 			time.Sleep(50 * time.Millisecond)
 			continue
 		}
-		_, _, decErr := image.Decode(fh) // registered: png and netpbm, see the blank imports
+		_, _, decErr := image.Decode(fh) // registered: image/png, see the blank import
 		_ = fh.Close()
 		if decErr == nil {
 			return nil
 		}
-		// A STABLE FILE THAT WILL NOT DECODE IS NOT A RACE, so there is nothing left to wait for.
-		// The size is in the message because "unexpected EOF" on a complete file is what sent three
-		// runs looking at the wrong thing.
-		return fmt.Errorf("screendump: %s is %d bytes and does not decode: %w", path, fi.Size(), decErr)
+		// A FILE THAT DOES NOT DECODE IS NOT NECESSARILY A BROKEN FILE - IT IS USUALLY ONE STILL BEING
+		// WRITTEN, and "the size stopped growing for 100 ms" is a guess about a writer that may simply
+		// have been descheduled.
+		//
+		// MEASURED, AND IT IS WHY THIS LOOP EXISTS AT ALL: released on a truncated PNG, the caller gets
+		// `png: invalid format: not enough pixel data` - a real error about a real truncation, at a
+		// moment when another chunk was on its way.
+		//
+		// SO THE ATTEMPT IS COUNTED AND THE WAIT CONTINUES TO THE DEADLINE, which is the caller's own
+		// budget. Only when that budget is spent is the last decode error reported, with the size, so a
+		// genuinely corrupt frame still says what was wrong.
+		lastErr = decErr
+		stable = 0
+		time.Sleep(50 * time.Millisecond)
+		continue
 	}
 
 	if lastSize < 0 {
@@ -369,45 +380,6 @@ func frameSize(path string) (int, int, error) {
 		return 0, 0, fmt.Errorf("%s: decoded to %dx%d", path, cfg.Width, cfg.Height)
 	}
 	return cfg.Width, cfg.Height, nil
-}
-
-// ppmExpectedSize is the byte count a complete PPM will have, read from its own header.
-//
-// IT IS PARSED FROM THE FILE RATHER THAN FROM THE SCREEN SIZE because the two are not the same
-// question: a guest that switches mode mid-write produces a frame of the OLD size, and a caller that
-// assumed the new one would wait for bytes that are never coming.
-func ppmExpectedSize(path string) (need int64, headerLen int, ok bool) {
-	fh, err := os.Open(path)
-	if err != nil {
-		return 0, 0, false
-	}
-	defer fh.Close()
-	// A PPM header is `P6\n<w> <h>\n<max>\n`, which is under 32 bytes for any screen this drives.
-	head := make([]byte, 64)
-	n, _ := fh.Read(head)
-	if n == 0 {
-		return 0, 0, false
-	}
-	data := head[:n]
-	if !strings.HasPrefix(string(data), "P6") {
-		return 0, 0, false
-	}
-	hl := ppmHeaderLen(data)
-	if hl == 0 {
-		return 0, 0, false
-	}
-	fields := strings.Fields(string(data[:hl]))
-	if len(fields) < 3 {
-		return 0, 0, false
-	}
-	var w, h int
-	if _, err := fmt.Sscanf(fields[1]+" "+fields[2], "%d %d", &w, &h); err != nil {
-		return 0, 0, false
-	}
-	if w <= 0 || h <= 0 {
-		return 0, 0, false
-	}
-	return int64(hl) + int64(w)*int64(h)*3, hl, true
 }
 
 // ppmSize reads the width and height from a binary PPM's header.
@@ -656,6 +628,13 @@ func (c *Conn) DoubleClick(x, y int) error {
 	}
 	return c.button(raw.InputButtonLeft, false)
 }
+
+// PinnedQEMU is the emulator version this image installs, and it is why there is no PPM fallback.
+//
+// THE VALUE COMES FROM `Containerfile`'s `VERSION_QEMU`, and it is repeated here because the code that
+// DEPENDS on the capability has to name the version it assumes. `format: png` has been in `screendump`
+// since 9.0; this pin is 11.1.
+const PinnedQEMU = "11.1.0"
 
 // AxisMax is the range QEMU's absolute pointer axes use.
 //

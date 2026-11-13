@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
@@ -147,19 +148,23 @@ func TestNonPPMIsRefused(t *testing.T) {
 // still be measured correctly, which is why the Android frame above is 1280x800 and still parses.
 func TestDimensionsComeFromTheHeader(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "odd.ppm")
+	// PNG, because that is the only frame format `Screendump` writes now - the PPM decoder this test
+	// used to exercise is gone with the format.
+	path := filepath.Join(dir, "odd.png")
 	w, h := 1280, 800
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
 	var buf bytes.Buffer
-	fmt.Fprintf(&buf, "P6\n%d %d\n255\n", w, h)
-	buf.Write(make([]byte, w*h*3))
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	img, err := Load(path)
+	loaded, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b := img.Bounds()
+	b := loaded.Bounds()
 	if b.Dx() != w || b.Dy() != h {
 		t.Fatalf("read %dx%d, want %dx%d", b.Dx(), b.Dy(), w, h)
 	}

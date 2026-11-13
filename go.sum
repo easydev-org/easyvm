@@ -5,13 +5,7 @@ github.com/digitalocean/go-libvirt v0.0.0-20220804181439-8648fbde413e h1:SCnqm8S
 github.com/digitalocean/go-libvirt v0.0.0-20220804181439-8648fbde413e/go.mod h1:o129ljs6alsIQTc8d6eweihqpmmrbxZ2g1jhgjhPykI=
 github.com/digitalocean/go-qemu v0.0.0-20250212194115-ee9b0668d242 h1:rh6rt8pF5U4iyQ86h6lRDenJoX4ht2wFnZXB9ogIrIM=
 github.com/digitalocean/go-qemu v0.0.0-20250212194115-ee9b0668d242/go.mod h1:LGHUtlhsY4vRGM6AHejEQKVI5e3eHbSylMHwTSpQtVw=
-github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=
-github.com/google/go-cmp v0.7.0/go.mod h1:pXiqmnSA92OHEEa9HXL2W4E7lf9JzCmGVUdgjX3N/iU=
 github.com/jessevdk/go-flags v1.4.0/go.mod h1:4FA24M0QyGHXBuZZK/XkWh8h0e1EYbRYJSGM75WSRxI=
-github.com/kovidgoyal/go-parallel v1.1.1 h1:1OzpNjtrUkBPq3UaqrnvOoB2F9RttSt811uiUXyI7ok=
-github.com/kovidgoyal/go-parallel v1.1.1/go.mod h1:BJNIbe6+hxyFWv7n6oEDPj3PA5qSw5OCtf0hcVxWJiw=
-github.com/kovidgoyal/imaging v1.9.0 h1:TxHvhClPANvDW7eLm7PYDTZU1KE15xbqlFv95DA6DmY=
-github.com/kovidgoyal/imaging v1.9.0/go.mod h1:t2vWMc3uISm/jMP87nBCcZUcAK6EDUdgumwaXSuz0Jc=
 github.com/kr/fs v0.1.0 h1:Jskdu9ieNAYnjxsi0LbQp1ulIKZV1LAFgK1tWhpZgl8=
 github.com/kr/fs v0.1.0/go.mod h1:FFnZGqtBN9Gxj7eW1uZ42v5BccTP0vu6NEaFoC2HwRg=
 github.com/pkg/sftp v1.13.12 h1:Myhzy/ZzLPnCtE2F2WtDHsgs8RfgMnH2gfbHuCJhkMU=
