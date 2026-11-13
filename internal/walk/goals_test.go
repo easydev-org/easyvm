@@ -1890,3 +1890,57 @@ func TestGhostBSDSetsTheLoaderVariableThatMakesClicksWork(t *testing.T) {
 			"boot entry - so the guard is not a formality")
 	}
 }
+
+// THE MACOS RECOVERY GATE MUST NOT REQUIRE THE ONE ROW THAT NEVER READS.
+//
+// THE RECOVERY SYSTEM DRAWS AT 640x480 - OpenCore's GOP leaves the guest in that mode before macOS
+// loads a display driver - so `Disk Utility` is EIGHT PIXELS TALL. MEASURED ON THE REAL FRAME AT
+// SEVERAL MAGNIFICATIONS:
+//
+//	scale 2   restore, time machine
+//	scale 3   restore, safari
+//	scale 4   restore
+//	scale 6   restore, time machine, reinstall, safari
+//	scale 8   restore, time machine, safari
+//
+// `disk utility` DOES NOT READ AT 2x, 3x, 4x, 6x, 8x, 10x OR 12x. A gate whose `until:` is
+// `[disk, utility]` therefore waits out its whole budget on a menu that is plainly on screen, which
+// is what it did for thirty minutes on every attempt.
+//
+// THIS IS THE PYTHON IMPLEMENTATION'S OWN RULE, and its comment states the reason: the menu is a
+// list of four labelled rows and TWO is enough - one row can be cut off by a redraw.
+func TestTheMacOSRecoveryGateAcceptsReadableRows(t *testing.T) {
+	path := filepath.Join("..", "..", "macos", "15", "steps", "setup.yaml")
+	doc, err := Load(path, nil)
+	if err != nil {
+		t.Fatalf("%s: %v", path, err)
+	}
+	var gate *Step
+	for i := range doc.Steps {
+		if doc.Steps[i].Name == "wait for the recovery menu" {
+			gate = &doc.Steps[i]
+			break
+		}
+	}
+	if gate == nil {
+		t.Fatal("no `wait for the recovery menu` step")
+	}
+	if gate.Has("until") {
+		t.Fatal("the recovery gate uses `until:`, which is one word-set with AND meaning. Requiring " +
+			"`disk utility` is requiring the one row that reads at no magnification - measured at " +
+			"2x, 3x, 4x, 6x, 8x, 10x and 12x on the real frame")
+	}
+	sets, _ := gate.Spec["until_any"].([]any)
+	if len(sets) < 3 {
+		t.Errorf("the recovery gate accepts %d row(s). The menu has four labelled rows and the "+
+			"Python implementation needs TWO hits because one can be cut off by a redraw; with "+
+			"fewer than three alternatives a single bad read fails the step", len(sets))
+	}
+	// AND IT IS ENLARGED FOR THE SIZE THE GUEST REALLY DRAWS AT.
+	scale, _ := gate.Float("scale", 3)
+	if scale < 6 {
+		t.Errorf("the recovery gate crops at scale %.0f. Measured on the real 640x480 frame: at "+
+			"scale 6 four rows read, at scale 2 only two - and the two that read at 2 are `restore` "+
+			"and `time machine`", scale)
+	}
+}

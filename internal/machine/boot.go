@@ -511,26 +511,24 @@ func (b Boot) ExtraArgs() []string {
 		"-global", "ICH9-LPC.acpi-pci-hotplug-with-bridge-support=off",
 		"-rtc", "base=utc",
 		"-smbios", "type=2",
-		// `vgamem_mb=256` IS NOT TUNING, IT IS THE RESOLUTION. Bare `vmware-svga` is given the
-		// adapter's default memory, and macOS then draws the RECOVERY SYSTEM at 640x480 no
-		// matter what OpenCore's `UEFI/Output/Resolution` says - measured on macos-setup, whose
-		// every poll for thirty minutes logged
+		// BARE `vmware-svga`, NOT `vmware-svga,vgamem_mb=256`, AND THE MEASUREMENT IS THE REASON.
 		//
-		//	wait for the recovery menu: the framebuffer is 640x480 and this region was
-		//	measured at 1920x1080; reading the same place scaled to [253, 88, 466, 248]
-		//	wait for the recovery menu: 2 word(s): Ul ag
+		// The Python implementation sets `vgamem_mb=256` for an INSTALLED macOS, which has
+		// VMwareGfx loaded and can use the memory. THE RECOVERY SYSTEM HAS NO SUCH DRIVER, and
+		// asking for 256 MB made its framebuffer far WORSE rather than better - two runs on
+		// adjacent commits, same walkthrough, same machine:
 		//
-		// AT 640x480 `Disk Utility` IS EIGHT PIXELS TALL and tesseract cannot resolve it - the
-		// gate read `Ul ag` - while EVERY COORDINATE in macos/15/steps is a 1920x1080 position,
-		// so `at: [837, 514]` would have been clamped by `toAxis` and landed somewhere else
-		// entirely. The video is not evidence against this: it is normalised to 1920x1080, so
-		// the extracted frame reads cleanly while the guest was never drawing that size.
+		//	22eeda3   bare vmware-svga         1803 frames captured,   3 lost
+		//	5ba0c18   vgamem_mb=256              92 frames captured, 264 lost
 		//
-		// THE PYTHON IMPLEMENTATION SETS IT: `vmware-svga,vgamem_mb=256` in
-		// macos/15/machine.py, with the note "On the same disk it reports 1920x1080 - the
-		// resolution the coordinate tables need". The port dropped the argument and kept the
-		// comment about the wallpaper, which is why six runs read a screen nobody could click.
-		"-device", "vmware-svga,vgamem_mb=256",
+		// 264 LOST TICKS IS THREE QUARTERS OF THE RECORDING, and the 92 that survived are BLACK at
+		// mean luminance 0.6 - the recovery system never drew anything. The `Ul ag` that the gate
+		// reported for thirty minutes is OCR reading noise, not a menu.
+		//
+		// SO THE 640x480 IS NOT A MEMORY PROBLEM AND THIS ARGUMENT DOES NOT FIX IT. The gate reads
+		// 640x480 because that is the mode OpenCore's GOP leaves the guest in before macOS loads a
+		// display driver; the fix has to be in where the walkthrough reads, not in the adapter.
+		"-device", "vmware-svga",
 	}
 }
 

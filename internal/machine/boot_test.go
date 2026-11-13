@@ -735,36 +735,38 @@ func TestAtMostOneMediumIsOnTheIDEBus(t *testing.T) {
 	}
 }
 
-// THE MACOS ADAPTER NEEDS ITS FRAMEBUFFER MEMORY, OR THE GUEST DRAWS AT 640x480.
+// THE MACOS ADAPTER IS BARE `vmware-svga`, AND ASKING FOR 256 MB OF FRAMEBUFFER BROKE THE GUEST.
 //
-// MEASURED ON macos-setup, EVERY POLL FOR THIRTY MINUTES:
+// THE MEASUREMENT IS TWO RUNS ON ADJACENT COMMITS, SAME WALKTHROUGH, SAME MACHINE:
 //
-//	wait for the recovery menu: the framebuffer is 640x480 and this region was measured at
-//	                            1920x1080; reading the same place scaled to [253, 88, 466, 248]
-//	wait for the recovery menu: 2 word(s): Ul ag
+//	22eeda3   bare vmware-svga        1803 frames captured,   3 lost to a failed screendump
+//	5ba0c18   vgamem_mb=256             92 frames captured, 264 lost to a failed screendump
 //
-// `Disk Utility` AT 640x480 IS EIGHT PIXELS TALL. tesseract answers `Ul ag` - the icon and the two
-// letters it can resolve - and the gate expired having never read the menu it was looking at. Worse,
-// EVERY COORDINATE in macos/15/steps is a 1920x1080 position, so `at: [837, 514]` would be clamped
-// by `toAxis` and land somewhere else entirely on the 640-wide screen.
+// THREE QUARTERS OF THE RECORDING WENT MISSING, and the 92 frames that survived are BLACK at mean
+// luminance 0.6. The recovery system never drew anything, so `wait for the recovery menu` read
+// `Ul ag` - OCR finding letters in noise - for its whole thirty-minute budget.
 //
-// THE PYTHON IMPLEMENTATION SETS `vgamem_mb=256` and its own note says why: "On the same disk it
-// reports 1920x1080 - the resolution the coordinate tables need". The port kept the wallpaper
-// comment and dropped the argument, so the adapter fell back to its default memory.
+// THE PYTHON IMPLEMENTATION DOES SET `vgamem_mb=256`, WHICH IS WHY THIS LOOKED RIGHT, AND THE
+// DIFFERENCE IS WHICH SYSTEM IS RUNNING: an INSTALLED macOS has VMwareGfx loaded and can use the
+// memory. THE RECOVERY SYSTEM HAS NO SUCH DRIVER, so the request does not help it and instead
+// disturbs whatever mode the firmware had established.
 //
-// THE RECORDING IS NOT EVIDENCE AGAINST THIS: it is normalised to 1920x1080, so the extracted frame
-// reads cleanly while the guest was never drawing at that size. That discrepancy is what made this
-// look like an OCR problem in `readScreen` for a session.
-func TestTheMacOSAdapterHasEnoughFramebufferForFHD(t *testing.T) {
+// THE 640x480 IS NOT A MEMORY PROBLEM. OpenCore's GOP leaves the guest at that mode before macOS
+// loads a display driver, and no adapter argument changes when that happens.
+func TestTheMacOSAdapterIsBareVmwareSVGA(t *testing.T) {
 	body, err := os.ReadFile("boot.go")
 	if err != nil {
 		t.Fatal(err)
 	}
 	src := string(body)
-	if !strings.Contains(src, `"vmware-svga,vgamem_mb=256"`) {
-		t.Fatal("the macOS adapter is `vmware-svga` without `vgamem_mb`. Measured on " +
-			"macos-setup: the recovery system then draws at 640x480, `Disk Utility` is eight " +
-			"pixels tall, the gate reads `Ul ag` for thirty minutes, and every 1920x1080 " +
-			"coordinate in macos/15/steps is off the screen")
+	if strings.Contains(src, `"vmware-svga,vgamem_mb=256"`) {
+		t.Fatal("the macOS adapter asks for vgamem_mb=256. Measured: 1803 frames and 3 losses " +
+			"with a bare `vmware-svga` against 92 frames and 264 losses with the argument - three " +
+			"quarters of the recording lost and the rest black. The recovery system has no " +
+			"VMwareGfx driver to use that memory with")
+	}
+	if !strings.Contains(src, `"-device", "vmware-svga"`) {
+		t.Fatal("the macOS adapter is no longer `vmware-svga`; virtio-vga left a 7 MB framebuffer " +
+			"with `No Kext Loaded`, so the wallpaper layer could not be drawn")
 	}
 }

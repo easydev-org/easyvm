@@ -29,9 +29,6 @@ steps:
   recovery: recovery_macos
   timeout: 900
 - name: wait for the recovery menu
-  until:
-  - disk
-  - utility
   region:
   - 760
   - 200
@@ -40,9 +37,18 @@ steps:
   region_at:
   - 1920
   - 1080
-  scale: 2
+  scale: 6
   timeout: 1800
   poll: 10
+  until_any:
+  - - restore
+    - time
+    - machine
+  - - reinstall
+    - macos
+  - - safari
+  - - disk
+    - utility
 - name: select disk utility
   at:
   - 837
