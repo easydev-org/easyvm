@@ -176,31 +176,113 @@ steps:
 # it was tuned to selected the 268 MB boot image on one run and the 137 GB disk on another. `Uninitialized`
 # is a property of the disk that has never been formatted, which is exactly the disk to format, and no
 # other device in this window is one.
-- name: choose the uninitialised disk
+# THE TARGET IS THE DISK THAT SAYS `Uninitialized`, AND NOTHING ELSE IN THIS WINDOW DOES.
+#
+# THE ROWS SWAP BETWEEN RUNS - measured by clicking each and reading its detail pane:
+#
+#	run A   row 1 = 137.44 GB  Uninitialized        row 2 = 268.4 MB   GUID Partition Map
+#	run B   row 1 = 268.4 MB   GUID Partition Map   row 2 = 137.44 GB  Uninitialized
+#
+# so a POSITION is not a judgement. `Uninitialized` IS: it means the disk carries no partition map, which
+# is exactly the disk to format, and the other two devices in this window cannot say it - the OpenCore
+# boot image is a GUID Partition Map and the recovery volume is Mac OS Extended.
+#
+# AND IT IS A TEXT READING, NOT A NUMBER: a capacity comparison has to pick a range that happens to
+# contain the target and exclude the decoys, and that range is a guess about THIS guest's disk size.
+# The word is a fact about the disk's state.
+#
+# THE DETAIL PANE PRINTS IT ON THE LINE UNDER THE DISK'S NAME, WHICH IS WHY THE REGION IS THE HEADER
+# BLOCK AND NOT THE CAPACITY TABLE:
+#
+#	Apple Inc. VirtIO Block Media
+#	Uninitialized
+#
+# MEASURED AT x=370..660, y=125..140.
+# THE ROWS ARE 28 px APART AND THE FIRST ONE STARTS AT y=105, MEASURED OFF THE FRAME'S TEXT BANDS:
+#
+#	y=105..114   first row    "Apple Inc. VirtIO Block Media"
+#	y=133..142   second row   "Apple Inc. VirtIO Block Media"
+#	y=184..211   third row    "disk2s1", the recovery volume
+#
+# `y=96` - the first value - is ABOVE the first row's text, so the click landed on nothing and the
+# selection stayed wherever the window left it, which was `disk2s1`. The OCR then read
+#
+#	disk2s1 USB External Physical Volume - Mac OS Extended 2.88 GB
+#
+# and the step failed asking for `Uninitialized` on the RECOVERY VOLUME.
+# THE ROW IS READ, AND ONLY THEN MOVED - THAT ORDER IS THE WHOLE STEP.
+#
+# `loop:` RUNS `do:` BEFORE `ocr:`, so a step whose `do:` is "press Down" read the SECOND row on its
+# first attempt, then the third:
+#
+#	do:    key down        <- runs first
+#	ocr:   read the header  <- reads the row AFTER the move
+#	check: Uninitialized?
+#
+# MEASURED: six attempts, every one reading `disk2s1 ... Mac OS Extended`, because the loop had walked
+# past both disks before it looked. The read has to come first and the movement second.
+#
+# SO THE FIRST READING IS ITS OWN STEP, and the loop only runs when that reading says no.
+# THE ROW IS CLICKED UNTIL IT IS SELECTED, BECAUSE A CLICK ON A LIST THAT IS STILL LAYING OUT IS LOST.
+#
+# MEASURED: the pointer sits on the first row and `click:` does not select it, while the SAME click by
+# hand, a moment later, does. The window has just been made full screen, and Disk Utility re-lays its
+# sidebar out for the new width - a click that arrives during that is discarded rather than queued.
+#
+# SO THE CLICK IS REPEATED AND THE RESULT IS READ, which is the same shape as the GhostBSD checkbox:
+# click, read the detail pane, and only stop when the pane says `Uninitialized`.
+#
+# `x=200` AND NOT `x=100` IS ALSO MEASURED: the sidebar's left margin holds the disk ICON, and the table
+# treats the icon as its own widget - a click at x=100 selects nothing, which is why the selection stayed
+# on `disk2s1` through six attempts:
+#
+#	disk2s1 USB External Physical Volume - Mac OS Extended 2.88 GB
+# SIX ATTEMPTS, AND THE PANE SAID `GUID Partition Map` EVERY TIME - THE LOOP WAS RE-CLICKING A ROW IT
+# HAD ALREADY SELECTED, WHILE THE TARGET WAS THE ONE BELOW IT.
+#
+# MEASURED, ON CONSECUTIVE RUNS OF THIS SAME STEP:
+#
+#	run A   row 1 = 137.44 GB  Uninitialized        row 2 = 268.4 MB   GUID Partition Map
+#	run B   row 1 = 268.4 MB   GUID Partition Map   row 2 = 137.44 GB  Uninitialized
+#
+# so the first row is the target on some runs and not others, and a loop that only re-clicks row 1 can
+# never find the other case. It reads `GUID Partition Map`, clicks row 1 again, reads the same thing,
+# ten times:
+#
+#	click the first disk: the loop ran 10 attempt(s) and the condition never held
+#
+# THE LOOP MOVES AS WELL AS CLICKS. One `down` per attempt walks the list once; the reading decides when
+# to stop, so both orders are covered without knowing which one this run has.
+#
+# `x=200` AND NOT `x=100`: the sidebar's left margin holds the disk ICON, and the table treats the icon
+# as its own widget - a click at x=100 selects nothing.
+- name: find the uninitialised disk
   loop:
-    max: 6
+    max: 8
     do:
-    # the second row is the target on every run; the loop moves up one at a time from wherever the
-    # selection starts, and the reading decides when to stop
     - click:
-      - 100
-      - 153
+      - 200
+      - 110
+    - wait: 2
+    # THE MOVE IS WHAT MAKES THE SEARCH A SEARCH: the second attempt clicks row 1 and steps to row 2,
+    # the third steps to row 3, and the reading after each says whether to stop.
+    - key: down
     - wait: 2
     ocr:
-      name: disk
+      name: details
       region:
-      - 590
-      - 95
-      - 1900
-      - 200
+      - 360
+      - 100
+      - 1000
+      - 160
       region_at:
       - 1920
       - 1080
-      scale: 2
-      wait: 2
+      scale: 4
+      wait: 0
     check:
       name: uninitialised
-      from: disk
+      from: details
       mode: contains
       text: Uninitialized
     until:

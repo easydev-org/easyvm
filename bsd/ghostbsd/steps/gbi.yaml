@@ -303,11 +303,54 @@ steps:
   - 1331
   - 785
   wait_after: 12
+# THE NEXT PRESS IS VERIFIED, BECAUSE A PRESS ON A PANE THAT IS STILL LAYING OUT IS LOST.
+#
+# MEASURED: this step clicked (1331,785), waited fourteen seconds, and the screen was STILL
+# `Installation Types` - so the `wait for the zfs form` that follows waited for a form that the walk
+# never asked for:
+#
+#	wait for the zfs form to be drawn [check]: form_up = false (none of "pool name" or "swap size"
+#	                                   in "How do you")
+#
+# and twenty attempts later the leg failed on a pane it had never left. THE SAME SHAPE AS THE macOS
+# DISK LIST: the default selection is already correct on this pane, so the click has nothing to change
+# and the ONLY evidence that it was received is that the pane changed.
+#
+# SO THE READING IS THE CONFIRMATION: `Please select one drive` is the next pane's own line, and it is
+# on no other screen in this installer.
 - name: installation type
-  click:
-  - 1331
-  - 785
-  wait_after: 14
+  loop:
+    max: 8
+    do:
+    - click:
+      - 1331
+      - 785
+    - wait: 4
+    ocr:
+      name: zfsprobe
+      region:
+      - 760
+      - 315
+      - 1400
+      - 345
+      region_at:
+      - 1920
+      - 1080
+      scale: 3
+      wait: 0
+    check:
+      name: zfs_up
+      from: zfsprobe
+      mode: says_any
+      words:
+      - - select
+        - one
+        - drive
+      - - pool
+        - layout
+    until:
+      fact: zfs_up
+  wait_after: 3
 # THE CHECK BOX IS AT (800,377), READ OFF THE FRAME'S OWN PIXELS.
 #
 # The box is a light SQUARE OUTLINE, and the ASCII of the region says exactly where:
@@ -332,6 +375,49 @@ steps:
 # THE NUMBERS WERE 592,495 (the reference implementation's, for ITS gbi) and then 804,382 (a guess off a
 # scaled crop). This one is read from the pixels: the box outline's light pixels span x=792..829 and
 # y=368..385, so the centre is (810,376).
+# THE PANE HAS TO BE DRAWN BEFORE THE BOX CAN BE TICKED, AND FIVE SECONDS IS NOT A MEASUREMENT.
+#
+# MEASURED, ON THE SAME COORDINATE, TWICE:
+#
+#	by hand, on a pane that had been on screen for a minute   the box ticks
+#	by `click:` five seconds after the previous Next           the box stays EMPTY
+#
+# and an unticked box leaves `Next` GREYED OUT, so the `zfs configuration` click that follows does
+# nothing - and the walk then typed the account fields into a ZFS form and pressed `install` into a
+# disabled button. THE SYMPTOM WAS `installation runs`: the walk believed it was installing while the
+# screen still showed the ZFS form, which is why this looked like a coordinate bug for two rounds.
+#
+# SO THE PANE'S OWN LABELS ARE THE GATE. `Pool Name` and `Swap Size` are drawn when the form is
+# complete, and they are on no other pane of this installer - a reading with one answer, where a
+# duration is a guess about how busy the guest is.
+- name: wait for the zfs form to be drawn
+  loop:
+    max: 20
+    do:
+    - wait: 3
+    ocr:
+      name: zfsform
+      region:
+      - 560
+      - 300
+      - 780
+      - 480
+      region_at:
+      - 1920
+      - 1080
+      scale: 2
+      wait: 0
+    check:
+      name: form_up
+      from: zfsform
+      mode: says_any
+      words:
+      - - pool
+        - name
+      - - swap
+        - size
+    until:
+      fact: form_up
 - name: tick the zfs disk
   click:
   - 800
