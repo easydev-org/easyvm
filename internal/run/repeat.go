@@ -176,7 +176,7 @@ func (e *Executor) parseRepeatUntil(s walk.Step) (repeatUntil, error) {
 	if v, ok := asInt(raw["attempts"]); ok && v > 0 {
 		loop.Attempts = v
 	}
-	if v, ok := raw["settle"]; ok {
+	if v, ok := raw["wait_after"]; ok {
 		if f, ok := toFloat(v); ok && f > 0 {
 			loop.Settle = time.Duration(f * float64(time.Second))
 		}
@@ -390,7 +390,7 @@ func actionKey(k string) bool {
 	}
 	// Qualifiers an action may carry on top of its verb.
 	switch k {
-	case "settle", "timeout", "optional", "type_gap", "region", "scale", "poll":
+	case "wait_after", "timeout", "optional", "type_gap", "region", "scale", "poll":
 		return true
 	}
 	return false

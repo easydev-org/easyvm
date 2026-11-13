@@ -35,11 +35,11 @@ steps:
   double:
   - 267
   - 34
-  settle: 40
   expect_any:
   - - installation
   - - upgrade
   - - language
+  wait_after: 40
 - name: open yast2 (once more, if it did not)
   unless_any:
   - - installation
@@ -48,87 +48,87 @@ steps:
   double:
   - 267
   - 34
-  settle: 45
+  wait_after: 45
 - name: welcome
   at:
   - 1596
   - 859
-  settle: 30
+  wait_after: 30
 - name: online repositories - no
   at:
   - 1004
   - 614
-  settle: 20
+  wait_after: 20
 - name: role - desktop with kde plasma
   at:
   - 588
   - 333
-  settle: 6
+  wait_after: 6
 - name: system role
   at:
   - 1596
   - 859
-  settle: 30
+  wait_after: 30
 - name: suggested partitioning
   at:
   - 1596
   - 859
-  settle: 25
+  wait_after: 25
 - name: clock and time zone
   at:
   - 1596
   - 859
-  settle: 22
+  wait_after: 22
 - name: local user - full name
   at:
   - 1106
   - 418
   type: '{{ user }}'
-  settle: 2
+  wait_after: 2
 - name: local user - user name, select all
   at:
   - 1106
   - 483
-  settle: 2
+  wait_after: 2
 - name: local user - user name, clear it
   key: ctrl+a
-  settle: 2
+  wait_after: 2
 - name: local user - user name, delete the selection
   key: backspace
-  settle: 2
+  wait_after: 2
 - name: local user - user name
   type: '{{ user }}'
-  settle: 2
+  wait_after: 2
 - name: local user - password
   at:
   - 1106
   - 548
   type: '{{ password }}'
-  settle: 2
+  wait_after: 2
 - name: local user - confirm password
   at:
   - 1106
   - 614
   type: '{{ password }}'
-  settle: 3
+  wait_after: 3
 - name: local user
   at:
   - 1596
   - 859
-  settle: 18
+  wait_after: 18
 - name: accept the weak password
   key: ret
-  settle: 22
+  wait_after: 22
 - name: install
   at:
   - 1587
   - 859
-  settle: 15
+  wait_after: 15
 - name: the confirm installation dialog's install
   at:
   - 922
   - 707
-  settle: 25
+  wait_after: 25
 - name: the install runs, as measured
   wait: 1800
   keep_alive: true

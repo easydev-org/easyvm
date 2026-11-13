@@ -57,6 +57,24 @@ type Executor struct {
 	// ShouldStop is asked at each step boundary, so a `stop` request takes effect between steps
 	// rather than waiting out a 900-second ssh timeout.
 	ShouldStop func() bool
+
+	// seen is what an `ocr:` step read, by the name the file gave it.
+	//
+	// IT IS THE SECOND HALF OF THE THREE-STEP MODEL. An action does not read the screen, an `ocr:`
+	// step reads one region and NAMES what it found, and a condition answers from that name:
+	//
+	//   - name: read the installer pane
+	//     ocr: {name: pane, region: [690, 225, 1560, 265]}
+	//   - name: the installer is up
+	//     when: pane
+	//     has_any: [[welcome], [location]]
+	//
+	// WITHOUT THIS THE CONDITION WOULD HAVE TO READ THE SCREEN ITSELF, which is exactly the coupling
+	// that made a `until:` inside a click step report "did not advance" when the click had missed.
+	//
+	// THE ZERO VALUE IS USABLE, so a walk that never calls an `ocr:` step needs no setup, and the map
+	// is created on first write because an Executor is built by value in places.
+	seen map[string][]string
 }
 
 // Result is the whole walkthrough's outcome.
@@ -185,6 +203,14 @@ func (e *Executor) runOne(s walk.Step) error {
 		return e.doCompress(s)
 	case s.Has("snapshot"):
 		return e.doSnapshot(s)
+	// THE THREE-STEP MODEL, IN DISPATCH ORDER. `ocr:` reads ONE region and names it; `check:` answers
+	// from that name without touching the screen. Both are separate steps on purpose - see ocr.go.
+	case s.Has("ocr"):
+		return e.doOCR(s)
+	case s.Has("check"):
+		return e.doWhen(s)
+	case s.Has("loop"):
+		return e.doLoop(s)
 	case s.Has("require_ssh"):
 		return e.doRequireSSH(s)
 	case s.Has("ssh"):
@@ -504,7 +530,7 @@ func (e *Executor) target() guest.Target {
 // --- small helpers --------------------------------------------------------------------
 
 func (e *Executor) settle(s walk.Step) error {
-	value, err := s.Float("settle", 0)
+	value, err := s.Float("wait_after", 0)
 	if err != nil {
 		return err
 	}

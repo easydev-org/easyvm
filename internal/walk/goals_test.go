@@ -143,9 +143,9 @@ func TestTheDismissalKeepsItsMeasuredShape(t *testing.T) {
 				if _, ok := m["at"]; ok {
 					clicks++
 					// FOUR SECONDS, NOT TWO. Two was measured short on a loaded guest.
-					if settle, ok := toFloat(m["settle"]); !ok || settle < 4 {
-						t.Fatalf("%s: a Quit click settles %v seconds; the measured gap is 4 "+
-							"(run 42162859846)", name, m["settle"])
+					if settle, ok := toFloat(m["wait_after"]); !ok || settle < 4 {
+						t.Fatalf("%s: a Quit click waits %v seconds after it; the measured gap is 4 "+
+							"(run 42162859846)", name, m["wait_after"])
 					}
 				}
 				if _, ok := m["key"]; ok {

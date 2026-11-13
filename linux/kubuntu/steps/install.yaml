@@ -51,153 +51,153 @@ steps:
   repeat:
   - 2
   - 0.8
-  settle: 25
+  wait_after: 25
 - name: welcome
   repeat_until:
     attempts: 3
-    settle: 12
     actions:
     - at:
       - 1757
       - 1058
-      settle: 12
+      wait_after: 12
     - at:
       - 1757
       - 1058
-      settle: 12
+      wait_after: 12
     - key: alt+n
-      settle: 12
+      wait_after: 12
     until_any:
     - changed: true
+    wait_after: 12
 - name: location
   repeat_until:
     attempts: 3
-    settle: 12
     actions:
     - at:
       - 1757
       - 1058
-      settle: 12
+      wait_after: 12
     - at:
       - 1757
       - 1058
-      settle: 12
+      wait_after: 12
     - key: alt+n
-      settle: 12
+      wait_after: 12
     until_any:
     - changed: true
+    wait_after: 12
 - name: keyboard
   repeat_until:
     attempts: 3
-    settle: 12
     actions:
     - at:
       - 1757
       - 1058
-      settle: 12
+      wait_after: 12
     - at:
       - 1757
       - 1058
-      settle: 12
+      wait_after: 12
     - key: alt+n
-      settle: 12
+      wait_after: 12
     until_any:
     - changed: true
+    wait_after: 12
 - name: customize
   repeat_until:
     attempts: 3
-    settle: 12
     actions:
     - at:
       - 1757
       - 1058
-      settle: 12
+      wait_after: 12
     - at:
       - 1757
       - 1058
-      settle: 12
+      wait_after: 12
     - key: alt+n
-      settle: 12
+      wait_after: 12
     until_any:
     - changed: true
+    wait_after: 12
 - name: partitions - erase the disk
   at:
   - 208
   - 73
-  settle: 4
+  wait_after: 4
 - name: partitions
   repeat_until:
     attempts: 3
-    settle: 15
     actions:
     - at:
       - 1757
       - 1058
-      settle: 15
+      wait_after: 15
     - at:
       - 1757
       - 1058
-      settle: 15
+      wait_after: 15
     - key: alt+n
-      settle: 15
+      wait_after: 15
     until_any:
     - changed: true
+    wait_after: 15
 - name: users - full name
   at:
   - 296
   - 52
   type: '{{ user }}'
-  settle: 2
+  wait_after: 2
 - name: users - login name
   at:
   - 296
   - 120
   type: '{{ user }}'
-  settle: 2
+  wait_after: 2
 - name: users - password
   at:
   - 296
   - 254
   type: '{{ password }}'
-  settle: 2
+  wait_after: 2
 - name: users - confirm password
   at:
   - 500
   - 254
   type: '{{ password }}'
-  settle: 3
+  wait_after: 3
 - name: log in automatically
   at:
   - 203
   - 297
-  settle: 3
+  wait_after: 3
 - name: users
   repeat_until:
     attempts: 3
-    settle: 15
     actions:
     - at:
       - 1757
       - 1058
-      settle: 15
+      wait_after: 15
     - at:
       - 1757
       - 1058
-      settle: 15
+      wait_after: 15
     - key: alt+n
-      settle: 15
+      wait_after: 15
     until_any:
     - changed: true
+    wait_after: 15
 - name: summary - install
   at:
   - 1757
   - 1058
-  settle: 12
+  wait_after: 12
 - name: the confirmation dialog's install now
   at:
   - 1058
   - 535
-  settle: 25
+  wait_after: 25
 - name: the installer finishes
   until_any:
   - - all

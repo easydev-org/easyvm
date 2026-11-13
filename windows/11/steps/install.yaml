@@ -47,13 +47,13 @@ steps:
   blind_after: 60
 - name: press a key so the loader takes it
   key: esc
-  settle: 1
+  wait_after: 1
 - name: press it again, because the prompt is emitted more than once
   key: esc
-  settle: 1
+  wait_after: 1
 - name: and once more, for a loader that was not listening yet
   key: esc
-  settle: 2
+  wait_after: 2
 - name: Setup is on screen
   until:
   - Windows

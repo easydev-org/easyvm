@@ -37,8 +37,8 @@ steps:
     2>/dev/null || xrandr --output Virtual1 --mode 1920x1080 2>/dev/null || xrandr -s 1920x1080 2>/dev/null || true; xset s off; xset -dpms; xset s noblank; ( for i in $(seq 1 1080); do xdotool mousemove_relative -- 1 0 2>/dev/null; xdotool mousemove_relative
     -- -1 0 2>/dev/null; sleep 20; done ) >/dev/null 2>&1 & exit
   terminal_wait: 8
-  settle: 10
   type_gap: 0.15
+  wait_after: 10
 - name: wait for the installer launcher
   until_any:
   - - welcome
@@ -57,68 +57,68 @@ steps:
   double:
   - 114
   - 47
-  settle: 25
   expect_any:
   - - welcome
   - - install
+  wait_after: 25
 - name: welcome
   at:
   - 1306
   - 727
-  settle: 12
+  wait_after: 12
 - name: keyboard
   at:
   - 1306
   - 727
-  settle: 12
+  wait_after: 12
 - name: multimedia codecs
   at:
   - 1306
   - 727
-  settle: 12
+  wait_after: 12
 - name: installation type
   at:
   - 1306
   - 727
-  settle: 15
+  wait_after: 15
 - name: write the changes to disks
   at:
   - 1266
   - 663
-  settle: 25
+  wait_after: 25
 - name: installation type - install now, after the modal
   at:
   - 1307
   - 726
-  settle: 30
+  wait_after: 30
 - name: where are you
   at:
   - 1306
   - 727
-  settle: 15
+  wait_after: 15
 - name: who are you - full name
   at:
   - 965
   - 347
   type: '{{ display_name }}'
-  settle: 2
+  wait_after: 2
 - name: who are you - password
   at:
   - 877
   - 458
   type: '{{ password }}'
-  settle: 2
+  wait_after: 2
 - name: who are you - confirm password
   at:
   - 877
   - 492
   type: '{{ password }}'
-  settle: 3
+  wait_after: 3
 - name: who are you
   at:
   - 1306
   - 727
-  settle: 20
+  wait_after: 20
 - name: the install runs, as measured
   wait: 2400
   keep_alive: true

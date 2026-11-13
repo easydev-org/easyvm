@@ -18,36 +18,36 @@ steps:
   run: gsettings set org.cinnamon.desktop.session idle-delay 0; gsettings set org.cinnamon.desktop.screensaver lock-enabled false; gsettings set org.cinnamon.desktop.screensaver idle-activation-enabled false; xset s off; xset -dpms; xset s noblank; ( for
     i in $(seq 1 1080); do xdotool mousemove_relative -- 1 0 2>/dev/null; xdotool mousemove_relative -- -1 0 2>/dev/null; sleep 20; done ) >/dev/null 2>&1 & exit
   terminal_wait: 8
-  settle: 10
   type_gap: 0.15
+  wait_after: 10
 - name: open the installer
   double:
   - 114
   - 47
-  settle: 25
   expect: welcome
+  wait_after: 25
 - name: welcome
   at: &id001
   - 1306
   - 727
-  settle: 12
+  wait_after: 12
 - name: keyboard layout
   at: *id001
-  settle: 12
+  wait_after: 12
 - name: multimedia codecs
   at: *id001
-  settle: 12
+  wait_after: 12
 - name: installation type
   at: *id001
-  settle: 15
+  wait_after: 15
 - name: write the changes to disks
   at:
   - 1269
   - 659
-  settle: 20
+  wait_after: 20
 - name: time zone
   at: *id001
-  settle: 15
+  wait_after: 15
 - name: full name
   at:
   - 965
@@ -70,7 +70,7 @@ steps:
   type: '{{ password }}'
 - name: create the account
   at: *id001
-  settle: 20
+  wait_after: 20
 - name: install
   wait: 2400
   keep_alive: true

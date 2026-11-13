@@ -21,32 +21,32 @@ steps:
   timeout: 900
 - name: greeter - wake the screen
   key: esc
-  settle: 5
+  wait_after: 5
 - name: greeter - the user tile
   at:
   - 960
   - 488
-  settle: 4
+  wait_after: 4
 - name: greeter - the password box
   at:
   - 936
   - 628
   type: '{{ password }}'
   clear: false
-  settle: 4
+  wait_after: 4
 - name: greeter - submit
   key: ret
-  settle: 12
+  wait_after: 12
 - name: let the session finish starting
   wait: 240
 - name: skip the welcome dialog
   at:
   - 858
   - 748
-  settle: 5
+  wait_after: 5
 - name: clear anything left over
   key: esc
-  settle: 2
+  wait_after: 2
 - name: the desktop is up
   until_any:
   - - Dashboard
@@ -67,13 +67,13 @@ steps:
   at:
   - 960
   - 700
-  settle: 2
+  wait_after: 2
 - name: open the overview
   key: meta_l
-  settle: 4
+  wait_after: 4
 - name: search for the terminal
   type: terminal
-  settle: 3
+  wait_after: 3
 - name: wait for the Console result
   until_any:
   - - Console
@@ -93,24 +93,24 @@ steps:
   at:
   - 960
   - 160
-  settle: 20
+  wait_after: 20
 - name: declare openssh in configuration.nix
   run: 'echo {{ password }} | sudo -S sh -c ''sed -i "$ d" /etc/nixos/configuration.nix; printf "  services.openssh.enable = true;\n  services.openssh.settings.PasswordAuthentication = true;\n  networking.firewall.enable = false;\n}\n" >> /etc/nixos/configuration.nix''
 
     '
   terminal_wait: 0
   type_gap: 0.15
-  settle: 6
+  wait_after: 6
 - name: rebuild the system
   run: echo {{ password }} | sudo -S nixos-rebuild switch 2>&1 | tail -8
   terminal_wait: 0
   type_gap: 0.15
-  settle: 300
+  wait_after: 300
 - name: prove sshd is active
   run: systemctl is-active sshd
   terminal_wait: 0
   type_gap: 0.15
-  settle: 5
+  wait_after: 5
 - name: wait for sshd
   require_ssh: true
   timeout: 600

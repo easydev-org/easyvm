@@ -32,50 +32,50 @@ steps:
   timeout: '{{ boot_timeout }}'
 - name: wake the screen
   key: esc
-  settle: 5
+  wait_after: 5
 - name: wake the screen again
   key: esc
-  settle: 3
+  wait_after: 3
 - name: open the run dialog
   key: meta_l+r
-  settle: 3
+  wait_after: 3
 - name: type powershell
   type: powershell
   type_gap: 0.15
-  settle: 2
+  wait_after: 2
 - name: open powershell
   key: ret
-  settle: 14
+  wait_after: 14
 - name: keep the screen on before ssh exists
   type: powercfg /change monitor-timeout-ac 0; powercfg /change monitor-timeout-dc 0; powercfg /change standby-timeout-ac 0; powercfg /change standby-timeout-dc 0; 'SCREEN=kept-on'
   type_gap: 0.15
-  settle: 2
+  wait_after: 2
 - name: run the screen setting
   key: ret
-  settle: 3
+  wait_after: 3
 - name: install openssh
   type: winget install --id Microsoft.OpenSSH.Preview --exact --source winget --accept-source-agreements --accept-package-agreements --disable-interactivity; 'WINGET_EXIT=' + $LASTEXITCODE; 'WINGET_LOW=' + ($LASTEXITCODE -band 0xFF)
   type_gap: 0.3
-  settle: 2
+  wait_after: 2
 - name: run the install
   key: ret
-  settle: 120
+  wait_after: 120
 - name: sshd starts automatically
   run: Set-Service sshd -StartupType Automatic; (Get-Service sshd).StartType
-  settle: 4
   type_gap: 0.15
+  wait_after: 4
 - name: sshd takes passwords and port 22
   run: $f = Join-Path $env:ProgramData 'ssh/sshd_config'; Add-Content -Path $f -Value 'PasswordAuthentication yes'; (Select-String -Path $f -Pattern PasswordAuthentication).Line
-  settle: 4
   type_gap: 0.15
+  wait_after: 4
 - name: sshd is running
   run: Start-Service sshd; (Get-Service sshd).Status
-  settle: 4
   type_gap: 0.15
+  wait_after: 4
 - name: the firewall allows 22
   run: New-NetFirewallRule -Name sshd22 -DisplayName OpenSSH22 -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22 -ErrorAction SilentlyContinue; Test-NetConnection localhost -Port 22 -InformationLevel Quiet
-  settle: 4
   type_gap: 0.15
+  wait_after: 4
 - name: wait for sshd
   require_ssh: true
   ssh_probe: echo ok

@@ -21,70 +21,70 @@ steps:
   timeout: 900
 - name: greeter - wake the screen
   key: esc
-  settle: 5
   optional: true
+  wait_after: 5
 - name: greeter - the user tile
   at:
   - 960
   - 488
-  settle: 4
   optional: true
+  wait_after: 4
 - name: greeter - the password box
   at:
   - 960
   - 627
   type: '{{ password }}'
   clear: false
-  settle: 4
   optional: true
+  wait_after: 4
 - name: greeter - submit
   key: ret
-  settle: 12
   optional: true
+  wait_after: 12
 - name: open the terminal
   key: ctrl+alt+t
-  settle: 20
+  wait_after: 20
 - name: dismiss the software updater, if it is up
   at:
   - 968
   - 594
-  settle: 3
   optional: true
+  wait_after: 3
 - name: stop the updater that puts a dialog over the terminal
   run: echo {{ password }} | sudo -S sh -c "systemctl stop packagekit 2>/dev/null; systemctl stop unattended-upgrades 2>/dev/null; systemctl stop apt-daily.service 2>/dev/null; systemctl stop apt-daily-upgrade.service 2>/dev/null; true" 2>&1 | tail -3
   terminal_wait: 0
-  settle: 15
+  wait_after: 15
 - name: dismiss the software updater again
   at:
   - 968
   - 594
-  settle: 3
   optional: true
+  wait_after: 3
 - name: install openssh-server
   run: echo {{ password }} | sudo -S sh -c "export DEBIAN_FRONTEND=noninteractive; apt-get update -o DPkg::Lock::Timeout=600 && apt-get install -y -o DPkg::Lock::Timeout=600 openssh-server" 2>&1 | tail -6
   terminal_wait: 0
-  settle: 90
+  wait_after: 90
 - name: allow password authentication
   run: echo {{ password }} | sudo -S -p '' sh -c 'mkdir -p /etc/ssh/sshd_config.d; printf "PasswordAuthentication yes\n" > /etc/ssh/sshd_config.d/99-vm.conf; sed -i "s/^#\?\s*PasswordAuthentication.*/PasswordAuthentication yes/" /etc/ssh/sshd_config; grep
     -q "^PasswordAuthentication yes" /etc/ssh/sshd_config || printf "PasswordAuthentication yes\n" >> /etc/ssh/sshd_config' 2>&1 | tail -3
   terminal_wait: 0
-  settle: 3
+  wait_after: 3
 - name: enable ssh at boot
   run: echo {{ password }} | sudo -S systemctl enable ssh 2>&1 | tail -3
   terminal_wait: 0
-  settle: 8
+  wait_after: 8
 - name: prove the setting took
   run: echo {{ password }} | sudo -S sh -c 'sshd -T 2>/dev/null | grep -i "^passwordauthentication" || echo PASSWORDAUTH-UNREADABLE' 2>&1 | tail -3
   terminal_wait: 0
-  settle: 3
+  wait_after: 3
 - name: start ssh
   run: echo {{ password }} | sudo -S systemctl restart ssh 2>&1 | tail -3
   terminal_wait: 0
-  settle: 10
+  wait_after: 10
 - name: prove ssh is active
   run: systemctl is-active ssh
   terminal_wait: 0
-  settle: 5
+  wait_after: 5
 - name: wait for sshd
   require_ssh: true
   timeout: 600

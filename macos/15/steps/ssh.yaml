@@ -38,64 +38,64 @@ steps:
   optional: true
 - name: dismiss anything over the login window
   key: esc
-  settle: 2
+  wait_after: 2
 - name: click the password field
   at:
   - 965
   - 981
-  settle: 1
+  wait_after: 1
 - name: type the password
   type: '{{ password }}'
-  settle: 1
+  wait_after: 1
 - name: press return
   key: ret
-  settle: 20
+  wait_after: 20
 - name: dismiss the overlays macOS puts up on a first login
   do:
   - at:
     - 1228
     - 826
-    settle: 4
+    wait_after: 4
   - at:
     - 1228
     - 826
-    settle: 4
+    wait_after: 4
   - at:
     - 1228
     - 826
-    settle: 4
+    wait_after: 4
   - key: esc
-    settle: 2
+    wait_after: 2
   - key: meta_l+q
-    settle: 2
+    wait_after: 2
   - key: esc
-    settle: 2
+    wait_after: 2
 - name: wait for the desktop
   repeat_until:
     attempts: 10
-    settle: 60
     until_any:
     - desktop: macos
     actions:
     - key: esc
-      settle: 1
+      wait_after: 1
     - key: meta_l+q
-      settle: 1
+      wait_after: 1
     - key: esc
-      settle: 1
+      wait_after: 1
+    wait_after: 60
   timeout: 600
 - name: dismiss anything over the desktop
   key: esc
-  settle: 2
+  wait_after: 2
 - name: open spotlight
   key: meta_l+spc
-  settle: 4
+  wait_after: 4
 - name: type the settings app name
   type: system settings
-  settle: 7
+  wait_after: 7
 - name: open it
   key: ret
-  settle: 14
+  wait_after: 14
 - name: the settings window is up
   until_any:
   - - system
@@ -111,7 +111,7 @@ steps:
   type: remote login
   clear: true
   modifier: meta_l
-  settle: 10
+  wait_after: 10
 - name: the remote login result is on screen
   until_any:
   - - sharing
@@ -132,7 +132,7 @@ steps:
   at:
   - 703
   - 336
-  settle: 12
+  wait_after: 12
 - name: open the remote login pane again
   unless:
   - allow
@@ -148,7 +148,7 @@ steps:
   at:
   - 703
   - 336
-  settle: 12
+  wait_after: 12
 - name: the remote login pane is up
   until_any:
   - - allow
@@ -179,7 +179,7 @@ steps:
   at:
   - 1145
   - 353
-  settle: 4
+  wait_after: 4
 - name: the switch reads on
   until_any:
   - - log
@@ -200,7 +200,7 @@ steps:
   at:
   - 1145
   - 679
-  settle: 5
+  wait_after: 5
 - name: wait for sshd
   require_ssh: true
   timeout: 600

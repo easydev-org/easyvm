@@ -46,101 +46,101 @@ steps:
   at:
   - 1355
   - 848
-  settle: 12
+  wait_after: 12
 - name: accessibility
   at:
   - 1355
   - 848
-  settle: 12
+  wait_after: 12
 - name: keyboard layout
   at:
   - 1355
   - 848
-  settle: 12
+  wait_after: 12
 - name: internet connection
   at:
   - 1355
   - 848
-  settle: 14
+  wait_after: 14
 - name: try or install
   at:
   - 1355
   - 848
-  settle: 14
+  wait_after: 14
 - name: type of installation
   at:
   - 1355
   - 848
-  settle: 14
+  wait_after: 14
 - name: applications
   at:
   - 1355
   - 848
-  settle: 14
+  wait_after: 14
 - name: proprietary software
   at:
   - 1355
   - 848
-  settle: 14
+  wait_after: 14
 - name: disk setup
   at:
   - 1355
   - 848
-  settle: 20
+  wait_after: 20
 - name: encryption
   at:
   - 1355
   - 848
-  settle: 14
+  wait_after: 14
 - name: create your account - full name
   at:
   - 1139
   - 393
   type: '{{ user }}'
-  settle: 2
+  wait_after: 2
 - name: create your account - username
   at:
   - 1139
   - 501
   type: '{{ user }}'
-  settle: 2
+  wait_after: 2
 - name: create your account - password
   at:
   - 1050
   - 563
   type: '{{ password }}'
-  settle: 2
+  wait_after: 2
 - name: create your account - confirm password
   at:
   - 1139
   - 616
   type: '{{ password }}'
-  settle: 3
+  wait_after: 3
 - name: clear 'require my password to log in'
   at:
   - 923
   - 670
-  settle: 3
+  wait_after: 3
 - name: create your account
   at:
   - 1355
   - 848
-  settle: 12
+  wait_after: 12
 - name: time zone - new york on the map
   at:
   - 762
   - 483
-  settle: 4
+  wait_after: 4
 - name: time zone
   at:
   - 1355
   - 848
-  settle: 14
+  wait_after: 14
 - name: ready to install - the green install button
   at:
   - 1355
   - 848
-  settle: 30
+  wait_after: 30
 - name: the installer finishes
   until_any:
   - - installed

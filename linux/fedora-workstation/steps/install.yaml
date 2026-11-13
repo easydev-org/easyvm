@@ -49,7 +49,7 @@ steps:
   repeat:
   - 2
   - 3
-  settle: 3
+  wait_after: 3
 - name: install fedora linux (again, if anaconda is not up)
   unless:
   - installation
@@ -60,7 +60,7 @@ steps:
   repeat:
   - 2
   - 3
-  settle: 25
+  wait_after: 25
 - name: install fedora linux (and once more)
   unless:
   - installation
@@ -71,7 +71,7 @@ steps:
   repeat:
   - 2
   - 3
-  settle: 30
+  wait_after: 30
 - name: anaconda is up
   until_any:
   - - installation
@@ -94,26 +94,25 @@ steps:
   at:
   - 729
   - 1002
-  settle: 15
   expect_any:
   - - installation
     - method
+  wait_after: 15
 - name: installation method
   at:
   - 729
   - 1002
-  settle: 12
   expect_any:
   - - storage
     - configuration
   - - configuracion
     - de
     - almacenamiento
+  wait_after: 12
 - name: storage configuration
   at:
   - 729
   - 1002
-  settle: 12
   expect_any:
   - - review
     - and
@@ -121,11 +120,12 @@ steps:
   - - revisar
     - e
     - instalar
+  wait_after: 12
 - name: erase data and install
   at:
   - 780
   - 1002
-  settle: 20
+  wait_after: 20
 - name: the install is written
   disk_settle: 180
   disk_min_mb: 512
@@ -136,7 +136,7 @@ steps:
   at:
   - 963
   - 364
-  settle: 10
+  wait_after: 10
 - name: first boot
   until_any:
   - - welcome
@@ -164,87 +164,87 @@ steps:
   - 960
   - 492
   type: united states
-  settle: 5
+  wait_after: 5
 - name: language - pick English (United States)
   at:
   - 960
   - 550
-  settle: 6
+  wait_after: 6
 - name: language
   at:
   - 1432
   - 181
-  settle: 10
+  wait_after: 10
 - name: typing
   at:
   - 1432
   - 181
-  settle: 10
+  wait_after: 10
 - name: location services off
   at:
   - 1209
   - 485
-  settle: 2
+  wait_after: 2
 - name: automatic problem reporting off
   at:
   - 1209
   - 601
-  settle: 2
+  wait_after: 2
 - name: privacy
   at:
   - 1432
   - 181
-  settle: 10
+  wait_after: 10
 - name: time zone
   at:
   - 1432
   - 181
-  settle: 12
+  wait_after: 12
 - name: third party repositories
   at:
   - 1432
   - 181
-  settle: 10
+  wait_after: 10
 - name: about you - full name
   at:
   - 1000
   - 528
   type: '{{ user }}'
-  settle: 2
   expect:
   - '{{ user }}'
+  wait_after: 2
 - name: about you
   at:
   - 1432
   - 181
-  settle: 10
+  wait_after: 10
 - name: password - password
   at:
   - 960
   - 493
   type: '{{ password }}'
-  settle: 2
+  wait_after: 2
 - name: password - confirm
   at:
   - 960
   - 630
   type: '{{ password }}'
-  settle: 3
+  wait_after: 3
 - name: password
   at:
   - 1432
   - 181
-  settle: 20
+  wait_after: 20
 - name: start using fedora linux
   at:
   - 959
   - 709
-  settle: 25
+  wait_after: 25
 - name: skip the tour
   at:
   - 852
   - 756
-  settle: 12
+  wait_after: 12
 - name: stop the machine
   shutdown: kill
   timeout: 120

@@ -1,102 +1,66 @@
-# macOS 15 (Sequoia) Setup Assistant, 1920x1080. The pane shape, not the sequence shape.
-#
-#     python3 lib/steps.py macos/15/steps/sequoia.yaml --qmp /work/drive.sock.qmp
-#
-# THIS FILE IS THE ARGUMENT FOR THE WHOLE ROUTE, AND ALSO ITS LIMIT.
-#
-# WHAT IT REPLACES
-#
-# macos/15/drive_read.py is 694 lines: seventeen handlers, the Wizard class, the event loop and
-# main(). Almost every handler is the same four lines:
-#
-#     def pane_privacy(w):
-#         if not w.says("data", "privacy"):   return False
-#         w.click(w.continue_at, "...", settle=8.0)
-#         return True
-#
-# As data that is one step. The seventeen fit here with their reasons attached, and the reasons
-# are the part that was worth keeping - the Python handlers are mostly comment, which is the
-# tell that the code was already trying to be a table of contents.
-#
-# WHY PANES AND NOT A SEQUENCE
-#
-# The Setup Assistant SKIPS panes: a machine with no network gets no Apple Account pane, a
-# release with no Screen Time has no Screen Time pane, and an answer given two panes earlier
-# decides whether the next one appears at all. A sequence would sit on a pane that never comes.
-# So this is the event loop: look at the screen, answer the one pane whose words are up, look
-# again. `ends: [finder]` says how it finishes, and `finder` is the desktop's menu bar and
-# nothing else - the version that treated "nothing matched" as arrival left the guest one click
-# from finished.
-#
-# A PANE IS ANSWERED IN ONE PASS. Its `do` list is every click the question needs, in order.
-# This is not an optimisation: the account pane is three fields and a Continue, and a loop that
-# ran one action per pass left the pane on the first field forever, because the second pass
-# matched the same pane, saw the full name already typed, and stopped.
-#
-# WHAT IS NOT HERE, AND IT IS NOT MUCH
-#
-#   the Apple Account pane   a popup on 26 and a text link on 15, each followed by a
-#                            confirmation sheet at a different place - see sequoia_panes.py
-#   the 26 Update pane       greys Continue and spins forever; the only exit is a QMP reset
-#
-# Everything else is below, as data.
-
 name: macos 15 sequoia setup assistant
-resolution: [1920, 1080]
-ends: [finder]
-# THE MENU BAR, READ AS A CROP. `finder` is 12-pixel text at the top of the screen, and a
-# whole-frame read of a 1920x1080 desktop returns "Empty page!!" - the page segmenter decides
-# there is no page. lib/desktop.py's MENU_BAR is (0, 0, 700, 34) at 3x for exactly this.
-ends_region: [0, 0, 700, 34]
+resolution:
+- 1920
+- 1080
+ends:
+- finder
+ends_region:
+- 0
+- 0
+- 700
+- 34
 ends_region_scale: 3
-# AND THE WIZARD'S REAL END, WHICH IS THE LOGIN WINDOW - NOT A DESKTOP.
-#
-# macOS 15's Setup Assistant finishes by putting the machine at its login window. There the only
-# readable text is the password field's placeholder: twelve pixels tall in a 165x40 box, so a
-# whole-frame read finds nothing and this walk reported STUCK on a screen that read
-#
-#     Sunday, November 8  7:18  docker  [Enter Password]
-#
-# lib/desktop.py crops PASSWORD_FIELD for exactly this, and desktop.py's own wait_for_desktop()
-# TYPES THE PASSWORD when it sees it - so this stage's job ends here and the unlock belongs to
-# the code that already does it.
 ends_at:
-  - name: the login window's password field
-    region: [880, 960, 1045, 1000]
-    scale: 6
-    words: [enter, password]
-# THE DISK IS STILL BOOTING WHEN THIS WALKTHROUGH STARTS, so the loop has to know how it
-# recognises the first pane. Without it the loop matches nothing against a black screen and
-# reports STUCK, which is exactly what the first CI run of the desktop stage did.
-#
-# `country` is the Setup Assistant's first pane ("Select Your Country or Region") and it is
-# what macos/15/drive_read.py waits for before its own loop.
-# ANY KNOWN PANE IS A VALID STARTING POINT. A desktop stage can resume from wherever an earlier
-# run stopped - a persistent volume makes that the normal case, not the exception - so waiting
-# for the wizard's FIRST page would spin forever on a screen that is already six panes in.
+- name: the login window's password field
+  region:
+  - 880
+  - 960
+  - 1045
+  - 1000
+  scale: 6
+  words:
+  - enter
+  - password
 waits_for:
-  - [country, region]
-  - [transfer, data]
-  - [spoken, languages]
-  - [accessibility, individual]
-  - [data, privacy]
-  - [create, mac, account]
-  - [sign, in, to, your, apple, account]
-  - [terms, conditions]
-  - [location, services]
-  - [time, zone]
-  - [analytics, improve]
-  - [screen, report]
-  - [look, appearance]
-  - [welcome, mac]
-  - [keyboard, select]
+- - country
+  - region
+- - transfer
+  - data
+- - spoken
+  - languages
+- - accessibility
+  - individual
+- - data
+  - privacy
+- - create
+  - mac
+  - account
+- - sign
+  - in
+  - to
+  - your
+  - apple
+  - account
+- - terms
+  - conditions
+- - location
+  - services
+- - time
+  - zone
+- - analytics
+  - improve
+- - screen
+  - report
+- - look
+  - appearance
+- - welcome
+  - mac
+- - keyboard
+  - select
 boot_timeout: 1800
 boot_poll: 10
 stuck_after: 20
 pane_limit: 3
-
-# THIS FILE CREATES THE ACCOUNT, so it has no `ssh_user:` - the wizard types `user` into the
-# account form and nothing here logs in. Every later stage names the same value.
 vars:
   user:
     from: args.user
@@ -104,460 +68,286 @@ vars:
   password:
     from: args.password
     default: admin
-  # THE SHUTDOWN METHOD, AS IN THE OTHER TWO macOS FILES: a fact about how the stage was
-  # started, not about the screen. `kill` on a throwaway overlay, `ssh` on the real disk.
   shutdown:
     from: args.shutdown
     default: ssh
-
-# THIS STAGE'S DISK COMES FROM THE CALLER, AND THAT IS NOW IN THE FILE RATHER THAN IN THE WORKFLOW.
-#
-# `boot_disk: from_caller` says the `--boot-disk` flag supplies it, because an earlier stage made it.
-# Without the declaration a file that continues from another stage is indistinguishable from one that
-# forgot to create a disk: `boot:` refuses with "booting needs a target disk", and it refuses AFTER
-# every host-side step above it has run - run 43044525517 spent three minutes building an answer CD
-# and resolving a 7.7 GiB installer before the boot said no.
 boot_disk: from_caller
-
 steps:
-  # =========================================================================
-  # THE MACHINE, BEFORE THE FIRST PANE - AND THE THREE STEPS AFTER THE LAST
-  # =========================================================================
-  #
-  # A PANE FILE HAS A PREAMBLE AND AN EPILOGUE, and this is the file that needed them: the Setup
-  # Assistant is panes by construction (they appear and disappear depending on answers given two
-  # panes earlier), and the stage that answers it is also the stage that starts and stops the
-  # machine. See lib/steps.py's Walk.__init__ for the rule and for what it refuses.
-  #
-  # BEFORE THE LOOP: only lifecycle steps, because a click with no screen has nothing to click.
-  # AFTER IT: the login, the desktop, and the stop - `skip_when_unfinished` on the first two,
-  # because a wizard that stopped on an unanswered pane has not left a desktop to log into, and
-  # saying so is more useful than a five-minute wait for a screen the wizard never reached.
-  #
-  # THE SHUTDOWN NEVER CARRIES THAT FLAG. Stopping the machine is exactly what has to happen on
-  # the way out of a failed walk.
-  # NO `recovery:` HERE, AND THAT IS THE POINT.
-  #
-  # macOS installs FROM removable media, so only the setup stage attaches the recovery image as a
-  # USB disk. This stage boots a system that is already installed, and an installed macOS has no
-  # recovery volume - an extra USB disk would be one more row the guest can pick in Disk Utility,
-  # where setup.yaml's "choose the target disk by capacity" reads the sidebar. Attaching it where
-  # nothing is being installed is at best a row nobody looks at and at worst the row that gets
-  # picked.
-  #
-  # THE RECOVERY IMAGE IS STILL AN INPUT to the step that builds OpenCore - the APFS driver comes
-  # out of that image - and that is host work on a file, not a device handed to the guest. The
-  # two are separate facts: opencore.build() reads it, `boot:` does not attach it.
-  #
-  # WHAT IS ALWAYS THERE, because macOS always boots through OpenCore:
-  #
-  #     boot.img   OpenCore, bootindex=0   a disk with no bootindex is not in the boot order at
-  #                                        all, which is what "failed to load Boot0001" meant for
-  #                                        six runs
-  #     disk       the target, bootindex=1 OpenCore finds the installed system here
-  #
-  # And discard is ON: this disk is finished, and a guest's TRIMs are what keep the published
-  # qcow2 small.
-  # OPENCORE AND THE RECOVERY IMAGE ARE INPUTS EVEN THOUGH THIS STAGE DOES NOT INSTALL.
-  #
-  # The firmware three - a boot image, OVMF's code and a writable variables copy - are built FROM the
-  # recovery image, because Apple's APFS driver lives inside it (usr/standalone/i386/apfs.efi) and
-  # OpenCore cannot read an APFS partition without one. EnableJumpstart=true does not supply a
-  # driver; it HOOKS one the firmware is expected to have, and OVMF has none. The symptom is silent:
-  # a picker that lists only Reset NVRAM and Toggle SIP.
-  #
-  # NO `recovery:` ON THE BOOT, THOUGH. That key attaches the image to the GUEST as removable media,
-  # and only the setup stage installs from it. An installed disk has no recovery volume, and an extra
-  # USB disk is one more row in Disk Utility's sidebar - which is what `choose the target disk by
-  # capacity` reads. Two facts, two places: this step reads the image, the boot does not give it away.
-  - name: fetch the recovery image
-    fetch: recovery_macos
-    release: "15"
-  - name: build OpenCore from the recovery image
-    fetch: opencore
-    release: "15"
-    recovery: recovery_macos
-
-  - name: boot the disk
-    boot: true
-    os: macos
-    timeout: 900
-  # --- the panes that only need the footer ------------------------------------------------
-  #
-  # THE FOOTER'S FORWARD BUTTON IS NOT IN THE SAME PLACE ON 26: (1306, 810) against
-  # (1276, 798), a button's width apart. That is why this file is 15 and a 26 file repeats the
-  # numbers instead of parameterising them - a shared table is wrong by thirty pixels on one of
-  # the two, and a click that far off a forty-pixel button misses silently while the wizard
-  # carries on.
-
-  # THE UNTICK HAS TO HAPPEN BEFORE THE PAGE THAT MERELY MENTIONS PRIVACY.
-  #
-  # `data and privacy` used to be able to match the Analytics screen, and it is declared
-  # earlier, so on both CI runs of this stage the walk clicked Continue here and never unticked
-  # 'Share Mac Analytics with Apple'. The order below is the fix, and the tightened matcher
-  # above is the belt to go with it.
-  #
-  # UNTICK FIRST. The box is on when the pane opens; clicking it clears it and greys the second
-  # option with it, which is what the bake wants. (808, 513) is that box; (1306, 810) is the
-  # footer's Continue.
-  - name: analytics
-    when: [analytics, improve]
-    do:
-      - at: [808, 513]
-        settle: 3
-      - at: [1306, 810]
-        settle: 10
-
-  - name: data and privacy
-    # THE WORDS ARE THE PAGE'S OWN SENTENCE, NOT TWO WORDS ITS NEIGHBOUR ALSO SAYS.
-    #
-    # `when: [data, privacy]` matched TWO panes on macOS 15. The Analytics page says
-    #
-    #     ... automatically sending diagnostics and usage data. Diagnostic data may include
-    #     location information.        About Analytics & Privacy...
-    #
-    # which contains both "data" and "privacy", so the walk answered it as this pane: it
-    # clicked Continue and never ran the analytics step. Measured on the CI recording of run
-    # 42573249989, frame t=512s: `data privacy` TRUE and `analytics improve` TRUE at once, and
-    # this step is 115 lines above the analytics one, so it won.
-    #
-    # The cost was not a stuck walk - the wizard carried on and reached Finder - it was a disk
-    # that still had 'Share Mac Analytics with Apple' ticked, which is the one thing the
-    # analytics step exists to untick.
-    #
-    # 'this icon appears when an apple feature asks to use your personal information' is this
-    # page's own body text. Checked against the real frames of five panes: TRUE here, FALSE on
-    # Analytics, Create a Mac Account, Accessibility, Choose Your Look and Time Zone.
-    when: [privacy, fundamental]
-    at: [1306, 810]
-    settle: 8
-
-  - name: written and spoken languages
-    when: [spoken, languages]
-    at: [1306, 810]
-    settle: 8
-
-  # NOT "CONTINUE". This pane's forward button says Not Now, four pixels higher than the usual
-  # footer - clicking (1306, 810) here selects nothing.
-  - name: accessibility
-    when: [accessibility, individual]
-    at: [1306, 806]
-    settle: 12
-
-  # THE ROW IS THE CONTROL, NOT THE LABEL. Measured: two clicks on the circle at (825, 669)
-  # take the selection where a click on the label at (880, 666) did nothing.
-  - name: transfer your data
-    when: [transfer, data]
-    do:
-      - at: [825, 669]
-        settle: 4
-      - at: [1306, 810]
-        settle: 10
-
-  # TYPING SELECTS THE ROW. The list takes nothing from a click except focus; typing "united
-  # states" jumps to the U section with the row already highlighted.
-  - name: country or region
-    when: [country, region]
-    do:
-      - at: [900, 500]
-        settle: 2
-      - at: [900, 500]
-        type: united states
-        settle: 3
-      - at: [1306, 810]
-        settle: 8
-
-  # --- the account, which is three fields ------------------------------------------------
-
-  # THE PASSWORD ROW IS TWO BOXES. These positions are the ones that produced a green tick
-  # beside every field - drive.py's table differs by a row and put the text one row off.
-  # `modifier: meta_l` IS NOT COSMETIC. Select-all is Control+A on Linux and Command+A on
-  # macOS; the wrong one moves the cursor instead of selecting, so the installer's suggested
-  # name stays and the typed value is INSERTED in front of it. The field then holds both, the
-  # form never validates, Continue stays disabled - and the wizard sits on this pane while every
-  # later pane is matched against its text. That is what the first YAML desktop run did, and its
-  # log shows the account pane still up sixty seconds later.
-  - name: create a mac account
-    when: [create, mac, account]
-    once: true
-    region: [300, 300, 1620, 340]
-    region_at: [1920, 1080]
-    scale: 2
-    do:
-      - at: [945, 447]
-        type: "{{ user }}"
-        modifier: meta_l
-        settle: 3
-      - at: [850, 531]
-        type: "{{ password }}"
-        modifier: meta_l
-        settle: 3
-      - at: [1086, 531]
-        type: "{{ password }}"
-        modifier: meta_l
-        settle: 3
-      # CONTINUE STARTS A PROCESS, NOT A TRANSITION, AND IT TAKES UP TO THREE MINUTES.
-      #
-      # The pane answers by going
-      #
-      #     Creating account...
-      #
-      # with Continue greyed out. A loop that looks again before it finishes sees the SAME
-      # pane, runs this `do` list a second time and types `docker` into fields that already
-      # hold it - measured on a live guest: three passes, and the form was unusable
-      # afterwards. That is how the Apple Account pane ended up with 'admin' typed into its
-      # Email field.
-      #
-      # 180 SECONDS IS drive.py's NUMBER, AND ITS HISTORY IS THE REASON:
-      #
-      #     6 -> 25 -> 80 -> 180, and 80 WAS STILL NOT ENOUGH
-      #
-      # Run 41855475794 clicked Continue at 15:32:37 and Set Up Later at 15:34:00 - eighty
-      # seconds later - and the recording shows the form still spinning. `Set Up Later` only
-      # exists on the Apple Account pane, so on a form that has not finished the click went
-      # somewhere else and the wizard came back and stayed. drive.py's own words: "the number
-      # that matters is not how long it takes but how long it can take - a first boot on a
-      # shared runner with a cold disk, writing a home directory, generating keys and talking
-      # to the keychain. Waiting too long costs idle seconds and is recoverable; clicking too
-      # early throws away the run."
-      - at: [1306, 810]
-        settle: 180
-
-  # --- the panes with their own way out --------------------------------------------------
-
-  # THE SHEET'S "DON'T USE" IS ITS DEFAULT BUTTON: a click darkens it and leaves the sheet up,
-  # and Return is what fires it. Both halves of that were measured. The sheet and the pane share
-  # the word "use", which is why both steps are in one pane: the first answer opens the sheet
-  # and the second one closes it, in the same pass.
-  - name: enable location services
-    # `when: [location, services]` MATCHED THE ANALYTICS PAGE TOO. That page's body reads
-    #
-    #     Help Apple and app developers improve their products and services automatically.
-    #     ... Diagnostic data may include location information.
-    #
-    # so "location" and "services" are both on it. This step happens to sit after the analytics
-    # one, so the walk got the right answer by luck of ordering - which is not a thing to
-    # leave in a file that a future edit can reorder.
-    #
-    # 'approximate location' is on this page ("... use data including your approximate
-    # location.") and on none of the six others checked: Analytics, Data & Privacy, Create a
-    # Mac Account, Choose Your Look, Time Zone.
-    when: [approximate, location]
-    do:
-      - at: [1306, 810]
-        settle: 6
-      - at: [960, 632]
-        settle: 3
-      - key: ret
-        settle: 6
-
-  # SET UP LATER, AND ITS OWN BUTTON - not the footer.
-  # THIS PANE FINISHES ON ITS OWN AND TAKES ABOUT FORTY SECONDS - drive_read.py measures it
-  # with `w.wait_for("look", timeout=180)`, which is the only reliable end-of-pane signal: a
-  # fixed sleep either wastes time or clicks a greyed Continue on the pane that follows. Here
-  # the pane loop supplies that wait by simply looking again, so this settle is only the pause
-  # after the click; the 8 seconds is not the pane's duration.
-  - name: screen time
-    when: [screen, report]
-    at: [619, 806]
-    settle: 8
-
-  - name: time zone
-    when: [time, zone]
-    at: [1306, 806]
-    settle: 10
-
-  - name: choose your look
-    when: [look, appearance]
-    at: [1306, 805]
-    settle: 12
-
-  # THE FOOTER'S AGREE OPENS A LICENCE SHEET, whose own Agree is a different click.
-  - name: terms and conditions
-    when: [terms, conditions]
-    do:
-      - at: [1298, 806]
-        settle: 8
-      - at: [1019, 616]
-        settle: 10
-
-  # "WELCOME TO MAC" IS A PANE, NOT THE DESKTOP. It is a full-screen card with a Continue
-  # button, and treating it as arrival skipped this pane and left the wizard one click from
-  # finished - the same class of mistake as an earlier loop that matched the word "up" inside a
-  # paragraph.
-  - name: welcome to mac
-    when: [welcome, mac]
-    at: [960, 990]
-    settle: 12
-
-  # THE LAST PANE, AND IT ASKS WHETHER TO KEEP THE KEYBOARD SETUP.
-  # THE KEYBOARD SETUP ASSISTANT, WHICH IS A DIALOG OVER THE DESKTOP AND NOT A WIZARD PANE.
-  #
-  # drive_read.py matches it on `keyboard` + `assistant`; this file matched
-  # `keyboard` + `select`, which is not what the dialog says, so the handler would never have
-  # fired. The dialog eats the next keystroke - ssh.py's dismiss_keyboard_assistant() exists
-  # because of exactly that - so leaving it up is a failure that surfaces much later.
-  - name: keyboard
-    when: [keyboard, assistant]
-    at: [1222, 818]
-    settle: 12
-
-  # --- the pane that is a menu and a sheet, and the one that must not run ------------------
-  #
-  # `python:` because leaving the Apple Account pane is a menu on 26 and a link on 15, each
-  # followed by a confirmation sheet at a different place. Writing that as `at:` steps would
-  # need a conditional-that-gates-a-click, which is the mistake this repository has paid for
-  # four times. The branch is in Python where it is readable as a branch, and the YAML names it.
-  # THE MATCH IS THE TITLE, NOT "sign" AND "apple" ANYWHERE - and that cost a run.
-  #
-  # The account pane's own body reads "The password you create here will be used to log in to
-  # [your Apple Account]", so a `says("sign", "apple")` matches it. The first YAML desktop run
-  # therefore answered the ACCOUNT pane as the Apple Account pane, clicked `Set Up Later` at a
-  # coordinate that is not on the account form, and reported
-  #
-  #     the Apple Account pane is still up; no measured way out worked
-  #
-  # over a screen that read 'Create a Mac Account'.
-  #
-  # "Sign In to Your Apple Account" is the pane's title and appears nowhere else, so the match
-  # is those words. This is the same rule every driver here states: match the title strip, not
-  # a phrase in the body.
-  # LEAVING THIS PANE WAS A `python:` FUNCTION AND DID NOT NEED TO BE.
-  #
-  # What it does is four actions in a row, and the file that recorded the measurements stated why
-  # they are in that order:
-  #
-  #     click Set Up Later   settle 2
-  #     key   Return         settle 3     the sheet's default button needs it
-  #     click sheet Skip     settle 2     only if the sheet is up
-  #     key   Return         settle 2     Skip focused it, so Return fires it
-  #
-  # THE LAST TWO ARE UNCONDITIONAL, AND THAT IS MEASURED, NOT LAZY: "the sheet only exists if the
-  # click worked. When the pane has already gone, this coordinate is empty space on the next pane -
-  # harmless - and when the sheet is up it is its Skip button."
-  #
-  # THE VERDICT IS THE SCREEN BELOW, not "I clicked". Returning success from the click is how a pane
-  # is answered three times in a row and then reported STUCK.
-  - name: sign in to apple account
-    when: [sign, in, to, your, apple, account]
-    region: [300, 420, 1620, 460]
-    region_at: [1920, 1080]
-    scale: 2
-    do:
-      # THE "Set Up Later" LINK. (620, 811) on a 1920x1080 guest.
-      - at: [620, 811]
-        settle: 2
-      # THE SHEET'S DEFAULT BUTTON, which the link raises.
-      - key: ret
-        settle: 3
-      # THE SHEET'S Skip, IF THERE IS ONE. Empty space when the pane has already gone.
-      - at: [1026, 634]
-        settle: 2
-      # Skip FOCUSED IT, so Return fires it.
-      - key: ret
-        settle: 2
-
-  # AND THE PANE MUST BE GONE. A loose check reports success while the wizard is still here: the
-  # account pane's own body says "used to log in to your Apple Account", so the title is the test
-  # and the body is not.
-  - name: the apple account pane is gone
-    expect_any:
-      - [update, automatically]
-      - [choose, a, look]
-      - [welcome, to, mac]
-    timeout: 60
-
-  # UPDATE MAC AUTOMATICALLY. On 15 this is another footer click. On 26 it greys Continue, spins
-  # and never advances, and the only exit is a system_reset - see the file header. It is
-  # `optional` so a 26 disk that reaches it reports rather than failing the whole walk.
-  - name: update mac automatically
-    when: [update, automatically]
-    at: [1306, 810]
-    settle: 15
-    optional: true
-
-  # =========================================================================
-  # THE EPILOGUE: WHAT THE WIZARD LEFT BEHIND
-  # =========================================================================
-  #
-  # The Setup Assistant on macOS 15 finishes at the LOGIN WINDOW - `ends_at` above is the
-  # password field's placeholder, because that window has no readable text and a whole-frame
-  # read returns nothing. So "the wizard finished" and "the disk is usable" are two different
-  # facts, and this is where the second one is established.
-  #
-  # THE LOGIN FIRST. The field is clicked before anything is typed: it is focused on some boots
-  # and not on others, and a password typed into an unfocused window goes nowhere and reads
-  # afterwards as "the password was wrong" (runs 42079736995 against 42083224228). (965, 981)
-  # is the centre of the "Enter Password" pill, which spans x=880..1210 at y=960..1000.
-  - name: click the password field
-    at: [965, 981]
-    settle: 1
-    skip_when_unfinished: true
-
-  - name: type the password
-    type: "{{ password }}"
-    settle: 1
-    skip_when_unfinished: true
-
-  - name: press return
-    key: ret
-    settle: 20
-    skip_when_unfinished: true
-
-  # THE KEYBOARD SETUP ASSISTANT COMES UP WITH THE FIRST DESKTOP SESSION and eats the next
-  # keystroke - which is how sshd was never enabled on six runs (42034256322). It is dismissed
-  # here because this is where the first session begins.
-  # THIS WAS A `dismiss: post_login` PRIMITIVE, AND IT HID THREE DIFFERENT THINGS.
-  #
-  # What it did: click Quit on the Keyboard Setup Assistant, send ("esc", "meta_l+q", "esc") to
-  # close whatever accessibility sheet is on top, and MAKE ITS OWN QMP CONNECTION. The third of
-  # those is not a decision about a screen at all - it is how this framework must talk to qemu, and
-  # the Python implementation's own note records the cost of getting it wrong:
-  #
-  #     qemu's -qmp unix:... ACCEPTS ONE CLIENT PER SOCKET. This function first opened its own
-  #     connection and then called `dismiss_keyboard_assistant` WITHOUT passing it - so that
-  #     function opened a second one, which blocks on the greeting forever, because the first is
-  #     still held here. The step then sits inside its 240-second timeout with no output at all.
-  #
-  # THE CLICKS ARE HARMLESS ON A CLEAN DESKTOP: they land on wallpaper. And that is the reason the
-  # Keyboard Setup Assistant's Quit is clicked TWICE - one click can arrive before the dialog is
-  # drawn.
-  #
-  # THE VOICEOVER SHEET IS NOT RECOGNISED, IT IS DISMISSED. A keystroke on a desktop with no sheet
-  # is a keystroke; the price of guessing is one lost keystroke, and the price of not guessing is
-  # the whole stage.
-  - name: dismiss the overlays macOS puts up on a first login
-    do:
-      # THREE CLICKS FOUR SECONDS APART, WHICH IS THE MEASURED NUMBER AND NOT A ROUND ONE.
-      #
-      # A click that arrives before the dialog is drawn lands on wallpaper and looks identical in
-      # the log to one that dismissed it (run 42162859846). Two seconds was not enough on a loaded
-      # guest; four is what the recorded runs used.
-      - at: [1228, 826]
-        settle: 4
-      - at: [1228, 826]
-        settle: 4
-      - at: [1228, 826]
-        settle: 4
-      # Whatever accessibility sheet is on top. `meta_l+q` is VoiceOver's own quit chord, and the
-      # escape on either side of it is what closes a sheet that is holding focus.
-      - key: esc
-        settle: 2
-      - key: meta_l+q
-        settle: 2
-      - key: esc
-        settle: 2
-    optional: true
-    skip_when_unfinished: true
-
-  # AND NOW THE DESKTOP IS THE VERDICT ON THE WHOLE STAGE. `wait_for_desktop` is the wallpaper
-  # test, which is the only thing that can confirm the password was accepted; five minutes,
-  # because this is a first session on a disk that has never had one.
-  - name: wait for the desktop
-    desktop: macos
-    timeout: 300
-    skip_when_unfinished: true
-
-  - name: stop the machine
-    shutdown: "{{ shutdown }}"
-    timeout: 300
+- name: fetch the recovery image
+  fetch: recovery_macos
+  release: '15'
+- name: build OpenCore from the recovery image
+  fetch: opencore
+  release: '15'
+  recovery: recovery_macos
+- name: boot the disk
+  boot: true
+  os: macos
+  timeout: 900
+- name: analytics
+  when:
+  - analytics
+  - improve
+  do:
+  - at:
+    - 808
+    - 513
+    wait_after: 3
+  - at:
+    - 1306
+    - 810
+    wait_after: 10
+- name: data and privacy
+  when:
+  - privacy
+  - fundamental
+  at:
+  - 1306
+  - 810
+  wait_after: 8
+- name: written and spoken languages
+  when:
+  - spoken
+  - languages
+  at:
+  - 1306
+  - 810
+  wait_after: 8
+- name: accessibility
+  when:
+  - accessibility
+  - individual
+  at:
+  - 1306
+  - 806
+  wait_after: 12
+- name: transfer your data
+  when:
+  - transfer
+  - data
+  do:
+  - at:
+    - 825
+    - 669
+    wait_after: 4
+  - at:
+    - 1306
+    - 810
+    wait_after: 10
+- name: country or region
+  when:
+  - country
+  - region
+  do:
+  - at:
+    - 900
+    - 500
+    wait_after: 2
+  - at:
+    - 900
+    - 500
+    type: united states
+    wait_after: 3
+  - at:
+    - 1306
+    - 810
+    wait_after: 8
+- name: create a mac account
+  when:
+  - create
+  - mac
+  - account
+  once: true
+  region:
+  - 300
+  - 300
+  - 1620
+  - 340
+  region_at:
+  - 1920
+  - 1080
+  scale: 2
+  do:
+  - at:
+    - 945
+    - 447
+    type: '{{ user }}'
+    modifier: meta_l
+    wait_after: 3
+  - at:
+    - 850
+    - 531
+    type: '{{ password }}'
+    modifier: meta_l
+    wait_after: 3
+  - at:
+    - 1086
+    - 531
+    type: '{{ password }}'
+    modifier: meta_l
+    wait_after: 3
+  - at:
+    - 1306
+    - 810
+    wait_after: 180
+- name: enable location services
+  when:
+  - approximate
+  - location
+  do:
+  - at:
+    - 1306
+    - 810
+    wait_after: 6
+  - at:
+    - 960
+    - 632
+    wait_after: 3
+  - key: ret
+    wait_after: 6
+- name: screen time
+  when:
+  - screen
+  - report
+  at:
+  - 619
+  - 806
+  wait_after: 8
+- name: time zone
+  when:
+  - time
+  - zone
+  at:
+  - 1306
+  - 806
+  wait_after: 10
+- name: choose your look
+  when:
+  - look
+  - appearance
+  at:
+  - 1306
+  - 805
+  wait_after: 12
+- name: terms and conditions
+  when:
+  - terms
+  - conditions
+  do:
+  - at:
+    - 1298
+    - 806
+    wait_after: 8
+  - at:
+    - 1019
+    - 616
+    wait_after: 10
+- name: welcome to mac
+  when:
+  - welcome
+  - mac
+  at:
+  - 960
+  - 990
+  wait_after: 12
+- name: keyboard
+  when:
+  - keyboard
+  - assistant
+  at:
+  - 1222
+  - 818
+  wait_after: 12
+- name: sign in to apple account
+  when:
+  - sign
+  - in
+  - to
+  - your
+  - apple
+  - account
+  region:
+  - 300
+  - 420
+  - 1620
+  - 460
+  region_at:
+  - 1920
+  - 1080
+  scale: 2
+  do:
+  - at:
+    - 620
+    - 811
+    wait_after: 2
+  - key: ret
+    wait_after: 3
+  - at:
+    - 1026
+    - 634
+    wait_after: 2
+  - key: ret
+    wait_after: 2
+- name: the apple account pane is gone
+  expect_any:
+  - - update
+    - automatically
+  - - choose
+    - a
+    - look
+  - - welcome
+    - to
+    - mac
+  timeout: 60
+- name: update mac automatically
+  when:
+  - update
+  - automatically
+  at:
+  - 1306
+  - 810
+  optional: true
+  wait_after: 15
+- name: click the password field
+  at:
+  - 965
+  - 981
+  skip_when_unfinished: true
+  wait_after: 1
+- name: type the password
+  type: '{{ password }}'
+  skip_when_unfinished: true
+  wait_after: 1
+- name: press return
+  key: ret
+  skip_when_unfinished: true
+  wait_after: 20
+- name: dismiss the overlays macOS puts up on a first login
+  do:
+  - at:
+    - 1228
+    - 826
+    wait_after: 4
+  - at:
+    - 1228
+    - 826
+    wait_after: 4
+  - at:
+    - 1228
+    - 826
+    wait_after: 4
+  - key: esc
+    wait_after: 2
+  - key: meta_l+q
+    wait_after: 2
+  - key: esc
+    wait_after: 2
+  optional: true
+  skip_when_unfinished: true
+- name: wait for the desktop
+  desktop: macos
+  timeout: 300
+  skip_when_unfinished: true
+- name: stop the machine
+  shutdown: '{{ shutdown }}'
+  timeout: 300

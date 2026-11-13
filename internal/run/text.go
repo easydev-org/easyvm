@@ -2,6 +2,7 @@ package run
 
 import (
 	"fmt"
+	"image"
 	"io"
 	"os"
 	"os/exec"
@@ -160,6 +161,17 @@ func (e *Executor) readScreen(s walk.Step, label string) ([]string, error) {
 		crop = cropped
 	}
 
+	return e.readCrop(crop, label)
+}
+
+// readCrop saves one crop and reads it, which is the ONLY place tesseract is invoked.
+//
+// IT IS SEPARATE FROM `readScreen` SO THAT "WHICH RECTANGLE" AND "READ IT" ARE TWO DECISIONS. The
+// conditions (`until:`, `until_any:` and the rest) reach this through `readScreen`, which takes its
+// rectangle from the step's own `region:`; an `ocr:` step reaches it with a rectangle it validated
+// as required. One tesseract call, one enlargement, one saved ppm - so a gate and a loop cannot
+// disagree about what the screen said.
+func (e *Executor) readCrop(crop image.Image, label string) ([]string, error) {
 	path := filepath.Join(e.Work, "read-"+sanitise(label)+".ppm")
 	if err := os.MkdirAll(e.Work, 0o755); err != nil {
 		return nil, err

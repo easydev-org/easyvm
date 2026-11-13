@@ -17,6 +17,11 @@ func ExecutableKeys() []string {
 		"share_serve", "share_mount",
 		"type", "key", "double", "at",
 		"wait_for", "screenshot",
+		// THE THREE-STEP MODEL. `ocr:` reads one region and names it; `check:` answers from that
+		// name; `loop:` is the three parts written down. ONLY THESE THREE ARE DISPATCHED: `says`,
+		// `says_any` and `max` are sub-keys of `check:` and `loop:` - a sub-key is not a step, and
+		// claiming it here is what the dispatch test exists to refuse.
+		"ocr", "check", "loop",
 		"unless", "unless_any", "until", "until_any", "until_console", "expect", "expect_any", "at_window",
 		"at_button", "host_log", "run", "disk_settle", "do",
 		"repeat_until",

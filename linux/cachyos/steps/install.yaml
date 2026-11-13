@@ -41,10 +41,10 @@ steps:
   repeat:
   - 2
   - 0.8
-  settle: 35
   expect_any:
   - - welcome
   - - location
+  wait_after: 35
 - name: open the installer (once more, if it did not)
   unless:
   - welcome
@@ -54,91 +54,91 @@ steps:
   repeat:
   - 2
   - 0.8
-  settle: 40
+  wait_after: 40
 - name: welcome
   at:
   - 1352
   - 747
-  settle: 20
+  wait_after: 20
 - name: location
   at:
   - 1352
   - 796
-  settle: 20
+  wait_after: 20
 - name: keyboard
   at:
   - 1352
   - 796
-  settle: 22
+  wait_after: 22
 - name: bootloader
   at:
   - 1352
   - 796
-  settle: 22
+  wait_after: 22
 - name: partitions - erase the disk
   at:
   - 465
   - 367
-  settle: 10
+  wait_after: 10
 - name: partitions
   at:
   - 1352
   - 796
-  settle: 20
+  wait_after: 20
 - name: the erase confirmation's continue (if it is shown)
   at:
   - 1010
   - 640
-  settle: 3
+  wait_after: 3
 - name: desktop
   at:
   - 1352
   - 796
-  settle: 22
+  wait_after: 22
 - name: packages
   at:
   - 1352
   - 796
-  settle: 25
+  wait_after: 25
 - name: users - full name
   at:
   - 516
   - 348
   type: '{{ user }}'
-  settle: 2
+  wait_after: 2
 - name: users - login name
   at:
   - 516
   - 413
   type: '{{ user }}'
-  settle: 2
+  wait_after: 2
 - name: users - password
   at:
   - 516
   - 546
   type: '{{ password }}'
-  settle: 2
+  wait_after: 2
 - name: users - confirm password
   at:
   - 729
   - 546
   type: '{{ password }}'
-  settle: 3
+  wait_after: 3
 - name: users
   at:
   - 1352
   - 796
-  settle: 25
+  wait_after: 25
 - name: summary - install
   at:
   - 1365
   - 902
-  settle: 18
+  wait_after: 18
 - name: the install confirmation's install now
   at:
   - 1018
   - 620
-  settle: 30
+  wait_after: 30
 - name: the installer finishes
   until_any:
   - - all

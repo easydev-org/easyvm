@@ -38,103 +38,103 @@ steps:
   double:
   - 960
   - 760
-  settle: 35
   expect_any:
   - - welcome
   - - location
+  wait_after: 35
 - name: open the installer (once more, if it did not)
   unless:
   - welcome
   double:
   - 960
   - 760
-  settle: 40
+  wait_after: 40
 - name: welcome
   at:
   - 1325
   - 801
-  settle: 18
+  wait_after: 18
 - name: location
   at:
   - 1325
   - 801
-  settle: 18
+  wait_after: 18
 - name: keyboard
   at:
   - 1325
   - 801
-  settle: 18
+  wait_after: 18
 - name: partitions - erase the disk
   at:
   - 653
   - 340
-  settle: 6
+  wait_after: 6
 - name: partitions
   at:
   - 1325
   - 801
-  settle: 20
+  wait_after: 20
 - name: users - full name
   at:
   - 741
   - 320
   type: '{{ user }}'
-  settle: 2
+  wait_after: 2
 - name: users - login name
   at:
   - 741
   - 385
   type: '{{ user }}'
-  settle: 2
+  wait_after: 2
 - name: users - password
   at:
   - 724
   - 523
   type: '{{ password }}'
-  settle: 2
+  wait_after: 2
 - name: users - confirm password
   at:
   - 944
   - 523
   type: '{{ password }}'
-  settle: 2
+  wait_after: 2
 - name: users - root password
   at:
   - 741
   - 650
   type: '{{ password }}'
-  settle: 2
+  wait_after: 2
 - name: users - confirm root password
   at:
   - 944
   - 650
   type: '{{ password }}'
-  settle: 3
+  wait_after: 3
 - name: users
   at:
   - 1325
   - 801
-  settle: 20
+  wait_after: 20
 - name: office suite - no office suite
   at:
   - 700
   - 288
-  settle: 6
+  wait_after: 6
 - name: office suite
   at:
   - 1334
   - 794
-  settle: 20
+  wait_after: 20
 - name: summary - install
   at:
   - 1318
   - 799
-  settle: 18
+  wait_after: 18
 - name: the install confirmation's install now
   at:
   - 1055
   - 537
-  settle: 30
+  wait_after: 30
 - name: the installer finishes
   until_any:
   - - all

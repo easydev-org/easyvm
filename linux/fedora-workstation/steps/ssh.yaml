@@ -21,71 +21,71 @@ steps:
   timeout: 900
 - name: greeter - wake the screen
   key: esc
-  settle: 5
   optional: true
+  wait_after: 5
 - name: greeter - the user tile
   at:
   - 960
   - 488
-  settle: 4
   optional: true
+  wait_after: 4
 - name: greeter - the password box
   at:
   - 936
   - 628
   type: '{{ password }}'
   clear: false
-  settle: 4
   optional: true
+  wait_after: 4
 - name: greeter - submit
   key: ret
-  settle: 12
   optional: true
+  wait_after: 12
 - name: desktop - give the shell focus
   at:
   - 960
   - 700
-  settle: 2
+  wait_after: 2
 - name: open the overview
   key: meta_l
-  settle: 4
+  wait_after: 4
 - name: search for the terminal
   type: terminal
-  settle: 4
+  wait_after: 4
 - name: open the terminal
   at:
   - 960
   - 178
-  settle: 20
+  wait_after: 20
 - name: install openssh-server
   run: echo {{ password }} | sudo -S dnf install -y openssh-server 2>&1 | tail -5
   terminal_wait: 0
-  settle: 45
+  wait_after: 45
 - name: allow password authentication
   run: echo {{ password }} | sudo -S -p '' sh -c 'mkdir -p /etc/ssh/sshd_config.d; printf "PasswordAuthentication yes\n" > /etc/ssh/sshd_config.d/99-vm.conf; sed -i "s/^#\?\s*PasswordAuthentication.*/PasswordAuthentication yes/" /etc/ssh/sshd_config; grep
     -q "^PasswordAuthentication yes" /etc/ssh/sshd_config || printf "PasswordAuthentication yes\n" >> /etc/ssh/sshd_config' 2>&1 | tail -3
   terminal_wait: 0
-  settle: 3
+  wait_after: 3
 - name: enable sshd at boot
   run: echo {{ password }} | sudo -S systemctl enable sshd 2>&1 | tail -3
   terminal_wait: 0
-  settle: 8
+  wait_after: 8
 - name: prove the setting took
   run: echo {{ password }} | sudo -S sh -c 'sshd -T 2>/dev/null | grep -i "^passwordauthentication" || echo PASSWORDAUTH-UNREADABLE' 2>&1 | tail -3
   terminal_wait: 0
-  settle: 3
+  wait_after: 3
 - name: start sshd
   run: echo {{ password }} | sudo -S systemctl restart sshd 2>&1 | tail -3
   terminal_wait: 0
-  settle: 10
+  wait_after: 10
 - name: prove sshd is active
   run: systemctl is-active sshd
   terminal_wait: 0
-  settle: 5
+  wait_after: 5
 - name: open the firewall for ssh
   run: echo {{ password }} | sudo -S sh -c "firewall-cmd --add-service=ssh --permanent; firewall-cmd --reload; firewall-cmd --list-services" 2>&1 | tail -5
   terminal_wait: 0
-  settle: 8
+  wait_after: 8
 - name: wait for sshd
   require_ssh: true
   timeout: 600

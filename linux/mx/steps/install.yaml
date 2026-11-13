@@ -38,7 +38,7 @@ steps:
   repeat:
   - 2
   - 3
-  settle: 28
+  wait_after: 28
 - name: wait for the terms page
   until:
   - terms
@@ -59,7 +59,7 @@ steps:
   at:
   - 1482
   - 889
-  settle: 14
+  wait_after: 14
 - name: wait for the installation type page
   until:
   - select
@@ -81,7 +81,7 @@ steps:
   at:
   - 1482
   - 889
-  settle: 16
+  wait_after: 16
 - name: wait for the confirmation page
   until:
   - final
@@ -101,12 +101,12 @@ steps:
   at:
   - 1478
   - 889
-  settle: 25
+  wait_after: 25
 - name: dismiss the invalid settings modal if it is up
   at:
   - 1069
   - 583
-  settle: 4
+  wait_after: 4
 - name: wait for the swap file page
   until:
   - create
@@ -128,7 +128,7 @@ steps:
   at:
   - 1482
   - 889
-  settle: 18
+  wait_after: 18
 - name: wait for the computer identity page
   until:
   - computer
@@ -148,7 +148,7 @@ steps:
   at:
   - 1482
   - 889
-  settle: 18
+  wait_after: 18
 - name: wait for the localization page
   until:
   - localization
@@ -168,7 +168,7 @@ steps:
   at:
   - 1482
   - 889
-  settle: 18
+  wait_after: 18
 - name: wait for the account page
   until:
   - default
@@ -190,29 +190,29 @@ steps:
   - 1210
   - 342
   type: '{{ user }}'
-  settle: 2
+  wait_after: 2
 - name: account - password
   at:
   - 1210
   - 377
   type: '{{ password }}'
-  settle: 2
+  wait_after: 2
 - name: account - confirm password
   at:
   - 1210
   - 412
   type: '{{ password }}'
-  settle: 3
+  wait_after: 3
 - name: autologin
   at:
   - 700
   - 561
-  settle: 4
+  wait_after: 4
 - name: default user login
   at:
   - 1482
   - 889
-  settle: 25
+  wait_after: 25
 - name: the installer finishes
   until_any:
   - - congratulations

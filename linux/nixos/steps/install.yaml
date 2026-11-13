@@ -38,11 +38,11 @@ steps:
   repeat:
   - 2
   - 3
-  settle: 8
   expect_any:
   - - welcome
   - - language
   - - install
+  wait_after: 8
 - name: open the installer (desktop icon, if the window was not there)
   unless:
   - welcome
@@ -53,7 +53,7 @@ steps:
   repeat:
   - 2
   - 3
-  settle: 8
+  wait_after: 8
 - name: open the installer (desktop icon again)
   unless:
   - welcome
@@ -64,7 +64,7 @@ steps:
   repeat:
   - 2
   - 3
-  settle: 25
+  wait_after: 25
 - name: calamares is up
   until_any:
   - - welcome
@@ -86,102 +86,102 @@ steps:
   at_bottom:
   - 1327
   - 15
-  settle: 15
+  wait_after: 15
 - name: location
   at_bottom:
   - 1327
   - 15
-  settle: 15
+  wait_after: 15
 - name: keyboard
   at_bottom:
   - 1327
   - 15
-  settle: 15
+  wait_after: 15
 - name: users - what is your name
   at:
   - 700
   - 377
   type: '{{ user }}'
-  settle: 2
+  wait_after: 2
 - name: users - login name, select all
   at:
   - 700
   - 429
   key: ctrl+a
-  settle: 1
+  wait_after: 1
 - name: users - login name, clear it
   key: backspace
-  settle: 1
+  wait_after: 1
 - name: users - login name
   at:
   - 700
   - 429
   type: '{{ user }}'
-  settle: 2
+  wait_after: 2
 - name: users - allow a short password
   at:
   - 630
   - 532
-  settle: 3
+  wait_after: 3
 - name: users - password
   at:
   - 700
   - 494
   type: '{{ password }}'
-  settle: 2
+  wait_after: 2
 - name: users - repeat password
   at:
   - 900
   - 494
   type: '{{ password }}'
-  settle: 2
+  wait_after: 2
 - name: users - administrator password
   at:
   - 700
   - 603
   type: '{{ password }}'
-  settle: 2
+  wait_after: 2
 - name: users - administrator repeat password
   at:
   - 900
   - 603
   type: '{{ password }}'
-  settle: 3
+  wait_after: 3
 - name: users
   at_bottom:
   - 1327
   - 15
-  settle: 18
+  wait_after: 18
 - name: choose gnome
   at:
   - 1000
   - 400
-  settle: 4
+  wait_after: 4
 - name: packagechooser
   at_bottom:
   - 1327
   - 15
-  settle: 15
+  wait_after: 15
 - name: unfree notes
   at_bottom:
   - 1327
   - 15
-  settle: 12
+  wait_after: 12
 - name: partitions - erase the disk
   at:
   - 633
   - 390
-  settle: 6
+  wait_after: 6
 - name: partitions
   at_bottom:
   - 1327
   - 15
-  settle: 18
+  wait_after: 18
 - name: summary - install
   at_bottom:
   - 1327
   - 15
-  settle: 25
+  wait_after: 25
 - name: the install is written
   disk_settle: 180
   disk_min_mb: 1024

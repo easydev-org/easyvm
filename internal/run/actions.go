@@ -784,7 +784,7 @@ func notImplementedCount(steps []walk.Step, can map[string]bool) (int, string) {
 	count := 0
 	first := ""
 	passive := map[string]bool{"name": true, "optional": true, "timeout": true, "requires": true,
-		"settle": true, "poll": true, "os": true, "family": true}
+		"wait_after": true, "poll": true, "os": true, "family": true}
 	for _, s := range steps {
 		blocking := false
 		for k := range s.Spec {

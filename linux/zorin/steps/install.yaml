@@ -49,7 +49,7 @@ steps:
   repeat:
   - 2
   - 3
-  settle: 40
+  wait_after: 40
 - name: install zorin os (once more, if the wizard is not up)
   unless:
   - keyboard
@@ -59,28 +59,28 @@ steps:
   repeat:
   - 2
   - 3
-  settle: 40
+  wait_after: 40
 - name: disable the screen saver and the lock
   run: xrandr --output Virtual-1 --mode 1920x1080 2>/dev/null || xrandr --output Virtual1 --mode 1920x1080 2>/dev/null || xrandr -s 1920x1080 2>/dev/null || true; xset s off; xset -dpms; xset s noblank; gsettings set org.gnome.desktop.session idle-delay
     0; gsettings set org.gnome.desktop.screensaver lock-enabled false; ( for i in $(seq 1 1080); do xdotool mousemove_relative -- 1 0 2>/dev/null; xdotool mousemove_relative -- -1 0 2>/dev/null; sleep 20; done ) >/dev/null 2>&1 & exit
   terminal_wait: 8
-  settle: 10
   type_gap: 0.15
+  wait_after: 10
 - name: welcome
   at:
   - 1361
   - 764
-  settle: 15
+  wait_after: 15
 - name: keyboard - english (us)
   at:
   - 1106
   - 402
-  settle: 4
+  wait_after: 4
 - name: keyboard
   at:
   - 1361
   - 764
-  settle: 18
+  wait_after: 18
 - name: updates and other software, when this build shows it
   unless_any:
   - - installation
@@ -88,7 +88,7 @@ steps:
   at:
   - 1361
   - 764
-  settle: 18
+  wait_after: 18
 - name: the updates pane is done
   until_any:
   - - installation
@@ -109,7 +109,7 @@ steps:
   at:
   - 1361
   - 764
-  settle: 18
+  wait_after: 18
 - name: the disk warning is up
   until_any:
   - - write
@@ -125,7 +125,7 @@ steps:
   at:
   - 1293
   - 673
-  settle: 20
+  wait_after: 20
 - name: the disk warning is answered
   until_any:
   - - where
@@ -139,7 +139,7 @@ steps:
   at:
   - 1361
   - 764
-  settle: 18
+  wait_after: 18
 - name: the time zone pane is done
   until_any:
   - - who
@@ -154,30 +154,30 @@ steps:
   - 975
   - 386
   type: '{{ user }}'
-  settle: 2
+  wait_after: 2
 - name: who are you - username
   at:
   - 859
   - 477
   type: '{{ user }}'
-  settle: 2
+  wait_after: 2
 - name: who are you - password
   at:
   - 873
   - 514
   type: '{{ password }}'
-  settle: 2
+  wait_after: 2
 - name: who are you - confirm password
   at:
   - 883
   - 550
   type: '{{ password }}'
-  settle: 3
+  wait_after: 3
 - name: who are you
   at:
   - 1361
   - 764
-  settle: 20
+  wait_after: 20
 - name: the install runs, as measured
   wait: 2400
   keep_alive: true

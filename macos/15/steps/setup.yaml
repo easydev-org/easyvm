@@ -53,16 +53,15 @@ steps:
   at:
   - 837
   - 514
-  settle: 3
+  wait_after: 3
 - name: open disk utility
   at:
   - 1142
   - 586
-  settle: 5
+  wait_after: 5
 - name: choose the target disk by capacity
   repeat_until:
     attempts: 8
-    settle: 3
     until_any:
     - number_between:
       - 60
@@ -70,7 +69,8 @@ steps:
       unit: gb
     actions:
     - key: up
-      settle: 3
+      wait_after: 3
+    wait_after: 3
   region:
   - 690
   - 480
@@ -87,7 +87,6 @@ steps:
   window_x: 500
   window_from: 180
   window_to: 400
-  settle: 6
   expect_any:
   - - erase
     - deleted
@@ -95,20 +94,21 @@ steps:
     - space
   - - security
     - option
+  wait_after: 6
 - name: erase - clear the name field
   key: backspace
-  settle: 3
+  wait_after: 3
 - name: erase - name the volume
   at:
   - 960
   - 415
   type: '{{ disk_name }}'
-  settle: 4
+  wait_after: 4
 - name: erase - confirm
   at:
   - 1155
   - 646
-  settle: 5
+  wait_after: 5
 - name: erase - wait for the report
   until_any:
   - - erase
@@ -121,10 +121,10 @@ steps:
   at:
   - 1143
   - 601
-  settle: 5
+  wait_after: 5
 - name: close disk utility
   key: meta_l+q
-  settle: 12
+  wait_after: 12
 - name: the recovery menu is back
   until:
   - reinstall
@@ -144,43 +144,43 @@ steps:
   at:
   - 837
   - 333
-  settle: 3
+  wait_after: 3
 - name: open the installer
   at:
   - 1142
   - 586
-  settle: 20
+  wait_after: 20
 - name: wait for the welcome pane
   wait: 10
 - name: welcome continue
   at:
   - 960
   - 712
-  settle: 5
+  wait_after: 5
 - name: wait for the licence pane
   wait: 60
 - name: agree to the licence
   at:
   - 1005
   - 713
-  settle: 5
+  wait_after: 5
 - name: wait for the licence sheet
   wait: 10
 - name: agree in the sheet
   at:
   - 1060
   - 530
-  settle: 10
+  wait_after: 10
 - name: select the destination card
   at:
   - 850
   - 550
-  settle: 5
+  wait_after: 5
 - name: destination continue
   at:
   - 1005
   - 712
-  settle: 10
+  wait_after: 10
 - name: the copy runs until the Setup Assistant appears
   until_any:
   - - select

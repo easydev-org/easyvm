@@ -29,7 +29,6 @@ steps:
 - name: the loader prompt appears
   repeat_until:
     attempts: 60
-    settle: 2
     until_any:
     - - detailed
       - help
@@ -38,18 +37,19 @@ steps:
       - commands
     actions:
     - key: '3'
-      settle: 2
+      wait_after: 2
+    wait_after: 2
   timeout: 200
 - name: clear the loader command line
   key: ctrl+u
-  settle: 1
+  wait_after: 1
 - name: set the usb hid setting
   type: set hw.usb.usbhid.enable=1
   type_gap: 0.15
-  settle: 2
+  wait_after: 2
 - name: run the setting
   key: ret
-  settle: 3
+  wait_after: 3
 - name: the loader accepted the setting
   until_any:
   - - detailed
@@ -62,10 +62,10 @@ steps:
 - name: boot the live system
   type: boot
   type_gap: 0.15
-  settle: 1
+  wait_after: 1
 - name: start the boot
   key: ret
-  settle: 10
+  wait_after: 10
 - name: choose the X driver, when the menu appears
   until_any:
   - - start
@@ -81,10 +81,10 @@ steps:
   repeat:
   - 4
   - 1.0
-  settle: 2
+  wait_after: 2
 - name: choose scfb
   key: ret
-  settle: 25
+  wait_after: 25
 - name: wait for the live desktop
   until_any:
   - - install
@@ -96,28 +96,28 @@ steps:
   at: &id001
   - 1293
   - 781
-  settle: 12
   expect: keyboard
+  wait_after: 12
 - name: keyboard
   at: *id001
-  settle: 12
+  wait_after: 12
 - name: time zone
   at: *id001
-  settle: 12
+  wait_after: 12
 - name: installation type
   at: *id001
-  settle: 14
+  wait_after: 14
 - name: tick the zfs disk
   at:
   - 592
   - 495
-  settle: 5
+  wait_after: 5
 - name: zfs configuration
   at: *id001
-  settle: 14
+  wait_after: 14
 - name: boot option
   at: *id001
-  settle: 14
+  wait_after: 14
 - name: real name
   at:
   - 959
@@ -140,7 +140,7 @@ steps:
   type: '{{ password }}'
 - name: install
   at: *id001
-  settle: 25
+  wait_after: 25
 - name: installation runs
   wait: 1800
   keep_alive: true

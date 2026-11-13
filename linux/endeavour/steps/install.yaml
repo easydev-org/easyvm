@@ -34,12 +34,12 @@ steps:
 - name: pin the wizard's language to english
   run: sudo sed -i 's#https://geoip.kde.org/v1/ubiquity#http://127.0.0.1:9/x#' /etc/calamares/modules/welcome_offline.conf; exit
   terminal_wait: 10
-  settle: 8
+  wait_after: 8
 - name: close the terminal
   at:
   - 1402
   - 310
-  settle: 6
+  wait_after: 6
 - name: wait for the calamares window
   until_any:
   - - american
@@ -54,84 +54,84 @@ steps:
   at:
   - 735
   - 425
-  settle: 20
+  wait_after: 20
 - name: offline
   at:
   - 1069
   - 590
-  settle: 55
   expect_any:
   - - welcome
   - - location
+  wait_after: 55
 - name: welcome
   at:
   - 1406
   - 873
-  settle: 20
+  wait_after: 20
 - name: location
   at:
   - 1406
   - 873
-  settle: 20
+  wait_after: 20
 - name: keyboard
   at:
   - 1406
   - 873
-  settle: 20
+  wait_after: 20
 - name: bootloader
   at:
   - 1406
   - 873
-  settle: 20
+  wait_after: 20
 - name: partitions - erase the disk
   at:
   - 566
   - 258
-  settle: 8
+  wait_after: 8
 - name: partitions
   at:
   - 1406
   - 873
-  settle: 22
+  wait_after: 22
 - name: users - full name
   at:
   - 847
   - 302
   type: '{{ user }}'
-  settle: 2
+  wait_after: 2
 - name: users - login name
   at:
   - 847
   - 356
   type: '{{ user }}'
-  settle: 2
+  wait_after: 2
 - name: users - password
   at:
   - 700
   - 513
   type: '{{ password }}'
-  settle: 2
+  wait_after: 2
 - name: users - confirm password
   at:
   - 982
   - 513
   type: '{{ password }}'
-  settle: 3
+  wait_after: 3
 - name: users
   at:
   - 1406
   - 873
-  settle: 22
+  wait_after: 22
 - name: summary - install
   at:
   - 1406
   - 873
-  settle: 18
+  wait_after: 18
 - name: the install confirmation's install now
   at:
   - 1059
   - 542
-  settle: 30
+  wait_after: 30
 - name: the install runs, as measured
   wait: 2700
   keep_alive: true

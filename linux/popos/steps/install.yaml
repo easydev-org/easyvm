@@ -40,7 +40,7 @@ steps:
   at_fallback:
   - 1265
   - 1390
-  settle: 20
+  wait_after: 20
 - name: the installer window is up
   until_any:
   - - select
@@ -62,52 +62,52 @@ steps:
   - 755
   - 1430
   - 845
-  settle: 21
+  wait_after: 21
 - name: language variants
   at_button:
   - 1240
   - 755
   - 1430
   - 845
-  settle: 21
+  wait_after: 21
 - name: keyboard layout
   at_button:
   - 1240
   - 755
   - 1430
   - 845
-  settle: 21
+  wait_after: 21
 - name: keyboard variants
   at_button:
   - 1240
   - 755
   - 1430
   - 845
-  settle: 21
+  wait_after: 21
 - name: clean install
   at:
   - 1180
   - 456
-  settle: 8
+  wait_after: 8
 - name: install
   at_button:
   - 1240
   - 755
   - 1430
   - 845
-  settle: 21
+  wait_after: 21
 - name: select a drive
   at:
   - 1193
   - 498
-  settle: 8
+  wait_after: 8
 - name: erase and install
   at_button:
   - 1240
   - 755
   - 1430
   - 845
-  settle: 44
+  wait_after: 44
 - name: wait for the account pane
   until:
   - Full
@@ -121,17 +121,17 @@ steps:
   - 494
   type: VM User
   type_gap: 0.09
-  settle: 2
+  wait_after: 2
 - name: leave the field so it validates
   key: tab
-  settle: 2
+  wait_after: 2
 - name: create user account
   at_button:
   - 1240
   - 755
   - 1430
   - 845
-  settle: 22
+  wait_after: 22
 - name: wait for the password pane
   until_any:
   - - Choose
@@ -143,33 +143,33 @@ steps:
   poll: 2
 - name: dismiss anything a stray click opened
   key: esc
-  settle: 2
+  wait_after: 2
 - name: type the password
   at:
   - 1350
   - 447
   type: '{{ password }}'
   type_gap: 0.09
-  settle: 2
+  wait_after: 2
 - name: confirm the password
   at:
   - 1350
   - 543
   type: '{{ password }}'
   type_gap: 0.09
-  settle: 2
+  wait_after: 2
 - name: account password next
   at_button:
   - 1240
   - 755
   - 1430
   - 845
-  settle: 25
+  wait_after: 25
 - name: drive encryption - don't encrypt
   at:
   - 1081
   - 808
-  settle: 35
+  wait_after: 35
 - name: the install is written
   disk_settle: 180
   disk_min_mb: 512

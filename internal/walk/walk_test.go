@@ -90,11 +90,16 @@ func TestLoadsEveryRealWalkthrough(t *testing.T) {
 	}
 }
 
-// A FILE THAT NAMES A PYTHON EXTENSION IS REFUSED BY NAME, not silently run without it.
+// A FILE THAT NAMES A PYTHON EXTENSION IS REFUSED, not silently run without it.
 //
 // The Go implementation has no Python. A `python:` step that was quietly skipped would report
 // success for work nobody did - and these steps are the ones that drive a GUI through a stage's
 // own code, so the work is not small.
+//
+// IT IS REFUSED AS AN UNKNOWN KEY. There used to be a `Deprecated` table that named `python:` and
+// explained why it was gone; THE TABLE IS DELETED, because the walkthroughs are the only caller and
+// every name in this repository is renamed in the same commit as the vocabulary. A compatibility
+// entry with no external consumer is a second copy of the vocabulary that drifts from the first.
 func TestPythonStepsAreRefusedWithASentence(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "x.yaml")
@@ -112,6 +117,10 @@ steps:
 	}
 	if !strings.Contains(err.Error(), "python") {
 		t.Fatalf("the refusal must say which key is the problem; got %v", err)
+	}
+	if !strings.Contains(err.Error(), "unknown key") {
+		t.Fatalf("the refusal must be the unknown-key one, which names the key and says a step "+
+			"that does nothing used to be accepted; got %v", err)
 	}
 }
 

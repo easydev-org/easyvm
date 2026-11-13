@@ -251,7 +251,7 @@ var Keys = map[string]Key{
 		Summary: "wait until the screen changes rather than for particular words"},
 	"wait": {Name: "wait", Kind: KindFloat,
 		Summary: "wait this many seconds with nothing clicked"},
-	"settle": {Name: "settle", Kind: KindFloat,
+	"wait_after": {Name: "wait_after", Kind: KindFloat,
 		Summary: "wait this long after the action, for the screen to catch up"},
 	"poll": {Name: "poll", Kind: KindFloat,
 		Summary: "seconds between looks in an until: loop"},
@@ -343,6 +343,30 @@ var Keys = map[string]Key{
 		Summary: "write one of the login/bootstrap files on the HOST, for the scp: after it. " +
 			"Kinds: launcher, macos_agent_plist, macos_mount_script, macos_mount_plist, " +
 			"windows_task"},
+	// --- the three-step model ---------------------------------------------------------------
+	//
+	// ONE OCR STEP, ONE CONDITION STEP, AND A LOOP THAT NAMES ALL THREE. The six keys they replace
+	// (`until`, `until_any`, `expect`, `expect_any`, `unless`, `unless_any`) each meant "read the
+	// screen and decide", and they could sit inside a click step - so a failure said `did not
+	// advance` whether the click missed or the crop was wrong, and 47 of 70 readings covered the
+	// whole frame because `region:` was optional.
+	"ocr": {Name: "ocr", Kind: KindMapping,
+		Summary: "read ONE region with OCR and name the result: {name, region, region_at, scale}. " +
+			"It decides nothing - a `when:` step answers from the name, and work/ocr/<name>.txt " +
+			"keeps the words a decision was made from"},
+	"check": {Name: "check", Kind: KindString,
+		Summary: "answer a condition from a named reading: `check: menu` with `says:` or " +
+			"`says_any:`. It never reads the screen, so it costs nothing to re-ask"},
+	"says": {Name: "says", Kind: KindWords,
+		Summary: "with `check:`: every one of these words must be in the reading"},
+	"says_any": {Name: "says_any", Kind: KindWordSets,
+		Summary: "with `check:`: any one of these word-sets must be in the reading"},
+	"loop": {Name: "loop", Kind: KindMapping,
+		Summary: "the three parts written down: `max:`, `do:` (the action), `ocr:` (the reading) " +
+			"and `until:` (the condition answered from it)"},
+	"max": {Name: "max", Kind: KindInt,
+		Summary: "with `loop:`: the attempt ceiling. Required, because a loop with no ceiling " +
+			"presses a key until the stage times out"},
 	"repeat_until": {Name: "repeat_until", Kind: KindMapping,
 		Summary: "run `actions:` and then read the screen, up to `attempts:` times, stopping " +
 			"when `until_any:` matches. This is the loop the vocabulary was missing: the two " +
@@ -361,20 +385,10 @@ var Keys = map[string]Key{
 		Summary: "with `fetch: answer_iso`: the answer file to substitute into. It is a path in " +
 			"the repository because the placeholders are the file's vocabulary, not a download"},
 
-	// --- extensions ---------------------------------------------------------------------
-	"python": {Name: "python", Kind: KindString,
-		Summary: "DEPRECATED AND NOT SUPPORTED BY THIS IMPLEMENTATION. The Python stage " +
-			"extensions are being replaced by Go step types; a file that names one here is " +
-			"refused by name rather than silently ignored"},
-	"python_screen": {Name: "python_screen", Kind: KindBool,
-		Summary: "DEPRECATED with `python:`"},
-}
-
-// Deprecated lists keys that are accepted by the parser only so a file can be REFUSED with a
-// sentence instead of a parse error. They are not implemented.
-var Deprecated = map[string]string{
-	"python":        "Python stage extensions are not available in the Go implementation; the step it names must become a Go step type",
-	"python_screen": "this only qualified a `python:` step, which is not available",
+	// THERE IS NO `python:` AND NO `python_screen:`. The Go implementation has no interpreter, so
+	// a file that names one is refused as an unknown key - which is the same answer a typo gets, and
+	// the right one: a key that cannot be executed must not be in the vocabulary at all. Keeping it
+	// here so it could be refused BY NAME was the `Deprecated` table, and that is deleted.
 }
 
 // Validate checks a step mapping against the vocabulary.
@@ -383,12 +397,16 @@ var Deprecated = map[string]string{
 // implementation kept 85 keys alive by accepting whatever the executor happened to read, so a
 // misspelled key was a step that did nothing and reported success. Two such key names are in this
 // project's history already (`family:` then `os:`, `eject` spelled two ways).
+// THERE IS NO DEPRECATED LIST. A NAME IS EITHER IN THE VOCABULARY OR IT IS REFUSED.
+//
+// THERE WAS ONE, and it existed so a renamed key could be refused with a sentence rather than a parse
+// error. IT WAS REMOVED BECAUSE THE FILES ARE THE ONLY CALLER. Every walkthrough in this repository
+// is renamed in the same commit as the vocabulary, so a stale name is not a user to be guided - it is
+// a file that was not updated, and "unknown key" is the correct answer for it. A compatibility table
+// with no external consumer is a second place the vocabulary is written down, and the two drift.
 func Validate(stepName string, mapping map[string]any) error {
 	for key := range mapping {
 		if _, ok := Keys[key]; ok {
-			if why, gone := Deprecated[key]; gone {
-				return fmt.Errorf("step %q uses %q: %s", stepName, key, why)
-			}
 			continue
 		}
 		return fmt.Errorf("step %q has unknown key %q; an unknown key used to mean a step that did nothing",

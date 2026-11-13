@@ -23,80 +23,80 @@ steps:
   at:
   - 259
   - 568
-  settle: 2
   optional: true
+  wait_after: 2
 - name: greeter - log in
   type: '{{ password }}'
-  settle: 3
   optional: true
+  wait_after: 3
 - name: greeter - submit
   key: ret
-  settle: 20
   optional: true
+  wait_after: 20
 - name: wake the screen
   key: esc
-  settle: 3
+  wait_after: 3
 - name: open the Applications menu
   key: alt+f1
-  settle: 4
+  wait_after: 4
 - name: choose System Tools
   key: down
-  settle: 1
+  wait_after: 1
 - name: choose System Tools 2
   key: down
-  settle: 1
+  wait_after: 1
 - name: choose System Tools 3
   key: down
-  settle: 1
+  wait_after: 1
 - name: choose System Tools 4
   key: down
-  settle: 1
+  wait_after: 1
 - name: choose System Tools 5
   key: down
-  settle: 1
+  wait_after: 1
 - name: choose System Tools 6
   key: down
-  settle: 2
+  wait_after: 2
 - name: open the System Tools submenu
   key: right
-  settle: 3
+  wait_after: 3
 - name: choose MATE Terminal 1
   key: down
-  settle: 1
+  wait_after: 1
 - name: choose MATE Terminal 2
   key: down
-  settle: 1
+  wait_after: 1
 - name: choose MATE Terminal 3
   key: down
-  settle: 1
+  wait_after: 1
 - name: choose MATE Terminal 4
   key: down
-  settle: 1
+  wait_after: 1
 - name: choose MATE Terminal 5
   key: down
-  settle: 1
+  wait_after: 1
 - name: choose MATE Terminal 6
   key: down
-  settle: 2
+  wait_after: 2
 - name: open MATE Terminal
   key: ret
-  settle: 15
+  wait_after: 15
 - name: enable sshd at boot
   run: echo {{ password }} | sudo -S sysrc sshd_enable=YES 2>&1 | tail -3
   terminal_wait: 0
-  settle: 5
+  wait_after: 5
 - name: allow password authentication
   run: echo {{ password }} | sudo -S sh -c 'printf "PasswordAuthentication yes\n" >> /etc/ssh/sshd_config; grep -c "^PasswordAuthentication yes" /etc/ssh/sshd_config' 2>&1 | tail -3
   terminal_wait: 0
-  settle: 5
+  wait_after: 5
 - name: start sshd
   run: echo {{ password }} | sudo -S sh -c 'service sshd restart || service sshd start' 2>&1 | tail -3
   terminal_wait: 0
-  settle: 20
+  wait_after: 20
 - name: prove sshd is listening
   run: echo {{ password }} | sudo -S sh -c 'service sshd status; sockstat -4 -l | grep sshd' 2>&1 | tail -6
   terminal_wait: 0
-  settle: 8
+  wait_after: 8
 - name: wait for sshd
   require_ssh: true
   timeout: 600
