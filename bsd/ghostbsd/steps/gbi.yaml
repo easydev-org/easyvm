@@ -113,7 +113,21 @@ steps:
 - name: start the boot
   key: ret
   wait_after: 10
-- name: choose the X driver, when the menu appears
+# THE X DRIVER MENU MAY NEVER APPEAR, AND WAITING FOR IT IS NOT THE SAME AS WAITING FOR THE DESKTOP.
+#
+# MEASURED, on the local pod at 26.3: the machine boots to a fully drawn MATE desktop, X starts on the
+# default driver, and gbi opens its own "Welcome to GhostBSD / Please select your language" window. THE
+# MENU IS NOT SHOWN, because it exists only when X CANNOT start - and the old version of this file
+# waited sixty times for a title that was never going to be drawn.
+#
+# THE REFERENCE IMPLEMENTATION SAYS SO IN ITS OWN WORDS: "IT MAY NOT APPEAR, and that is not a
+# failure: the menu is shown when X cannot start on the default driver ... the driver treats 'the
+# desktop is already up' and 'the menu was answered' as the same success."
+#
+# SO THE QUESTION IS ASKED FIRST AND THE ANSWER PICKS THE PATH. A `check:` produces a boolean, an
+# `if:` branches on it, and each branch does one thing - which is why this is three steps rather than
+# one that waits for either.
+- name: wait for the desktop or the X driver menu
   loop:
     max: 60
     do:
@@ -131,10 +145,16 @@ steps:
       scale: 1
       wait: 0
     check:
-      name: done
+      name: booted
       from: screen
       mode: says_any
       words:
+      # THE DESKTOP'S OWN WINDOW. `install ghostbsd` is gbi's menu entry and `applications` is the
+      # MATE panel; either one means the session is up and nothing is waiting to be chosen.
+      - - install
+        - ghostbsd
+      - - applications
+      # THE MENU, WHICH ONLY EXISTS WHEN X FAILED TO START.
       - - start
         - desktop
         - with
@@ -142,20 +162,49 @@ steps:
         - to
         - auto
     until:
-      fact: done
-- name: reach scfb with four downs
-  do:
-  - key: down
-    wait_after: 1
-  - key: down
-    wait_after: 1
-  - key: down
-    wait_after: 1
-  - key: down
-    wait_after: 1
-- name: choose scfb
-  key: ret
-  wait_after: 25
+      fact: booted
+- name: is the X driver menu the thing on screen
+  ocr:
+    name: screen
+    region:
+    - 0
+    - 0
+    - 1920
+    - 1080
+    region_at:
+    - 1920
+    - 1080
+    scale: 1
+  check:
+    name: menu
+    from: screen
+    mode: says_any
+    words:
+    - - start
+      - desktop
+      - with
+    - - failed
+      - to
+      - auto
+- name: choose scfb, when the menu is the thing on screen
+  if: menu
+  then:
+  # FOUR DOWNS REACH scfb. The menu's entries are the driver list, and scfb - the UEFI framebuffer -
+  # is the one that works on this machine. `failed to auto` picks the same entry, because the menu
+  # defaults to the first row.
+  - name: reach scfb
+    do:
+    - key: down
+      wait_after: 1
+    - key: down
+      wait_after: 1
+    - key: down
+      wait_after: 1
+    - key: down
+      wait_after: 1
+  - name: choose scfb
+    key: ret
+    wait_after: 25
 - name: wait for the live desktop
   loop:
     max: 180
