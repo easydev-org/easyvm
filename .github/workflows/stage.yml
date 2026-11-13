@@ -363,53 +363,61 @@ jobs:
         # expand, not the log.
         #
         # THE ACTIONS LOG IS UNREADABLE UNTIL THE STEP FINISHES; A CHECK RUN'S `output.text` IS, and
-        # .github/log-stream.sh publishes the newest 60,000 characters to one every ten seconds.
+        # `easyactions/log-stream` publishes the newest 60,000 characters to one every ten seconds.
         #
-        # NO INTERPRETER, NO jq, NO gh. The image carries no Python on purpose and no jq at all, so the
-        # script does the whole thing with `curl` and `sed`: two requests, one to create the check run
-        # and one per update.
-        #
-        # IT IS ALSO WHERE A CANCEL BECOMES A REAL KILL. The command runs in its own process group and
-        # the trap kills `-$pid`, which reaches qemu; `kill $pid` alone reaches the shell and leaves
-        # the machine holding /dev/kvm for the next job.
-        run: |
-          set -eu
-          limit=$(( ${{ matrix.timeout }} - 10 ))
-          summary=${GITHUB_STEP_SUMMARY:-/dev/null}
-          printf '| time | state |\n|---|---|\n' >> "$summary"
-
-          # THE COMMAND IS THE POLLING LOOP, A CHILD OF THE STREAMER - so its output is what the check
-          # run shows, and a cancel reaches it through the process group.
-          sh "$GITHUB_WORKSPACE/.github/log-stream.sh" \
-              --name "${{ matrix.name }}-live" \
-              --interval 10 \
-              --max-bytes 60000 \
-              -- sh -c '
-                set -eu
-                summary=$1
-                limit=$2
-                rounds=0
-                while [ "$rounds" -lt "$limit" ]; do
-                  rounds=$((rounds + 1))
-                  state=$(easyvm status --work "$GITHUB_WORKSPACE/work" 2>&1 || true)
-                  printf "%s\n" "$state"
-                  printf "| %s | %s |\n" "$(date -u +%H:%M:%S)" "$(printf "%s" "$state" | head -1)" >> "$summary"
-                  case "$state" in
-                    *"status: finished"*)
-                      echo "=== THE WALKTHROUGH FINISHED ==="
-                      cat "$GITHUB_WORKSPACE/work/daemon.log" 2>/dev/null || true
-                      exit 0 ;;
-                    *"status: failed"*)
-                      echo "=== THE WALKTHROUGH FAILED ==="
-                      cat "$GITHUB_WORKSPACE/work/daemon.log" 2>/dev/null || true
-                      exit 1 ;;
-                  esac
-                  sleep 60
-                done
-                echo "=== THE WALKTHROUGH DID NOT FINISH IN TIME ==="
-                cat "$GITHUB_WORKSPACE/work/daemon.log" 2>/dev/null || true
-                exit 1
-              ' sh "$summary" "$limit"
+        # IT NEEDS NOTHING BUT curl. That action used to be a Python script, and THIS image has no
+        # interpreter on purpose - the driver is Go and speaks QMP directly - so it refused to start in
+        # the one place a three-hour leg lives. It is a shell script now, and the jq it would otherwise
+        # need was replaced with sed.
+        uses: easydev-org/easyactions/log-stream@main
+        with:
+          token: ${{ github.token }}
+          name: ${{ matrix.name }}-live
+          interval: "10"
+          max_bytes: "60000"
+          command: |
+            set -eu
+            summary=${GITHUB_STEP_SUMMARY:-/dev/null}
+            printf '| time | state |\n|---|---|\n' >> "$summary"
+            # THE LOOP MUST END BEFORE GITHUB ENDS THE JOB, OR THE DIAGNOSIS IS NEVER PRINTED.
+            #
+            # This was `timeout + 5`, which is five rounds PAST the job's own `timeout-minutes`. Every
+            # leg that overran was therefore killed by the runner mid-sleep, and the line a person
+            # needs
+            #
+            #	=== THE WALKTHROUGH DID NOT FINISH IN TIME ===
+            #	<daemon.log: the step it was on and the error it hit>
+            #
+            # NEVER APPEARED. Measured on macos-setup: 97 minutes in `follow it`, still going, with 150
+            # for the job - so its conclusion was going to be an opaque cancellation and not a reason.
+            #
+            # TEN MINUTES OF HEADROOM, because the two steps after this one are not instant either:
+            # `what it produced` lists and the artifact upload pushes the disk, which is gigabytes.
+            #
+            # POSIX SH ONLY, BECAUSE A `container:` JOB RUNS STEPS WITH /bin/sh. `$SECONDS` is bash and
+            # dash does not define it, and `set -o pipefail` is ignored rather than refused.
+            limit=$(( ${{ matrix.timeout }} - 10 ))
+            rounds=0
+            while [ "$rounds" -lt "$limit" ]; do
+              rounds=$((rounds + 1))
+              state=$(easyvm status --work "$GITHUB_WORKSPACE/work" 2>&1 || true)
+              printf '%s\n' "$state"
+              printf '| %s | %s |\n' "$(date -u +%H:%M:%S)" "$(printf '%s' "$state" | head -1)" >> "$summary"
+              case "$state" in
+                *"status: finished"*)
+                  echo "=== THE WALKTHROUGH FINISHED ==="
+                  cat "$GITHUB_WORKSPACE/work/daemon.log" 2>/dev/null || true
+                  exit 0 ;;
+                *"status: failed"*)
+                  echo "=== THE WALKTHROUGH FAILED ==="
+                  cat "$GITHUB_WORKSPACE/work/daemon.log" 2>/dev/null || true
+                  exit 1 ;;
+              esac
+              sleep 60
+            done
+            echo "=== THE WALKTHROUGH DID NOT FINISH IN TIME ==="
+            cat "$GITHUB_WORKSPACE/work/daemon.log" 2>/dev/null || true
+            exit 1
 
       - name: what it produced
         if: always()

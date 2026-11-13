@@ -498,54 +498,51 @@ func TestTheArtifactPullResumesInsteadOfRestarting(t *testing.T) {
 	}
 }
 
-// THE LOG IS STREAMED TO A CHECK RUN, AND THE WHOLE DEPENDENCY IS curl.
+// A RUNNING LEG IS STREAMED TO A CHECK RUN, BY AN ACTION THAT NEEDS NOTHING BUT curl.
 //
 // A STEP'S ACTIONS LOG IS UNREADABLE UNTIL THE STEP FINISHES, and a leg spends up to three hours inside
 // one step - so "which step is it on" is answered only after the answer has stopped mattering. A CHECK
 // RUN'S `output.text` IS readable while it runs.
 //
-// `.github/log-stream.sh` does it with two requests and no interpreter: the image deliberately carries
-// no Python (the driver is Go and speaks QMP directly) and no `jq` either, so the id is read out of a
-// response the script generated itself.
-func TestTheLogStreamerNeedsNothingButCurl(t *testing.T) {
-	body, err := os.ReadFile(filepath.Join("..", "..", ".github", "log-stream.sh"))
+// THE ACTION IS THE ORGANISATION'S, NOT A COPY IN THIS REPOSITORY. It used to be `log_stream.py`, and
+// THIS image has no interpreter on purpose - the driver is Go and speaks QMP directly - so it refused
+// to start in exactly the place a three-hour leg lives. It is a shell script now; the jq it would
+// otherwise need was replaced with sed.
+//
+// SO THIS TEST CHECKS THE CALL, NOT THE IMPLEMENTATION: the workflow must use the action, must pass the
+// three inputs that make it useful, and must NOT reach for a local copy of the script - which would be
+// a second implementation to keep in step with the first.
+func TestALegIsStreamedToACheckRunWhileItRuns(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "stage.yml"))
 	if err != nil {
-		t.Fatalf("%s: %v", filepath.Join("..", "..", ".github", "log-stream.sh"), err)
+		t.Fatal(err)
 	}
 	s := string(body)
 
-	// NO INTERPRETER, NO jq, NO gh - the three things a person would reach for and this image lacks.
-	for _, forbidden := range []string{"python", "jq ", "jq'", "gh api"} {
-		if strings.Contains(s, forbidden) {
-			t.Errorf("the streamer uses %q; the image has no interpreter and no jq, which is the "+
-				"whole reason this is a shell script", forbidden)
-		}
+	if !strings.Contains(s, "easydev-org/easyactions/log-stream@main") {
+		t.Fatal("`follow it` does not use the log-stream action, so a running leg has no live output " +
+			"and `which step is it on` is answered only after it stops")
 	}
-	for _, want := range []string{"curl", "/check-runs", "max_bytes", "interval"} {
+	// THE THREE INPUTS THAT MAKE IT USEFUL, and each has a reason:
+	//
+	//	name        one check run per leg, so three parallel legs do not overwrite one another
+	//	interval    one API call per ten seconds, against a step that runs for three hours
+	//	max_bytes   GitHub refuses more than 65535, so 60,000 is the cap that keeps the newest lines
+	for _, want := range []string{"-live", `interval: "10"`, `max_bytes: "60000"`} {
 		if !strings.Contains(s, want) {
-			t.Errorf("the streamer never mentions %q", want)
+			t.Errorf("`follow it` does not set %q", want)
 		}
 	}
-
-	// THE TWO THINGS THAT WERE WRONG WHEN THIS WAS WRITTEN, AND BOTH WERE SILENT:
-	//
-	//	the id regex required no space after the colon, and GitHub answers `{"id": 4242`
-	//	a raw newline went into the JSON, and GitHub refuses a control character
-	//
-	// Neither fails loudly: the first runs the command unpublished, the second drops every update for
-	// the whole run. So both are asserted here.
-	if !strings.Contains(s, `[[:space:]]*`) {
-		t.Error("the id is read with a regex that does not allow whitespace; GitHub's answer is " +
-			"`{\"id\": 4242` and the first version of this script failed to read it, then ran the " +
-			"command unpublished because it thought the API had refused")
+	// AND NOT A LOCAL COPY. A second implementation in .github/ would drift from the action, and the
+	// drift would show up as "the log is live on one leg and not another".
+	if strings.Contains(s, ".github/log-stream.sh") {
+		t.Error("`follow it` reaches for a local copy of the streamer; the action owns it, and two " +
+			"implementations drift")
 	}
-	if !strings.Contains(s, `s/\n/\\n/g`) {
-		t.Error("newlines are not escaped; a JSON string may not contain a raw control character, " +
-			"and a log is mostly newlines - GitHub refuses the whole request, once per interval")
-	}
-	// AND THE CANCEL MUST REACH THE CHILDREN, or a cancelled leg leaves qemu holding /dev/kvm.
-	if !strings.Contains(s, "kill_tree") {
-		t.Error("a cancel does not walk the process tree; `kill $pid` reaches the shell that owns " +
-			"the daemon, and the daemon owns qemu")
+	// THE COMMAND MUST STILL END BEFORE THE JOB DOES, or the diagnosis is never printed - this was
+	// `timeout + 5`, five rounds PAST the job's own limit, so every overrun was killed mid-sleep.
+	if !strings.Contains(s, "limit=$(( ${{ matrix.timeout }} - 10 ))") {
+		t.Error("the polling loop does not stop ten minutes before the job's own timeout, so an " +
+			"overrunning leg is killed by the runner mid-sleep and never prints why")
 	}
 }
