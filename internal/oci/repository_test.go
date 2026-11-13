@@ -77,10 +77,11 @@ func TestTheArtifactWorkflowAndItsPermission(t *testing.T) {
 	for _, want := range []string{
 		// The permission without which the push is a 403.
 		"packages: write",
-		// The pull side is still the program, and the push side is oras.
-		"./cmd/easyvm",
-		"oras push",
-		"ORAS_VERSION=",
+		// THE TRANSFER IS THE ORGANISATION'S ACTION. The `oras` install and push moved out of this
+		// file when the actions were written - `ORAS_VERSION=` and `oras push` used to be asserted
+		// here, and asserting them now would be asserting the thing that was removed.
+		"easyactions/oci-push",
+		"easyactions/runner-check",
 		// EVERY TAG THE BUILD FETCHES has to be in the catalogue, so one of the four groups is not
 		// silently short an input.
 		"iso-windows11",

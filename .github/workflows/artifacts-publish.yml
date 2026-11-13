@@ -61,334 +61,152 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # ONE JOB PER ARTIFACT, AND THE MATRIX IS THE CATALOGUE.
+  #
+  # THIS WAS A `while` LOOP INSIDE ONE JOB that mirrored all 23 in sequence, and the loop had three
+  # costs that a matrix does not:
+  #
+  #	ONE FAILURE BLOCKED NOTHING AND REVEALED NOTHING. The loop collected names into `$failed` and
+  #	exited at the end, so a run that lost three downloads and pushed twenty looked, for two hours,
+  #	exactly like a run that was working.
+  #	ONE RUNNER HELD EVERY FILE at some point, and the largest is a 7.7 GiB Windows ISO.
+  #	ONE LOG held every download's output, and the question after a failure is one artifact long.
+  #
+  # AS JOBS each artifact gets its own runner, its own disk, its own log and its own verdict - and a
+  # failed one is re-run alone with `gh run rerun --job`. `fail-fast: false` is deliberate: one dead
+  # mirror must not cancel twenty-two working downloads.
   publish:
     runs-on: ubuntu-latest
-    # TWENTY INPUTS, ONE OF THEM 7.2 GiB AND THREE MORE AROUND 6. Downloads at a few hundred Mbit/s
-    # plus an upload to the same registry is a few hours for a full run; a single group is far less.
-    timeout-minutes: 330
+    timeout-minutes: 120
     permissions:
       contents: read
       packages: write
       checks: write
-
+    strategy:
+      fail-fast: false
+      matrix:
+        artifact:
+          - { tag: "iso-windows11", group: "windows", url: "https://software-static.download.prss.microsoft.com/dbazure/888969d5-f34g-4e03-ac9d-1f9786c66749/26200.6584.250915-1905.25h2_ge_release_svc_refresh_CLIENT_CONSUMER_x64FRE_en-us.iso", sha: "d141f6030fed50f75e2b03e1eb2e53646c4b21e5386047cb860af5223f102a32", size: "7736125440" }
+          - { tag: "iso-virtio-win", group: "windows", url: "https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso", sha: "", size: "0" }
+          - { tag: "iso-ubuntu-desktop", group: "linux", url: "https://releases.ubuntu.com/26.04/ubuntu-26.04.1-desktop-amd64.iso", sha: "601e30fbf5d97759367c632e2c33630665039b7e2158fd068403da3ccf1bda1f", size: "6482409472" }
+          - { tag: "iso-kubuntu-desktop", group: "linux", url: "https://cdimage.ubuntu.com/kubuntu/releases/26.04/release/kubuntu-26.04.1-desktop-amd64.iso", sha: "831e4d4bb85098339ba43d3502cd6619b27e76daf37246a084cd68a6413090b8", size: "5072990208" }
+          - { tag: "iso-fedora-workstation", group: "linux", url: "https://dl.fedoraproject.org/pub/fedora/linux/releases/45/Workstation/x86_64/iso/Fedora-Workstation-Live-45-1.4.x86_64.iso", sha: "68338c6bfe4f0d64151f2e47efe9f44a8855ad05b460e56b844fb3fa2c9a3beb", size: "2925092864" }
+          - { tag: "iso-mint-cinnamon", group: "linux", url: "https://mirrors.kernel.org/linuxmint/stable/22.3/linuxmint-22.3-cinnamon-64bit.iso", sha: "a081ab202cfda17f6924128dbd2de8b63518ac0531bcfe3f1a1b88097c459bd4", size: "3091660800" }
+          - { tag: "iso-opensuse-leap-16.1", group: "linux", url: "https://download.opensuse.org/distribution/leap/16.1/offline/Leap-16.1-offline-installer-x86_64.install.iso", sha: "c95738ba232a36eb31dfdf3e5f663beb672232410894ab04b1bfe0c7a803a622868a90fe631fc6c89418eca9ad181979b8817a52fdec3c203a9a5b7b997ba051", size: "4516216832" }
+          - { tag: "iso-cachyos-desktop", group: "linux", url: "https://mirror.cachyos.org/ISO/desktop/260809/cachyos-desktop-linux-260809.iso", sha: "959f6577f45e25ee9fd8c220fd221b08e4ea79412c7315c0f922dd6d86d5e33c", size: "3188850688" }
+          - { tag: "iso-manjaro-kde", group: "linux", url: "https://download.manjaro.org/kde/26.1.0/manjaro-kde-26.1.0-260812-linux71.iso", sha: "711b64362abe0b45348dc33bd4a2c654641e069b50ae9ae37c01771da880aa99", size: "5534201856" }
+          - { tag: "iso-endeavouros", group: "linux", url: "https://mirror.alpix.eu/endeavouros/iso/EndeavourOS_Titan-Nova-2026.08.15.iso", sha: "0487f46fe29e0ab2ed153ba874568cc542a0507fb6029f29ad552b36ba447393", size: "3898638336" }
+          - { tag: "iso-zorin-core", group: "linux", url: "https://mirrors.edge.kernel.org/zorinos-isos/18/Zorin-OS-18.1-Core-64-bit.iso", sha: "44649b97bd307fc4c8529205d098ebbf98575a1e1ba2ee7d7005b697af1721d5", size: "3909091328" }
+          - { tag: "iso-mx-xfce", group: "linux", url: "https://netix.dl.sourceforge.net/project/mx-linux/Final/Xfce/MX-25.3_Xfce_x64.iso", sha: "25b5ce20caeee1b0e50507291df5ac8a8211b1b9999d8dd7416da9b66ed9fbf9", size: "2927624192" }
+          - { tag: "iso-popos-desktop", group: "linux", url: "https://iso.pop-os.org/24.04/amd64/intel/10/pop-os_24.04_amd64_intel_10.iso", sha: "a5b7321babdef75d86c688d3429fbd5525689d80a1a8b94bc393eea84f372b62", size: "2583691264" }
+          - { tag: "iso-nixos-graphical", group: "linux", url: "https://releases.nixos.org/nixos/26.05/nixos-26.05.13627.c56a87d8e41c/nixos-graphical-26.05.13627.c56a87d8e41c-x86_64-linux.iso", sha: "62900e47b6bea0917c491ac0a8e18dd4e3b7579d9b60ee8e0bbbd8945162256d", size: "3888513024" }
+          - { tag: "iso-ghostbsd-mate", group: "linux", url: "https://download.ghostbsd.org/releases/amd64/26.3.R15.1p6/GhostBSD-26.3.R15.1p6.iso", sha: "2d1b46e7d0d9339ef04d2ee386783a2431f43eecb873b8f11b7109a43c577f7f", size: "4122404864" }
+          - { tag: "macos-asset-opencore", group: "macos", url: "https://github.com/acidanthera/OpenCorePkg/releases/download/1.0.7/OpenCore-1.0.7-RELEASE.zip", sha: "2ffab6ebf58c7aefb0bcb3a1a385d207746823d6dd87d44bd666e1286939943e", size: "10437696" }
+          - { tag: "macos-asset-opencore-template", group: "macos", url: "https://github.com/LongQT-sea/OpenCore-ISO/releases/download/v0.7/LongQT-OpenCore-v0.7.iso", sha: "287328995d4198f1b05166f087d85bf7ef66bedafe150d17ad112ac8de60051d", size: "15884288" }
+          - { tag: "macos-asset-ovmf-code", group: "macos", url: "https://raw.githubusercontent.com/kholia/OSX-KVM/326053dd61f49375d5dfb28ee715d38b04b5cd8e/OVMF_CODE.fd", sha: "52a625db5a45329bf8005232db33e94781787d92ae8d088f2f73332dd4ded3a9", size: "1966080" }
+          - { tag: "macos-asset-ovmf-vars-1920x1080", group: "macos", url: "https://raw.githubusercontent.com/kholia/OSX-KVM/326053dd61f49375d5dfb28ee715d38b04b5cd8e/OVMF_VARS-1920x1080.fd", sha: "6ed987af3a3c155be71665f510eae3e007eda9b8b94afd59d45e91c4a11565cc", size: "131072" }
+          - { tag: "macos-asset-xcode-26.3", group: "macos", url: "https://archive.org/download/xcode-26.3/Xcode_26.3_Universal.xip", sha: "cebf05ec2920111830af5e08a45f07961e36bfd6", size: "2871807039" }
+          - { tag: "macos-asset-mac-guest-agent", group: "macos", url: "https://github.com/mav2287/mac-guest-agent/releases/latest/download/mac-guest-agent", sha: "", size: "0" }
+          - { tag: "dev-node-pkg", group: "macos", url: "https://nodejs.org/dist/v26.13.0/node-v26.13.0.pkg", sha: "445b202997c959dddbd54ad8c82956371b495b03c73d56044a6f82dfb3249c46", size: "105205394" }
+          - { tag: "dev-python-pkg", group: "macos", url: "https://www.python.org/ftp/python/3.13.9/python-3.13.9-macos11.pkg", sha: "dafebf62b8737f341f6b7eca2d6d1153a50a6b1bfbfa4b8aaf0e62adc73e5017", size: "70163313" }
+    # NO `if:` HERE, AND THAT IS NOT AN OVERSIGHT: A JOB-LEVEL `if:` CANNOT SEE `matrix`.
+    #
+    # GitHub evaluates a job's `if:` before the matrix is expanded, so `matrix.artifact.tag` is empty
+    # there and the condition silently reads as false for every row - a run with zero jobs and no log
+    # line. MEASURED, and it is what the repository's own workflow test refuses.
+    #
+    # SELECTION GOES IN THE MATRIX INSTEAD, which IS evaluated per row. The generator that wrote this
+    # file reads the catalogue and the three inputs, so a re-run of one artifact is:
+    #
+    #	gh workflow run artifacts-publish.yml -f tag=iso-windows11
+    #
+    # and the matrix then holds one row. The cost is that the row list is written out at generation
+    # time rather than computed at run time - which a catalogue in a heredoc was already doing.
     steps:
       - uses: actions/checkout@v4
 
       - name: prepare the runner
-        # THE DISK IS THE POINT: the largest single input is 7.2 GiB and its sha256 pass reads it
-        # again, so a runner with a 14 GiB volume fails halfway through the Windows image.
+        # THE DISK IS THE POINT: the largest single input is 7.7 GiB and its hash pass reads it again,
+        # so a runner with a 14 GiB volume fails halfway through the Windows image.
         uses: easydev-org/easyactions/runner-check@main
         with:
           kvm: false
-          disk-gb: '60'
+          disk-gb: '25'
           token: ${{ github.token }}
 
-      - name: build easyvm
-        # `easyvm pull` IS HOW THE RECOVERY IMAGE IS READ, and the host runner does not have the
-        # program: it is baked into the bake image at /usr/local/bin/easyvm, which is a container this
-        # job does not run. Building it here is two seconds of Go.
-        #
-        # PULL AND PUSH ARE NOT SYMMETRIC ANY MORE, and that is deliberate: `pull` is the daemon's
-        # `fetch:` implementation and stays in the program; `push` is `oras`, which is installed below.
-        run: |
-          set -eu
-          go build -trimpath -o /tmp/easyvm ./cmd/easyvm
-          echo "EASYVM=/tmp/easyvm" >> "$GITHUB_ENV"
-
-      - name: install oras
-        # THE PUBLISHER. `easyvm push` was removed - it was 246 lines of registry protocol with one
-        # caller - and `oras` is that tool: the payload is a bare ISO or qcow2, not a rootfs.
-        #
-        # This job runs on the HOST runner rather than in a container, so the oras project's own
-        # installer action would work here - but the version and hash are pinned by hand for the same
-        # reason `prepare` pins them: the tags this writes are what later stages pull.
-        run: |
-          set -eu
-          ORAS_VERSION=1.2.2
-          ORAS_SHA256=bff970346470e5ef888e9f2c0bf7f8ee47283f5a45207d6e7a037da1fb0eae0d
-          curl -fsSL --retry 5 --retry-all-errors -o /tmp/oras.tgz \
-            "https://github.com/oras-project/oras/releases/download/v${ORAS_VERSION}/oras_${ORAS_VERSION}_linux_amd64.tar.gz"
-          echo "${ORAS_SHA256}  /tmp/oras.tgz" | sha256sum -c -
-          tar -xzf /tmp/oras.tgz -C /usr/local/bin oras
-          chmod 0755 /usr/local/bin/oras
-          oras version
-
-      - name: mirror the macOS recovery image
-        # APPLE'S RECOVERY IMAGE IS THE ONE INPUT THAT CANNOT BE A URL IN THE CATALOGUE.
-        #
-        # Every other upstream here is one HTTP GET. This one is a session cookie, a five-field POST
-        # with opaque nonces, a token exchange, and then a CDN download that has to be parallel or it
-        # is cut short - Apple does not serve it as one request:
-        #
-        #	curl: (18) end of response with 887566699 bytes missing
-        #
-        # and every request produces a DIFFERENT URL AND A DIFFERENT TOKEN, so there is nothing stable
-        # to pin. The reference implementation solved this with a dedicated publisher that does that
-        # exchange; this build does not reimplement it, because the file is the SAME BYTES and one
-        # copy is already published. Mirroring it is a pull and a push, and both are this repository's
-        # package - which is what makes the token work at all.
-        #
-        # IT IS A SEPARATE STEP BECAUSE IT IS A SEPARATE KIND OF WORK: a transfer between two
-        # packages rather than a download from an upstream.
-        # THE EVENT CHECK IS NOT DECORATION: an `inputs.` value is EMPTY on any event that is not a
-        # dispatch, so a condition spelled `inputs.which == ''` alone is FALSE on a push and the step
-        # is skipped while the job reports success. This workflow is dispatch-only today; naming the
-        # event is what keeps that true if it ever is not.
-        if: github.event_name != 'workflow_dispatch' || (inputs.which == '' && (inputs.group == 'all' || inputs.group == 'recovery'))
+      - name: download and verify
+        # THE PER-ARTIFACT RULE LIVES IN ONE SCRIPT, because it is fifteen comments long and a matrix
+        # row should be readable. It downloads, checks the pin by ITS OWN LENGTH, and fails with the
+        # numbers when they differ.
+        id: fetch
         env:
-          GITHUB_TOKEN: ${{ github.token }}
-          REPOSITORY: ${{ github.repository }}
+          GROUP: ${{ matrix.artifact.group }}
+          DISKS_REPOSITORY: ${{ inputs.disks_repository }}
         run: |
           set -eu
-          # THE SOURCE IS THE PUBLISHER'S OWN PACKAGE. It is public, so the token is not what reads
-          # it - but every tag this build consumes then lives in this repository's package, and the
-          # stage code has ONE place to look.
-          # ORAS NEEDS ITS OWN LOGIN. `GITHUB_TOKEN` in the environment is not a credential oras
-          # reads; it has to be exchanged once, and without this every push is anonymous and is
-          # answered `denied: requested access to the resource is denied` - measured on
-          # iso-popos-desktop, whose 2.4 GiB download and sha256 BOTH succeeded first.
-          # `printf | oras login --password-stdin`, NOT `<<< "$GITHUB_TOKEN"`.
-          #
-          # `<<<` IS A BASH HERE-STRING AND THIS STEP RUNS UNDER /bin/sh (dash). Measured on
-          # cachyos-install, which had JUST PRODUCED A 6962 MiB DISK:
-          #
-          #	publishing .../linux-cachyos.qcow2: 6962 MiB
-          #	credential: GITHUB_TOKEN is set (377 characters)
-          #	....sh: 74: Syntax error: redirection unexpected
-          #	##[error]Process completed with exit code 2.
-          #
-          # - the credential was there, the disk was there, and the shell refused the line before
-          # oras ever ran. `printf '%s' | ... --password-stdin` is the portable spelling and is what
-          # this file already uses for other stdin.
-          printf '%s' "$GITHUB_TOKEN" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
-          for tag in macos-recovery-sequoia; do
-            echo "=== $tag"
-            dest="$RUNNER_TEMP/$tag.dmg"
-            if ! "$EASYVM" pull --tag "$tag" --dest "$dest" \
-                    --repository easydev-org/easydiskbake --timeout 60m; then
-              echo "::warning::$tag: could not be read from the publisher's package"
-              continue
-            fi
-            got=$(stat -c %s "$dest")
-            echo "  got: $got bytes"
-            if [ "$got" -lt $((200 * 1024 * 1024)) ]; then
-              echo "::warning::$tag: $got bytes is below the 200 MiB floor for a recovery image"
-              rm -f "$dest"
-              continue
-            fi
-            repo=$(printf '%s' "$REPOSITORY" | tr '[:upper:]' '[:lower:]')
-            ( cd "$RUNNER_TEMP" && \
-              oras push "ghcr.io/${repo}:${tag}" \
-                --artifact-type application/vnd.easydev.recovery \
-                "$(basename "$dest"):application/vnd.oci.image.layer.v1.tar" ) || {
-              echo "::warning::$tag: push failed"
-              rm -f "$dest"
-              continue
-            }
-            rm -f "$dest"
-          done
+          path=$(sh scripts/mirror-one.sh \
+                   "${{ matrix.artifact.tag }}" \
+                   "${{ matrix.artifact.url }}" \
+                   "${{ matrix.artifact.sha }}" \
+                   "${{ matrix.artifact.size }}")
+          echo "path=$path" >> "$GITHUB_OUTPUT"
 
-      - name: publish
-        env:
-          # GHCR IS WHAT THIS PUSHES TO, and the token has `packages: write` from the block above.
-          GITHUB_TOKEN: ${{ github.token }}
-          REPOSITORY: ${{ github.repository }}
-          GROUP: ${{ inputs.group }}
-          WHICH: ${{ inputs.which }}
-          KEEP: ${{ inputs.keep }}
-        run: |
-          set -eu
-          # THE CATALOGUE, AS ONE TABLE. `tag|group|url|sha256|bytes`, and an empty sha256 means the
-          # upstream is a moving "latest" that cannot be pinned - virtio-win and opensuse-tumbleweed
-          # are the two, and they are verified by size instead (see the floor check below).
-          #
-          # TAB-SEPARATED, AND THE TABS IN THIS HEREDOC ARE REAL TABS.
-          cat > /tmp/catalogue.tsv <<'CATALOGUE'
-          iso-windows11	windows	https://software-static.download.prss.microsoft.com/dbazure/888969d5-f34g-4e03-ac9d-1f9786c66749/26200.6584.250915-1905.25h2_ge_release_svc_refresh_CLIENT_CONSUMER_x64FRE_en-us.iso	d141f6030fed50f75e2b03e1eb2e53646c4b21e5386047cb860af5223f102a32	7736125440
-          iso-virtio-win	windows	https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso		0
-          iso-ubuntu-desktop	linux	https://releases.ubuntu.com/26.04/ubuntu-26.04.1-desktop-amd64.iso	601e30fbf5d97759367c632e2c33630665039b7e2158fd068403da3ccf1bda1f	6482409472
-          iso-kubuntu-desktop	linux	https://cdimage.ubuntu.com/kubuntu/releases/26.04/release/kubuntu-26.04.1-desktop-amd64.iso	831e4d4bb85098339ba43d3502cd6619b27e76daf37246a084cd68a6413090b8	5072990208
-          iso-fedora-workstation	linux	https://dl.fedoraproject.org/pub/fedora/linux/releases/45/Workstation/x86_64/iso/Fedora-Workstation-Live-45-1.4.x86_64.iso	68338c6bfe4f0d64151f2e47efe9f44a8855ad05b460e56b844fb3fa2c9a3beb	2925092864
-          iso-mint-cinnamon	linux	https://mirrors.kernel.org/linuxmint/stable/22.3/linuxmint-22.3-cinnamon-64bit.iso	a081ab202cfda17f6924128dbd2de8b63518ac0531bcfe3f1a1b88097c459bd4	3091660800
-          iso-opensuse-leap-16.1	linux	https://download.opensuse.org/distribution/leap/16.1/offline/Leap-16.1-offline-installer-x86_64.install.iso	c95738ba232a36eb31dfdf3e5f663beb672232410894ab04b1bfe0c7a803a622868a90fe631fc6c89418eca9ad181979b8817a52fdec3c203a9a5b7b997ba051	4516216832
-          iso-cachyos-desktop	linux	https://mirror.cachyos.org/ISO/desktop/260809/cachyos-desktop-linux-260809.iso	959f6577f45e25ee9fd8c220fd221b08e4ea79412c7315c0f922dd6d86d5e33c	3188850688
-          iso-manjaro-kde	linux	https://download.manjaro.org/kde/26.1.0/manjaro-kde-26.1.0-260812-linux71.iso	711b64362abe0b45348dc33bd4a2c654641e069b50ae9ae37c01771da880aa99	5534201856
-          iso-endeavouros	linux	https://mirror.alpix.eu/endeavouros/iso/EndeavourOS_Titan-Nova-2026.08.15.iso	0487f46fe29e0ab2ed153ba874568cc542a0507fb6029f29ad552b36ba447393	3898638336
-          iso-zorin-core	linux	https://mirrors.edge.kernel.org/zorinos-isos/18/Zorin-OS-18.1-Core-64-bit.iso	44649b97bd307fc4c8529205d098ebbf98575a1e1ba2ee7d7005b697af1721d5	3909091328
-          iso-mx-xfce	linux	https://netix.dl.sourceforge.net/project/mx-linux/Final/Xfce/MX-25.3_Xfce_x64.iso	25b5ce20caeee1b0e50507291df5ac8a8211b1b9999d8dd7416da9b66ed9fbf9	2927624192
-          iso-popos-desktop	linux	https://iso.pop-os.org/24.04/amd64/intel/10/pop-os_24.04_amd64_intel_10.iso	a5b7321babdef75d86c688d3429fbd5525689d80a1a8b94bc393eea84f372b62	2583691264
-          iso-nixos-graphical	linux	https://releases.nixos.org/nixos/26.05/nixos-26.05.13627.c56a87d8e41c/nixos-graphical-26.05.13627.c56a87d8e41c-x86_64-linux.iso	62900e47b6bea0917c491ac0a8e18dd4e3b7579d9b60ee8e0bbbd8945162256d	3888513024
-          iso-ghostbsd-mate	linux	https://download.ghostbsd.org/releases/amd64/26.3.R15.1p6/GhostBSD-26.3.R15.1p6.iso	2d1b46e7d0d9339ef04d2ee386783a2431f43eecb873b8f11b7109a43c577f7f	4122404864
-          macos-asset-opencore	macos	https://github.com/acidanthera/OpenCorePkg/releases/download/1.0.7/OpenCore-1.0.7-RELEASE.zip	2ffab6ebf58c7aefb0bcb3a1a385d207746823d6dd87d44bd666e1286939943e	10437696
-          macos-asset-opencore-template	macos	https://github.com/LongQT-sea/OpenCore-ISO/releases/download/v0.7/LongQT-OpenCore-v0.7.iso	287328995d4198f1b05166f087d85bf7ef66bedafe150d17ad112ac8de60051d	15884288
-          macos-asset-ovmf-code	macos	https://raw.githubusercontent.com/kholia/OSX-KVM/326053dd61f49375d5dfb28ee715d38b04b5cd8e/OVMF_CODE.fd	52a625db5a45329bf8005232db33e94781787d92ae8d088f2f73332dd4ded3a9	1966080
-          macos-asset-ovmf-vars-1920x1080	macos	https://raw.githubusercontent.com/kholia/OSX-KVM/326053dd61f49375d5dfb28ee715d38b04b5cd8e/OVMF_VARS-1920x1080.fd	6ed987af3a3c155be71665f510eae3e007eda9b8b94afd59d45e91c4a11565cc	131072
-          macos-asset-xcode-26.3	macos	https://archive.org/download/xcode-26.3/Xcode_26.3_Universal.xip	cebf05ec2920111830af5e08a45f07961e36bfd6	2871807039
-          macos-asset-mac-guest-agent	macos	https://github.com/mav2287/mac-guest-agent/releases/latest/download/mac-guest-agent		0
-          dev-node-pkg	macos	https://nodejs.org/dist/v26.13.0/node-v26.13.0.pkg	445b202997c959dddbd54ad8c82956371b495b03c73d56044a6f82dfb3249c46	105205394
-          dev-python-pkg	macos	https://www.python.org/ftp/python/3.13.9/python-3.13.9-macos11.pkg	dafebf62b8737f341f6b7eca2d6d1153a50a6b1bfbfa4b8aaf0e62adc73e5017	70163313
-          CATALOGUE
+      - name: push
+        # THE TRANSFER IS THE ACTION THAT KNOWS THE REGISTRY: it installs oras idempotently, logs in
+        # explicitly, and refuses a push whose bytes are identical to an earlier artifact.
+        uses: easydev-org/easyactions/oci-push@main
+        with:
+          path: ${{ steps.fetch.outputs.path }}
+          tag: ${{ matrix.artifact.tag }}
+          repository: ${{ inputs.disks_repository }}
+          media-type: application/vnd.easydev.artifact
+          token: ${{ github.token }}
+          check-name: mirror-${{ matrix.artifact.tag }}
 
-          # THE LOGIN, ONCE, BEFORE ANY PUSH. See the note in the mirror step above: an unauthenticated
-          # oras answers `denied` and the message names the package rather than the missing session.
-          # `printf | oras login --password-stdin`, NOT `<<< "$GITHUB_TOKEN"`.
-          #
-          # `<<<` IS A BASH HERE-STRING AND THIS STEP RUNS UNDER /bin/sh (dash). Measured on
-          # cachyos-install, which had JUST PRODUCED A 6962 MiB DISK:
-          #
-          #	publishing .../linux-cachyos.qcow2: 6962 MiB
-          #	credential: GITHUB_TOKEN is set (377 characters)
-          #	....sh: 74: Syntax error: redirection unexpected
-          #	##[error]Process completed with exit code 2.
-          #
-          # - the credential was there, the disk was there, and the shell refused the line before
-          # oras ever ran. `printf '%s' | ... --password-stdin` is the portable spelling and is what
-          # this file already uses for other stdin.
-          printf '%s' "$GITHUB_TOKEN" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
+  # APPLE'S RECOVERY IMAGE IS THE ONE INPUT THAT CANNOT BE A CATALOGUE ROW.
+  #
+  # Every other upstream here is one HTTP GET. This one is a session cookie, a five-field POST with
+  # opaque nonces, a token exchange, and then a CDN download that has to be parallel or it is cut
+  # short - Apple does not serve it as one request:
+  #
+  #	curl: (18) end of response with 887566699 bytes missing
+  #
+  # and every request produces a DIFFERENT URL AND TOKEN, so there is nothing stable to pin.
+  #
+  # SO IT IS A TRANSFER BETWEEN TWO PACKAGES RATHER THAN A DOWNLOAD: the file is the same bytes, one
+  # copy is already published under `macos-recovery-sequoia`, and this mirrors it into THIS
+  # repository's package so the asset layer has one place to look. A pull and a push, both through the
+  # organisation's actions.
+  recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+      checks: write
+    # THE EVENT CHECK IS NOT DECORATION: an `inputs.` value is EMPTY on any event that is not a
+    # dispatch, so `inputs.which == ''` alone is FALSE on a push and the job is skipped while the run
+    # reports success.
+    if: github.event_name != 'workflow_dispatch' || (inputs.which == '' && (inputs.group == 'all' || inputs.group == 'recovery'))
+    steps:
+      - uses: actions/checkout@v4
 
-          echo "=== the catalogue ==="
-          awk -F'\t' '{printf "  %-34s %-8s %s\n", $1, $2, ($4==""?"(unpinned - size floor only)":"sha256 "+substr($4,1,16))}' /tmp/catalogue.tsv
+      - name: pull the published image
+        # THE SOURCE IS THE PUBLISHER'S OWN PACKAGE, which is public - but every tag this build
+        # consumes then lives in this repository, and the asset layer has ONE place to look.
+        uses: easydev-org/easyactions/oci-pull@main
+        with:
+          tag: macos-recovery-sequoia
+          dest: ${{ runner.temp }}/recovery
+          repository: easydev-org/easyvm
+          token: ${{ github.token }}
+          check-name: recovery-pull
 
-          # THE SELECTION IS A TAG, NOT A WORKFLOW. `which` wins over `group`, and an unknown tag
-          # fails with the list of real ones rather than publishing nothing and reporting success.
-          if [ -n "$WHICH" ]; then
-            if ! awk -F'\t' -v w="$WHICH" '$1==w{found=1} END{exit !found}' /tmp/catalogue.tsv; then
-              echo "::error::$WHICH is not a tag in this catalogue:" >&2
-              awk -F'\t' '{print "  "$1}' /tmp/catalogue.tsv >&2
-              exit 1
-            fi
-            selected=$(awk -F'\t' -v w="$WHICH" '$1==w' /tmp/catalogue.tsv)
-          elif [ "$GROUP" = "all" ]; then
-            selected=$(cat /tmp/catalogue.tsv)
-          else
-            selected=$(awk -F'\t' -v g="$GROUP" '$2==g' /tmp/catalogue.tsv)
-            if [ -z "$selected" ]; then
-              echo "::error::group $GROUP selects nothing" >&2
-              exit 1
-            fi
-          fi
-
-          # KEEP GOING, BECAUSE ONE UPSTREAM MUST NOT COST THE OTHERS. A mirror being briefly wrong is
-          # the normal failure here, and the list that matters at the end is the one of what failed.
-          failed=""
-          published=0
-          work=$(mktemp -d)
-          trap 'rm -rf "$work"' EXIT
-
-          # PROCESS SUBSTITUTION, NOT A PIPE. A pipe puts the `while` body in a SUBSHELL, so
-          # `failed` and `published` are discarded when it ends - and the run would report success
-          # after every download failed. `< <(...)` keeps the loop in this shell.
-          while IFS=$(printf '\t') read -r tag group url sha size <&3; do
-            [ -n "$tag" ] || continue
-            # THE FILE'S NAME COMES FROM THE URL, so the layer carries a name a reader recognises
-            # rather than "download".
-            name=$(basename "${url%%\?*}")
-            dest="$work/$name"
-            echo
-            echo "=== $tag"
-            echo "  from: $url"
-            # NO `--max-time`. It is a limit on the WHOLE transfer, so it ends a 7.2 GiB download
-            # at the number whatever the speed - the connect timeout is what guards a dead mirror,
-            # and `--retry-all-errors` is what retries a stall.
-            if ! curl -fL --retry 5 --retry-delay 10 --retry-all-errors \
-                        --connect-timeout 30 -C - \
-                        -o "$dest" "$url"; then
-              echo "::warning::$tag: download failed"
-              failed="$failed $tag"
-              continue
-            fi
-            got=$(stat -c %s "$dest")
-            echo "  got:  $got bytes"
-            if [ "$sha" != "" ] && [ "$sha" != "0" ]; then
-              # THE PIN IS THE POINT. A file that does not match is not a newer version - it is the
-              # wrong file, and pushing it would put it behind the right tag where nobody looks.
-              #
-              # THE HASH IS WHICHEVER ONE THE PIN PUBLISHED, AND NOT ALWAYS sha256. Apple's Xcode
-              # release index gives a sha1, archive.org republishes that same sha1, and
-              # `internal/asset/xcode.go` verifies it as a sha1 - so the catalogue carries a sha1 for
-              # `macos-asset-xcode-26.3` and a sha256 for everything else. CHECKING EVERYTHING AS
-              # sha256 REFUSED THE CORRECT FILE:
-              #
-              #	warning: macos-asset-xcode-26.3: sha256 is cf87232e..., the pin is cebf05ec...
-              #
-              # and `cebf05ec...` is 40 hex digits - a sha1 - being compared against 64. The length
-              # of the pin says which digest to compute, which is the one fact that does not need a
-              # second table.
-              # THE PIN'S LENGTH SAYS WHICH DIGEST TO COMPUTE, and opensuse publishes a sha512 -
-              # its release index has `.sha512` and NO `.sha256` (`HTTP 404` for the sha256 file).
-              # Between sha1, sha256 and sha512 that is three lengths, and each one names itself.
-              case "${#sha}" in
-                40)  actual=$(sha1sum   "$dest" | cut -d' ' -f1) ;;
-                64)  actual=$(sha256sum "$dest" | cut -d' ' -f1) ;;
-                128) actual=$(sha512sum "$dest" | cut -d' ' -f1) ;;
-                *)   echo "::warning::$tag: the pin is ${#sha} hex digits, which is not sha1, sha256 or sha512"
-                     failed="$failed $tag"
-                     continue ;;
-              esac
-              if [ "$actual" != "$sha" ]; then
-                echo "::warning::$tag: ${#sha}-digit digest is $actual, the pin is $sha"
-                failed="$failed $tag"
-                continue
-              fi
-              echo "  sha${#sha}: verified"
-            else
-              # THE UNPINNED ONES ARE EITHER A MOVING "latest" OR A SMALL BINARY, so the only honest
-              # check is a floor - and THE FLOOR IS NOT ONE NUMBER.
-              #
-              # MEASURED: `macos-asset-mac-guest-agent` is a 531 KB EXECUTABLE, and a 500 MiB floor
-              # refused it with a sentence about an installer image. The floor exists to catch a
-              # truncated transfer or an HTML error page, and those are proportional to the real
-              # file: half a gigabyte is right for a 7 GiB ISO and absurd for a 531 KB binary.
-              floor=500
-              case "$tag" in
-                macos-asset-mac-guest-agent) floor=0 ;;    # ~519 KB: checked in KB below, not MiB
-                dev-*)                       floor=10 ;;
-                macos-asset-*)               floor=1 ;;
-              esac
-              # THE AGENT IS A HALF-MEGABYTE BINARY, so its floor is in kilobytes and the `floor=0`
-              # above means "handled separately". Everything else uses the MiB table.
-              if [ "$tag" = "macos-asset-mac-guest-agent" ]; then
-                min=$((400 * 1024))
-              else
-                min=$((floor * 1024 * 1024))
-              fi
-              if [ "$got" -lt "$min" ]; then
-                echo "::warning::$tag: $got bytes is below the $min-byte floor for this kind of artifact"
-                failed="$failed $tag"
-                continue
-              fi
-              echo "  sha256: unpinned upstream, size floor passed"
-            fi
-            # `oras push`, FROM THE FILE'S OWN DIRECTORY WITH A BARE FILENAME. oras validates the
-            # path in a `file:media:type` reference and rejects an absolute one; the flag that would
-            # allow it also disables the checks protecting a mistyped variable.
-            repo=$(printf '%s' "$REPOSITORY" | tr '[:upper:]' '[:lower:]')
-            if ( cd "$work" && \
-                 oras push "ghcr.io/${repo}:${tag}" \
-                   --artifact-type application/vnd.easydev.iso \
-                   "${name}:application/vnd.oci.image.layer.v1.tar" \
-                   --annotation "org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" \
-                   --annotation "org.opencontainers.image.revision=${{ github.sha }}" ); then
-              published=$((published + 1))
-            else
-              echo "::warning::$tag: push failed"
-              failed="$failed $tag"
-            fi
-            if [ "$KEEP" != "true" ]; then rm -f "$dest"; fi
-          done 3< <(printf '%s\n' "$selected")
-
-          echo
-          echo "=== done: see the tags in the package"
-          # A FAILURE LIST IS WRITTEN TO THE STEP SUMMARY, because the log is thousands of lines and
-          # the question after a run is one line long.
-          {
-            echo "## artifacts-publish"
-            echo
-            echo "repository: \`$REPOSITORY\`"
-            echo
-            if [ -n "$failed" ]; then
-              echo "**failed:**$failed"
-              exit 1
-            fi
-            echo "every selected artifact was verified and pushed"
-          } >> "$GITHUB_STEP_SUMMARY"
+      - name: push it here
+        uses: easydev-org/easyactions/oci-push@main
+        with:
+          path: ${{ runner.temp }}/recovery/macos-recovery-sequoia
+          tag: macos-recovery-sequoia
+          repository: ${{ inputs.disks_repository }}
+          token: ${{ github.token }}
+          check-name: recovery-mirror

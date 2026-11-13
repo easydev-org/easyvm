@@ -137,140 +137,35 @@ jobs:
           mkdir -p "$GITHUB_WORKSPACE/work"
 
       - name: pull the input disk
-        # AN INSTALL HAS NO INPUT: its first step creates the disk it writes to. Every other stage
-        # starts from a published one, and `pull` is the tag - so a leg can be pointed at any disk this
-        # repository has ever published.
+        # AN INSTALL HAS NO INPUT: its first step creates the disk it writes to. Every other leg pulls
+        # the disk the leg before it published, and THERE IS EXACTLY ONE TAG TO TRY.
+        #
+        # THIS WAS A LOOP WITH TWO FALLBACKS AND A THIRTY-MINUTE WAIT, and all of that existed for one
+        # reason: the legs ran as a PARALLEL MATRIX, so a leg could ask for a tag the leg before it had
+        # not published yet, get a 404, and then fall back to the INSTALL disk - which has no sshd - and
+        # wait out its timeout on a machine that could never answer.
+        #
+        # `needs:` IN THE CALLER REMOVED THE RACE, so the loop is gone with it. A leg that finds its tag
+        # missing now has a REAL problem: the leg before it published nothing, and saying so at once is
+        # worth more than thirty minutes of retries that end in the same place.
+        # THE GUARD IS THE MATRIX ROW, NOT AN INPUT: an install leg's `pull` is empty and everything
+        # else names one tag. `matrix.pull` is a string, and an empty one is how "I start a chain" is
+        # spelled.
         if: matrix.pull != ''
-        # THE TOKEN IS THE VARIABLE `easyvm pull` READS, AND IT IS NOT IN THE CONTAINER BY
-        # DEFAULT.
-        #
-        # `GITHUB_TOKEN` IS NOT AUTOMATICALLY EXPORTED INTO A CONTAINER JOB. It was used for the
-        # registry login of the container image itself - the only place this file mentioned it -
-        # while `easyvm` reads `os.Getenv("GITHUB_TOKEN")` to exchange for a registry session.
-        # WITH NONE SET, EVERY PULL AND EVERY PUSH ASKED ANONYMOUSLY and the registry answered
-        #
-        #	FAILED: the registry refused a pull,push token (HTTP 403): {"errors":[{"code":
-        #	"DENIED","message":"requested access to the resource is denied"}]}
-        #
-        # `artifacts-publish.yml` HAS ALWAYS SET THIS, which is why it could push while the stages
-        # could not. One workflow passing a variable and the other not does not show up in a diff
-        # of their `permissions:` blocks, and that is where this was looked for first.
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
         run: |
-          set -u
-          # A FALLBACK, BECAUSE THE LEGS RUN AT THE SAME TIME.
-          #
-          # `matrix.pull` IS WHERE THIS DISK SHOULD COME FROM, and on a package that has every tag it
-          # is the only source tried. THE LEGS ARE DISPATCHED TOGETHER, though - `fail-fast: false`
-          # and no `needs:` - so on a FRESH PACKAGE the `vm` leg starts while the `ssh` leg whose
-          # output it wants has not published it yet.
-          #
-          # MEASURED, AND IT COST A WHOLE BATCH: all fifteen workflows dispatched at once against an
-          # empty package, and every `ssh`/`vm` leg answered
-          #
-          #   FAILED: ghcr.io/easydev-org/easyvm:linux-zorin-ssh is not in the registry (404)
-          #
-          # SO EACH LEG TRIES ITS OWN TAG, THEN THE STAGES BEFORE IT, IN ORDER. The chain is
-          # install -> ssh -> vm-configure -> dev, and `fallback` is that chain written out for this
-          # leg. The FIRST tag that exists wins, which means:
-          #
-          #   once every tag exists   nothing falls back, and each leg continues its own disk
-          #   a fresh package         `vm` continues the INSTALLED disk instead of failing, and
-          #                           vm-configure configures the name, the share and the agent
-          #                           itself - which is all it ever needed ssh for
-          #
-          # A FALLBACK IS NOT A SILENT SUBSTITUTE: it is printed, and the leg's own `out` is still
-          # published under its own name, so the next run finds the tag it wanted.
-          # THE PULL IS TAKEN FROM THE JSON, AND THE RENDERED VALUE IS PRINTED SO A MISMATCH IS
-          # VISIBLE RATHER THAN INFERRED.
-          #
-          # MEASURED ON windows-ssh, WHOSE LEG DECLARES `"pull": "windows11"`:
-          #
-          #	will try, in order: windows11-ssh windows11
-          #	=== pull windows11-ssh
-          #
-          # - the FIRST tag tried was the leg's own output name, not the disk the leg before it
-          # publishes. `windows11` was present only as a fallback. The declaration is correct in
-          # `windows.yml` at the same commit (`git show e408153:.github/workflows/windows.yml`), so
-          # the value arriving here was not the value declared.
-          #
-          # SO IT IS PRINTED, and the leg's own name is printed beside it: a run that says
-          # `pull=windows11-ssh` for a leg named `windows-ssh` is a run whose matrix arrived wrong,
-          # and that is a sentence rather than an investigation.
-          tags="${{ matrix.pull }}"
-          fallbacks="${{ matrix.fallback }}"
-          echo "  matrix: name=${{ matrix.name }} pull='$tags' fallback='$fallbacks' out=${{ matrix.out }}"
-          # A LEG THAT PULLS ITS OWN OUTPUT NAME IS ALWAYS WRONG HERE - that is the disk it is about
-          # to WRITE. Refusing it converts a confusing 404 loop into one line that says what happened.
-          if [ "$tags" = "${{ matrix.out }}" ]; then
-            echo "::error::this leg pulls '$tags', which is its own output file. The matrix did not"
-            echo "::error::carry the 'pull' it declares; refusing rather than recursing."
+          set -eu
+          tag="${{ matrix.pull }}"
+          [ -n "$tag" ] || { echo "this leg has no pull:"; exit 0; }
+          echo "=== pull $tag"
+          sh "$GITHUB_WORKSPACE/.github/pull-artifact.sh" \
+             ghcr.io "$(printf '%s' "${{ inputs.disks_repository }}" | tr '[:upper:]' '[:lower:]')" \
+             "$tag" "$GITHUB_WORKSPACE/work/disk.qcow2" || {
+            echo "::error::$tag is not in the package. This leg pulls the disk the leg before it"
+            echo "::error::published, and that leg declares its own tag in the caller's matrix."
+            echo "::error::A missing tag here means the previous job published nothing - read ITS log,"
+            echo "::error::not this one."
             exit 1
-          fi
-          for fb in $fallbacks; do
-            case " $tags " in *" $fb "*) ;; *) tags="$tags $fb" ;; esac
-          done
-          echo "  will try, in order: $tags"
-          got=""
-          # THE LEGS ARE DISPATCHED TOGETHER, SO THE DISK A LEG WANTS MAY BE PUBLISHING RIGHT NOW.
-          #
-          # `fail-fast: false` with no `needs:` starts every leg at once, so `vm` pulls
-          # `linux-ubuntu-ssh` while the `ssh` leg that writes it is still running. MEASURED THREE
-          # TIMES: `will try, in order: linux-ubuntu-ssh linux-ubuntu` then fifteen to thirty minutes
-          # spent on the FALLBACK disk, which is the install image with no sshd - a timeout that looks
-          # like a broken walk and is only a race.
-          #
-          # SO THE FIRST TAG IS WAITED FOR, not abandoned on the first 404. Every later tag is an
-          # immediate fallback, because those are tags that either exist or never will.
-          first=1
-          for tag in $tags; do
-            echo "=== pull $tag"
-            attempt=0
-            while :; do
-              # THE TRANSFER IS A SHELL SCRIPT, NOT `easyvm pull`. `oras pull` HAS NO RESUME: a retry
-              # around it restarts every multi-gigabyte transfer at byte zero, so more attempts make
-              # more failures rather than progress - measured on a 28 GiB blob whose first four
-              # attempts each died at the same stream error. This one fetches the blob with `Range:`
-              # and keeps a `.part` file.
-              #
-              # IT IS THE SAME ALGORITHM AS `easyactions/oci-pull`, DELIBERATELY DUPLICATED FOR ONE
-              # REASON: THIS LOOP RETRIES ON 404. The action is a STEP, and a step cannot sit inside a
-              # `while` that waits thirty minutes for a tag the parallel leg has not published yet - so
-              # the retry stays here and the transfer is the same three requests with the same
-              # `Range:` resume. THE ACTION IS THE ONE TO USE ANYWHERE ELSE; this copy exists because
-              # this call site is a loop.
-              if sh "$GITHUB_WORKSPACE/.github/pull-artifact.sh" \
-                     ghcr.io "$(printf '%s' "${{ inputs.disks_repository }}" | tr '[:upper:]' '[:lower:]')" \
-                     "$tag" "$GITHUB_WORKSPACE/work/disk.qcow2"; then
-                got="$tag"
-                break 2
-              fi
-              if [ "$first" != "1" ]; then
-                echo "  (no $tag in the package; trying the next one)"
-                break
-              fi
-              attempt=$((attempt + 1))
-              if [ "$attempt" -ge 60 ]; then
-                echo "  ($tag did not appear in 30 minutes; falling back)"
-                first=0
-                break
-              fi
-              echo "  ($tag is not there yet - the leg that publishes it is likely still running;"
-              echo "   waiting 30s, attempt $attempt of 60)"
-              sleep 30
-            done
-            first=0
-          done
-          if [ -z "$got" ]; then
-            echo "::error::none of these tags exist: $tags"
-            echo "::error::a fresh package needs each leg run once; an install leg has no pull:"
-            exit 1
-          fi
-          echo "  the input disk is $got"
-          ls -l "$GITHUB_WORKSPACE/work/"
-          # A TRUNCATED ARTIFACT IS ONE LINE HERE RATHER THAN A BOOT TIMEOUT.
-          qemu-img check "$GITHUB_WORKSPACE/work/disk.qcow2" || true
+          }
 
       - name: start the daemon
         # ONE PROCESS OWNS THE MACHINE FOR THE WHOLE STAGE. It runs in the background because

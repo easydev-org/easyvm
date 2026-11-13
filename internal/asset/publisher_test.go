@@ -110,18 +110,21 @@ func tagsThePublisherWrites(t *testing.T, src string) (catalogue, mirrored map[s
 	catalogue = map[string]bool{}
 	mirrored = map[string]bool{}
 
-	// A CATALOGUE ROW IS `tag<TAB>group<TAB>url<TAB>sha256<TAB>bytes`. Requiring the tab is what tells
-	// a row from a comment that happens to start with a tag-shaped word.
-	for _, line := range strings.Split(src, "\n") {
-		line = strings.TrimSpace(line)
-		if !strings.Contains(line, "\t") {
-			continue
+	// A CATALOGUE ENTRY IS A MATRIX ROW: `- { tag: "iso-...", group: ..., url: ... }`.
+	//
+	// IT USED TO BE A TAB-SEPARATED LINE IN A HEREDOC, and the requirement was the same: something
+	// exact enough that a comment starting with a tag-shaped word could not be mistaken for a row. A
+	// quoted `tag:` key is that, and the parser is `encoding/json` after the braces are wrapped.
+	row := regexp.MustCompile(`\{ tag: "[^"]+", group: "[^"]*", url: "[^"]*", sha: "[^"]*", size: "[^"]*" \}`)
+	for _, m := range row.FindAllString(src, -1) {
+		// THE TAG IS READ WITH A NARROW PATTERN RATHER THAN BY CONVERTING THE ROW TO JSON.
+		//
+		// The first version quoted every `word:` in the row and unmarshalled it, and a URL contains
+		// one: `https://...` became `"https"://...`, which is not JSON. Only the tag is needed here,
+		// and `tag: "..."` is unambiguous.
+		if tag := regexp.MustCompile(`tag: "([^"]+)"`).FindStringSubmatch(m); tag != nil {
+			catalogue[tag[1]] = true
 		}
-		fields := strings.Split(line, "\t")
-		if len(fields) < 5 {
-			continue
-		}
-		catalogue[fields[0]] = true
 	}
 	if len(catalogue) == 0 {
 		t.Fatal("no catalogue rows were found in artifacts-publish.yml, so every fetch would look " +

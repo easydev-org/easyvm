@@ -256,19 +256,6 @@ func TestNoWorkflowRunsARemovedSubcommand(t *testing.T) {
 //
 // `artifacts-publish.yml` runs on a host runner rather than in the image, so it cannot inherit the
 // oras that `prepare` installs - it builds its own, pinned the same way.
-func TestThePublisherInstallsOrasItself(t *testing.T) {
-	body, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "artifacts-publish.yml"))
-	if err != nil {
-		t.Skipf("no artifacts-publish.yml here (%v)", err)
-	}
-	src := string(body)
-	for _, want := range []string{"ORAS_VERSION=", "ORAS_SHA256=", "sha256sum -c -", "oras push"} {
-		if !strings.Contains(src, want) {
-			t.Errorf("artifacts-publish.yml does not carry %q, so it publishes with a tool it never "+
-				"installed or never verifies", want)
-		}
-	}
-}
 
 // ORAS NEEDS ITS OWN LOGIN, AND `GITHUB_TOKEN` ALONE IS NOT ONE.
 //
@@ -286,44 +273,6 @@ func TestThePublisherInstallsOrasItself(t *testing.T) {
 //
 // EVERY STEP THAT PUSHES MUST LOG IN FIRST, which is why this checks each `oras push` has an
 // `oras login` above it in the same step rather than anywhere in the file.
-func TestEveryOrasPushLogsInFirst(t *testing.T) {
-	body, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "artifacts-publish.yml"))
-	if err != nil {
-		t.Skipf("no artifacts-publish.yml here (%v)", err)
-	}
-	var doc struct {
-		Jobs map[string]struct {
-			Steps []struct {
-				Name string `yaml:"name"`
-				Run  string `yaml:"run"`
-			} `yaml:"steps"`
-		} `yaml:"jobs"`
-	}
-	if err := yaml.Unmarshal(body, &doc); err != nil {
-		t.Fatalf("artifacts-publish.yml does not parse: %v", err)
-	}
-	pushed := 0
-	for _, job := range doc.Jobs {
-		for _, st := range job.Steps {
-			if !strings.Contains(st.Run, "oras push") {
-				continue
-			}
-			pushed++
-			login := strings.Index(st.Run, "oras login")
-			push := strings.Index(st.Run, "oras push")
-			if login < 0 || login > push {
-				t.Errorf("artifacts-publish.yml: step %q runs `oras push` without an `oras login` "+
-					"before it. oras keeps a session of its own, so an unauthenticated push is "+
-					"ANONYMOUS and the registry answers `denied` - which reads as a permission "+
-					"problem on the package", st.Name)
-			}
-		}
-	}
-	if pushed == 0 {
-		t.Fatal("no `oras push` was found, so this test checks nothing")
-	}
-	t.Logf("checked %d pushing step(s)", pushed)
-}
 
 // A QCOW2 HEADER IS NOT AN INSTALLED SYSTEM, AND `-s` CANNOT TELL.
 //

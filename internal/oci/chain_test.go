@@ -301,56 +301,64 @@ func TestEveryCallerGrantsPackagesWrite(t *testing.T) {
 //
 // SO THE TWO STEPS THAT TALK TO THE REGISTRY MUST BOTH CARRY IT, and this test is what keeps a later
 // edit from dropping one of them.
-func TestTheStageStepsThatUseTheRegistryPassTheToken(t *testing.T) {
-	body, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "stage.yml"))
+// EVERY STEP THAT TOUCHES THE REGISTRY GETS A TOKEN, AND NOW THAT IS THE ACTION'S CONTRACT.
+//
+// THE HAND-WRITTEN STEPS each carried `env: GITHUB_TOKEN: ...`, and a missing one was a
+// `403 DENIED` that read like a package permission problem. THREE STEPS LOST IT at different times:
+// the pull, the publish, and the artifact mirror.
+//
+// THOSE STEPS ARE `runner-check`, `oci-pull`, `oci-push` AND `log-stream` NOW, and each takes the token
+// as an INPUT - so a step without one is a step whose `with:` does not say `token:`, which is visible
+// where the step is written rather than three hundred lines into a `run:` block.
+//
+// WHAT THIS CHECKS IS THE CALL, NOT THE IMPLEMENTATION: every action that talks to the registry must be
+// given `token:`.
+func TestEveryRegistryActionIsGivenAToken(t *testing.T) {
+	root := filepath.Join("..", "..", ".github", "workflows")
+	files, err := filepath.Glob(filepath.Join(root, "*.yml"))
 	if err != nil {
-		t.Skipf("no stage.yml here (%v)", err)
+		t.Fatal(err)
 	}
-	var doc struct {
-		Jobs map[string]struct {
-			Steps []struct {
-				Name string            `yaml:"name"`
-				Env  map[string]string `yaml:"env"`
-			} `yaml:"steps"`
-		} `yaml:"jobs"`
-	}
-	if err := yaml.Unmarshal(body, &doc); err != nil {
-		t.Fatalf("stage.yml does not parse: %v", err)
-	}
-	wanted := map[string]bool{"pull the input disk": false, "publish the disk": false}
-	for _, job := range doc.Jobs {
-		for _, st := range job.Steps {
-			if _, ok := wanted[st.Name]; !ok {
-				continue
-			}
-			wanted[st.Name] = true
-			tok, ok := st.Env["GITHUB_TOKEN"]
-			if !ok || !strings.Contains(tok, "github.token") {
-				t.Errorf("stage.yml: %q has no `GITHUB_TOKEN` in its `env`, so `easyvm` asks the "+
-					"registry anonymously and the answer to a write is 403 `DENIED` - which looks "+
-					"like a permissions bug and is a missing variable", st.Name)
+	// THE ACTIONS THAT NEED A CREDENTIAL. `runner-check` uses one for the check run; the other three
+	// for the registry. `log-stream` publishes a check run and needs it too.
+	needsToken := []string{"oci-pull", "oci-push", "log-stream"}
+	checked := 0
+	for _, path := range files {
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lines := strings.Split(string(body), "\n")
+		for i, line := range lines {
+			for _, action := range needsToken {
+				if !strings.Contains(line, "easyactions/"+action) {
+					continue
+				}
+				checked++
+				// the `with:` block follows within a few lines
+				block := strings.Join(lines[i:min(i+12, len(lines))], "\n")
+				if !strings.Contains(block, "token:") {
+					t.Errorf("%s:%d uses %s without `token:`, so it reaches the API anonymously and "+
+						"the answer is 403 DENIED - which reads like a permissions bug and is a "+
+						"missing input", filepath.Base(path), i+1, action)
+				}
 			}
 		}
 	}
-	for name, found := range wanted {
-		if !found {
-			t.Errorf("stage.yml has no step named %q, so this test is checking nothing", name)
-		}
+	if checked == 0 {
+		t.Fatal("no registry action was found, so this checks nothing")
 	}
+	t.Logf("checked %d registry action call(s)", checked)
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // AND THE WORKFLOW THAT ALREADY WORKED STILL HAS TO.
-func TestThePublisherPassesTheTokenToo(t *testing.T) {
-	body, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "artifacts-publish.yml"))
-	if err != nil {
-		t.Skipf("no artifacts-publish.yml here (%v)", err)
-	}
-	src := string(body)
-	if strings.Count(src, "GITHUB_TOKEN:") < 2 {
-		t.Fatal("artifacts-publish.yml no longer passes `GITHUB_TOKEN` to both its steps; it was " +
-			"the workflow that proved the variable is what the registry wants")
-	}
-}
 
 // EVERY LEG THAT WRITES A DISK PUBLISHES IT, INCLUDING THE ONES THAT CONTINUE ONE.
 //
