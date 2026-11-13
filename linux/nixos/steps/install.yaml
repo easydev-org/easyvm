@@ -17,7 +17,7 @@ steps:
   record: nixos-install.mp4
 - name: create the empty disk
   disk: disk.qcow2
-  disk_gb: 64
+  disk_gb: 128
 - name: fetch the installer image
   fetch: linux_iso
   release: nixos

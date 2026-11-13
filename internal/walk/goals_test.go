@@ -1775,3 +1775,45 @@ func TestTheInstallingLegThatWasMeasuredUnbootableRebootsItsDisk(t *testing.T) {
 		}
 	}
 }
+
+// EVERY DISK THIS REPOSITORY CREATES IS 128 GiB, BECAUSE THAT IS THE SIZE THE PROJECT FIXED.
+//
+// MEASURED: twelve Linux walkthroughs carried `disk_gb: 64` while Windows carried 128. Nothing
+// failed because of it - an install fits in 64 GiB - which is exactly why it survived: a value that
+// is wrong but not fatal is never reported. The requirement is one size for every disk so that a
+// published artifact is comparable across distributions and so a guest never runs out of space part
+// way through an install that then looks like an installer bug.
+//
+// THIS IS A CONSTRAINT ON THE FILES, NOT A DEFAULT IN THE CODE. A walkthrough that says 64 asked for
+// 64, and the answer is that it may not.
+func TestEveryCreatedDiskIs128GiB(t *testing.T) {
+	root := filepath.Join("..", "..")
+	files, err := filepath.Glob(filepath.Join(root, "*", "*", "steps", "*.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked := 0
+	for _, path := range files {
+		doc, err := Load(path, nil)
+		if err != nil {
+			continue
+		}
+		rel, _ := filepath.Rel(root, path)
+		for _, s := range doc.Steps {
+			if !s.Has("disk_gb") {
+				continue
+			}
+			checked++
+			gb, _ := s.Float("disk_gb", 0)
+			if gb != 128 {
+				t.Errorf("%s: %q creates a %.0f GiB disk. Every disk in this repository is 128 GiB - "+
+					"measured: twelve Linux walkthroughs said 64 while Windows said 128, and nothing "+
+					"failed because an install fits in 64, which is why it survived", rel, s.Name, gb)
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no `disk_gb:` step was found")
+	}
+	t.Logf("checked %d disk(s)", checked)
+}

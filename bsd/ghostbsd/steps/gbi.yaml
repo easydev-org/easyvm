@@ -1,25 +1,7 @@
-# GhostBSD gbi, 1920x1080. An escape hatch is visible here, and that is the point.
-#
-#     python3 lib/steps.py bsd/ghostbsd/steps/gbi.yaml --qmp /work/drive.sock.qmp
-#
-# THIS FILE EXISTS TO SHOW THE BOUNDARY.
-#
-# gbi is the easiest of all the installers to write as data: nine panes, one footer
-# coordinate, and every answer is the default. If YAML were the answer to everything, this
-# file would be enough to prove it. It is not, and the two steps that are NOT steps are here
-# to say so:
-#
-#     the ZFS disk tick      `Next` is GREY until the checkbox is clicked, and the checkbox is
-#                            not the footer - it is a control that exists on exactly one pane.
-#                            That is still data (an `at`), but it is the reason a walkthrough
-#                            is a sequence and not a set of "press Next" rules.
-#
-#     the boot/desktop wait  whether the live session is up is a question with many right
-#                            answers - and it is TWO of them, which is what `until_any:` is for.
-
 name: ghostbsd gbi
-resolution: [1920, 1080]
-
+resolution:
+- 1920
+- 1080
 vars:
   user:
     from: args.user
@@ -27,159 +9,94 @@ vars:
   password:
     from: args.password
     default: admin
-
 steps:
-  # THE MACHINE AND ITS INSTALLER, WHICH USED TO BE THE BAKE SKELETON IN PYTHON.
-  #
-  # THIS FILE IS THE WIZARD STEPS. bsd/ghostbsd/install.py's main() built the machine, attached the
-  # ISO and pressed the desktop icon; its own docstring says install.py "keeps the machine, the OVMF
-  # firmware, the loader step, the frames, the recording and the publish". Reproduced as YAML, that
-  # skeleton has to be in the file.
-  #
-  # 64G BECAUSE THAT IS WHAT THE WORKFLOW PASSED (`--disk-size`), and the wizard's disk pane reads
-  # capacity.
-  - name: create the empty disk
-    disk: disk.qcow2
-    disk_gb: 64
-
-  - name: fetch the installer image
-    fetch: linux_iso
-    release: ghostbsd
-
-  - name: boot the installer
-    boot: true
-    os: bsd
-    iso: installer_iso
-    timeout: 1800
-
-  # THE UEFI BOOT LANDS ON AN X DRIVER MENU FIRST, AND IT IS ANSWERED BEFORE ANY WAIT FOR A DESKTOP.
-  #
-  # MEASURED on bsd-ghostbsd-install, step 4 of 17:
-  #
-  #	wait for the live desktop: never saw "install ghostbsd" or "applications" within 30m0s;
-  #	last read: start Desktop with Legacy Intel dri
-  #
-  # THE MENU WAS ON SCREEN FOR THIRTY MINUTES. It offers five X drivers and asks which to use, and
-  # the REFERENCE IMPLEMENTATION RECORDS THE EXACT SAME FAILURE:
-  #
-  #	Run 42364259880 looked for the word "scfb" and failed while the menu was on screen: the
-  #	selected row is drawn inverted and OCR read only that one, as `Start Desktop with Legacy
-  #	Intel dri`. The bottom four of the five entries were invisible to it. Matching the title -
-  #	which is present whatever row is selected - is the question that actually has one answer.
-  #
-  # SO THE MENU IS RECOGNISED BY ITS TITLE, and the answer is four Downs and Enter: `scfb`, the UEFI
-  # framebuffer, which is the driver this machine has. `SCFB_DOWNS = 4` is the reference
-  # implementation's measured number.
-  #
-  # THE STEP IS `optional` BECAUSE SOME GHOSTBSD IMAGES AUTO-SELECT AND NEVER SHOW IT - a machine that
-  # needed no menu must not fail a step about the menu.
-  - name: choose the X driver, when the menu appears
-    until_any:
-      - ["start", "desktop", "with"]
-      - ["failed", "to", "auto"]
-    timeout: 300
-    poll: 5
-    optional: true
-
-  # FOUR DOWNS IN ONE STEP, BECAUSE `repeat:` IS THE SAME FOUR KEYSTROKES AND ONE LINE.
-  #
-  # The interval is 1.0 second, which is the reference implementation's `time.sleep(1.0)` between
-  # presses: the menu redraws the inverted row on every move, and a key that arrives during the
-  # redraw is read as nothing.
-  - name: reach scfb with four downs
-    key: down
-    repeat: [4, 1.0]
-    settle: 2
-
-  - name: choose scfb
-    key: ret
-    settle: 25
-
-  # THE LIVE SESSION HAS TWO RIGHT ANSWERS, AND THE DRIVER'S OWN MEASUREMENT SAYS SO:
-  #
-  #     the desktop comes up BEFORE its panel does
-  #     the installer's own window can appear BEFORE the panel does when the autostart wins
-  #     a frame taken too early is a black rectangle that reads as an empty screen
-  #
-  # so a single word would pass on two of those three. The two states this waits for are the
-  # INSTALLER'S WINDOW - which says `Install` and `GhostBSD` somewhere on it - and MATE's PANEL,
-  # whose `Applications` menu appears nowhere else. Either one means the session is up.
-  - name: wait for the live desktop
-    until_any:
-      - [install, ghostbsd]
-      - [applications]
-    timeout: 1800
-    poll: 10
-
-  # 1. WELCOME -> KEYBOARD. English is preselected.
-  - name: welcome
-    at: &next [1293, 781]
-    settle: 12
-    expect: keyboard
-
-  # 2. KEYBOARD -> TIME ZONE. English (US) is preselected.
-  - name: keyboard
-    at: *next
-    settle: 12
-
-  # 3. TIME ZONE -> INSTALLATION TYPE. America/Adak is preselected; the requirement is a disk
-  #    that boots, not a particular region, and this is the installer's own default.
-  - name: time zone
-    at: *next
-    settle: 12
-
-  # 4. INSTALLATION TYPE -> ZFS. `Full disk configuration` is preselected.
-  - name: installation type
-    at: *next
-    settle: 14
-
-  # 5. THE DISK MUST BE TICKED OR `NEXT` STAYS DISABLED. Measured: the button is grey until
-  #    the checkbox at (592, 495) is clicked. This is the one control in the whole walk that
-  #    is not the footer, which is exactly why it is spelled out rather than folded into a
-  #    "press Next nine times" abstraction.
-  - name: tick the zfs disk
-    at: [592, 495]
-    settle: 5
-
-  - name: zfs configuration
-    at: *next
-    settle: 14
-
-  # 6. BOOT OPTION. `FreeBSD UEFI loader only` is preselected - the right answer on OVMF.
-  - name: boot option
-    at: *next
-    settle: 14
-
-  # 7. USER ADMIN SETUP. Four fields; the installer sets root's password to the same one.
-  - name: real name
-    at: [959, 457]
-    type: "{{ user }}"
-
-  - name: user name
-    at: [959, 503]
-    type: "{{ user }}"
-
-  - name: password
-    at: [959, 595]
-    type: "{{ password }}"
-
-  - name: verify password
-    at: [959, 643]
-    type: "{{ password }}"
-
-  # 8. INSTALL. The same footer button, whose label has changed.
-  - name: install
-    at: *next
-    settle: 25
-
-  # 9. A MEASURED WAIT. The `Installation in progress` pane is a slideshow and a progress
-  #    bar; measuring "is it done" would be a detector, so the duration is the answer.
-  #    MEASURED: from `Install` to the window closing is about 8 minutes on this ISO. Thirty
-  #    is that with room for a slower runner.
-  #
-  #    THE POINTER IS CLICKED INSIDE THE LOOP because MATE blanks its own display when idle -
-  #    the frame goes solid black, which is what a manual session showed after ten minutes -
-  #    and a blanked display reads as an empty screen for every later step.
-  - name: installation runs
-    wait: 1800
-    keep_alive: true
+- name: create the empty disk
+  disk: disk.qcow2
+  disk_gb: 128
+- name: fetch the installer image
+  fetch: linux_iso
+  release: ghostbsd
+- name: boot the installer
+  boot: true
+  os: bsd
+  iso: installer_iso
+  timeout: 1800
+- name: choose the X driver, when the menu appears
+  until_any:
+  - - start
+    - desktop
+    - with
+  - - failed
+    - to
+    - auto
+  timeout: 300
+  poll: 5
+  optional: true
+- name: reach scfb with four downs
+  key: down
+  repeat:
+  - 4
+  - 1.0
+  settle: 2
+- name: choose scfb
+  key: ret
+  settle: 25
+- name: wait for the live desktop
+  until_any:
+  - - install
+    - ghostbsd
+  - - applications
+  timeout: 1800
+  poll: 10
+- name: welcome
+  at: &id001
+  - 1293
+  - 781
+  settle: 12
+  expect: keyboard
+- name: keyboard
+  at: *id001
+  settle: 12
+- name: time zone
+  at: *id001
+  settle: 12
+- name: installation type
+  at: *id001
+  settle: 14
+- name: tick the zfs disk
+  at:
+  - 592
+  - 495
+  settle: 5
+- name: zfs configuration
+  at: *id001
+  settle: 14
+- name: boot option
+  at: *id001
+  settle: 14
+- name: real name
+  at:
+  - 959
+  - 457
+  type: '{{ user }}'
+- name: user name
+  at:
+  - 959
+  - 503
+  type: '{{ user }}'
+- name: password
+  at:
+  - 959
+  - 595
+  type: '{{ password }}'
+- name: verify password
+  at:
+  - 959
+  - 643
+  type: '{{ password }}'
+- name: install
+  at: *id001
+  settle: 25
+- name: installation runs
+  wait: 1800
+  keep_alive: true
