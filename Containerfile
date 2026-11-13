@@ -125,19 +125,6 @@ ARG DEBIAN_SNAPSHOT="20260819T142328Z"
 #	    iproute2
 #	+ curl iproute2            <- apt never ran; the comment ate the continuation
 #
-# PYTHON3 IS A TOOL THE WORKFLOWS USE, NOT A DEPENDENCY OF THE IMPLEMENTATION.
-#
-# The "DELIBERATELY ABSENT" note above is still true of what it says: the MACHINE DRIVER is Go and
-# speaks QMP directly, and `qemu.qmp` will never be installed. What arrives with this package is
-# `easyactions/log-stream`, which runs a command and republishes its newest 60,000 characters to a
-# CHECK RUN every ten seconds - because a step's Actions log is unreadable until it finishes, and
-# "which step is it on" is the one question a three-hour leg raises.
-#
-# THE ALTERNATIVE WAS A SECOND IMPLEMENTATION of the same thing in Go, in this repository, for one
-# caller. `python3-minimal` is 4 MiB; a streaming client with retries, a size cap, and a
-# process-group kill so that `gh run cancel` stops qemu rather than orphaning it, is a few hundred
-# lines and its own tests.
-#
 RUN set -eux; \
     # non-free is where some qemu firmware blobs live; the snapshot below is official Debian.
     echo "deb https://deb.debian.org/debian trixie non-free" > /etc/apt/sources.list.d/non-free.list; \
@@ -145,7 +132,6 @@ RUN set -eux; \
     apt-get -y --no-install-recommends install \
         ca-certificates \
         curl \
-        python3-minimal \
         iproute2 \
         iptables \
         dnsmasq \

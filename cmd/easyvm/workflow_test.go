@@ -497,3 +497,55 @@ func TestTheArtifactPullResumesInsteadOfRestarting(t *testing.T) {
 			"decision, and a script that guessed would be a second place that can disagree")
 	}
 }
+
+// THE LOG IS STREAMED TO A CHECK RUN, AND THE WHOLE DEPENDENCY IS curl.
+//
+// A STEP'S ACTIONS LOG IS UNREADABLE UNTIL THE STEP FINISHES, and a leg spends up to three hours inside
+// one step - so "which step is it on" is answered only after the answer has stopped mattering. A CHECK
+// RUN'S `output.text` IS readable while it runs.
+//
+// `.github/log-stream.sh` does it with two requests and no interpreter: the image deliberately carries
+// no Python (the driver is Go and speaks QMP directly) and no `jq` either, so the id is read out of a
+// response the script generated itself.
+func TestTheLogStreamerNeedsNothingButCurl(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("..", "..", ".github", "log-stream.sh"))
+	if err != nil {
+		t.Fatalf("%s: %v", filepath.Join("..", "..", ".github", "log-stream.sh"), err)
+	}
+	s := string(body)
+
+	// NO INTERPRETER, NO jq, NO gh - the three things a person would reach for and this image lacks.
+	for _, forbidden := range []string{"python", "jq ", "jq'", "gh api"} {
+		if strings.Contains(s, forbidden) {
+			t.Errorf("the streamer uses %q; the image has no interpreter and no jq, which is the "+
+				"whole reason this is a shell script", forbidden)
+		}
+	}
+	for _, want := range []string{"curl", "/check-runs", "max_bytes", "interval"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("the streamer never mentions %q", want)
+		}
+	}
+
+	// THE TWO THINGS THAT WERE WRONG WHEN THIS WAS WRITTEN, AND BOTH WERE SILENT:
+	//
+	//	the id regex required no space after the colon, and GitHub answers `{"id": 4242`
+	//	a raw newline went into the JSON, and GitHub refuses a control character
+	//
+	// Neither fails loudly: the first runs the command unpublished, the second drops every update for
+	// the whole run. So both are asserted here.
+	if !strings.Contains(s, `[[:space:]]*`) {
+		t.Error("the id is read with a regex that does not allow whitespace; GitHub's answer is " +
+			"`{\"id\": 4242` and the first version of this script failed to read it, then ran the " +
+			"command unpublished because it thought the API had refused")
+	}
+	if !strings.Contains(s, `s/\n/\\n/g`) {
+		t.Error("newlines are not escaped; a JSON string may not contain a raw control character, " +
+			"and a log is mostly newlines - GitHub refuses the whole request, once per interval")
+	}
+	// AND THE CANCEL MUST REACH THE CHILDREN, or a cancelled leg leaves qemu holding /dev/kvm.
+	if !strings.Contains(s, "kill_tree") {
+		t.Error("a cancel does not walk the process tree; `kill $pid` reaches the shell that owns " +
+			"the daemon, and the daemon owns qemu")
+	}
+}
