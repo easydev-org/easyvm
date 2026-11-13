@@ -706,7 +706,7 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 	//
 	// SO THE PROCESS IS CHECKED FIRST. If it is gone, that is the answer and it is reported as such,
 	// with qemu's exit status attached.
-	if _, err := d.qmpSocketLocked(); err != nil {
+	if _, err := d.qmpSocket(); err != nil {
 		if d.proc != nil {
 			if waitErr := d.proc.Process.Signal(syscall.Signal(0)); waitErr != nil {
 				exit := "unknown"
@@ -981,26 +981,63 @@ func (m machineControl) IsRunning() bool {
 	return d.proc != nil
 }
 
-// qmpSocket opens the connection, once.
+// qmpSocket opens the connection, once - WITHOUT HOLDING THE LOCK WHILE IT WAITS.
+//
+// THE LOCK IS `d.mu`, AND IT GUARDS EVERY FACT ABOUT THE MACHINE: whether it is running, what disk it
+// has, where its console listens. `qmpSocket` used to take it and then call `Acquire`, which waits up
+// to THIRTY SECONDS for a socket that a dead qemu is never going to create. For those thirty seconds
+// EVERY OTHER CALLER BLOCKED:
+//
+//	goroutine 1  snapshot()    -> ConsolePort() -> d.mu.Lock()   [sync.Mutex.Lock]
+//	goroutine ?  handle("status")                                 blocked behind it
+//
+// and the symptom was not "qemu is gone" but
+//
+//	FAILED: reading the reply to "status": read unix @->/work/easyvm.sock: i/o timeout
+//
+// - a daemon that looks hung, from a connection that is perfectly fine.
+//
+// SO THE I/O HAPPENS OUTSIDE: the fast path takes the lock, finds a connection and returns; a slow
+// path that has to connect does so with the lock RELEASED, then re-checks in case two callers raced
+// and keeps the one that got there first.
 func (d *Driver) qmpSocket() (*qmp.Conn, error) {
 	d.mu.Lock()
-	defer d.mu.Unlock()
-	return d.qmpSocketLocked()
-}
-
-func (d *Driver) qmpSocketLocked() (*qmp.Conn, error) {
 	if d.qmpConn != nil {
-		return d.qmpConn, nil
+		conn := d.qmpConn
+		d.mu.Unlock()
+		return conn, nil
 	}
-	if d.qmpReg == nil {
-		d.qmpReg = qmp.NewRegistry()
-	}
+	reg := d.qmpReg
 	path := filepath.Join(d.work, "drive.sock.qmp")
-	conn, err := d.qmpReg.Acquire(path, "easyvm", 30*time.Second)
+	d.mu.Unlock()
+
+	if reg == nil {
+		reg = qmp.NewRegistry()
+		d.mu.Lock()
+		if d.qmpReg == nil {
+			d.qmpReg = reg
+		} else {
+			reg = d.qmpReg
+		}
+		d.mu.Unlock()
+	}
+
+	conn, err := reg.Acquire(path, "easyvm", 30*time.Second)
 	if err != nil {
 		return nil, err
 	}
+
+	d.mu.Lock()
+	if d.qmpConn != nil {
+		// another caller won the race; its connection is the machine's, so this one is given back
+		// rather than left open beside it.
+		other := d.qmpConn
+		d.mu.Unlock()
+		_ = conn.Close()
+		return other, nil
+	}
 	d.qmpConn = conn
+	d.mu.Unlock()
 	return conn, nil
 }
 
