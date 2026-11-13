@@ -660,7 +660,18 @@ steps:
   # ceiling is not a judgement about how long macOS takes; it is the estimate plus a margin, and the
   # number is written here so the next reader can see which of the two it is.
   loop:
-    max: 600
+    # SIX HOURS, BECAUSE THE INSTALLER'S OWN ESTIMATE SAYS FIVE.
+    #
+    # MEASURED ON THIS RUN, ON THE PROGRESS PANE ITSELF: `About 5 hours and 20 minutes remaining`,
+    # with the bar about a fifth along. The previous ceiling was 600 x 20s = 3h20m, so the step would
+    # have given up an hour and a half before the installer said it would finish - and the failure
+    # would have been `the copy runs until ... did not appear`, which reads as a stuck installer rather
+    # than as a timeout that was too short.
+    #
+    # THE ESTIMATE IS A MEASUREMENT, NOT A GUESS: macOS reports it on the pane, computed from the
+    # write rate it is actually achieving on this disk. 1080 x 20s = 6h, which is the estimate plus
+    # margin for a node that slows down.
+    max: 1080
     do:
     - wait: 20
     ocr:
