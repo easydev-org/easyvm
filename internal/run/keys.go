@@ -22,7 +22,7 @@ func ExecutableKeys() []string {
 		// `says_any` and `max` are sub-keys of `check:` and `loop:` - a sub-key is not a step, and
 		// claiming it here is what the dispatch test exists to refuse.
 		"ocr", "check", "loop", "if",
-		"unless", "unless_any", "until", "until_any", "until_console", "expect", "expect_any", "at_window",
+		"unless", "unless_any", "until", "until_any", "until_console", "expect", "expect_any", "at_color",
 		"at_button", "host_log", "run", "disk_settle", "do",
 		"repeat_until",
 		"demo_script",

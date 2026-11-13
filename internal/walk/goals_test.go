@@ -19,7 +19,7 @@ import (
 // about what the FILES may say, not about what the executor can do.
 var allowedActionKeys = map[string]string{
 	// --- pure atoms ---
-	"click":         "one click",
+	"click":      "one click",
 	"double":     "one double-click",
 	"at_window":  "one click, placed relative to a window edge",
 	"key":        "one keystroke",

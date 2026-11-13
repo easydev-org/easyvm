@@ -308,3 +308,81 @@ func TestCropAcceptsEveryDecodedImageKind(t *testing.T) {
 		}()
 	}
 }
+
+// A COLOUR IS FOUND BY ITS OWN VALUE, ITS OWN CENTRE, INSIDE ITS OWN REGION.
+//
+// `at_color` REPLACED `at_window` BECAUSE THE WINDOW'S POSITION IS THE UNRELIABLE THING. macOS paints
+// the zoom button rgb(40,200,64) at (474,281) on a floating window and (65,50) once full screen - two
+// completely different places, one constant colour - so the three properties this test pins are the
+// three the primitive depends on.
+func TestFindColorFindsTheCentreOfABlobInARegion(t *testing.T) {
+	const w, h = 400, 300
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	// a dark background, like a mac window
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			img.Set(x, y, color.RGBA{30, 30, 30, 255})
+		}
+	}
+	green := color.RGBA{40, 200, 64, 255}
+
+	// THE TARGET: a 12-px dot centred at (100, 80).
+	drawDot := func(cx, cy, r int, c color.RGBA) {
+		for y := cy - r; y <= cy+r; y++ {
+			for x := cx - r; x <= cx+r; x++ {
+				if (x-cx)*(x-cx)+(y-cy)*(y-cy) <= r*r {
+					img.Set(x, y, c)
+				}
+			}
+		}
+	}
+	drawDot(100, 80, 6, green)
+
+	// A DECOY OF THE SAME COLOUR, LARGER, OUTSIDE THE REGION - this is the "interference" the region
+	// exists to exclude. Without the region it would win, being the heaviest blob on the screen.
+	drawDot(320, 240, 12, green)
+
+	// 1. THE WHOLE FRAME FINDS THE DECOY, because it is the biggest blob. That is correct behaviour and
+	// it is why a region has to be given when the colour appears twice.
+	x, y, ok := FindColor(img, [3]uint8{40, 200, 64}, 45, [4]int{})
+	if !ok {
+		t.Fatal("the decoy is a green blob and the whole-frame search must find it")
+	}
+	if x < 280 || y < 200 {
+		t.Fatalf("whole-frame centre = (%d,%d), want the decoy near (320,240); the search is not "+
+			"taking the heaviest blob", x, y)
+	}
+
+	// 2. THE REGION FINDS THE TARGET AND NOT THE DECOY.
+	x, y, ok = FindColor(img, [3]uint8{40, 200, 64}, 45, [4]int{60, 40, 150, 130})
+	if !ok {
+		t.Fatal("no green found in the region, though the dot is inside it")
+	}
+	if absInt(x-100) > 6 || absInt(y-80) > 6 {
+		t.Fatalf("region centre = (%d,%d), want the dot at (100,80) within 6 px; the answer must be "+
+			"the blob's CENTRE, not its first pixel", x, y)
+	}
+
+	// 3. A TOLERANCE THAT DOES NOT REACH THE COLOUR FINDS NOTHING, and one that does finds it. This is
+	// what makes the number meaningful rather than decorative.
+	if _, _, ok := FindColor(img, [3]uint8{40, 200, 64}, 0, [4]int{60, 40, 150, 130}); !ok {
+		t.Error("tolerance 0 must still find the exact colour: the dot is drawn in it")
+	}
+	if _, _, ok := FindColor(img, [3]uint8{200, 40, 40}, 45, [4]int{60, 40, 150, 130}); ok {
+		t.Error("a red target found something in a region holding only green - the channel test is " +
+			"not being applied")
+	}
+	// A NEAR MISS WITHIN 45 IS ACCEPTED, and 10 away is refused at 5: antialiasing is why the
+	// tolerance exists, and this is where the boundary actually is.
+	//
+	// THE WHOLE DOT IS REDRAWN 10 AWAY ON EACH CHANNEL, not one pixel of it - replacing a single pixel
+	// leaves the rest of the dot exact, so the search still succeeds and the assertion would be about
+	// nothing. That is the mistake this test made first.
+	drawDot(100, 80, 6, color.RGBA{50, 210, 74, 255})
+	if _, _, ok := FindColor(img, [3]uint8{40, 200, 64}, 45, [4]int{60, 40, 150, 130}); !ok {
+		t.Error("a blob 10 away from the target must be accepted inside tolerance 45")
+	}
+	if _, _, ok := FindColor(img, [3]uint8{40, 200, 64}, 5, [4]int{60, 40, 150, 130}); ok {
+		t.Error("a blob 10 away must be refused at tolerance 5")
+	}
+}

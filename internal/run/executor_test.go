@@ -727,14 +727,14 @@ func TestActionsAreDispatchedBeforeTheirChecks(t *testing.T) {
 
 	// POSITIONS OF THE BRANCHES THAT MATTER, in the order the switch reads them.
 	pos := func(needle string) int { return strings.Index(rest, needle) }
-	atWindow := pos(`case s.Has("at_window"):`)
+	atWindow := pos(`case s.Has("at_color"):`)
 	atButton := pos(`case hasKey(s, "at_button"):`)
 	expect := pos(`case s.Has("expect_any") || s.Has("expect"):`)
 	if atWindow < 0 || atButton < 0 || expect < 0 {
 		t.Fatal("a branch this test looks for is missing, so it would pass vacuously")
 	}
 	if atWindow > expect {
-		t.Error("`at_window` is dispatched AFTER `expect`, so a step with both clicks NOTHING and " +
+		t.Error("`at_color` is dispatched AFTER `expect`, so a step with both clicks NOTHING and " +
 			"reports that the thing it was meant to open did not open")
 	}
 	if atButton > expect {

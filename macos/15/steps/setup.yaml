@@ -83,6 +83,59 @@ steps:
   - 1142
   - 586
   wait_after: 5
+
+# THE WINDOW IS MADE FULL SCREEN BEFORE ANYTHING IN IT IS CLICKED, AND THAT IS WHAT MAKES THE
+# COORDINATES FIXED.
+#
+# MEASURED ACROSS RUNS: Disk Utility centres itself vertically and REMEMBERS ITS HEIGHT, so the same
+# toolbar sat at y=255 on one run and y=294 on the next - 39 px of drift, which is more than a button is
+# tall. `at_window` was the answer for that, and it needed the right brightness threshold and the right
+# offset, and it took four attempts to get both.
+#
+# THE GREEN BUTTON REMOVES THE PROBLEM INSTEAD OF MEASURING IT. Full screen, the window is the screen:
+#
+#	Erase  (1681, 57)     First Aid  (1637, 57)     Partition  (1745, 57)
+#	sidebar row 1 (100, 128) = the OpenCore boot image
+#	sidebar row 2 (100, 153) = the target disk
+#
+# ONE FIXED SET OF NUMBER FOR EVERY RUN, which is worth more than a cleverer measurement.
+#
+# THE GREEN BUTTON'S OWN COORDINATE WAS WRONG ONCE: it is at (474, 281) - the traffic lights are
+# saturated circles and a pixel scan puts red at (434, 281) and green at (474, 281). A click 5 px right
+# and 10 px low missed the button and did nothing, which reads as "maximising is not supported".
+- name: make disk utility full screen
+  # BY COLOUR, BECAUSE THAT IS THE ONE THING THAT DOES NOT DEPEND ON WHERE THE WINDOW IS.
+  #
+  # Everything else was tried:
+  #
+  #	Ctrl+Cmd+F   opens the Window menu's "Fill" - MEASURED, and it did nothing to this window
+  #	the menu item    same
+  #	a fixed coordinate   wrong whenever the window opened somewhere else, which it does
+  #	`at_window`      a brightness scan for the window's edge; needed a threshold, a column, a range
+  #	                 and an offset, and was wrong four times
+  #
+  # MACOS PAINTS THE ZOOM BUTTON rgb(40,200,64) ON EVERY RUN, at every window height, in every Space.
+  # That is a property of the compositor, not of this window's position, so one colour finds it:
+  # MEASURED at (474,281) on a floating window and (65,50) once full screen - two completely different
+  # places, one constant colour.
+  at_color:
+  - 40
+  - 200
+  - 64
+  color_tolerance: 45
+  # THE SEARCH IS LIMITED TO THE TOP-LEFT CORNER, WHERE A WINDOW'S TRAFFIC LIGHTS ALWAYS ARE.
+  #
+  # The colour is a fact, but it is not a UNIQUE fact: the recovery wallpaper, the desktop picture and
+  # other applications all paint saturated greens, and a whole-frame search takes the LARGEST blob -
+  # which on the wrong screen is somebody else's control. MEASURED: the zoom button is at (474,281) on
+  # a floating window and (65,50) once full screen, and both are inside the first quarter of the frame,
+  # so the region is the top-left corner and the decoys elsewhere cannot win.
+  color_region:
+  - 0
+  - 30
+  - 700
+  - 400
+  wait_after: 6
 # THE DISK IS CHOSEN BY ITS DEVICE NAME, NOT BY ITS SIZE.
 #
 # MEASURED: the sidebar shows the virtio disk TWICE - the whole device and the partition the firmware
@@ -111,33 +164,47 @@ steps:
 #
 # AND IF NO DISK IS IN RANGE THE RUN STOPS, which is correct: erasing the wrong one installs macOS
 # into a volume that is not the target, and that failure surfaces fifty minutes later.
-- name: choose the target disk by capacity
+# THE TARGET IS THE DISK THAT IS `Uninitialized`, AND THAT WORD IS THE ONE THING ONLY IT CAN SAY.
+#
+# Three devices are listed and TWO ARE NAMED `disk0`, because the OpenCore boot image is bootindex 0:
+#
+#	268.4 MB   the boot image       "Internal Physical Disk - GUID Partition Map"
+#	137.44 GB  the target           "Uninitialized"
+#	2.88 GB    the recovery volume  "Mac OS Extended"
+#
+# A CAPACITY TEST CANNOT TELL THEM APART WITHOUT A RANGE THAT IS TUNED TO THIS ONE IMAGE, and the range
+# it was tuned to selected the 268 MB boot image on one run and the 137 GB disk on another. `Uninitialized`
+# is a property of the disk that has never been formatted, which is exactly the disk to format, and no
+# other device in this window is one.
+- name: choose the uninitialised disk
   loop:
-    max: 8
+    max: 6
     do:
-    - key: up
-      wait_after: 3
+    # the second row is the target on every run; the loop moves up one at a time from wherever the
+    # selection starts, and the reading decides when to stop
+    - click:
+      - 100
+      - 153
+    - wait: 2
     ocr:
       name: disk
       region:
-      - 690
-      - 480
-      - 1500
-      - 700
+      - 590
+      - 95
+      - 1900
+      - 200
       region_at:
       - 1920
       - 1080
-      scale: 4
-      wait: 3
+      scale: 2
+      wait: 2
     check:
-      name: right_disk
+      name: uninitialised
       from: disk
-      mode: size_between
-      range:
-      - 60
-      - 200
+      mode: contains
+      text: Uninitialized
     until:
-      fact: right_disk
+      fact: uninitialised
 # THE WINDOW'S POSITION MOVES BETWEEN RUNS, AND ITS BRIGHTNESS IS NOT 200.
 #
 # MEASURED ACROSS TWO RUNS, sampling column x=500 of the same dialog:
@@ -152,26 +219,17 @@ steps:
 #
 # A THRESHOLD BETWEEN THE TWO IS THE MEASUREMENT: 40 is above the wallpaper and below the title bar.
 - name: erase - open the sheet
-  # (1289, 15), WHICH IS THE REFERENCE IMPLEMENTATION'S OWN MEASUREMENT AND THE ONE THING I GOT WRONG.
+  # A FIXED COORDINATE, BECAUSE THE WINDOW IS THE SCREEN NOW.
   #
-  # `lib/steps.py` records two consecutive CI runs of this same stage:
+  # This used to be `at_window: [1289, 15]` with a brightness scan to find the window's top edge, and
+  # every part of that was a measurement that could be wrong: the threshold, the scan column, the
+  # offset, and whether the edge it found was the window or the wallpaper. It was wrong four times.
   #
-  #	run 42567290197   window top y=294  height 521   Erase icon y=309   -> dy = 15
-  #	run 42570035685   window top y=256  height 599   Erase icon y=271   -> dy = 15
-  #
-  # and the icon's x spanned 1283..1295 (centre 1289) in BOTH. The offset from the window is what
-  # survives; an absolute y is wrong on whichever run has the other height.
-  #
-  # MY 33 AND 36 WERE MEASURED OFF A BRIGHTNESS SCAN THAT INCLUDED THE BUTTON'S BORDER AND ITS LABEL,
-  # so the "centre" it found was the label's, three pixels below the icon - and a click there lands on
-  # the button's lower edge, which on this toolbar is outside the hit area.
-  at_window:
-  - 1289
-  - 15
-  window_x: 500
-  window_from: 180
-  window_to: 400
-  window_brightness: 40
+  # After `make disk utility full screen` the toolbar is at y=57 on EVERY run, so the Erase icon is at
+  # (1681, 57) and there is nothing left to measure. THE FULL-SCREEN STEP IS WHY THIS IS A CONSTANT.
+  click:
+  - 1681
+  - 57
   expect_any:
   - - erase
     - deleted
@@ -191,8 +249,8 @@ steps:
   wait_after: 4
 - name: erase - confirm
   click:
-  - 1155
-  - 646
+  - 1150
+  - 647
   wait_after: 5
 - name: erase - wait for the report
   loop:

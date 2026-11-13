@@ -226,9 +226,26 @@ var Keys = map[string]Key{
 		Summary: "[x, y] - with `at_button`: the measured position to click when the fill is not " +
 			"found. For a control that CAN be missing (an icon behind a wallpaper change) rather " +
 			"than one that cannot (a footer button whose absence means a step above failed)"},
-	"at_window": {Name: "at_window", Kind: KindPair,
-		Summary: "[x, dy] - click x at dy pixels below the window's top edge, for a dialog whose " +
-			"vertical position depends on what is above it"},
+	// `at_color:` FINDS A CONTROL BY ITS COLOUR AND CLICKS ITS CENTRE, WHICH NEEDS NO GEOMETRY.
+	//
+	// IT REPLACED `at_window`, whose whole premise was that a control's offset from its window is
+	// constant - true, and useless, because finding the window's edge was itself an unreliable
+	// measurement. Four attempts at Disk Utility's Erase button (592,495 / 810,376 / 807,367 / 1289,15)
+	// were four attempts at the SCAN, not at the button.
+	//
+	// A COLOUR IS A FACT THE COMPOSITOR DRAWS: macOS paints the green zoom control rgb(40,200,64) on
+	// every run, at every window height, in every Space. `at_color: [40, 200, 64]` is the whole
+	// instruction, and `color_tolerance:` says how far a pixel may sit from it for antialiasing.
+	"at_color": {Name: "at_color", Kind: KindRect,
+		Summary: "[r, g, b] - click the centre of the largest blob of this colour. For a control " +
+			"the window draws in a fixed colour, which is how a macOS window button is found without " +
+			"knowing where the window is"},
+	"color_tolerance": {Name: "color_tolerance", Kind: KindInt,
+		Summary: "with `at_color`: how far a pixel may be from the target colour and still count, " +
+			"for antialiasing. 45 matches macOS's window buttons"},
+	"color_region": {Name: "color_region", Kind: KindRect,
+		Summary: "with `at_color`: [x0, y0, x1, y1] to search inside, when the colour could appear " +
+			"somewhere else on the screen too"},
 	"at_bottom": {Name: "at_bottom", Kind: KindPair,
 		Summary: "[x, dy] - click x at dy pixels above the window's bottom edge"},
 	"key": {Name: "key", Kind: KindString,
@@ -300,14 +317,6 @@ var Keys = map[string]Key{
 		Summary: "[width, height] the crop was measured at; a mismatch is an error"},
 	"scale": {Name: "scale", Kind: KindInt,
 		Summary: "enlargement for a cropped read; small text needs it"},
-	"window_brightness": {Name: "window_brightness", Kind: KindFloat,
-		Summary: "mean grey that identifies the window this step measures"},
-	"window_from": {Name: "window_from", Kind: KindInt,
-		Summary: "first scanline of the window search"},
-	"window_to": {Name: "window_to", Kind: KindInt,
-		Summary: "last scanline of the window search"},
-	"window_x": {Name: "window_x", Kind: KindInt,
-		Summary: "the column the window search samples"},
 	"screenshot": {Name: "screenshot", Kind: KindString,
 		Summary: "save the screen to this path, for a post-mortem nobody had to ask for"},
 	"desktop": {Name: "desktop", Kind: KindMapping,

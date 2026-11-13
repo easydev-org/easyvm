@@ -308,7 +308,18 @@ func (d *Daemon) startRun(req Request) Response {
 		// that EXISTED and is now gone is evidence the run is dead.
 		alive := true
 		if machine == nil {
-			alive = true
+			// A RUN WITH NO MACHINE IS EITHER STILL PREPARING OR ABANDONED, AND TIME TELLS THEM APART.
+			//
+			// The first version of this check treated `machine == nil` as "still working", which is
+			// right for the seconds a disk takes to create and wrong for a run wedged before its
+			// machine ever existed - and that is exactly the state that answers
+			//
+			//	REFUSED: a run is already in progress (step "installation runs"); stop it first
+			//
+			// for a run that `stop` cannot end either. AN HOUR is longer than any preparation here
+			// (the longest is an overlay create plus an ISO copy, minutes) and shorter than a real
+			// install, so it separates them without a guess.
+			alive = time.Since(st.Started) < time.Hour
 		} else if m, ok := machine.(interface{ IsRunning() bool }); ok {
 			alive = m.IsRunning()
 		}

@@ -311,8 +311,8 @@ func (e *Executor) runOne(s walk.Step) error {
 	// Measured on macos-setup, three runs in a row, while the coordinate itself was correct the whole
 	// time. The comment above `run` already describes this exact class of bug; these two were left on
 	// the wrong side of the line.
-	case s.Has("at_window"):
-		return e.doAtWindow(s)
+	case s.Has("at_color"):
+		return e.doAtColor(s)
 	case hasKey(s, "at_button"):
 		return e.doAtButton(s)
 	case s.Has("expect_any") || s.Has("expect"):
@@ -653,6 +653,27 @@ func pair(s walk.Step, key string) (int, int, error) {
 		return 0, 0, fail(s.Name, "%q must be two whole numbers", key)
 	}
 	return x, y, nil
+}
+
+// colorTriple reads `[r, g, b]`, which is how a control's colour is named.
+func colorTriple(s walk.Step, key string) (int, int, int, error) {
+	v, ok := s.Spec[key]
+	if !ok {
+		return 0, 0, 0, fail(s.Name, "%q is missing", key)
+	}
+	list, ok := v.([]any)
+	if !ok || len(list) != 3 {
+		return 0, 0, 0, fail(s.Name, "%q must be [r, g, b], each 0..255", key)
+	}
+	out := [3]int{}
+	for i := range out {
+		n, ok := asInt(list[i])
+		if !ok || n < 0 || n > 255 {
+			return 0, 0, 0, fail(s.Name, "%q must be three numbers 0..255; %v is not", key, list[i])
+		}
+		out[i] = n
+	}
+	return out[0], out[1], out[2], nil
 }
 
 func asInt(v any) (int, bool) {

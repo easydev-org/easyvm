@@ -154,7 +154,11 @@ func TestSecondRunIsRefused(t *testing.T) {
 	// about a walkthrough. Using the real type means the test cannot pass against a stub that the
 	// production code would not accept.
 	d.ex = &run.Executor{}
-	d.st = State{Status: "running", Step: "install openssh", StepIndex: 7, StepCount: 29}
+	// `Started` IS NOW, BECAUSE A RUN THAT STARTED LONG AGO IS ASSUMED ABANDONED. A zero time here is
+	// the year 1, which the staleness rule correctly reads as "nobody has touched this in two thousand
+	// years" - so the test would be asserting the abandonment path rather than the refusal.
+	d.st = State{Status: "running", Step: "install openssh", StepIndex: 7, StepCount: 29,
+		Started: time.Now()}
 	d.mu.Unlock()
 
 	cl, err := client.Dial(work)

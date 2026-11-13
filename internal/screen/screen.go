@@ -451,30 +451,105 @@ func SavePPM(img image.Image, path string) error {
 	return err
 }
 
-// FindWindowTop scans one column for the first row at least this bright.
+// FindColor returns the centre of the largest blob of one colour, inside an optional region.
 //
-// A WINDOW'S TOP EDGE IS A BRIGHTNESS STEP. A dialog above a dark desktop is easy; one above a
-// bright wallpaper is what `window_brightness` is for - the caller measures the window it wants and
-// says how bright it is. Scanning a COLUMN rather than a row is deliberate: a window spans the
-// column, a desktop does not, so the scan finds the edge rather than the wallpaper.
-func FindWindowTop(img image.Image, x, from, to int, brightness float64) (int, bool) {
+// IT REPLACED `FindWindowTop`, WHOSE PREMISE WAS THAT A CONTROL'S OFFSET FROM ITS WINDOW IS CONSTANT -
+// true, and useless, because finding the window's edge was the unreliable part. Four attempts at Disk
+// Utility's Erase button were four attempts at the SCAN:
+//
+//	592,495   the reference implementation's gbi numbers, unrelated to this pane
+//	810,376   a bounding box that included the word `vtbd0` beside the box
+//	807,367   a threshold that found only the box's top edge
+//	1289,15   the reference implementation's macOS numbers, which assume ITS window position
+//
+// A COLOUR IS A FACT THE COMPOSITOR DRAWS. macOS paints the green zoom control rgb(40,200,64) on every
+// run, at every window height, in every Space - so "click the green dot" is a question with one answer
+// and no geometry at all.
+//
+// THE CENTRE OF THE HEAVIEST BLOB, not the first matching pixel: antialiasing puts a fringe of
+// near-misses around the dot, and the first hit can be on that fringe.
+func FindColor(img image.Image, want [3]uint8, tolerance int, region [4]int) (x, y int, ok bool) {
 	b := img.Bounds()
-	if x < 0 || x >= b.Dx() {
-		return 0, false
+
+	// THE REGION IS [x0, y0, x1, y1] AND A ZERO RECTANGLE MEANS "THE WHOLE FRAME".
+	//
+	// IT IS CHECKED BY AREA, NOT BY `x1 <= 0`: a region that starts at the left edge has x0 == 0, and
+	// the first version of this treated `x1 <= 0` as the absent marker - so a region whose RIGHT edge
+	// was clipped to zero silently became the whole screen. A region with no extent is the one thing
+	// that cannot be meant.
+	x0, y0, x1, y1 := region[0], region[1], region[2], region[3]
+	if x1 <= x0 || y1 <= y0 {
+		x0, y0, x1, y1 = 0, 0, b.Dx(), b.Dy()
 	}
-	if to <= from {
-		to = b.Dy()
+	if x0 < 0 {
+		x0 = 0
 	}
-	if to > b.Dy() {
-		to = b.Dy()
+	if y0 < 0 {
+		y0 = 0
 	}
-	for y := from; y < to; y++ {
-		r, g, bl := rgb8(img.At(b.Min.X+x, b.Min.Y+y))
-		if (float64(r)+float64(g)+float64(bl))/3.0 >= brightness {
-			return y, true
+	if x1 > b.Dx() {
+		x1 = b.Dx()
+	}
+	if y1 > b.Dy() {
+		y1 = b.Dy()
+	}
+	if x1 <= x0 || y1 <= y0 {
+		return 0, 0, false
+	}
+
+	// CELLS OF 8x8, because a control's dot is ~12 px across and its CENTRE is what is wanted.
+	// Counting per cell and taking the heaviest gives that centre without a flood fill.
+	const cell = 8
+	type key struct{ cx, cy int }
+	counts := map[key]int{}
+	for py := y0; py < y1; py++ {
+		for px := x0; px < x1; px++ {
+			r, g, bl := rgb8(img.At(b.Min.X+px, b.Min.Y+py))
+			// THE TOLERANCE IS PER CHANNEL AND INCLUSIVE: `<= tolerance`, so 45 accepts every pixel
+			// within 45 of the target on each of red, green and blue. Antialiasing is what needs it -
+			// the edge of a drawn dot is a gradient, and a tolerance of 0 finds only the flat middle.
+			if absInt(int(r)-int(want[0])) > tolerance ||
+				absInt(int(g)-int(want[1])) > tolerance ||
+				absInt(int(bl)-int(want[2])) > tolerance {
+				continue
+			}
+			counts[key{px / cell, py / cell}]++
 		}
 	}
-	return 0, false
+	if len(counts) == 0 {
+		return 0, 0, false
+	}
+
+	// THE HEAVIEST CELL AND EVERY CELL TOUCHING IT, so a dot straddling a cell boundary is not split in
+	// two and reported at half its size. The answer is the AREA-WEIGHTED CENTRE of those cells: each
+	// cell contributes its own centre, weighted by how many of the target's pixels it holds, which puts
+	// the point inside the dot rather than on the corner of a grid.
+	var best key
+	bestN := 0
+	for k, n := range counts {
+		if n > bestN {
+			best, bestN = k, n
+		}
+	}
+	sumX, sumY, n := 0, 0, 0
+	for k, cnt := range counts {
+		if absInt(k.cx-best.cx) <= 1 && absInt(k.cy-best.cy) <= 1 {
+			sumX += (k.cx*cell + cell/2) * cnt
+			sumY += (k.cy*cell + cell/2) * cnt
+			n += cnt
+		}
+	}
+	if n == 0 {
+		return 0, 0, false
+	}
+	return sumX / n, sumY / n, true
+}
+
+func absInt(v int) int {
+	if v < 0 {
+		return -v
+	}
+	return v
 }
 
 // --- did the screen change -------------------------------------------------------------

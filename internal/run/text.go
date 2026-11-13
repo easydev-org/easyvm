@@ -499,21 +499,34 @@ func (e *Executor) doExpectAny(s walk.Step) error {
 		describeSets(sets), truncateWords(words, 16))
 }
 
-// doAtWindow clicks a point a fixed distance below a window's top edge.
+// doAtColor clicks the centre of the largest blob of one colour.
 //
-// THE WINDOW IS FOUND BY BRIGHTNESS, NOT BY OCR. `window_from`/`window_to`/`window_x` name a column
-// scanned from one row to another, and the first row whose brightness crosses `window_brightness` is
-// the window's top - which is how a dialog whose vertical position depends on what is above it can
-// still be clicked at a fixed offset into itself.
-func (e *Executor) doAtWindow(s walk.Step) error {
-	x, dy, err := pair(s, "at_window")
+// IT REPLACES `doAtWindow`, WHOSE PREMISE WAS THAT A CONTROL'S OFFSET FROM ITS WINDOW IS CONSTANT - and
+// that is true and useless, because finding the window's edge was the unreliable part. Four attempts at
+// Disk Utility's Erase button were four attempts at the scan:
+//
+//	592,495   the reference implementation's gbi numbers, unrelated to this pane
+//	810,376   a bounding box that included the word `vtbd0` to the right of the box
+//	807,367   a threshold that found only the box's top edge
+//	1289,15   the reference implementation's own macOS numbers, which assume ITS window position
+//
+// A COLOUR IS A FACT THE COMPOSITOR DRAWS. macOS paints the green zoom control rgb(40,200,64) on every
+// run, at every window height, in every Space, and the same is true of the traffic lights and of any
+// control an application draws in a fixed colour.
+func (e *Executor) doAtColor(s walk.Step) error {
+	r, g, b, err := colorTriple(s, "at_color")
 	if err != nil {
 		return err
 	}
-	from, _ := s.Float("window_from", 0)
-	to, _ := s.Float("window_to", 0)
-	windowX, _ := s.Float("window_x", 0)
-	bright, _ := s.Float("window_brightness", 200)
+	tolerance, _ := s.Float("color_tolerance", 45)
+	region := [4]int{0, 0, 0, 0}
+	if raw, ok := s.Spec["color_region"].([]any); ok && len(raw) == 4 {
+		for i := range region {
+			if v, ok := toFloat(raw[i]); ok {
+				region[i] = int(v)
+			}
+		}
+	}
 
 	f, ferr := e.Driver.Frame()
 	if ferr != nil {
@@ -523,18 +536,17 @@ func (e *Executor) doAtWindow(s walk.Step) error {
 	if ierr != nil {
 		return fail(s.Name, "%v", ierr)
 	}
-	top, ok := screen.FindWindowTop(img, int(windowX), int(from), int(to), bright)
+	x, y, ok := screen.FindColor(img, [3]uint8{uint8(r), uint8(g), uint8(b)}, int(tolerance), region)
 	if !ok {
 		return failWithScreen(s.Name, e.Driver,
-			"no window edge in column %d between rows %d and %d at brightness %.0f",
-			int(windowX), int(from), int(to), bright)
+			"no pixel within %.0f of rgb(%d,%d,%d) on this screen, so the control this step names "+
+				"is not drawn - which means the pane it belongs to is not the one on screen",
+			tolerance, r, g, b)
 	}
-	y := top + dy
 	if err := e.Driver.Click(x, y); err != nil {
 		return fail(s.Name, "click (%d, %d): %v", x, y, err)
 	}
-	e.Driver.Log(fmt.Sprintf("  clicked (%d, %d), %d px below the window top at row %d",
-		x, y, dy, top))
+	e.Driver.Log(fmt.Sprintf("  clicked (%d, %d), the centre of the rgb(%d,%d,%d) blob", x, y, r, g, b))
 	return e.settle(s)
 }
 
