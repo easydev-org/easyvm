@@ -648,7 +648,47 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 	}
 	d.mu.Lock()
 	d.proc = cmd
-	d.qmpReg = qmp.NewRegistry()
+	d.mu.Unlock()
+
+	// THE REGISTRY IS NOT REPLACED, AND THAT IS THE WHOLE FIX.
+	//
+	// A REGISTRY IS WHAT MAKES "QEMU TAKES ONE CLIENT" TRUE: `Acquire` holds its map across the
+	// handshake, so a second caller gets `ErrBusy` naming the first owner. That guarantee is only as
+	// wide as the map - and this function used to throw the map away:
+	//
+	//	d.qmpReg = qmp.NewRegistry()
+	//
+	// TWO MAPS MEAN TWO CLIENTS. The recorder's sampler starts at `record:` and ticks across every
+	// `boot:`, so it takes the registry pointer that existed BEFORE the boot; the boot then made a
+	// fresh one, and each asked qemu for the socket with its own empty `held`. qemu accepts the first
+	// and queues the second in its listen backlog WITHOUT EVER GREETING IT, and
+	// `SocketMonitor.Connect` read that greeting with no deadline:
+	//
+	//	goroutine 21 [IO wait, 7 minutes]:
+	//	qmp.(*SocketMonitor).Connect()  socket.go:128   <- dec.Decode(&ban)
+	//	machineControl.Boot()           driver.go:680
+	//	doBoot -> runOne -> Run
+	//
+	// while goroutine 27 was the sampler's successful `listen`. The guest had already drawn its
+	// recovery menu; the walk believed it was still booting, for seven minutes, past its own
+	// `timeout:`.
+	//
+	// SO THE ONE REGISTRY IS KEPT FOR THE LIFE OF THE DAEMON AND THE PREVIOUS MACHINE'S CLIENT IS
+	// RELEASED FROM IT. `Release` closes the connection and drops the path from `held`, which is exactly
+	// "this socket has no client now" - the state a new qemu needs - and the map itself survives, so
+	// the one-client rule keeps its full width.
+	var reg *qmp.Registry
+	d.mu.Lock()
+	reg = d.qmpRegistryLocked()
+	d.mu.Unlock()
+	// RELEASE DOES I/O (IT CLOSES THE SOCKET), SO IT IS OUTSIDE THE LOCK. A sampler that reconnects
+	// while this runs lands in the SAME registry and therefore hits `ErrBusy`, not a second client.
+	// `qmpPath` is the same path this function removed before starting qemu.
+	_ = reg.Release(qmpPath)
+	d.mu.Lock()
+	// CLEARED WITH THE RELEASE: `qmpSocket`'s fast path returns `d.qmpConn` without asking the
+	// registry, so a stale pointer here would hand out the connection just closed.
+	d.qmpConn = nil
 	d.mu.Unlock()
 
 	// NO CONSOLE IS STARTED HERE ANY MORE, AND THAT IS THE POINT.
@@ -997,6 +1037,19 @@ func (m machineControl) IsRunning() bool {
 // SO THE I/O HAPPENS OUTSIDE: the fast path takes the lock, finds a connection and returns; a slow
 // path that has to connect does so with the lock RELEASED, then re-checks in case two callers raced
 // and keeps the one that got there first.
+// qmpRegistryLocked returns the daemon's ONE registry, creating it on first use.
+//
+// THE CALLER MUST HOLD `d.mu`. There is exactly one of these for the life of the daemon, and that is
+// the property that makes `Acquire` able to refuse a second client: `Release` drops the path, `CloseAll`
+// drops everything, but the MAP is never replaced. See the note in `Boot` for the seven-minute hang
+// that a second map produced.
+func (d *Driver) qmpRegistryLocked() *qmp.Registry {
+	if d.qmpReg == nil {
+		d.qmpReg = qmp.NewRegistry()
+	}
+	return d.qmpReg
+}
+
 func (d *Driver) qmpSocket() (*qmp.Conn, error) {
 	d.mu.Lock()
 	if d.qmpConn != nil {
@@ -1004,20 +1057,9 @@ func (d *Driver) qmpSocket() (*qmp.Conn, error) {
 		d.mu.Unlock()
 		return conn, nil
 	}
-	reg := d.qmpReg
+	reg := d.qmpRegistryLocked()
 	path := filepath.Join(d.work, "drive.sock.qmp")
 	d.mu.Unlock()
-
-	if reg == nil {
-		reg = qmp.NewRegistry()
-		d.mu.Lock()
-		if d.qmpReg == nil {
-			d.qmpReg = reg
-		} else {
-			reg = d.qmpReg
-		}
-		d.mu.Unlock()
-	}
 
 	conn, err := reg.Acquire(path, "easyvm", 30*time.Second)
 	if err != nil {

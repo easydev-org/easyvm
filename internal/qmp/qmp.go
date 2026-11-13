@@ -60,6 +60,9 @@ type Conn struct {
 	wire sync.Mutex
 }
 
+// handshakeTimeout bounds the QMP greeting, which qemu never sends to a second client.
+const handshakeTimeout = 10 * time.Second
+
 // Open connects to path and completes the capability handshake.
 //
 // THE SOCKET IS WAITED FOR, because `boot:` starts qemu and the socket appears a moment later.
@@ -71,7 +74,43 @@ func Open(path string, wait time.Duration) (*Conn, error) {
 	for {
 		mon, err := qemump.NewSocketMonitor("unix", path, 5*time.Second)
 		if err == nil {
-			if err = mon.Connect(); err == nil {
+			// THE HANDSHAKE HAS A DEADLINE, BECAUSE QEMU DOES NOT CLOSE A SECOND CLIENT - IT IGNORES IT.
+			//
+			// `net.DialTimeout` bounds the CONNECT and nothing after it, and `mon.Connect()` then reads
+			// the greeting with no deadline at all. That is fine while one process holds the socket,
+			// and it is a hang the moment two do: qemu accepts the second connection into its backlog
+			// and never speaks on it, so the read waits forever.
+			//
+			// MEASURED, AND IT COST A WHOLE macOS LEG - the goroutine dump put `Boot` here for seven
+			// minutes while the guest was already up and drawing:
+			//
+			//	goroutine 21 [IO wait, 7 minutes]:
+			//	qmp.(*SocketMonitor).Connect()  socket.go:128   <- dec.Decode(&ban)
+			//	qmp.Open()                       qmp.go:74
+			//	machineControl.Boot()            driver.go:680
+			//	doBoot -> runOne -> Run
+			//
+			// The step never returned, so the walk never advanced, and the screen showed a finished
+			// recovery menu while the daemon believed it was still booting.
+			//
+			// A DEADLINE TURNS THAT INTO THE ERROR IT ALWAYS WAS: a closed connection, the retry loop
+			// below runs again, and the second attempt gets `ErrBusy` from the registry - which names
+			// the real problem instead of waiting on a socket nobody will answer.
+			//
+			// THE DEADLINE IS ENFORCED BY CLOSING RATHER THAN BY `SetDeadline`, because
+			// `SocketMonitor` does not expose its `net.Conn`. A closed socket makes the blocked read
+			// return at once, which is the same effect and needs no vendor change.
+			stop := make(chan struct{})
+			go func() {
+				select {
+				case <-stop:
+				case <-time.After(handshakeTimeout):
+					_ = mon.Disconnect()
+				}
+			}()
+			err = mon.Connect()
+			close(stop)
+			if err == nil {
 				return &Conn{Path: path, mon: mon, raw: raw.NewMonitor(mon)}, nil
 			}
 			_ = mon.Disconnect()

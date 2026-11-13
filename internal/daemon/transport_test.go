@@ -233,3 +233,77 @@ func TestANewRunClearsTheStopFlag(t *testing.T) {
 			"life of the daemon - measured as `finished step 0/31` and a 0 MiB video")
 	}
 }
+
+// THE DAEMON HAS EXACTLY ONE QMP REGISTRY, AND REPLACING IT IS WHAT BROKE THE ONE-CLIENT RULE.
+//
+// `Registry.Acquire` REFUSES A SECOND CLIENT, and it can only do that because `held` is shared by
+// every caller. So the guarantee is exactly as wide as the map:
+//
+//	if _, ok := r.held[path]; ok {
+//		return nil, fmt.Errorf("%w (by %q) ...", ErrBusy, r.owner[path])
+//	}
+//
+// AND `Boot` USED TO THROW THE MAP AWAY:
+//
+//	d.qmpReg = qmp.NewRegistry()
+//
+// Two maps are two clients. The recorder's sampler starts at `record:` and ticks across every `boot:`,
+// so it holds the registry that existed BEFORE the boot; the boot then made a fresh one, and each
+// asked qemu for the socket with its own empty `held`. qemu accepts the first and queues the second in
+// its listen backlog WITHOUT EVER GREETING IT, and `SocketMonitor.Connect` reads that greeting with no
+// deadline:
+//
+//	goroutine 21 [IO wait, 7 minutes]:
+//	qmp.(*SocketMonitor).Connect()  socket.go:128   <- dec.Decode(&ban)
+//	machineControl.Boot()           driver.go:680
+//	doBoot -> runOne -> Run
+//
+// while goroutine 27 was the sampler's own successful `listen`. The guest had already drawn its
+// recovery menu; the walk believed it was still booting, for seven minutes, past its own `timeout:`.
+//
+// SO THE MAP IS NEVER REPLACED - `Release` drops the path and `CloseAll` drops everything, but the
+// registry itself lives as long as the daemon. This reads the source to refuse a second
+// `qmp.NewRegistry()` outside the one accessor.
+func TestTheDaemonKeepsOneQMPRegistry(t *testing.T) {
+	body, err := os.ReadFile("driver.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	code := dropLineComments(string(body))
+
+	// THE ONLY PLACE ALLOWED TO CONSTRUCT ONE.
+	accessor := strings.Index(code, "func (d *Driver) qmpRegistryLocked() *qmp.Registry {")
+	if accessor < 0 {
+		t.Fatal("no `qmpRegistryLocked`; the one registry needs one place that creates it")
+	}
+	accessorBody := functionBody(code[accessor:])
+	if !strings.Contains(accessorBody, "qmp.NewRegistry()") {
+		t.Fatal("`qmpRegistryLocked` does not create the registry, so nothing does")
+	}
+
+	// EVERYWHERE ELSE, A CONSTRUCTION IS A SECOND MAP.
+	rest := code[:accessor] + code[accessor+len(accessorBody):]
+	if n := strings.Count(rest, "qmp.NewRegistry()"); n > 0 {
+		t.Fatalf("%d other `qmp.NewRegistry()` call(s) in driver.go. A second map has an empty "+
+			"`held`, so a caller holding it believes the socket is free and opens a SECOND QMP "+
+			"client - which qemu queues and never greets. Callers must share "+
+			"`qmpRegistryLocked()`, and a new machine releases the old path instead of replacing "+
+			"the map", n)
+	}
+	// AND BOOT RELEASES THE PREVIOUS MACHINE'S CONNECTION, or the new qemu's socket is still held by a
+	// client that is talking to a qemu that exited.
+	i := strings.Index(code, "func (m machineControl) Boot(")
+	if i < 0 {
+		t.Fatal("no Boot")
+	}
+	boot := functionBody(code[i:])
+	if !strings.Contains(boot, "reg.Release(") {
+		t.Fatal("`Boot` does not release the previous machine's QMP connection; the socket stays " +
+			"held by a client pointed at a qemu that exited, and the new machine's first " +
+			"`qmpSocket()` gets `ErrBusy` naming a machine that is gone")
+	}
+	if !strings.Contains(boot, "d.qmpConn = nil") {
+		t.Fatal("`Boot` releases the registry entry but leaves `d.qmpConn` set, so `qmpSocket`'s " +
+			"fast path keeps handing out the connection that was just closed")
+	}
+}
