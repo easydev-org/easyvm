@@ -697,3 +697,47 @@ func maxInt(a, b int) int {
 	}
 	return b
 }
+
+// AN ACTION THAT CARRIES ITS OWN CHECK MUST BE DISPATCHED BEFORE THE CHECK.
+//
+// `runOne` IS A `switch` AND THE FIRST MATCHING CASE WINS, so the ORDER of two branches is the
+// difference between "click, then read" and "read only, and never click".
+//
+// MEASURED ON macos-setup, THREE RUNS IN A ROW: `erase - open the sheet` carries `at_window:` to press
+// the Erase icon and `expect_any:` to see the sheet appear. `expect_any` was matched first, so
+// `doExpectAny` ran - which only reads the screen - and the step failed complaining that the sheet had
+// not opened, on a click that never happened:
+//
+//	erase - open the sheet: did not advance: wanted "erase deleted" ...
+//	                        <- and NOT ONE `clicked (1289, 271)` line in the log
+//
+// The coordinate was right the whole time. The comment above `run` already described this class of bug;
+// `at_window` and `at_button` were simply on the wrong side of the line.
+func TestActionsAreDispatchedBeforeTheirChecks(t *testing.T) {
+	body, err := os.ReadFile("executor.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(body)
+	i := strings.Index(src, "func (e *Executor) runOne(")
+	if i < 0 {
+		t.Fatal("no runOne")
+	}
+	rest := src[i:]
+
+	// POSITIONS OF THE BRANCHES THAT MATTER, in the order the switch reads them.
+	pos := func(needle string) int { return strings.Index(rest, needle) }
+	atWindow := pos(`case s.Has("at_window"):`)
+	atButton := pos(`case hasKey(s, "at_button"):`)
+	expect := pos(`case s.Has("expect_any") || s.Has("expect"):`)
+	if atWindow < 0 || atButton < 0 || expect < 0 {
+		t.Fatal("a branch this test looks for is missing, so it would pass vacuously")
+	}
+	if atWindow > expect {
+		t.Error("`at_window` is dispatched AFTER `expect`, so a step with both clicks NOTHING and " +
+			"reports that the thing it was meant to open did not open")
+	}
+	if atButton > expect {
+		t.Error("`at_button` is dispatched AFTER `expect`, for the same reason")
+	}
+}

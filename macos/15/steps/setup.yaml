@@ -97,7 +97,21 @@ steps:
 #
 # `Device: disk0` IS THE WHOLE DEVICE and is what must be formatted; `disk1` is a child of it. That is a
 # reading with ONE answer, which is the property a stop condition needs.
-- name: choose the whole disk, not the partition on it
+# THE TARGET IS FOUND BY ITS CAPACITY, AND THAT IS THE ONLY THING THAT WORKS HERE.
+#
+# THE SIDEBAR LISTS THREE DEVICES AND TWO OF THEM ARE NAMED `disk0`:
+#
+#	268.4 MB   the OpenCore boot image      <- what `contains: disk0` selected
+#	137.44 GB  the target                   <- what must be erased
+#	2.88 GB    the recovery volume, read-only
+#
+# The reference implementation recorded the same trap: "a fixed click erased the 268 MB boot image
+# instead". A DEVICE NAME CANNOT DISTINGUISH THEM - the boot image is `disk0` precisely because it is
+# bootindex 0 - so the reading has to be a CAPACITY, which is one number with one answer.
+#
+# AND IF NO DISK IS IN RANGE THE RUN STOPS, which is correct: erasing the wrong one installs macOS
+# into a volume that is not the target, and that failure surfaces fifty minutes later.
+- name: choose the target disk by capacity
   loop:
     max: 8
     do:
@@ -116,12 +130,14 @@ steps:
       scale: 4
       wait: 3
     check:
-      name: whole_disk
+      name: right_disk
       from: disk
-      mode: contains
-      text: disk0
+      mode: size_between
+      range:
+      - 60
+      - 200
     until:
-      fact: whole_disk
+      fact: right_disk
 # THE WINDOW'S POSITION MOVES BETWEEN RUNS, AND ITS BRIGHTNESS IS NOT 200.
 #
 # MEASURED ACROSS TWO RUNS, sampling column x=500 of the same dialog:

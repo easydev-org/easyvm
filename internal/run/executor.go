@@ -284,6 +284,23 @@ func (e *Executor) runOne(s walk.Step) error {
 	// THE ACTION COMES FIRST AND THE CHECK IS PART OF IT, so `run` is matched before `expect`.
 	case s.Has("run"):
 		return e.doRun(s)
+	// AND SO IS EVERY OTHER ACTION THAT CARRIES ITS OWN CHECK.
+	//
+	// `at_window` AND `at_button` ARE CLICKS WITH A `expect_any:` AFTER THEM, and dispatching them below
+	// the `expect` branch meant the FIRST key matched was `expect_any` - so `doExpectAny` ran, which
+	// only READS THE SCREEN, and the click never happened. The step then failed on the sheet it was
+	// supposed to open:
+	//
+	//	erase - open the sheet: did not advance: wanted "erase deleted" or "free space" ...
+	//	                        <- and NOT ONE `clicked (1289, 271)` LINE IN THE LOG
+	//
+	// Measured on macos-setup, three runs in a row, while the coordinate itself was correct the whole
+	// time. The comment above `run` already describes this exact class of bug; these two were left on
+	// the wrong side of the line.
+	case s.Has("at_window"):
+		return e.doAtWindow(s)
+	case hasKey(s, "at_button"):
+		return e.doAtButton(s)
 	case s.Has("expect_any") || s.Has("expect"):
 		return e.doExpectAny(s)
 	case s.Has("disk_settle"):
@@ -292,10 +309,6 @@ func (e *Executor) runOne(s walk.Step) error {
 		return e.doHostLog(s)
 	case hasKey(s, "do"):
 		return e.doActions(s)
-	case hasKey(s, "at_button"):
-		return e.doAtButton(s)
-	case s.Has("at_window"):
-		return e.doAtWindow(s)
 	case s.Has("wait_for"):
 		return e.doWaitFor(s)
 	case s.Has("screenshot"):
