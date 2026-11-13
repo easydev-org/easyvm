@@ -205,3 +205,31 @@ func functionBody(src string) string {
 	}
 	return strings.Join(out, "\n")
 }
+
+// `stop` BELONGS TO THE RUN IT STOPPED, NOT TO THE DAEMON'S LIFETIME.
+//
+// `stop` sets `d.stopping`, which the executor reads at each step boundary. NOTHING CLEARED IT AGAIN,
+// so the flag survived the run it was meant for and every later `run` returned from its first step:
+//
+//	=== finished rc=0
+//	status: finished step 0/31 ""
+//	/dsk/os/macos/run-setup/macos15-setup.mp4   0 MiB
+//
+// A leg that reported success having run nothing, and a zero-byte video. It was found by running the
+// same pod twice - which is the whole point of a daemon that serves several legs.
+func TestANewRunClearsTheStopFlag(t *testing.T) {
+	body, err := os.ReadFile("server.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(body)
+	i := strings.Index(src, "func (d *Daemon) startRun(")
+	if i < 0 {
+		t.Fatal("no startRun")
+	}
+	rest := functionBody(src[i:])
+	if !strings.Contains(rest, "d.stopping = false") {
+		t.Fatal("`startRun` does not clear `d.stopping`, so a `stop` disables every later run for the " +
+			"life of the daemon - measured as `finished step 0/31` and a 0 MiB video")
+	}
+}

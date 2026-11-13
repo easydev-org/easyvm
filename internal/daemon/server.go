@@ -295,6 +295,20 @@ func (d *Daemon) startRun(req Request) Response {
 		d.mu.Unlock()
 		return Response{OK: false, Error: "`run` needs a walkthrough file"}
 	}
+
+	// A NEW RUN CLEARS THE STOP FLAG, AND NOT CLEARING IT COST TWO LEGS.
+	//
+	// `stop` sets `d.stopping` so the executor returns at the next step boundary. NOTHING SET IT BACK,
+	// so the flag stayed set for the LIFE OF THE DAEMON - and every later `run` was refused by its own
+	// first step:
+	//
+	//	=== finished rc=0
+	//	status: finished step 0/31 ""
+	//	/dsk/os/macos/run-setup/macos15-setup.mp4   0 MiB
+	//
+	// A leg that "finished" without running a step, and a video of nothing. The daemon is one process
+	// for many legs, and a stop belongs to the run it stopped.
+	d.stopping = false
 	// THE DAEMON'S OWN DIRECTORY WINS, ALWAYS. A client that named a different one would put the
 	// socket in one place and the frames in another, and the frames are what a person looks at when
 	// a step fails. `req.Work` is accepted for a caller that started the daemon elsewhere and knows

@@ -81,7 +81,22 @@ echo "=== reset the machine slot"
 # with one owner for the frames and the ports. THE VERSION THAT STARTED A DAEMON PER LEG is what put
 # two of them in one pod - the second bound 8080 while the first still held 6080 - and every `pkill`
 # in it was cleaning up after a supervision model that did not exist.
-echo "=== destroy whatever the last leg left behind"
+# A RUN IN PROGRESS HAS TO BE STOPPED, AND `destroy` DOES NOT DO IT.
+#
+# `destroy` ends a SANDBOX - the machine `create` leaves running - and returns
+#
+#	REFUSED: a run is already in progress (step "the installer finishes"); stop it first
+#
+# for a `run`, which is what every leg here is. Measured: two legs "restarted" while the first was still
+# compressing a disk, and the second was refused, so the pod kept running the OLD file and the fix under
+# test was never exercised at all.
+#
+# SO THE ORDER IS `stop` THEN `destroy`: stop ends the walk and its machine, destroy clears anything a
+# `create` left. Both are best-effort, because on a fresh pod there is nothing to stop.
+echo "=== stop the run in progress, if any"
+easyvm stop --work /work >/dev/null 2>&1 || true
+
+echo "=== destroy whatever a create left behind"
 easyvm destroy --work /work >/dev/null 2>&1 || true
 
 # THE PORTS, BECAUSE A DESTROYED MACHINE'S LISTENERS CLOSE AFTER ITS QEMU IS REAPED. A boot that starts
@@ -98,7 +113,25 @@ wait_port_free() {
     done
     return 1
 }
-for port in 5900; do
+# THE PORT AND THE PROCESS ARE TWO DIFFERENT FACTS. A `stop` asks qemu to quit; a qemu still in `Rl`
+# holds 5900 with nothing listening behind it, and the next boot dies with
+#
+#	qemu-system-x86_64: -vnc 127.0.0.1:0: Failed to find an available port: Address already in use
+#
+# MEASURED: port 5900 LISTENing, qemu pid 153 alive, `destroy` reporting success.
+qemu_alive() {
+    ps -eo stat=,cmd= 2>/dev/null | awk '$1 !~ /^Z/ && $2 ~ /qemu-system/ { f = 1 } END { exit !f }'
+}
+i=0
+while qemu_alive && [ $i -lt 30 ]; do
+    i=$((i + 1)); sleep 1
+done
+if qemu_alive; then
+    echo "=== a qemu outlived its run; killing it" >&2
+    pkill -9 -f "qemu-system-x86_64" 2>/dev/null || true
+    sleep 2
+fi
+for port in 5900 8080; do
     wait_port_free "$port" || echo "=== port $port is still held after 20s" >&2
 done
 

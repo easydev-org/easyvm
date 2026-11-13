@@ -110,10 +110,13 @@ steps:
       - 200
     until:
       fact: right_disk
+# THE OFFSET IS MEASURED FROM THE FRAME, NOT COPIED: the Disk Utility window's top edge sits at
+# y=255 and the Erase button's centre at y=291, so the button is 36 px below the top. It said 15, which
+# is INSIDE THE TITLE BAR - a click there drags the window rather than pressing anything.
 - name: erase - open the sheet
   at_window:
   - 1289
-  - 15
+  - 36
   window_x: 500
   window_from: 180
   window_to: 400
