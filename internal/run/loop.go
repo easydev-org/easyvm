@@ -130,8 +130,29 @@ func (e *Executor) doLoop(s walk.Step) error {
 		}
 
 		// 2. THE READING -> a TEXT variable and work/ocr/<name>.txt.
+		//
+		// A READING THAT FAILED IS A FRAME THAT WAS NOT FINISHED, NOT A LOOP THAT SHOULD END.
+		//
+		// MEASURED ON THE FIRST LOCAL macos-setup THAT REACHED THE MENU:
+		//
+		//	wait for the recovery menu [ocr]: screendump: frame-000196.ppm was not readable
+		//	                                  within 5s: unexpected EOF
+		//
+		// qemu's `screendump` replies before the PPM write completes, so a capture can land on a
+		// half-written file - the driver already waits for the size to settle, and a 640x480 frame
+		// still races that. THE OLD `until:` CONTINUED ON A BAD READ, which is why it survived this;
+		// the loop returned the error and ended a thirty-minute gate at three minutes.
+		//
+		// THE ATTEMPT CEILING STILL BOUNDS IT: a guest whose frames never become readable runs out of
+		// attempts and fails with the last read error.
 		if err := e.doOCR(ocrStep); err != nil {
-			return err
+			e.Driver.Log(fmt.Sprintf("  loop: attempt %d could not read the screen (%v); trying again",
+				attempt, err))
+			if attempt == int(max) {
+				return fail(s.Name, "the loop ran %.0f attempt(s) and never read a frame: %v", max, err)
+			}
+			time.Sleep(2 * time.Second)
+			continue
 		}
 
 		// 3. THE COMPARISON -> a BOOLEAN.
