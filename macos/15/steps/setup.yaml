@@ -324,15 +324,91 @@ steps:
   - 1142
   - 586
   wait_after: 20
-- name: wait for the welcome pane
-  wait: 10
+# WAIT UNTIL THE PANE IS THERE, NOT FOR A NUMBER OF SECONDS THAT SOMEBODY HOPED WAS ENOUGH.
+#
+# MEASURED ON THIS GUEST, with timestamps off the frames:
+#
+#	16:27:42   Continue pressed, "Loading Installation Information..." appears
+#	16:28:25   still loading                (+43 s)
+#	16:29:39   the licence pane is up       (+117 s)
+#
+# so this transition is TWO MINUTES, and the step used to wait TEN SECONDS - it then clicked at a
+# screen still showing a spinner and the next step found the licence text it had not waited for.
+#
+# A FIXED WAIT IS THE WRONG SHAPE FOR SOMETHING THIS VARIABLE: the same installer takes 40 s on a warm
+# cache and two minutes on a cold one, and a number that is right for the first is a click into a
+# spinner for the second. Waiting for the pane's own words is a question with one answer.
+- name: wait for the installer to load
+  loop:
+    max: 24
+    do:
+    - wait: 10
+    ocr:
+      name: instaload
+      region:
+      - 440
+      - 380
+      - 1480
+      - 500
+      region_at:
+      - 1920
+      - 1080
+      scale: 2
+      wait: 0
+    check:
+      name: loaded
+      from: instaload
+      mode: says_any
+      words:
+      - - agree
+        - to
+        - the
+        - terms
+      - - english
+        - apple
+      - - select
+        - the
+        - disk
+      - - macos
+        - sequoia
+    until:
+      fact: loaded
 - name: welcome continue
   click:
   - 960
   - 712
   wait_after: 5
+# THE PANE IS CONFIRMED, NOT ASSUMED. `wait: 60` was measured short at 117 s.
 - name: wait for the licence pane
-  wait: 60
+  loop:
+    max: 24
+    do:
+    - wait: 10
+    ocr:
+      name: licence
+      region:
+      - 660
+      - 430
+      - 1260
+      - 700
+      region_at:
+      - 1920
+      - 1080
+      scale: 2
+      wait: 0
+    check:
+      name: licence_up
+      from: licence
+      mode: says_any
+      words:
+      - - software
+        - license
+        - agreement
+      - - please
+        - read
+        - this
+    until:
+      fact: licence_up
 - name: agree to the licence
   click:
   - 1005
@@ -395,8 +471,22 @@ steps:
   - 712
   wait_after: 10
 - name: the copy runs until the Setup Assistant appears
+  # `max` IS A COUNT OF ATTEMPTS AND EACH ONE WAITS 20 SECONDS, WHICH IS THE ARITHMETIC THAT MATTERS.
+  #
+  # MEASURED ON THIS GUEST: the installer's own estimate at the start of the copy is
+  #
+  #	macOS Sequoia will be installed on the disk "main".
+  #	About 2 hours and 52 minutes remaining
+  #
+  # and `max: 360` x 20 s is EXACTLY 2 hours - so the loop would have given up 52 minutes before the
+  # installer said it would finish, on a run that was working perfectly. A timeout shorter than the
+  # thing it is timing out is a failure with a delayed fuse.
+  #
+  # 600 x 20 s IS 3 HOURS 20 MINUTES, which covers the estimate with room for a slower runner. The
+  # ceiling is not a judgement about how long macOS takes; it is the estimate plus a margin, and the
+  # number is written here so the next reader can see which of the two it is.
   loop:
-    max: 360
+    max: 600
     do:
     - wait: 20
     ocr:
