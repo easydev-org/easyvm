@@ -66,37 +66,62 @@ mkdir -p "$dir" /disks/os
 # COMPLETELY RESET, EVERY TIME. The run directory, the daemon, and the tap the last run left behind -
 # so a rerun cannot be polluted by its own previous frames, overlay or network device.
 echo "=== reset $run"
-# WAIT FOR THE OLD DAEMON TO ACTUALLY BE GONE, BECAUSE `pkill` ONLY ASKS.
+
+# ASK THE DAEMON TO CLOSE ITS OWN MACHINE FIRST, BECAUSE THAT IS WHAT IT IS FOR.
 #
-# MEASURED, and it produced a machine that ran with NO BROWSER PAGE:
+# `easyvm destroy` stops the guest through the shutdown method the file chose - ssh, the agent, ACPI,
+# or a kill - and then closes the daemon. THAT IS THE ONLY PATH THAT KNOWS ABOUT BOTH PROCESSES, and
+# every `pkill` in this script is a fallback for a daemon that cannot answer.
 #
-#	[easyvm] http surface stopped: http listen :8080: bind: address already in use
+# THE FALLBACKS ARE NEEDED AND THAT IS NOT A REDUNDANCY: a daemon holding a half-broken qemu will not
+# always answer its own socket, and a container can be left with a machine whose QMP connection is
+# gone. What matters is the ORDER - ask first, kill second - because the reverse leaves an orphan:
 #
-# The previous daemon was still closing when this one started, so it took the socket, bound 8080
-# first, and the new daemon's HTTP surface died - while its qemu started normally. The run then looked
-# healthy from `status` and `screen.png` was a 000 from outside, which reads as a network problem.
+#	$ pkill easyvm      <- the daemon dies
+#	$ ss -lntp | grep 5900
+#	LISTEN ... qemu-system-x86  <- and qemu is now nobody's child, holding the port
 #
-# `pkill` IS A REQUEST AND THE DAEMON HAS WORK TO DO ON THE WAY OUT (stop the guest, close the socket,
-# close the page), so the wait is on the PROCESS, not on a fixed second.
+# which is exactly the failure this comment used to describe as "the port is already in use" and
+# blame on qemu's argument parsing.
+if [ -S "$run/easyvm.sock" ]; then
+    echo "=== destroy the previous machine through the daemon"
+    easyvm destroy --work "$run" >/dev/null 2>&1 || true
+    i=0
+    while [ $i -lt 20 ] && [ -S "$run/easyvm.sock" ]; do
+        i=$((i + 1)); sleep 1
+    done
+fi
+
+# THE DAEMON ITSELF, WHEN `destroy` COULD NOT REACH IT.
+#
+# A ZOMBIE IS NOT A RUNNING DAEMON, AND `pgrep` CANNOT TELL THE DIFFERENCE. This container's PID 1 is
+# `sleep infinity`, which never reaps anything, so every daemon that has exited stays in the table as
+# `<defunct>`; `pgrep -x easyvm` matched fourteen of them and a wait loop ran for processes that were
+# already gone.
 pkill easyvm 2>/dev/null || true
-# A ZOMBIE IS NOT A RUNNING DAEMON, AND `pgrep` CANNOT TELL THE DIFFERENCE.
-#
-# MEASURED: this container's PID 1 is `sleep infinity`, which never reaps anything, so every daemon
-# that has exited stays in the table as `<defunct>`. `pgrep -x easyvm` matched fourteen of them and
-# this loop waited the full thirty seconds for processes that were already gone - then `pkill -9`ed
-# nothing. The check has to ask whether any easyvm is in a NON-ZOMBIE state.
 daemons_alive() {
     ps -eo stat=,cmd= 2>/dev/null | awk '$1 !~ /^Z/ && $2 ~ /easyvm/ { found = 1 } END { exit !found }'
 }
 i=0
-while daemons_alive && [ $i -lt 30 ]; do
+while daemons_alive && [ $i -lt 20 ]; do
     i=$((i + 1))
     sleep 1
 done
-if daemons_alive; then
-    echo "=== the previous daemon did not exit in 30s; killing it" >&2
-    pkill -9 easyvm 2>/dev/null || true
-    sleep 2
+
+# AND THE GUEST, WHICH IS A SEPARATE PROCESS AND THE ONE THAT HOLDS THE PORTS.
+#
+# THE NAME IS TRUNCATED TO 15 CHARACTERS, which is why `pkill -x qemu-system-x86_64` matched nothing:
+#
+#	$ ps -o comm= -p 128
+#	qemu-system-x86
+#
+# so this matches the full command line instead. It is reached only when the daemon above could not
+# stop it, which is a real state after a failed run - a failed run KEEPS its machine on purpose, and
+# the local loop starts from nothing by definition.
+if ps -eo cmd= 2>/dev/null | grep -q "qemu-system-x86_64"; then
+    echo "=== a qemu outlived its daemon; killing it" >&2
+    pkill -9 -f "qemu-system-x86_64" 2>/dev/null || true
+    sleep 1
 fi
 ip link del qemutap0 2>/dev/null || true
 rm -rf "$run"

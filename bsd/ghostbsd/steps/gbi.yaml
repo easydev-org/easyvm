@@ -236,12 +236,65 @@ steps:
       - - places
     until:
       fact: done
+# A SETTLE AFTER THE WINDOW APPEARS, BECAUSE THE FIRST FRAME THAT SAYS "welcome ghostbsd" IS NOT YET
+# A WINDOW THAT TAKES A CLICK.
+#
+# MEASURED: the wait above satisfied on its FIRST attempt - one OCR read `welcome ghostbsd` - and the
+# click that followed did nothing, while the SAME click by hand, a minute later, advanced the dialog to
+# Keyboard Setup. GTK has drawn the window and its buttons by then, but the toolkit needs its main loop
+# to run before it maps input to widgets, and a click that arrives in that gap is discarded - not
+# queued, so retrying later is the only way to see it.
+#
+# TEN SECONDS is the reference implementation's own settle for this pane, and it is measured rather
+# than chosen: gbi's window appears well before it responds.
+# THE FIRST CLICK IS RETRIED, BECAUSE A WINDOW THAT HAS BEEN DRAWN IS NOT YET A WINDOW THAT TAKES A
+# CLICK, AND THERE IS NO READING THAT TELLS THE TWO APART.
+#
+# MEASURED, ON ONE MACHINE, TWICE IN A ROW: the walk's click at (1331,785) did nothing and the step
+# failed with "did not advance: wanted keyboard, read Welcome to GhostBSD"; the SAME click by hand, on
+# the SAME machine minutes later, advanced the dialog - first to Keyboard Setup, then to Network Setup.
+#
+# So the coordinates are right, the device is right, and the event arrives; what differs is WHEN. GTK
+# has drawn the window before its main loop accepts input, and a press that arrives in that gap is
+# discarded rather than queued - which is why waiting a fixed ten seconds did not help and retrying
+# does.
+#
+# A LOOP RATHER THAN `expect:`, because `expect:` ASSERTS and this is a question with two answers. The
+# click and the reading are separate steps, which is the rule the whole DSL rests on: `do:` clicks,
+# `ocr:` reads, `check:` decides, `until:` stops.
+- name: press Next until the keyboard page appears
+  loop:
+    max: 20
+    do:
+    - at:
+      - 1331
+      - 785
+    - wait: 3
+    ocr:
+      name: screen
+      region:
+      - 560
+      - 260
+      - 1360
+      - 400
+      region_at:
+      - 1920
+      - 1080
+      scale: 1
+      wait: 0
+    check:
+      name: advanced
+      from: screen
+      mode: says_any
+      words:
+      - - keyboard
+        - setup
+      - - keyboard
+        - layout
+    until:
+      fact: advanced
 - name: welcome
-  at:
-  - 1331
-  - 785
-  expect: keyboard
-  wait_after: 12
+  wait_after: 2
 - name: keyboard
   at:
   - 1331
