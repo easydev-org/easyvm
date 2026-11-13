@@ -684,3 +684,50 @@ func TestEveryMountBranchCreatesItsMountPoint(t *testing.T) {
 			"one", n)
 	}
 }
+
+// THE WINDOWS SHARE MUST LAND WHERE THE PROOF READS IT.
+//
+// MEASURED ON windows-vm-configure, STEP 13 OF 20 - AND THE MOUNT ITSELF REPORTED SUCCESS:
+//
+//	share: SMB_MAPPED
+//	share: Volume in drive C is Windows
+//	share: Directory of C:\Users\vmuser
+//	share: File Not Found
+//	error: the guest cannot see a file this host wrote into /github/home/shared
+//
+// `New-SmbMapping` WITHOUT `-LocalPath` INVENTS A DRIVE LETTER. Nothing knows which one, so the
+// verification's `dir` fell back to the working directory and the sentinel the host had just written
+// came back "File Not Found" - a successful mount reported as a failed one.
+//
+// THE PROOF READS `%USERPROFILE%\shared\<sentinel>`, so that path has to resolve to the share. A
+// junction does it, and a drive letter cannot.
+func TestTheWindowsShareIsMountableAtThePathTheProofReads(t *testing.T) {
+	body, err := os.ReadFile("share.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(body)
+	i := strings.Index(src, `case "windows":`)
+	if i < 0 {
+		t.Fatal("the windows branch is gone")
+	}
+	end := strings.Index(src[i:], `case "macos":`)
+	if end < 0 {
+		t.Fatal("cannot find the end of the windows branch")
+	}
+	branch := src[i : i+end]
+
+	if !strings.Contains(branch, "mklink") {
+		t.Error("the windows branch does not create a junction, so the share has no fixed path. " +
+			"`New-SmbMapping` without `-LocalPath` picks its own drive letter and the proof, which " +
+			"reads the sentinel under the user profile, sees the working directory instead")
+	}
+	if !strings.Contains(branch, `-Password ''`) {
+		t.Error("the windows branch no longer passes an empty password; the share account has no " +
+			"password and `null passwords = yes` is what accepts it")
+	}
+	if !strings.Contains(branch, "USERPROFILE") {
+		t.Error("the windows branch does not use the user profile, so the junction is not at the " +
+			"path the proof reads")
+	}
+}

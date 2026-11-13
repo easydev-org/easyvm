@@ -248,7 +248,35 @@ func (d *Driver) mountOnce(client *guest.Client, family, dir string) error {
 			`$m = Get-SmbMapping -RemotePath '` + share + `' -ErrorAction SilentlyContinue; ` +
 			`if ($m) { Remove-SmbMapping -RemotePath '` + share + `' -Force -ErrorAction SilentlyContinue | Out-Null }; ` +
 			`try { ` +
+			// A MAPPED UNC PATH HAS NO FIXED PLACE, AND THE PROOF READS A FILE PATH.
+			//
+			// MEASURED ON windows-vm-configure, STEP 13 OF 20 - THE MAPPING ITSELF SUCCEEDED:
+			//
+			//	share: SMB_MAPPED
+			//	share: Volume in drive C is Windows
+			//	share: Directory of C:\Users\vmuser
+			//	share: File Not Found
+			//	the guest cannot see a file this host wrote into /github/home/shared
+			//
+			// `New-SmbMapping` WITHOUT `-LocalPath` INVENTS A DRIVE LETTER, and nothing knows which
+			// one - so the verification's `dir` fell back to the working directory and the sentinel
+			// the host had just written was "File Not Found".
+			//
+			// THE PROOF READS `%USERPROFILE%\shared\<sentinel>`, WHICH IS A PATH, SO THE MOUNT HAS TO
+			// BE THAT PATH. `mklink /D` makes that directory a junction onto the UNC share, so the
+			// path the proof uses is the path that exists.
+			//
+			// `cmd /c mklink` IS THE ONLY WAY TO CREATE ONE: PowerShell has a junction cmdlet only in
+			// recent versions, and `New-Item -ItemType SymbolicLink` needs Developer Mode or an
+			// elevated token.
+			// THE MAPPING AND THE JUNCTION ARE BOTH NEEDED, AND FOR DIFFERENT THINGS. `New-SmbMapping`
+			// IS WHAT CARRIES THE CREDENTIAL - an empty `-Password ''` is the pair `null passwords =
+			// yes` accepts - while the junction is what puts the share at the PATH the proof reads.
 			`  New-SmbMapping -RemotePath '` + share + `' -UserName guest -Password '' -Persistent $false -ErrorAction Stop | Out-Null; ` +
+			`  $d = Join-Path $env:USERPROFILE 'shared'; ` +
+			`  if (Test-Path $d) { Remove-Item $d -Recurse -Force -ErrorAction SilentlyContinue }; ` +
+			`  cmd /c mklink /d "$d" '` + share + `' | Out-Null; ` +
+			`  if (-not (Test-Path $d)) { Write-Output 'SMB_LINK_FAILED: the junction was not created'; exit 1 }; ` +
 			`  Write-Output 'SMB_MAPPED' ` +
 			`} catch { ` +
 			`  Write-Output ('SMB_FAILED: ' + $_.Exception.Message); ` +
