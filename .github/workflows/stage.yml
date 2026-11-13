@@ -72,6 +72,13 @@ jobs:
     permissions:
       contents: read
       packages: write
+      # `checks: write` IS WHAT PUBLISHES THE LIVE LOG, AND IT IS NOT GRANTED BY DEFAULT.
+      #
+      # `follow it` streams to a CHECK RUN because a step's Actions log cannot be read until the step
+      # ends. MEASURED: without this line the POST is refused, the action falls back to running the
+      # command unpublished, and the whole feature looks like a no-op - there is no error in the step's
+      # own output, because a stream that cannot publish still runs the command by design.
+      checks: write
     strategy:
       # EVERY LEG AT ONCE. Each matrix leg gets its own runner, with its own /dev/kvm and its own
       # container, so the legs do not compete - and `max-parallel: 1` would make a stage wait for the

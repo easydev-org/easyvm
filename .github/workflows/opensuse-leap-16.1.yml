@@ -54,6 +54,9 @@ concurrency:
 permissions:
   contents: read
   packages: write
+  # THE CALLED WORKFLOW CANNOT ASK FOR MORE THAN ITS CALLER GRANTS, so this has to be here too: the
+  # live log is a check run, and publishing one needs `checks: write`.
+  checks: write
 
 jobs:
   stages:
