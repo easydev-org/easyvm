@@ -24,6 +24,7 @@
 package qmp
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"image"
@@ -33,9 +34,14 @@ import (
 	"sync"
 	"time"
 
-	// THE FRAME THIS PACKAGE WRITES IS A P6 PPM, AND THE DECODER IS WHAT DECIDES WHEN IT IS DONE.
-	// A blank import registers the format with `image.Decode`, which `waitForStable` calls - the
-	// same decoder `internal/screen` uses, so "complete" has ONE definition rather than two.
+	// TWO BLANK IMPORTS, BECAUSE TWO FORMATS ARE DECODED HERE.
+	//
+	// `netpbm` is the P6 PPM this package used to write, and it is still the fallback for a qemu that
+	// refuses `format: png`. `image/png` is what every frame is now. `image.Decode` dispatches on the
+	// file's own magic bytes, so registering both costs nothing and keeps "is this frame complete"
+	// answered by the same decoder that a caller uses.
+	_ "image/png"
+
 	_ "github.com/kovidgoyal/imaging/netpbm"
 
 	qemump "github.com/digitalocean/go-qemu/qmp"
@@ -137,9 +143,43 @@ func (c *Conn) Screendump(dir string) (Frame, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return Frame{}, err
 	}
-	path := filepath.Join(dir, fmt.Sprintf("frame-%06d.ppm", n))
-	if err := c.raw.Screendump(path); err != nil {
-		return Frame{}, fmt.Errorf("screendump: %w", err)
+	// PNG, NOT PPM, AND THE DIFFERENCE IS TWO ORDERS OF MAGNITUDE.
+	//
+	// A 1920x1080 PPM is 6,220,817 bytes - uncompressed by definition, one byte per channel. Every
+	// caller that wanted to look at the screen wrote one of those to the same disk:
+	//
+	//	the recording sampler    1/s
+	//	an `ocr:` gate           1/10s
+	//	the browser page         1/s
+	//
+	// so a macOS setup wrote ~12 MB/s of frames while the guest was installing, on a disk that also
+	// holds four 128 GiB guests. THE SIZE IS ALSO WHY THE READS RACED: a write of 6 MB takes long
+	// enough to overlap the next reader, and `unexpected EOF` on a complete file was the result.
+	//
+	// QEMU HAS WRITTEN PNG SINCE 9.0 (`screendump` takes `format: png`), the go-qemu wrapper only
+	// exposes the filename, and the same frame is ~100 KB - SO THE WRITE IS SHORT AND THE RACE SHRINKS
+	// WITH IT. This is one command on the same socket, written as raw JSON because the wrapper has no
+	// field for the format.
+	path := filepath.Join(dir, fmt.Sprintf("frame-%06d.png", n))
+	cmd, err := json.Marshal(map[string]any{
+		"execute": "screendump",
+		"arguments": map[string]any{
+			"filename": path,
+			"format":   "png",
+		},
+	})
+	if err != nil {
+		return Frame{}, err
+	}
+	if _, err := c.mon.Run(cmd); err != nil {
+		// A QEMU THAT DOES NOT KNOW `format` IS NOT A REASON TO LOSE THE FRAME, so the PPM path is
+		// still here as the fallback - and it says so, because a silent fallback would hide the
+		// version this build is running against.
+		ppm := filepath.Join(dir, fmt.Sprintf("frame-%06d.ppm", n))
+		if err2 := c.raw.Screendump(ppm); err2 != nil {
+			return Frame{}, fmt.Errorf("screendump: png refused (%v) and ppm failed: %w", err, err2)
+		}
+		path = ppm
 	}
 	// THIRTY SECONDS, NOT FIVE, AND THE FIVE WAS MEASURED WRONG ON A LOADED GUEST.
 	//
@@ -157,7 +197,16 @@ func (c *Conn) Screendump(dir string) (Frame, error) {
 	if err := waitForStable(path, 30*time.Second); err != nil {
 		return Frame{}, err
 	}
-	w, h, err := ppmSize(path)
+	// THE SIZE COMES FROM THE DECODER, NOT FROM A PPM HEADER, BECAUSE THE FRAME IS A PNG NOW.
+	//
+	// `ppmSize` refuses anything that does not start with `P6`, which is exactly the mistake this
+	// produced:
+	//
+	//	frames/frame-000007.png: not a binary PPM (starts "\x89PNG\r")
+	//
+	// The decoder has already been called by `waitForStable` and it knows the format from the file's
+	// own magic bytes, so it is the thing to ask.
+	w, h, err := frameSize(path)
 	if err != nil {
 		return Frame{}, err
 	}
@@ -166,6 +215,41 @@ func (c *Conn) Screendump(dir string) (Frame, error) {
 	c.lastW, c.lastH = w, h
 	c.mu.Unlock()
 	return Frame{Path: path, Width: w, Height: h}, nil
+}
+
+// screendumpPNG asks qemu for a PNG rather than a PPM, AND THAT IS THE WHOLE ANSWER TO "6.2 MB PER
+// FRAME".
+//
+// A 1920x1080 PPM is 6,220,817 bytes: three bytes per pixel with no compression, which is the format's
+// definition rather than a bad choice by anyone. At one frame a second for the recording that is
+// SIX MEGABYTES PER SECOND written to disk for the whole run, and the same again read back by every
+// `ocr:` step and every browser poll - on a shared volume, next to the guest's own disk.
+//
+// THE SAME SCREEN AS PNG IS AROUND A HUNDRED KILOBYTES - a desktop screenshot compresses about sixty
+// to one - so the disk traffic and the decode cost both fall by that factor, and the race this
+// package has been fighting stops being worth winning:
+//
+//	screendump: frame-000294.ppm was not readable within 30s: unexpected EOF
+//
+// QEMU HAS TAKEN A `format` ARGUMENT SINCE 9.0 and this build runs 11.1, so the answer is one field:
+//
+//	{"execute":"screendump","arguments":{"filename":"...","format":"png"}}
+//
+// THE LIBRARY'S OWN `Screendump` DOES NOT PASS IT - its arguments are `{"filename"}` - so the command
+// is written here. `run` is the same raw JSON call the wrapper makes, one level down.
+func (c *Conn) screendumpPNG(path string) error {
+	cmd, err := json.Marshal(map[string]any{
+		"execute": "screendump",
+		"arguments": map[string]any{
+			"filename": path,
+			"format":   "png",
+		},
+	})
+	if err != nil {
+		return err
+	}
+	_, err = c.mon.Run(cmd)
+	return err
 }
 
 // waitForStable waits until the frame DECODES, because that is what the caller does with it.
@@ -191,74 +275,100 @@ func (c *Conn) Screendump(dir string) (Frame, error) {
 func waitForStable(path string, limit time.Duration) error {
 	deadline := time.Now().Add(limit)
 	var lastSize int64 = -1
-	var lastHeader int
+	var stable int
+	var lastErr error
+
 	for time.Now().Before(deadline) {
 		fi, err := os.Stat(path)
 		if err != nil {
-			lastSize, lastHeader = -1, 0
+			lastSize, stable = -1, 0
 			time.Sleep(50 * time.Millisecond)
 			continue
 		}
-		lastSize = fi.Size()
 
-		// THE HEADER SAYS HOW MANY BYTES THE FILE WILL BE, SO "DONE" IS ARITHMETIC.
+		// TWO WAYS TO KNOW A WRITE IS FINISHED, AND THE FORMAT DECIDES WHICH ONE APPLIES.
 		//
-		// A PPM's size is decided before the first pixel is written:
+		// PPM: THE SIZE IS ARITHMETIC. A P6's final size is `header + width*height*3`, decided before
+		// the first pixel, and qemu writes the header first - so a file whose size EQUALS that number
+		// is complete by the format's own rule rather than by a guess about a race.
 		//
-		//	header length + width * height * channels
+		// PNG: THE SIZE IS NOT PREDICTABLE, so the DECODER decides - `image.Decode` reads to the IEND
+		// chunk, so "it decoded" means "the last chunk arrived". It is only decoded once two polls
+		// have seen the same size, because a PNG still being written is not worth reading sixty
+		// times.
 		//
-		// and qemu writes the header first. So a file whose size EQUALS that number is finished - not
-		// "probably finished", not "stable for two polls", but complete by the format's own rule. Every
-		// other judgement is a guess about a race:
-		//
-		//	A SIZE THAT STOPPED GROWING IS NOT A FINISHED WRITE. It is a finished write OR a writer
-		//	that has been descheduled, and the two are indistinguishable from outside. The previous
-		//	version of this function used the decoder as the judge and re-read all 6.2 MB every 20 ms
-		//	until it passed, which on a loaded disk meant the reader and the writer never let each
-		//	other finish:
-		//
-		//		screendump: frame-000294.ppm was not readable within 30s: unexpected EOF
-		//
-		//	thirty seconds, on a file of exactly 6,220,817 bytes with a correct P6 header.
-		//
-		//	A DECODE ON A COMPLETE FILE IS A REAL CHECK AND IS STILL DONE, once, at the end - because
-		//	a file of the right length can still be corrupt, and a caller that gets a path it cannot
-		//	read has been handed a lie.
-		need, hdr, ok := ppmExpectedSize(path)
-		if !ok {
-			// the header is not there yet, so there is nothing to compare against
-			lastHeader = 0
-			time.Sleep(50 * time.Millisecond)
-			continue
+		// EITHER WAY THE LAST CHECK IS A DECODE, because a file of the right length can still be
+		// corrupt and a caller handed a path it cannot read has been told a lie.
+		need, _, ok := ppmExpectedSize(path)
+		if ok {
+			if fi.Size() < need {
+				lastSize, stable = fi.Size(), 0
+				time.Sleep(50 * time.Millisecond)
+				continue
+			}
+		} else {
+			if fi.Size() != lastSize {
+				lastSize, stable = fi.Size(), 0
+				time.Sleep(50 * time.Millisecond)
+				continue
+			}
+			stable++
+			if stable < 2 {
+				time.Sleep(50 * time.Millisecond)
+				continue
+			}
 		}
-		lastHeader = hdr
-		if fi.Size() < need {
-			time.Sleep(50 * time.Millisecond)
-			continue
-		}
+
 		fh, err := os.Open(path)
 		if err != nil {
+			lastErr = err
 			time.Sleep(50 * time.Millisecond)
 			continue
 		}
-		_, _, decErr := image.Decode(fh) // registered: see the blank import in internal/screen
+		_, _, decErr := image.Decode(fh) // registered: png and netpbm, see the blank imports
 		_ = fh.Close()
 		if decErr == nil {
 			return nil
 		}
-		return fmt.Errorf("screendump: %s is %d bytes, the header says %d, and it does not decode: %w",
-			path, fi.Size(), need, decErr)
+		// A STABLE FILE THAT WILL NOT DECODE IS NOT A RACE, so there is nothing left to wait for.
+		// The size is in the message because "unexpected EOF" on a complete file is what sent three
+		// runs looking at the wrong thing.
+		return fmt.Errorf("screendump: %s is %d bytes and does not decode: %w", path, fi.Size(), decErr)
 	}
-	switch {
-	case lastSize < 0:
+
+	if lastSize < 0 {
 		return fmt.Errorf("screendump: %s never appeared within %s", path, limit)
-	case lastHeader == 0:
-		return fmt.Errorf("screendump: %s is %d bytes and its PPM header never became readable "+
-			"within %s", path, lastSize, limit)
-	default:
-		return fmt.Errorf("screendump: %s is %d bytes after %s and its header says %d - the write "+
-			"did not finish", path, lastSize, limit, lastHeader)
 	}
+	if lastErr != nil {
+		return fmt.Errorf("screendump: %s was %d bytes after %s: %w", path, lastSize, limit, lastErr)
+	}
+	return fmt.Errorf("screendump: %s stayed at %d bytes for %s without finishing - the guest is "+
+		"writing frames slower than this can wait", path, lastSize, limit)
+}
+
+// frameSize is the pixel size of a frame, from whichever decoder claims its bytes.
+//
+// IT WAS `ppmSize`, WHICH READS A P6 HEADER AND REFUSES ANYTHING ELSE - correct while every frame was
+// a PPM, and wrong the moment they became PNGs:
+//
+//	frames/frame-000007.png: not a binary PPM (starts "\x89PNG\r")
+//
+// THE DECODER IS THE AUTHORITY, and it is already the judge of "is this frame complete" in
+// `waitForStable`. Asking it for the dimensions too keeps ONE reading of the file rather than two.
+func frameSize(path string) (int, int, error) {
+	fh, err := os.Open(path)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer fh.Close()
+	cfg, _, err := image.DecodeConfig(fh)
+	if err != nil {
+		return 0, 0, fmt.Errorf("%s: %w", path, err)
+	}
+	if cfg.Width <= 0 || cfg.Height <= 0 {
+		return 0, 0, fmt.Errorf("%s: decoded to %dx%d", path, cfg.Width, cfg.Height)
+	}
+	return cfg.Width, cfg.Height, nil
 }
 
 // ppmExpectedSize is the byte count a complete PPM will have, read from its own header.
