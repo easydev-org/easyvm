@@ -915,9 +915,17 @@ func (e *Executor) userForPaths() string {
 // that took them from the environment instead would be a second place those facts live, and the
 // disk would be installed with one account and driven with another.
 func (e *Executor) doFetch(s walk.Step) error {
-	kind := s.Get("fetch")
+	// ONE KIND, THREE KEY NAMES. Which key the file used says what is being done - taking a
+	// published file, assembling one, or rendering one - and this reads it without caring which.
+	kind := s.Get("asset")
 	if kind == "" {
-		return fail(s.Name, "`fetch:` must name an asset")
+		kind = s.Get("build")
+	}
+	if kind == "" {
+		kind = s.Get("generate")
+	}
+	if kind == "" {
+		return fail(s.Name, "the step must name what it prepares: `asset:`, `build:` or `generate:`")
 	}
 	family := s.Get("family")
 	if family == "" && e.File != nil {

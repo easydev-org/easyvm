@@ -22,12 +22,12 @@ steps:
 - name: start recording
   record: macos15-vm-configure.mp4
 - name: fetch the recovery image
-  fetch: recovery_macos
   release: '15'
+  asset: recovery_macos
 - name: build OpenCore from the recovery image
-  fetch: opencore
   release: '15'
   recovery: recovery_macos
+  build: opencore
 - name: boot the disk
   boot: true
   os: macos
@@ -36,9 +36,9 @@ steps:
   require_ssh: true
   timeout: 900
 - name: fetch the guest agent on the host
-  fetch: guest_agent
   family: macos
   timeout: 900
+  asset: guest_agent
 - name: copy the agent into the guest
   scp:
   - mac-guest-agent

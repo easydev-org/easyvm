@@ -407,11 +407,32 @@ var Keys = map[string]Key{
 	"demo_script": {Name: "demo_script", Kind: KindString,
 		Summary: "write a throwaway script, for the primitives walkthrough that exists to exercise " +
 			"the vocabulary itself"},
-	"fetch": {Name: "fetch", Kind: KindString,
-		Summary: "download or extract a host-side asset: guest_agent_windows, guest_agent_macos, " +
-			"xcode, packages, windows_iso, virtio_win, answer_iso"},
+	// THREE KINDS OF HOST-SIDE PREPARATION, AND `fetch:` WAS ALL THREE OF THEM.
+	//
+	// MEASURED FROM THE 23 USES IN THIS REPOSITORY, its eight values did three different jobs:
+	//
+	//	download a published file   linux_iso, windows_iso, virtio_win, recovery_macos, xcode
+	//	build an artifact           opencore - reads apfs.efi out of the recovery image and
+	//	                            assembles boot.img
+	//	generate a file             answer_iso - renders a template and packs it into an ISO
+	//
+	// A NAME THAT SAYS "fetch" FOR ALL THREE HIDES THE BUILD AND THE GENERATE BEHIND A WORD THAT
+	// PROMISES A DOWNLOAD, and a reader who saw `fetch: opencore` had no way to know it was reading
+	// a 888 MiB recovery image.
+	"asset": {Name: "asset", Kind: KindString,
+		Summary: "take a host-side file this build ships or pulls: linux_iso, windows_iso, " +
+			"virtio_win, recovery_macos, guest_agent. It is a file that exists somewhere and is " +
+			"copied or downloaded here"},
+	"build": {Name: "build", Kind: KindString,
+		Summary: "assemble a host-side artifact from another asset: `build: opencore` reads " +
+			"Apple's APFS driver out of the recovery image and writes boot.img, macos.rom and " +
+			"macos.vars. Use `asset:` instead when nothing is being assembled"},
+	"generate": {Name: "generate", Kind: KindString,
+		Summary: "produce a file from a template and this walkthrough's variables: " +
+			"`generate: answer_iso` renders `template:` and packs the result into a CD image. " +
+			"Use `asset:` instead when nothing is being rendered"},
 	"template": {Name: "template", Kind: KindString,
-		Summary: "with `fetch: answer_iso`: the answer file to substitute into. It is a path in " +
+		Summary: "with `generate: answer_iso`: the answer file to substitute into. It is a path in " +
 			"the repository because the placeholders are the file's vocabulary, not a download"},
 
 	// THERE IS NO `python:` AND NO `python_screen:`. The Go implementation has no interpreter, so

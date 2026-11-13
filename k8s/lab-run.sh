@@ -107,6 +107,38 @@ if [ -z "$prev" ]; then
     done
 fi
 
+# EVERY ASSET IS SEEDED FROM THE PVC UNDER THE NAME THE FETCH STEP LOOKS FOR.
+#
+# `fetch:` READS THE WORK DIRECTORY FIRST AND ONLY REACHES A REGISTRY WHEN THE FILE IS ABSENT, so a
+# pre-seeded PVC means the local loop never pulls. THE NAMES ARE THE FETCH LAYER'S OWN - measured from
+# `internal/asset` and `internal/opencore`, not guessed:
+#
+#	fetch: linux_iso         work/installer.iso
+#	fetch: windows_iso       work/windows11.iso
+#	fetch: virtio_win        work/virtio-win.iso
+#	fetch: recovery_macos    work/recovery.dmg
+#	fetch: opencore          work/opencore.zip + opencore-template.iso + macos.rom
+#	                                     + OVMF_VARS-1920x1080.fd
+#
+# THE MACOS FIVE WERE MISSING, AND THE COST WAS A REGISTRY PULL: the pod sat on `fetch the recovery
+# image` at 888 MiB while /artifacts/macos held the same file, because nothing copied it in.
+if [ "$os" = macos ]; then
+    for pair in \
+        "recovery-macos.dmg:recovery.dmg" \
+        "opencore.zip:opencore.zip" \
+        "opencore-template.iso:opencore-template.iso" \
+        "OVMF_CODE.fd:macos.rom" \
+        "OVMF_VARS-1920x1080.fd:OVMF_VARS-1920x1080.fd"
+    do
+        src="/artifacts/macos/${pair%%:*}"
+        dst="$run/${pair##*:}"
+        if [ -f "$src" ]; then
+            echo "=== macos asset: $(basename "$src") -> $(basename "$dst")"
+            cp "$src" "$dst"
+        fi
+    done
+fi
+
 # WINDOWS NAMES ITS IMAGE `windows11.iso`, NOT `installer.iso`. `fetch: windows_iso` looks for that
 # fixed name in the work directory, so the artifact is copied under BOTH names and whichever the
 # step asks for is already there.

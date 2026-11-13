@@ -22,12 +22,12 @@ steps:
 - name: start recording
   record: macos15-dev.mp4
 - name: fetch the recovery image
-  fetch: recovery_macos
   release: '15'
+  asset: recovery_macos
 - name: build OpenCore from the recovery image
-  fetch: opencore
   release: '15'
   recovery: recovery_macos
+  build: opencore
 - name: boot the disk
   boot: true
   os: macos
@@ -36,7 +36,7 @@ steps:
   require_ssh: true
   timeout: 900
 - name: fetch xcode on the host
-  fetch: xcode
+  asset: xcode
 - name: copy xcode into the guest
   scp:
   - '{{ work }}/Xcode_26.3_Universal.xip'
@@ -57,7 +57,7 @@ steps:
   ssh: rm -f /Users/{{ user }}/Xcode.xip && df -h / | tail -1
   timeout: 300
 - name: fetch the packages on the host
-  fetch: dev_packages
+  asset: dev_packages
 - name: copy the packages into the guest
   scp:
   - '{{ work }}/packages.tar'

@@ -1,37 +1,7 @@
-# A whole macOS stage, declared in one file: boot, check, reboot, shut down.
-#
-#     python3 lib/steps.py macos/15/steps/lifecycle.yaml \
-#         --boot-disk out/macos15-share.qcow2 \
-#         --boot-share ~/shared
-#
-# THIS IS THE SHAPE THE STAGE SCRIPTS WILL BECOME. Everything a stage does to the machine as a
-# PROCESS is here; what stays in Python is what a step cannot be - fetching an image, publishing
-# an artifact, deciding whether the run passed.
-#
-# WHY EACH STEP IS WHAT IT IS
-#
-#   boot        starts the disk on an OVERLAY (lib/vm_session.py), so nothing this run does can
-#               reach the published artifact, and the guest can be killed at the end rather than
-#               asked politely - see `shutdown` below.
-#   require_ssh THE MACHINE IS NOT UP WHEN `boot:` RETURNS. A reset or a cold start answers QMP
-#               immediately and takes a minute to reach sshd; this is the wait, and doing it as a
-#               step means its timeout is visible in the log.
-#   reboot      system_reset through QMP. It exists because the guest's own shutdown path is the
-#               thing being avoided: macOS puts up a dialog on ACPI, and a loaded guest can
-#               outlast any timeout.
-#   shutdown    `graceful: false` is correct HERE and wrong for a stage that writes. This file
-#               runs on an overlay, so a kill destroys nothing; a stage whose output IS the disk
-#               (clean, dev) must let the guest close its filesystems first.
-#
-# WHAT THIS FILE DOES NOT DO, AND SHOULD NOT
-#
-#   install anything     that is a toolchain file, and it needs no reboot to run
-#   publish              a workflow step pushes what a stage produced
-#   decide pass/fail     the steps say it; a failing step is a failing run
-
 name: macos 15 - the machine's own lifecycle
-resolution: [1920, 1080]
-
+resolution:
+- 1920
+- 1080
 vars:
   user:
     from: args.user
@@ -39,106 +9,41 @@ vars:
   password:
     from: args.password
     default: admin
-
 ssh_user: vmuser
 ssh_port: 2222
-
-# THIS STAGE'S DISK COMES FROM THE CALLER, AND THAT IS NOW IN THE FILE RATHER THAN IN THE WORKFLOW.
-#
-# `boot_disk: from_caller` says the `--boot-disk` flag supplies it, because an earlier stage made it.
-# Without the declaration a file that continues from another stage is indistinguishable from one that
-# forgot to create a disk: `boot:` refuses with "booting needs a target disk", and it refuses AFTER
-# every host-side step above it has run - run 43044525517 spent three minutes building an answer CD
-# and resolving a 7.7 GiB installer before the boot said no.
 boot_disk: from_caller
-
 steps:
-  # NO `recovery:` HERE, AND THAT IS THE POINT.
-  #
-  # macOS installs FROM removable media, so only the setup stage attaches the recovery image as a
-  # USB disk. This stage boots a system that is already installed, and an installed macOS has no
-  # recovery volume - an extra USB disk would be one more row the guest can pick in Disk Utility,
-  # where setup.yaml's "choose the target disk by capacity" reads the sidebar. Attaching it where
-  # nothing is being installed is at best a row nobody looks at and at worst the row that gets
-  # picked.
-  #
-  # THE RECOVERY IMAGE IS STILL AN INPUT to the step that builds OpenCore - the APFS driver comes
-  # out of that image - and that is host work on a file, not a device handed to the guest. The
-  # two are separate facts: opencore.build() reads it, `boot:` does not attach it.
-  #
-  # WHAT IS ALWAYS THERE, because macOS always boots through OpenCore:
-  #
-  #     boot.img   OpenCore, bootindex=0   a disk with no bootindex is not in the boot order at
-  #                                        all, which is what "failed to load Boot0001" meant for
-  #                                        six runs
-  #     disk       the target, bootindex=1 OpenCore finds the installed system here
-  #
-  # And discard is ON: this disk is finished, and a guest's TRIMs are what keep the published
-  # qcow2 small.
-  # OPENCORE AND THE RECOVERY IMAGE ARE INPUTS EVEN THOUGH THIS STAGE DOES NOT INSTALL.
-  #
-  # The firmware three - a boot image, OVMF's code and a writable variables copy - are built FROM the
-  # recovery image, because Apple's APFS driver lives inside it (usr/standalone/i386/apfs.efi) and
-  # OpenCore cannot read an APFS partition without one. EnableJumpstart=true does not supply a
-  # driver; it HOOKS one the firmware is expected to have, and OVMF has none. The symptom is silent:
-  # a picker that lists only Reset NVRAM and Toggle SIP.
-  #
-  # NO `recovery:` ON THE BOOT, THOUGH. That key attaches the image to the GUEST as removable media,
-  # and only the setup stage installs from it. An installed disk has no recovery volume, and an extra
-  # USB disk is one more row in Disk Utility's sidebar - which is what `choose the target disk by
-  # capacity` reads. Two facts, two places: this step reads the image, the boot does not give it away.
-  - name: fetch the recovery image
-    fetch: recovery_macos
-    release: "15"
-  - name: build OpenCore from the recovery image
-    fetch: opencore
-    release: "15"
-    recovery: recovery_macos
+- name: fetch the recovery image
+  release: '15'
+  asset: recovery_macos
+- name: build OpenCore from the recovery image
+  release: '15'
+  recovery: recovery_macos
+  build: opencore
+- name: boot the disk
+  boot: true
+  os: macos
+  timeout: 900
+- name: wait for sshd
+  require_ssh: true
+  ssh_probe: echo ok
+  timeout: 900
+- name: say what came up
+  ssh: 'sw_vers && uname -a && id -un
 
-  - name: boot the disk
-    boot: true
-    os: macos
-    timeout: 900
+    '
+  timeout: 120
+- name: reboot into the same system
+  reboot: true
+  timeout: 900
+- name: prove it came back
+  require_ssh: true
+  ssh_probe: echo ok
+  timeout: 900
+- name: say what came up the second time
+  ssh: 'uptime && sw_vers
 
-  - name: wait for sshd
-    require_ssh: true
-    ssh_probe: echo ok
-    timeout: 900
-
-  # THE IDENTITY OF THE MACHINE, so the log says which disk was started rather than only that
-  # something answered.
-  - name: say what came up
-    ssh: |
-      sw_vers && uname -a && id -un
-    timeout: 120
-
-  # A REBOOT PROVES THE DISK BOOTS ON ITS OWN. A first boot can succeed out of a state the
-  # previous stage left in memory; the second one cannot.
-  - name: reboot into the same system
-    reboot: true
-    timeout: 900
-
-  - name: prove it came back
-    require_ssh: true
-    ssh_probe: echo ok
-    timeout: 900
-
-  - name: say what came up the second time
-    ssh: |
-      uptime && sw_vers
-    timeout: 120
-
-  # KILLED, NOT ASKED - this guest is on an overlay. See the note at the top.
-  #
-  # AND THE METHOD IS NAMED. `shutdown:` used to be a boolean that meant "careful or not", and
-  # the actual method was chosen by a chain inside vm_session.stop() - agent, then ssh, then the
-  # power button, then kill - with each step falling silently into the next. On macOS that chain
-  # was a lie: the power button opens a dialog, so the "graceful" shutdown was a 300-second wait
-  # and a kill that reported itself as clean.
-  #
-  #     guest_agent   a request the agent executes. Needs qga; stops the run if it is absent.
-  #     ssh           `shutdown -h now` over the walkthrough's own connection.
-  #     acpi          the power button. Windows and Linux honour it; macOS refuses it here.
-  #     kill          the process ends now. Right for an overlay, where nothing is kept.
-  - name: shut it down
-    shutdown: kill
+    '
+  timeout: 120
+- name: shut it down
+  shutdown: kill

@@ -106,7 +106,16 @@ func machineFromBlock(raw map[string]any, f *walk.File) (MachineSpec, []walk.Ste
 	}
 
 	// FETCH IS ONE OR MANY, because macOS has three and every other OS has one.
-	switch v := raw["fetch"].(type) {
+	// IN A `machine:` BLOCK THE THREE ARE ONE LIST, because they are one preparation and the key
+	// names only say WHY each file exists. The kind inside decides which key is emitted back.
+	fetchRaw := raw["fetch"]
+	if fetchRaw == nil {
+		fetchRaw = raw["asset"]
+	}
+	if fetchRaw == nil {
+		fetchRaw = raw["prepare"]
+	}
+	switch v := fetchRaw.(type) {
 	case map[string]any:
 		m.Fetch = append(m.Fetch, fetchFrom(v))
 	case []any:
@@ -156,7 +165,12 @@ func fetchFrom(raw map[string]any) FetchSpec {
 	spec := FetchSpec{}
 	spec.Kind, _ = raw["kind"].(string)
 	if spec.Kind == "" {
-		spec.Kind, _ = raw["fetch"].(string)
+		for _, k := range []string{"asset", "build", "generate", "fetch"} {
+			if v, ok := raw[k].(string); ok && v != "" {
+				spec.Kind = v
+				break
+			}
+		}
 	}
 	spec.Release, _ = raw["release"].(string)
 	spec.Template, _ = raw["template"].(string)
@@ -187,9 +201,11 @@ func machineFromSteps(f *walk.File) (MachineSpec, []walk.Step, error) {
 			path := s.Get("disk")
 			gb, _ := s.Float("disk_gb", 0)
 			m.Disk = &DiskSpec{Path: path, GB: int(gb)}
-		case s.Has("fetch"):
+		case stepHasAny(s, "asset", "build", "generate"):
+			// ALL THREE ARE PREPARATION: a machine cannot start until its media exists, whether that
+			// media was downloaded, assembled or rendered.
 			m.Fetch = append(m.Fetch, FetchSpec{
-				Kind:     s.Get("fetch"),
+				Kind:     firstOf(s, "asset", "build", "generate"),
 				Release:  s.Get("release"),
 				Template: s.Get("template"),
 				Recovery: s.Get("recovery"),
@@ -230,7 +246,17 @@ func MachineSteps(m MachineSpec) []walk.Step {
 		}})
 	}
 	for _, f := range m.Fetch {
-		spec := map[string]any{"name": "fetch " + f.Kind, "fetch": f.Kind}
+		// THE KEY THE FILE USED IS NOT PRESERVED HERE, and it does not need to be: `doFetch` reads
+		// whichever of the three is present, so emitting `asset:` for everything is the same
+		// assembly with one spelling. A `machine:` block that wants to say `build:` says it in its
+		// own `fetch:` list and keeps that name through `fetchFrom`.
+		key := "asset"
+		if f.Kind == "opencore" {
+			key = "build"
+		} else if f.Kind == "answer_iso" {
+			key = "generate"
+		}
+		spec := map[string]any{"name": "prepare " + f.Kind, key: f.Kind}
 		if f.Release != "" {
 			spec["release"] = f.Release
 		}
@@ -246,6 +272,26 @@ func MachineSteps(m MachineSpec) []walk.Step {
 		out = append(out, *m.Boot)
 	}
 	return out
+}
+
+// stepHasAny reports whether the step carries any of these keys.
+func stepHasAny(s walk.Step, keys ...string) bool {
+	for _, k := range keys {
+		if _, ok := s.Spec[k]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// firstOf returns the value of the first of these keys the step carries.
+func firstOf(s walk.Step, keys ...string) string {
+	for _, k := range keys {
+		if v := s.Get(k); v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // hasAny reports whether the step carries this key at all, including a false or empty value.

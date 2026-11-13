@@ -30,10 +30,10 @@ steps:
   disk: disk.qcow2
   disk_gb: 128
 - name: build the answer CD
-  fetch: answer_iso
   template: windows/11/answer/Autounattend.xml
+  generate: answer_iso
 - name: name the installer
-  fetch: windows_iso
+  asset: windows_iso
 - name: boot the installer
   boot: true
   os: windows

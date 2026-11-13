@@ -19,8 +19,8 @@ steps:
   disk: disk.qcow2
   disk_gb: 128
 - name: fetch the installer image
-  fetch: linux_iso
   release: cachyos
+  asset: linux_iso
 - name: boot the installer
   boot: true
   os: linux

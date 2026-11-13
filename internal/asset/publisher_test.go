@@ -33,8 +33,8 @@ func TestEveryFetchedTagIsPublishedAndEveryPublishedTagIsFetched(t *testing.T) {
 		if published[tag] || mirrored[tag] {
 			continue
 		}
-		t.Errorf("`fetch:` can ask for %q and artifacts-publish.yml does not write it, so that "+
-			"stage fails with a 404 after its download budget is already spent", tag)
+		t.Errorf("a preparation step can ask for %q and artifacts-publish.yml does not write it, "+
+			"so that stage fails with a 404 after its download budget is already spent", tag)
 	}
 	for tag := range published {
 		if fetched[tag] {
@@ -49,7 +49,8 @@ func TestEveryFetchedTagIsPublishedAndEveryPublishedTagIsFetched(t *testing.T) {
 	}
 }
 
-// tagsTheBuildAsksFor resolves every `fetch:` in every walkthrough through the alias table.
+// tagsTheBuildAsksFor resolves every `asset:`/`build:`/`generate:` in every walkthrough through
+// the alias table.
 func tagsTheBuildAsksFor(t *testing.T) map[string]bool {
 	t.Helper()
 	out := map[string]bool{}
@@ -66,14 +67,14 @@ func tagsTheBuildAsksFor(t *testing.T) map[string]bool {
 			t.Fatalf("cannot read %s: %v", name, err)
 		}
 		src := string(body)
-		if !strings.Contains(src, "fetch: linux_iso") {
+		if !strings.Contains(src, "asset: linux_iso") {
 			continue
 		}
 		for _, m := range release.FindAllStringSubmatch(src, -1) {
 			out[linuxISOTag(m[1])] = true
 		}
 	}
-	// A FILE THAT NAMES `fetch: linux_iso` MUST NAME A RELEASE, and if none was found the loop above
+	// A FILE THAT NAMES `asset: linux_iso` MUST NAME A RELEASE, and if none was found the loop above
 	// silently contributes nothing - so one is asserted rather than assumed.
 	if len(out) == 0 {
 		t.Fatal("no linux_iso release could be resolved from any walkthrough, so this test would " +

@@ -22,12 +22,12 @@ steps:
 - name: start recording
   record: install.mp4
 - name: fetch the recovery image
-  fetch: recovery_macos
   release: '15'
+  asset: recovery_macos
 - name: build OpenCore from the recovery image
-  fetch: opencore
   release: '15'
   recovery: recovery_macos
+  build: opencore
 - name: boot the disk
   boot: true
   os: macos

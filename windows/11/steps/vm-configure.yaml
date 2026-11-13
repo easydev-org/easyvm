@@ -37,9 +37,9 @@ steps:
   ssh_probe: echo ok
   timeout: 900
 - name: fetch the agent and its driver on the host
-  fetch: guest_agent
   family: windows
   timeout: 1200
+  asset: guest_agent
 - name: copy the driver in
   scp:
   - vioserial/vioser.inf

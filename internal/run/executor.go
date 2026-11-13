@@ -272,7 +272,10 @@ func (e *Executor) runOne(s walk.Step) error {
 		return e.doDemoScript(s)
 	case s.Has("write"):
 		return e.doWrite(s)
-	case s.Has("fetch"):
+	// THE THREE PREPARATION KINDS ARE ONE DISPATCHER, because they are one operation with three
+	// names: a file is obtained, assembled, or rendered, and all three end as a path in the work
+	// directory that a later step names. `doFetch` reads whichever key is present.
+	case s.Has("asset"), s.Has("build"), s.Has("generate"):
 		return e.doFetch(s)
 	case s.Has("scp"):
 		return e.doSCP(s)

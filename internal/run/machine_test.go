@@ -37,7 +37,7 @@ func TestTheMachineHalfIsThePreparationAndTheBoot(t *testing.T) {
 		"steps": []any{
 			map[string]any{"name": "start recording", "record": "x.mp4"},
 			map[string]any{"name": "create the empty disk", "disk": "disk.qcow2", "disk_gb": 128},
-			map[string]any{"name": "fetch the installer image", "fetch": "linux_iso", "release": "ubuntu"},
+			map[string]any{"name": "the installer image", "asset": "linux_iso", "release": "ubuntu"},
 			map[string]any{"name": "boot the installer", "boot": true, "os": "linux", "iso": "installer_iso"},
 			map[string]any{"name": "wait for the desktop", "desktop": "linux"},
 			map[string]any{"name": "click Next", "at": []any{10, 20}},
@@ -147,7 +147,7 @@ func TestAnISOAndARecoveryAreTheSameShape(t *testing.T) {
 		}
 		// `hasAny` RATHER THAN `Has`: a synthesized `disk_gb: 0` is present but empty, and `Has`
 		// asks whether the key carries a value. The order is what this asserts.
-		if !stepHasKey(steps[0], "disk") || !stepHasKey(steps[1], "fetch") || !stepHasKey(steps[2], "boot") {
+		if !stepHasKey(steps[0], "disk") || !stepHasKey(steps[1], "asset") || !stepHasKey(steps[2], "boot") {
 			t.Fatalf("%s: the machine half is out of order: %v (keys: %v / %v / %v)", c.name,
 				[]string{steps[0].Name, steps[1].Name, steps[2].Name},
 				keysOf(steps[0]), keysOf(steps[1]), keysOf(steps[2]))
