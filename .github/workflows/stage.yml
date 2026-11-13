@@ -203,7 +203,18 @@ jobs:
         # 141 for a check that SUCCEEDED.
         run: |
           set -eu
-          easyvm serve --work "$GITHUB_WORKSPACE/work" --novnc-port 6080 \
+          # THERE IS NO `--novnc-port` ANY MORE, AND PASSING IT KILLED EVERY CI LEG AT STARTUP.
+          #
+          # The console used to be a second HTTP server on :6080. It is now served by the daemon's own
+          # listener on :8080 - one port, bound once - and the flag was deleted with it. This line was
+          # not, so the daemon refused to start:
+          #
+          #	flag provided but not defined: -novnc-port
+          #	Usage of serve: -http string ... -work string ...
+          #
+          # and every install leg failed in 312 bytes of log with NO VIDEO AT ALL, because a machine
+          # that never started records nothing. Three workflows, one flag.
+          easyvm serve --work "$GITHUB_WORKSPACE/work" \
             > "$GITHUB_WORKSPACE/work/daemon.log" 2>&1 &
           echo $! > "$GITHUB_WORKSPACE/work/daemon.pid"
           for i in $(seq 1 30); do

@@ -24,7 +24,7 @@ INTERVAL=${INTERVAL:-5}
 mkdir -p "$WORK" "$SHOT"
 
 echo "=== daemon"
-easyvm serve --work "$WORK" --novnc-port 0 > "$WORK/daemon.log" 2>&1 &
+easyvm serve --work "$WORK" > "$WORK/daemon.log" 2>&1 &
 DPID=$!
 i=0
 while [ $i -lt 30 ]; do

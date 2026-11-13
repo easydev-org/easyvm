@@ -146,3 +146,60 @@ func mustRead(t *testing.T, path string) []byte {
 	}
 	return body
 }
+
+// NO WORKFLOW MAY PASS A FLAG THE DAEMON DOES NOT DEFINE.
+//
+// MEASURED, ON ALL THREE CI WORKFLOWS AT ONCE:
+//
+//	flag provided but not defined: -novnc-port
+//	Usage of serve: -http string ... -work string ...
+//
+// `--novnc-port` was deleted with the second HTTP server, and `stage.yml` and `sandbox.yml` still passed
+// it - so the daemon refused to start, every install leg failed in 312 bytes of log, and there was NO
+// VIDEO because a machine that never started records nothing.
+//
+// A TEST AND NOT A CONVENTION, because the deletion and the call sites live in different files and the
+// Go compiler cannot see a shell string. It asks the SOURCE OF TRUTH - the flags `cmdServe` defines -
+// and then looks for any other `-name` in the workflows' `easyvm serve` lines.
+func TestEveryDaemonFlagTheWorkflowsPassIsDefined(t *testing.T) {
+	src, err := os.ReadFile(filepath.Join("..", "..", "cmd", "easyvm", "main.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// the flags are declared with fs.String/fs.Int/fs.Duration in cmdServe
+	defined := map[string]bool{"work": true, "http": true}
+	for _, m := range regexp.MustCompile(`fs\.(?:String|Int|Duration|Bool)\("([a-z-]+)"`).FindAllStringSubmatch(string(src), -1) {
+		defined[m[1]] = true
+	}
+
+	files, err := filepath.Glob(filepath.Join("..", "..", ".github", "workflows", "*.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	served := 0
+	for _, path := range files {
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i, line := range strings.Split(string(body), "\n") {
+			// comments quote the old flags on purpose, and a comment is not an invocation
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "#") || !strings.Contains(line, "easyvm serve") {
+				continue
+			}
+			served++
+			for _, m := range regexp.MustCompile(`(?:^|\s)--?([a-z][a-z-]*)`).FindAllStringSubmatch(line, -1) {
+				if !defined[m[1]] {
+					t.Errorf("%s:%d passes `--%s` to `easyvm serve`, and cmdServe does not define it. "+
+						"The daemon will refuse to start and the leg will fail with a usage message "+
+						"rather than a machine", filepath.Base(path), i+1, m[1])
+				}
+			}
+		}
+	}
+	if served == 0 {
+		t.Fatal("no `easyvm serve` invocation was found, so this checks nothing")
+	}
+	t.Logf("checked %d `easyvm serve` line(s) against %d defined flag(s)", served, len(defined))
+}

@@ -120,7 +120,9 @@ jobs:
       - name: start the daemon
         run: |
           set -eu
-          easyvm serve --work "$GITHUB_WORKSPACE/work" --novnc-port 0 \
+          # `--novnc-port 0` WAS "NO CONSOLE"; there is no console port to disable now, because the page
+          # is served by the daemon's own listener. The flag was deleted with the second server.
+          easyvm serve --work "$GITHUB_WORKSPACE/work" \
             > "$GITHUB_WORKSPACE/work/daemon.log" 2>&1 &
           echo $! > "$GITHUB_WORKSPACE/work/daemon.pid"
           for i in $(seq 1 30); do
