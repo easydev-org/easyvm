@@ -513,7 +513,7 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 		"-netdev", fmt.Sprintf("tap,id=net0,ifname=%s,script=no,downscript=no",
 			easyvmnet.TapName),
 		"-device", fmt.Sprintf("virtio-net-pci,netdev=net0,mac=%s,romfile=,host_mtu=%d",
-			easyvmnet.TapMAC, easyvmnet.MTU),
+			easyvmnet.TapMAC, easyvmnet.UplinkMTU()),
 		"-device", "virtio-tablet-pci",
 	)
 

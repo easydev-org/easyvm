@@ -100,7 +100,7 @@ dhcp-option=option:mtu,%d
 dhcp-option=option:router,%s
 dhcp-option=option:dns-server,%s
 log-dhcp
-`, BridgeName, Prefix, BridgeName, GuestIP, GuestIP, TapMAC, GuestIP, dhcpLeasePath, MTU,
+`, BridgeName, Prefix, BridgeName, GuestIP, GuestIP, TapMAC, GuestIP, dhcpLeasePath, UplinkMTU(),
 		BridgeIP, dhcpUpstreams)
 
 	if err := os.WriteFile(dhcpConfPath, []byte(conf), 0o644); err != nil {
@@ -175,6 +175,51 @@ func applyNAT() error {
 		if _, err := run("iptables", "-t", "nat", "-A", "POSTROUTING", "-s", spec,
 			"-j", "MASQUERADE"); err != nil {
 			return fmt.Errorf("MASQUERADE for %s: %w", spec, err)
+		}
+	}
+
+	// MSS CLAMPING, WHICH IS THE SECOND HALF OF THE MTU FIX AND THE HALF THAT SURVIVES A GUEST THAT
+	// IGNORES THE LEASE.
+	//
+	// THE DHCP LEASE TELLS THE GUEST THE RIGHT MTU, and `Up` sets the bridge and the tap to the
+	// uplink's. THAT IS NOT ENOUGH. A guest that ignores the option, a guest whose stack clamps only
+	// its own side, and a path whose MTU changes after the lease all fail the same way: full-size
+	// segments vanish on a link the container cannot see, no ICMP comes back, and TLS stalls in its
+	// handshake because the server's Certificate is the first packet too big to carry.
+	//
+	// MEASURED, FROM THE REFERENCE IMPLEMENTATION: macOS 15 sat on the Setup Assistant for eight
+	// minutes with three ESTABLISHED connections to an Apple CDN whose byte counter did not move.
+	// The handshake completed - small packets - and so did the ClientHello; the Certificate did not.
+	//
+	// CLAMPING REWRITES THE MSS IN THE SYN AND SYN-ACK so the peer never offers more than fits. It
+	// costs one rule per direction and removes the silent failure for good.
+	//
+	//	FORWARD   the guest's traffic on its way out
+	//	OUTPUT    this container's own connections, which share the uplink and were measured dropping
+	//	          1500-byte packets too
+	//
+	// THE INSTALL IS CHECKED AND ITS FAILURE IS LOUD. A kernel without xt_TCPMSS reports
+	//
+	//	Warning: Extension TCPMSS revision 0 not supported, missing kernel module?
+	//	iptables v1.8.11 (nf_tables): RULE_APPEND failed (No such file or directory)
+	//
+	// and a version of this that discarded both return codes made "no module" look exactly like
+	// "rule installed", with an empty `iptables -t mangle -L FORWARD` for the life of the guest.
+	mss := strconv.Itoa(UplinkMTU() - 40) // 20 bytes of IP header, 20 of TCP
+	for _, chain := range []string{"FORWARD", "OUTPUT"} {
+		rule := []string{"-t", "mangle", "-C", chain, "-p", "tcp", "-m", "tcp",
+			"--tcp-flags", "SYN,RST", "SYN", "-j", "TCPMSS", "--set-mss", mss}
+		if _, err := run("iptables", rule...); err == nil {
+			continue
+		}
+		add := []string{"-t", "mangle", "-A", chain, "-p", "tcp", "-m", "tcp",
+			"--tcp-flags", "SYN,RST", "SYN", "-j", "TCPMSS", "--set-mss", mss}
+		if out, err := run("iptables", add...); err != nil {
+			// A MISSING MODULE IS REPORTED AND THE RUN CONTINUES, because the DHCP lease still
+			// carries the right MTU and a guest that honours it works. Silently pretending the rule
+			// exists is the failure this message replaces.
+			fmt.Printf("  network: MSS clamping for %s is unavailable: %s\n",
+				chain, firstLine(out))
 		}
 	}
 

@@ -47,11 +47,76 @@ const (
 	Prefix     = 24
 	// TapMAC is the MAC the tap presents and the one dnsmasq leases GuestIP to.
 	TapMAC = "52:54:00:56:4d:01"
-	// MTU follows the uplink. A guest larger than its tap is the broken case: measured on this
-	// cluster, guest 1500 over a 1450 tap drops every full segment, and the symptom is a TLS
-	// handshake that never completes rather than a network error.
+	// MTU IS READ FROM THE INTERFACE THIS CONTAINER'S TRAFFIC ACTUALLY LEAVES THROUGH, and the
+	// constant is only the fallback.
+	//
+	// THE GUEST'S MTU HAS TO FIT INSIDE THE CONTAINER'S. Kubernetes and its CNI take fifty bytes for
+	// encapsulation, so a container's eth0 is 1450 while a guest told 1500 sends packets that are
+	// dropped silently on a link the container cannot see. NOTHING REPORTS IT: no ICMP comes back,
+	// the TCP handshake completes because those segments are small, and so does the TLS ClientHello -
+	// and then the server's Certificate is several kilobytes, does not fit, and never arrives. TLS
+	// never finishes and the pane waits for an answer that cannot come.
+	//
+	// MEASURED, FROM THE REFERENCE IMPLEMENTATION: macOS 15 sat on the Setup Assistant's Screen Time
+	// pane for eight minutes with three ESTABLISHED connections to an Apple CDN whose byte counter
+	// did not move once. Two CI runs were blamed on "an unreachable Apple host" before this was found:
+	//
+	//	ping -M do -s 1422 17.157.64.66   (packet 1450)  OK
+	//	ping -M do -s 1472 17.157.64.66   (packet 1500)  DROPPED
+	//
+	// THE HARD-CODED 1450 WAS RIGHT FOR THIS CLUSTER AND WRONG AS A RULE. A node whose uplink is
+	// smaller, or a run behind a tunnel, gets the same silent stall and no way to see why.
 	MTU = 1450
+
+	// mtuOverrideEnv lets a host whose uplink differs from what the container reports say so.
+	mtuOverrideEnv = "VM_MTU"
 )
+
+// UplinkMTU is the MTU of the interface this container's traffic leaves through.
+//
+// IT IS READ FROM THE KERNEL RATHER THAN ASSUMED, and the fallback is the constant above because a
+// container with no default route has no link to fit inside. The order is: the override, then the
+// interface of the default route, then the first non-loopback interface, then 1450.
+func UplinkMTU() int {
+	if v := os.Getenv(mtuOverrideEnv); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	// THE DEFAULT ROUTE'S INTERFACE IS THE HONEST ANSWER, because that is where the packets go.
+	if out, err := run("ip", "route", "show", "default"); err == nil {
+		for _, field := range strings.Fields(out) {
+			if mtu, ok := mtuOf(field); ok {
+				return mtu
+			}
+		}
+	}
+	// AND WITHOUT A DEFAULT ROUTE, ANY REAL INTERFACE BEATS A GUESS.
+	if entries, err := os.ReadDir("/sys/class/net"); err == nil {
+		for _, e := range entries {
+			if e.Name() == "lo" || strings.HasPrefix(e.Name(), "qemutap") {
+				continue
+			}
+			if mtu, ok := mtuOf(e.Name()); ok {
+				return mtu
+			}
+		}
+	}
+	return MTU
+}
+
+// mtuOf reads one interface's MTU, reporting false for a name that is not an interface.
+func mtuOf(name string) (int, bool) {
+	b, err := os.ReadFile("/sys/class/net/" + name + "/mtu")
+	if err != nil {
+		return 0, false
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(string(b)))
+	if err != nil || n <= 0 {
+		return 0, false
+	}
+	return n, true
+}
 
 // ErrNoTun and ErrNoNetAdmin are the two capability failures, separate because the fixes differ.
 var (
@@ -157,7 +222,7 @@ func Up(sshPort int, forwards []int) error {
 	}
 	for _, step := range [][]string{
 		{"address", "add", fmt.Sprintf("%s/%d", BridgeIP, Prefix), "dev", BridgeName},
-		{"link", "set", BridgeName, "mtu", strconv.Itoa(MTU)},
+		{"link", "set", BridgeName, "mtu", strconv.Itoa(UplinkMTU())},
 		{"link", "set", BridgeName, "up"},
 	} {
 		// EACH IS ALLOWED TO SAY "already there": `address add` on an interface that has it, and
@@ -177,7 +242,7 @@ func Up(sshPort int, forwards []int) error {
 		return fmt.Errorf("ip tuntap add: %v (%s)", err, firstLine(out))
 	}
 	for _, step := range [][]string{
-		{"link", "set", TapName, "mtu", strconv.Itoa(MTU)},
+		{"link", "set", TapName, "mtu", strconv.Itoa(UplinkMTU())},
 		{"link", "set", "dev", TapName, "up", "promisc", "on"},
 		{"link", "set", "dev", TapName, "master", BridgeName},
 	} {
