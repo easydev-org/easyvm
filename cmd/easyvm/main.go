@@ -339,21 +339,21 @@ func cmdPull(args []string) int {
 
 func cmdServe(args []string) int {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
-	work := fs.String("work", "", "the directory the socket and the frames live in")
+	work := fs.String("work", "", "the directory the frames and the guest scratch live in")
 	httpAddr := fs.String("http", daemon.DefaultHTTPAddr, "the browser surface: a live screen, a "+
 		"click map, keys and typing. Empty disables it")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	if *work == "" {
-		fmt.Fprintln(os.Stderr, "easyvm serve: --work is required; the socket lives there")
+		fmt.Fprintln(os.Stderr, "easyvm serve: --work is required; the frames and the guest scratch live there")
 		return 2
 	}
 
 	d := daemon.New()
 	fmt.Printf("[easyvm] daemon for %s\n", *work)
 
-	// THE BROWSER SURFACE IS A SECOND FRONT END ON THE SAME DAEMON, started beside the socket and
+	// THE BROWSER SURFACE IS THE DAEMON'S ONE FRONT END, listening beside the socket-less state and
 	// sharing its state. It is not a second service: every click and key it receives goes through the
 	// same `handle` the CLI uses, and the QMP connection is the one this daemon already holds.
 	if *httpAddr != "" {
@@ -580,7 +580,7 @@ func workArg(cmd string, args []string) (string, int) {
 		return "", 2
 	}
 	if *work == "" {
-		fmt.Fprintf(os.Stderr, "easyvm %s: --work is required, because the socket lives in it\n", cmd)
+		fmt.Fprintf(os.Stderr, "easyvm %s: --work is required, because the frames live in it\n", cmd)
 		return "", 2
 	}
 	return *work, 0

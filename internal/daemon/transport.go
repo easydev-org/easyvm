@@ -1,116 +1,31 @@
 package daemon
 
 import (
-	"bufio"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
-	"net"
-	"os"
 	"path/filepath"
-	"strings"
-	"time"
 
 	"github.com/easydev-org/easyvm/internal/run"
 	"github.com/easydev-org/easyvm/internal/walk"
 )
 
-// listenUnix creates the socket with 0600, so only the owning user can drive the machine.
+// THERE IS NO UNIX-SOCKET TRANSPORT ANY MORE. It lived here as `listenUnix`, `socketAnswers`,
+// `acceptLoop` and `serveConn`, and the last of those had the wrong shape:
 //
-// THE PERMISSION IS THE SECURITY MODEL. There is no token and no password on this channel: the
-// daemon controls a machine on this host, and "the user who can open this socket" is exactly the
-// set of people allowed to. 0600 states that rather than relying on a umask.
-func listenUnix(path string) (net.Listener, error) {
-	_ = os.Remove(path)
-	ln, err := net.Listen("unix", path)
-	if err != nil {
-		return nil, fmt.Errorf("listen on %s: %w", path, err)
-	}
-	if err := os.Chmod(path, 0o600); err != nil {
-		ln.Close()
-		return nil, err
-	}
-	return ln, nil
-}
-
-// socketAnswers reports whether something is listening and answering on path.
-func socketAnswers(path string) bool {
-	conn, err := net.DialTimeout("unix", path, 500*time.Millisecond)
-	if err != nil {
-		return false
-	}
-	defer conn.Close()
-	// A LIVE DAEMON ANSWERS A PING. A socket file left by a crashed process accepts the connect and
-	// reads EOF; that distinction is what lets a restart clean up after a crash without ever
-	// taking over from a running daemon.
-	if err := json.NewEncoder(conn).Encode(Request{Command: "ping"}); err != nil {
-		return false
-	}
-	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	var resp Response
-	if err := json.NewDecoder(conn).Decode(&resp); err != nil {
-		return false
-	}
-	return resp.OK
-}
-
-// acceptLoop serves requests one at a time, which the machine's single state requires.
-func (d *Daemon) acceptLoop(ln net.Listener) error {
-	defer ln.Close()
-	for {
-		conn, err := ln.Accept()
-		if err != nil {
-			select {
-			case <-d.shutdown:
-				return nil
-			default:
-				return err
-			}
-		}
-		d.serveConn(conn)
-		conn.Close()
-	}
-}
-
-// serveConn answers requests on one connection until the client closes it.
+//	for {
+//		conn, _ := ln.Accept()
+//		d.serveConn(conn)     // reads until the CLIENT closes
+//		conn.Close()
+//	}
 //
-// IT DID NOT LOOP AT FIRST, AND THAT WAS A REAL DEFECT. The client's obvious shape is one connection
-// and several calls - `status` polled while a run proceeds - and a server that closed after the
-// first reply made every later call decode from a closed socket. The symptom was a `status` that
-// returned an EMPTY response with no error, which reads as a daemon that forgot its own state.
+// A poller that kept its connection open held the entire loop, so nothing else was accepted - and the
+// HTTP surface then blocked behind the machine's lock:
 //
-// A CONNECTION IS NOT AUTHORITY. Holding one lets a client keep ASKING, and each ask is answered on
-// its own; nothing about the machine is granted by the socket staying open.
-func (d *Daemon) serveConn(conn net.Conn) {
-	dec := json.NewDecoder(bufio.NewReader(conn))
-	for {
-		// A CONNECTION THAT GOES QUIET IS DROPPED rather than held forever: a client that crashed
-		// must not keep a descriptor for the life of the daemon.
-		_ = conn.SetDeadline(time.Now().Add(10 * time.Minute))
-		var req Request
-		if err := dec.Decode(&req); err != nil {
-			if !errors.Is(err, io.EOF) && !isClosed(err) {
-				writeResponse(conn, Response{OK: false, Error: fmt.Sprintf("unreadable request: %v", err)})
-			}
-			return
-		}
-		writeResponse(conn, d.handle(req))
-	}
-}
-
-// isClosed reports whether a read failed because the peer went away, which is the normal end of a
-// connection and not worth a reply.
-func isClosed(err error) bool {
-	return errors.Is(err, net.ErrClosed) || strings.Contains(err.Error(), "use of closed network connection")
-}
-
-func writeResponse(conn net.Conn, resp Response) {
-	_ = json.NewEncoder(conn).Encode(resp)
-}
-
-// runWalkthrough drives the file, and is the daemon's whole job.
+//	goroutine 1   [IO wait]                     <- acceptLoop, inside serveConn
+//	goroutine 66  [sync.Mutex.Lock] 3 minutes   <- http / -> vncPort -> d.mu
 //
+// which is a daemon that accepts `curl` and never answers, on a transport nobody needed. HTTP is the
+// only one now, and `net/http` starts a goroutine per connection itself. See `Serve`.
+
 // THE EXECUTOR'S DRIVER IS THE ONE THIS PACKAGE OWNS, so the machine and its position in the
 // walkthrough live in the same process. That is the structural claim the package exists to make.
 func (d *Daemon) runWalkthrough(req Request, work string, done chan struct{}) {

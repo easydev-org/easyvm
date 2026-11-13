@@ -66,17 +66,25 @@ func DialHTTP(addr string) (*Client, error) {
 	return &Client{base: base, http: &http.Client{Timeout: 30 * time.Second}}, nil
 }
 
+// Dial connects to the daemon for a work directory, OVER HTTP.
+//
+// THERE IS NO UNIX SOCKET ANY MORE, and this function used to open one. The socket transport was
+// serial - one connection at a time, read until the client closed - so a poller that kept its call
+// open stopped the daemon accepting anything else, and the HTTP surface then blocked behind the
+// machine's lock. The daemon now listens on one port and this dials it.
+//
+// EASYVM_HTTP NAMES IT. A client that runs beside the daemon uses 127.0.0.1:8080; one that runs in
+// another pod uses the Service name, which is the reason the variable exists at all.
 func Dial(work string) (*Client, error) {
-	sock := protocol.SocketPath(work)
-	conn, err := net.DialTimeout("unix", sock, 2*time.Second)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) || isNoSuchFile(err) {
-			return nil, fmt.Errorf("%w: no socket at %s", protocol.ErrNoDaemon, sock)
-		}
-		return nil, fmt.Errorf("the daemon at %s did not answer: %w", sock, err)
+	addr := os.Getenv("EASYVM_HTTP")
+	if addr == "" {
+		addr = defaultAddr
 	}
-	return &Client{conn: conn}, nil
+	return DialHTTP(addr)
 }
+
+// defaultAddr is where a daemon started without `--http ""` listens.
+const defaultAddr = "127.0.0.1:8080"
 
 func isNoSuchFile(err error) bool {
 	var opErr *net.OpError
@@ -95,25 +103,15 @@ func stringsContains(s, sub string) bool {
 	return false
 }
 
-// Do sends one request and reads the reply.
+// Do sends one request and reads the reply, OVER HTTP - the only transport there is.
+//
+// THE SOCKET BRANCH THAT USED TO BE HERE is gone with the socket. It mattered for more than tidiness:
+// the unix `acceptLoop` handled ONE CONNECTION AT A TIME and read until the client closed, so a poller
+// that kept its call open stopped the daemon accepting anything else. A client that could block the
+// server by staying connected is not a transport, it is a trap - and the trap was in the same code as
+// the fix, which is why it took a goroutine dump to see.
 func (c *Client) Do(req Request) (Response, error) {
-	// THE TCP TRANSPORT IS ONE POST PER COMMAND, and the path is the command's own name. The daemon
-	// serves both shapes from the same `handle`, so this is a transport and not a translation.
-	if c.base != "" {
-		return c.doHTTP(req)
-	}
-	// THE DEADLINE IS GENEROUS FOR STATUS AND SHORT FOR EVERYTHING ELSE. A `run` is answered as
-	// soon as the daemon accepts it, so nothing here waits for a walkthrough; the only call that can
-	// take real time is a `stop` that is waiting for a step boundary.
-	_ = c.conn.SetDeadline(time.Now().Add(30 * time.Second))
-	if err := json.NewEncoder(c.conn).Encode(req); err != nil {
-		return Response{}, fmt.Errorf("sending %q: %w", req.Command, err)
-	}
-	var resp Response
-	if err := json.NewDecoder(c.conn).Decode(&resp); err != nil {
-		return Response{}, fmt.Errorf("reading the reply to %q: %w", req.Command, err)
-	}
-	return resp, nil
+	return c.doHTTP(req)
 }
 
 // doHTTP sends one request to the browser surface.

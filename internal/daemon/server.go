@@ -99,57 +99,53 @@ func New() *Daemon {
 	}
 }
 
-// Addr is the socket path this daemon serves on its work directory.
+// ServeOptions configures Serve.
 type ServeOptions struct {
-	// Work is where the socket and the frames live.
+	// Work is where the frames and the guest's scratch files live.
+	//
+	// IT NO LONGER HOLDS A SOCKET, because there is no socket: HTTP is the only transport, for the
+	// reason spelled out on Serve.
 	Work string
-	// NoVNCPort is where the browser page listens; 0 disables it. It is the DAEMON'S flag rather
-	// than a per-run one because the port belongs to the host the daemon runs on, not to the file.
-	// The zero value means DefaultNovNCPort, so a caller that does not care gets the convention.
-	NoVNCPort int
-	// Ready is called once the socket is listening, for a caller that must wait. A supervisor
-	// watches for this line instead of polling for the socket file, because a file that exists is
-	// not a daemon that answers.
-	Ready func(socketPath string)
+	// HTTPAddr is where the browser surface and the whole API listen. Empty means DefaultHTTPAddr.
+	HTTPAddr string
+	// Ready is called once the listener is open, for a supervisor that waits for an address rather
+	// than polling for a file - a file that exists is not a daemon that answers.
+	Ready func(addr string)
 }
 
-// Serve listens until Shutdown, handling one request at a time.
+// Serve listens on ONE HTTP PORT until Shutdown.
 //
-// ONE AT A TIME IS THE POINT. The machine has one state, so two concurrent requests that both
-// changed it would need locking that the step executor does not have - and a `run` while a `run` is
-// in progress is a question with no good answer. A second request while busy is refused with the
-// state, which tells the caller what is actually happening.
+// THE UNIX SOCKET IS GONE, AND IT WAS THE SOURCE OF A DEADLOCK THAT LOOKED LIKE A DEAD DAEMON.
+//
+// Two transports meant two code paths into the same state, and the socket's was SERIAL:
+//
+//	for {
+//		conn, _ := ln.Accept()
+//		d.serveConn(conn)     // reads until the CLIENT closes
+//		conn.Close()
+//	}
+//
+// A client that asked `status`, got its answer and kept the connection open - which is exactly what a
+// poller does - held that loop for as long as it stayed connected. Nothing else was accepted, and the
+// HTTP surface blocked behind the machine's lock:
+//
+//	goroutine 1   [IO wait]                     <- acceptLoop, in serveConn
+//	goroutine 66  [sync.Mutex.Lock] 3 minutes   <- http / -> vncPort -> d.mu
+//	goroutine 11  [sync.Mutex.Lock] 8 minutes   <- run -> qmpSocket -> d.mu
+//
+// and `curl http://127.0.0.1:8080/` accepted the connection and never got a byte back, which reads as
+// a hung daemon rather than as contention on a second transport nobody needed.
+//
+// HTTP HAS NO SUCH SHAPE: `net/http` spawns a goroutine per connection itself, so one slow client
+// cannot stop another, and `curl` is a diagnostic that a person can run.
 func (d *Daemon) Serve(opts ServeOptions) error {
 	if opts.Work == "" {
-		return fmt.Errorf("a work directory is required; the socket lives in it")
+		return fmt.Errorf("a work directory is required; the frames live in it")
 	}
 	if err := os.MkdirAll(opts.Work, 0o755); err != nil {
 		return err
 	}
-	sock := SocketPath(opts.Work)
-
-	// A STALE SOCKET IS THE NORMAL CASE AFTER A CRASH, and refusing to start because of one is a
-	// daemon that cannot be restarted. The file is removed only when nothing answers on it, so a
-	// live daemon is still protected.
-	if _, err := os.Stat(sock); err == nil {
-		if !socketAnswers(sock) {
-			_ = os.Remove(sock)
-		} else {
-			return fmt.Errorf("a daemon is already listening on %s; stop it rather than "+
-				"starting a second, because two owners of one machine is the thing this "+
-				"package exists to prevent", sock)
-		}
-	}
-
-	ln, err := listenUnix(sock)
-	if err != nil {
-		return err
-	}
-	d.listener = ln
 	d.work = opts.Work
-	if opts.Ready != nil {
-		opts.Ready(sock)
-	}
 
 	// SIGTERM STOPS THE MACHINE AND THE DAEMON, in that order, so a container stop does not leave
 	// qemu behind holding /dev/kvm.
@@ -163,7 +159,7 @@ func (d *Daemon) Serve(opts ServeOptions) error {
 		}
 	}()
 
-	return d.acceptLoop(ln)
+	return d.ServeHTTP(HTTPServeOptions{Addr: opts.HTTPAddr, Ready: opts.Ready})
 }
 
 // requestShutdown stops any run and asks Serve to return.

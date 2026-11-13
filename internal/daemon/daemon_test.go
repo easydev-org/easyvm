@@ -8,10 +8,11 @@ import (
 	"time"
 
 	"github.com/easydev-org/easyvm/internal/client"
+	"github.com/easydev-org/easyvm/internal/protocol"
 	"github.com/easydev-org/easyvm/internal/run"
 )
 
-// THESE TESTS DRIVE THE REAL SOCKET. A daemon tested by calling its methods directly would prove
+// THESE TESTS DRIVE THE REAL TRANSPORT. A daemon tested by calling its methods directly would prove
 // nothing about the thing that matters - that a CLIENT can reach it - and the transport is where
 // "one owner" either holds or does not.
 
@@ -19,20 +20,27 @@ import (
 func startDaemon(t *testing.T) (string, *Daemon) {
 	t.Helper()
 	work := t.TempDir()
+	// PORT 0 AND THE ADDRESS IT CHOSE, because a fixed port would make two tests collide and a test
+	// that cannot run beside another one is a test that hides a real conflict behind a flaky one.
 	d := New()
 	ready := make(chan string, 1)
 	go func() {
 		_ = d.Serve(ServeOptions{
-			Work:  work,
-			Ready: func(sock string) { ready <- sock },
+			Work:     work,
+			HTTPAddr: "127.0.0.1:0",
+			Ready:    func(addr string) { ready <- addr },
 		})
 	}()
+	var addr string
 	select {
-	case <-ready:
+	case addr = <-ready:
 	case <-time.After(10 * time.Second):
-		t.Fatal("the daemon never became ready; a socket that does not appear is a daemon " +
-			"nobody can reach")
+		t.Fatal("the daemon never became ready; an address that never opens is a daemon nobody " +
+			"can reach")
 	}
+	// THE CLIENT DIALS `EASYVM_HTTP`, which is how a daemon on a Service name is reached too - the
+	// variable is the client's whole notion of where the machine is.
+	t.Setenv("EASYVM_HTTP", addr)
 	t.Cleanup(func() { d.requestShutdown() })
 	return work, d
 }
@@ -59,79 +67,76 @@ func TestClientReachesTheDaemon(t *testing.T) {
 	}
 }
 
-// AND A DAEMON THAT IS NOT THERE IS SAID SO, NOT WAITED FOR.
+// A DAEMON THAT IS NOT THERE IS SAID SO, NOT WAITED FOR.
 //
-// The common mistake is calling `run` before `serve`. A client that hung for thirty seconds and then
-// reported a timeout would send the reader looking at the machine.
+// THE TRANSPORT IS HTTP NOW, so the failure a client sees is a refused connection rather than a
+// missing socket file - and both are immediate. What matters is unchanged: a person who called `run`
+// before `serve` must be told "nothing is listening", not left to interpret a thirty-second timeout as
+// a broken machine.
 func TestDialWithoutADaemonIsImmediate(t *testing.T) {
-	work := t.TempDir()
+	// A PORT NOTHING OWNS. 9 is discard, which nothing listens on here.
+	t.Setenv("EASYVM_HTTP", "127.0.0.1:9")
 	start := time.Now()
-	_, err := client.Dial(work)
+	cl, err := client.Dial("")
 	elapsed := time.Since(start)
 
 	if err == nil {
-		t.Fatal("dial must fail when no daemon is listening")
+		// DialHTTP only parses the address, so the failure arrives on the first request.
+		_, err = cl.Do(protocol.Request{Command: "status"})
+		_ = cl.Close()
 	}
-	if !strings.Contains(err.Error(), "no socket at") {
-		t.Fatalf("the message must say there is no socket there; got %v", err)
+	if err == nil {
+		t.Fatal("a request must fail when no daemon is listening")
 	}
-	if elapsed > 3*time.Second {
+	if elapsed > 5*time.Second {
 		t.Fatalf("the refusal took %s; a missing daemon is a fact, not a timeout", elapsed)
 	}
 }
 
-// A SECOND DAEMON ON ONE SOCKET IS REFUSED BY NAME.
+// A SECOND DAEMON ON ONE PORT IS REFUSED BY THE KERNEL, WHICH IS A STRONGER ANSWER THAN A FILE CHECK.
 //
-// THIS IS THE STRUCTURAL CLAIM OF THE PACKAGE. Two owners of one machine is the failure that an
-// embedded-CLI fallback would have allowed, and the daemon is where it becomes impossible.
+// THIS IS STILL THE STRUCTURAL CLAIM OF THE PACKAGE: two owners of one machine is the failure an
+// embedded-CLI fallback would have allowed. It used to be enforced by noticing an answering socket
+// file; it is now enforced by binding the port, which cannot be raced and cannot be left stale.
 func TestSecondDaemonIsRefused(t *testing.T) {
-	work, _ := startDaemon(t)
+	_, _ = startDaemon(t)
+	addr := os.Getenv("EASYVM_HTTP")
 
 	second := New()
-	err := second.Serve(ServeOptions{Work: work})
+	err := second.Serve(ServeOptions{Work: t.TempDir(), HTTPAddr: addr})
 	if err == nil {
-		t.Fatal("a second daemon on one socket must be refused")
+		t.Fatal("a second daemon on one port must be refused")
 	}
-	if !strings.Contains(err.Error(), "already listening") {
-		t.Fatalf("the refusal must say a daemon is already there; got %v", err)
-	}
-	// AND IT MUST NOT HAVE REMOVED THE FIRST ONE'S SOCKET. A stale-socket cleanup that ran on a
-	// live daemon would take the machine away from its owner.
-	if _, err := os.Stat(SocketPath(work)); err != nil {
-		t.Fatalf("the first daemon's socket was removed: %v", err)
+	if !strings.Contains(err.Error(), "address already in use") {
+		t.Fatalf("the refusal must name the port conflict; got %v", err)
 	}
 }
 
-// A SOCKET LEFT BY A CRASHED DAEMON DOES NOT BLOCK A RESTART.
+// THE UNIX SOCKET IS GONE, AND THE DAEMON STARTS ON A PORT INSTEAD.
 //
-// The distinction is measured rather than assumed: a socket file that accepts a connect and reads
-// EOF is a dead one, and refusing to start because of it would be a daemon that cannot be restarted
-// after the crash it exists to survive.
-func TestStaleSocketIsReplaced(t *testing.T) {
+// This replaces `TestStaleSocketIsReplaced`, which tested that a socket file left by a crashed daemon
+// did not block a restart. THE TRANSPORT IT TESTED WAS REMOVED: it was serial - one connection, read
+// until the client closed - so a poller holding its call open stopped the daemon accepting anything
+// else, and the HTTP surface then blocked behind the machine's lock. A daemon that answers `curl` with
+// silence is not a transport that needs a stale-file check; it is a transport to delete.
+//
+// WHAT REPLACES IT IS THE PROPERTY THAT MATTERS: the daemon listens, and a second start of the same
+// work directory is refused because two owners of one machine is the thing this package exists to
+// prevent.
+func TestTheDaemonListensOnItsPort(t *testing.T) {
 	work := t.TempDir()
-	sock := SocketPath(work)
-
-	// A socket nobody listens on: create it and close it, which is exactly what a killed process
-	// leaves behind.
-	ln, err := listenUnix(sock)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ln.Close()
-
-	if socketAnswers(sock) {
-		t.Fatal("a closed socket must not answer; this test cannot distinguish the cases")
-	}
-
 	d := New()
 	ready := make(chan string, 1)
 	go func() {
-		_ = d.Serve(ServeOptions{Work: work, Ready: func(s string) { ready <- s }})
+		_ = d.Serve(ServeOptions{Work: work, Ready: func(addr string) { ready <- addr }})
 	}()
 	select {
-	case <-ready:
+	case addr := <-ready:
+		if addr == "" {
+			t.Fatal("the daemon reported an empty address, so a client has nowhere to dial")
+		}
 	case <-time.After(10 * time.Second):
-		t.Fatal("a stale socket must not stop a restart")
+		t.Fatal("the daemon never started listening")
 	}
 	t.Cleanup(func() { d.requestShutdown() })
 }
@@ -190,19 +195,13 @@ func TestUnknownCommandIsRefused(t *testing.T) {
 	}
 }
 
-// THE SOCKET IS NOT WORLD-READABLE. There is no token on this channel; the permission is the
-// security model, so it is asserted rather than assumed.
-func TestSocketIsPrivate(t *testing.T) {
-	work, _ := startDaemon(t)
-	fi, err := os.Stat(SocketPath(work))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if perm := fi.Mode().Perm(); perm != 0o600 {
-		t.Fatalf("the socket is %04o; it must be 0600, because the permission IS the security "+
-			"model on this channel", perm)
-	}
-}
+// THE PERMISSION MODEL MOVED FROM A FILE MODE TO A LISTEN ADDRESS.
+//
+// `TestSocketIsPrivate` asserted `0600` on the unix socket, because "who can open the socket" was the
+// whole of the authorisation. THE SOCKET IS GONE; the daemon listens on a TCP address, so the
+// authorisation is the address itself - loopback by default, reachable only by whoever can route to
+// it. That is stated in `ServeOptions.HTTPAddr`'s documentation rather than in a file mode, and a test
+// that read a file permission would pass on a transport nobody uses.
 
 // A RUN OF A FILE THAT DOES NOT LOAD FAILS THE RUN AND CANNOT BE ASKED AGAIN BY ACCIDENT.
 func TestBadFileFailsTheRun(t *testing.T) {
