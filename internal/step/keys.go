@@ -217,8 +217,13 @@ var Keys = map[string]Key{
 		Summary: "seconds to wait for the terminal after `run` opens it"},
 	"line_gap": {Name: "line_gap", Kind: KindFloat,
 		Summary: "seconds between the lines of a multi-line `run`"},
-	"repeat": {Name: "repeat", Kind: KindList,
-		Summary: "(count, settle) for a footer button pressed the same way N times"},
+	// THERE IS NO `repeat:`. IT WAS A DEAD KEY: fourteen of them across eight files, a vocabulary
+	// entry describing "(count, settle) for a footer button pressed the same way N times", and NO
+	// DISPATCHER BRANCH ANYWHERE THAT READ IT - so `repeat: [10, 4]` pressed nothing. The vocabulary
+	// test that requires every key to have a branch did not catch it because `repeat` was never
+	// claimed as executable, only declared.
+	//
+	// A LOOP IS `loop:`, and a fixed number of presses is a `do:` list. Both are visible in the file.
 	"sweep": {Name: "sweep", Kind: KindMapping,
 		Summary: "a band of clicks at one x, stopping when the sheet opens"},
 	"press": {Name: "press", Kind: KindString,
@@ -354,16 +359,20 @@ var Keys = map[string]Key{
 		Summary: "read ONE region with OCR and name the result: {name, region, region_at, scale}. " +
 			"It decides nothing - a `when:` step answers from the name, and work/ocr/<name>.txt " +
 			"keeps the words a decision was made from"},
-	"check": {Name: "check", Kind: KindString,
-		Summary: "answer a condition from a named reading: `check: menu` with `says:` or " +
-			"`says_any:`. It never reads the screen, so it costs nothing to re-ask"},
+	"check": {Name: "check", Kind: KindMapping,
+		Summary: "compare a named reading with a target and bind a BOOLEAN: {name, from, " +
+			"says/says_any}. `from:` is what an `ocr:` step read. It never reads the screen, so it " +
+			"costs nothing to re-ask"},
 	"says": {Name: "says", Kind: KindWords,
 		Summary: "with `check:`: every one of these words must be in the reading"},
 	"says_any": {Name: "says_any", Kind: KindWordSets,
 		Summary: "with `check:`: any one of these word-sets must be in the reading"},
+	"fact": {Name: "fact", Kind: KindString,
+		Summary: "with `until:` inside a loop: the boolean a `check:` step produced. `until:` " +
+			"tests it and can do nothing else - the comparison belongs to `check:`"},
 	"loop": {Name: "loop", Kind: KindMapping,
-		Summary: "the three parts written down: `max:`, `do:` (the action), `ocr:` (the reading) " +
-			"and `until:` (the condition answered from it)"},
+		Summary: "the parts written down: `max:`, `do:` (the action), `ocr:` (the reading -> text), " +
+			"`check:` (the comparison -> boolean), `until: {fact: ...}` (tests the boolean)"},
 	"max": {Name: "max", Kind: KindInt,
 		Summary: "with `loop:`: the attempt ceiling. Required, because a loop with no ceiling " +
 			"presses a key until the stage times out"},

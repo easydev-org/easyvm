@@ -32,16 +32,37 @@ steps:
   poll: 5
   keep_alive: true
 - name: wait for the installer window
-  until_any:
-  - - welcome
-    - to
-    - ubuntu
-  - - choose
-    - your
-    - language
-  timeout: 600
-  poll: 5
-  keep_alive: true
+  loop:
+    max: 120
+    do:
+    - at:
+      - 420
+      - 300
+      wait_after: 5
+    ocr:
+      name: screen
+      region:
+      - 0
+      - 0
+      - 1920
+      - 1080
+      region_at:
+      - 1920
+      - 1080
+      scale: 1
+      wait: 0
+    check:
+      name: done
+      from: screen
+      says_any:
+      - - welcome
+        - to
+        - ubuntu
+      - - choose
+        - your
+        - language
+    until:
+      fact: done
 - name: welcome / language
   at:
   - 1355
@@ -142,31 +163,43 @@ steps:
   - 848
   wait_after: 30
 - name: the installer finishes
-  until_any:
-  - - installed
-    - and
-    - ready
-    - to
-    - use
-  - - restart
-    - to
-    - complete
-    - the
-    - installation
-  - - restart
-    - now
-  region:
-  - 0
-  - 0
-  - 1920
-  - 1080
-  region_at:
-  - 1920
-  - 1080
-  scale: 1
-  timeout: 5400
-  poll: 20
-  keep_alive: true
+  loop:
+    max: 270
+    do:
+    - at:
+      - 420
+      - 300
+      wait_after: 20
+    ocr:
+      name: screen
+      region:
+      - 0
+      - 0
+      - 1920
+      - 1080
+      region_at:
+      - 1920
+      - 1080
+      scale: 1
+      wait: 0
+    check:
+      name: done
+      from: screen
+      says_any:
+      - - installed
+        - and
+        - ready
+        - to
+        - use
+      - - restart
+        - to
+        - complete
+        - the
+        - installation
+      - - restart
+        - now
+    until:
+      fact: done
 - name: stop the machine
   shutdown: kill
   timeout: 120

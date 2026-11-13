@@ -55,11 +55,30 @@ steps:
   key: esc
   wait_after: 2
 - name: Setup is on screen
-  until:
-  - Windows
-  - Setup
-  timeout: 900
-  poll: 5
+  loop:
+    max: 180
+    do:
+    - wait: 5
+    ocr:
+      name: screen
+      region:
+      - 0
+      - 0
+      - 1920
+      - 1080
+      region_at:
+      - 1920
+      - 1080
+      scale: 1
+      wait: 0
+    check:
+      name: done
+      from: screen
+      says:
+      - Windows
+      - Setup
+    until:
+      fact: done
 - name: wait for the desktop
   desktop: windows
   timeout: 5400

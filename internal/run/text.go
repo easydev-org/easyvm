@@ -209,8 +209,38 @@ func (e *Executor) readCrop(crop image.Image, label string) ([]string, error) {
 	return words, nil
 }
 
-// doUntil waits for words to appear.
+// doUntil is ONE measurement of a wait, not a loop.
+//
+// IT USED TO BE A LOOP AND THAT WAS THE HIDDEN RETRY THIS VOCABULARY IS BEING CLEANED OF. `timeout:`
+// and `poll:` were a `for` loop in Go, so 109 steps in this repository each carried an invisible
+// retry: a reader could see `until_any:` and `timeout: 1800` and had no way to tell that the executor
+// would read the screen up to 180 times, or that a failed read was swallowed, or that `keep_alive:`
+// clicked the guest between attempts.
+//
+// THE LOOP IS `loop:` NOW, AND IT SAYS SO IN THE FILE:
+//
+//   - name: the recovery menu is up
+//     loop:
+//     max: 180
+//     do: [{wait: 10}]
+//     ocr: {name: recovery, region: [...], region_at: [...], wait: 0}
+//     check: {name: up, from: recovery, says_any: [[restore, time, machine], [safari]]}
+//     until: {fact: up}
+//
+// A BARE `until:` REMAINS FOR THE CASE THAT NEEDS NO RETRY - a screen that must ALREADY show the
+// words, checked once. `timeout:` and `poll:` are refused with it, because accepting them would
+// restore the loop this replaced.
 func (e *Executor) doUntil(s walk.Step) error {
+	if s.Has("timeout") || s.Has("poll") {
+		return fail(s.Name, "`until:` is ONE measurement and takes no `timeout:` or `poll:`. A "+
+			"retry is a `loop:` - with `do:`, `ocr:`, `check:` and `until: {fact: ...}` - so the "+
+			"file says how many times it will look and what it waits between")
+	}
+	if s.Has("keep_alive") {
+		return fail(s.Name, "`keep_alive:` belonged to the retrying `until:`. A loop that has to "+
+			"wake a blanked screen says so in its `do:` list, where the click is visible")
+	}
+
 	want := wordsOf(s, "until")
 	var alternatives [][]string
 	if len(want) > 0 {
@@ -220,74 +250,21 @@ func (e *Executor) doUntil(s walk.Step) error {
 		alternatives = append(alternatives, set)
 	}
 	if len(alternatives) == 0 {
-		return fail(s.Name, "`until:` or `until_any:` must name the words to wait for")
+		return fail(s.Name, "`until:` or `until_any:` must name the words to check for")
 	}
 
-	timeout := seconds(s, "timeout", 300)
-	poll := seconds(s, "poll", 3)
-	e.Driver.Log(fmt.Sprintf("  waiting up to %s for %s", timeout, describeSets(alternatives)))
-
-	start := time.Now()
-	var last []string
-	var lastErr error
-	// COUNTS THE POLLS THAT READ NOTHING, because they used to vanish without a trace.
-	//
-	// MEASURED ON macos-setup: `poll: 10` over `timeout: 1800` is about 180 attempts, and the
-	// step's own log held FOURTEEN read lines. Every other attempt returned an error, `continue`d,
-	// and left no evidence - so a gate that was mostly not looking read as a gate that was
-	// looking and not finding.
-	attempts, blind := 0, 0
-	for time.Since(start) < timeout {
-		attempts++
-		words, err := e.readScreen(s, s.Name)
-		if err != nil {
-			blind++
-			// A FRAME THAT CANNOT BE READ IS NOT A FAILURE, IT IS A FRAME THAT WAS NOT FINISHED.
-			//
-			// MEASURED ON macos-setup, AT STEP 6 OF 30:
-			//
-			//	wait for the recovery menu: .../frames/frame-000134.ppm: unexpected EOF
-			//	(is the write still in progress? format "ppm")
-			//
-			// QEMU'S `screendump` REPLIES BEFORE THE WRITE COMPLETES - `internal/screen`'s own comment
-			// says so - so a poll can land on a half-written file. `desktop:` already tolerates this
-			// by `continue`ing, and `until:` did not: it returned the truncated read as the reason the
-			// step failed, which is a race in the driver reported as a fault in the walk.
-			//
-			// THE TIMEOUT STILL BOUNDS IT: a frame that never becomes readable means the guest is
-			// gone, and the step then fails with the last read AND the last read error.
-			lastErr = err
-			time.Sleep(poll)
-			continue
-		}
-		last = words
-		lastErr = nil
-		for _, set := range alternatives {
-			if says(words, set) {
-				e.Driver.Log(fmt.Sprintf("  saw %q (%s)", strings.Join(set, " "),
-					time.Since(start).Round(time.Second)))
-				return nil
-			}
-		}
-		if s.Has("keep_alive") {
-			// A GUEST THAT BLANKS ITS OWN SCREEN wakes on a click, and a blank screen reads as no
-			// words at all - which is indistinguishable from "the pane has not appeared".
-			_ = e.Driver.Click(400+(int(time.Since(start).Seconds())%40), 300)
-		}
-		time.Sleep(poll)
+	words, err := e.readScreen(s, s.Name)
+	if err != nil {
+		return fail(s.Name, "%v", err)
 	}
-	if lastErr != nil && len(last) == 0 {
-		return fail(s.Name, "never saw %s within %s, and no frame could be read in %d of %d "+
-			"poll(s): %v", describeSets(alternatives), timeout, blind, attempts, lastErr)
+	for _, set := range alternatives {
+		if says(words, set) {
+			e.Driver.Log(fmt.Sprintf("  saw %q", strings.Join(set, " ")))
+			return nil
+		}
 	}
-	if blind > 0 {
-		// A GATE THAT ONLY HALF LOOKED IS NOT A GATE THAT FAILED, and saying so is the difference
-		// between "the pane never appeared" and "the reads were failing".
-		e.Driver.Log(fmt.Sprintf("  %s: %d of %d poll(s) read no frame at all%s",
-			s.Name, blind, attempts, describeLastError(lastErr)))
-	}
-	return failWithScreen(s.Name, e.Driver, "never saw %s within %s; last read: %s",
-		describeSets(alternatives), timeout, truncateWords(last, 16))
+	return failWithScreen(s.Name, e.Driver, "the screen does not show %s; read: %s",
+		describeSets(alternatives), truncateWords(words, 16))
 }
 
 // doUnless runs a step only when the screen does NOT already show the words.

@@ -136,36 +136,48 @@ steps:
   - 537
   wait_after: 30
 - name: the installer finishes
-  until_any:
-  - - all
-    - done
-  - - you
-    - may
-    - now
-  - - has
-    - been
-    - installed
-  - - todo
-    - listo
-  - - ya
-    - puede
-  - - reiniciar
-  - - instalación
-    - completada
-  - - instalacion
-    - completada
-  region:
-  - 0
-  - 0
-  - 1920
-  - 1080
-  region_at:
-  - 1920
-  - 1080
-  scale: 1
-  timeout: 3600
-  poll: 20
-  keep_alive: true
+  loop:
+    max: 180
+    do:
+    - at:
+      - 420
+      - 300
+      wait_after: 20
+    ocr:
+      name: screen
+      region:
+      - 0
+      - 0
+      - 1920
+      - 1080
+      region_at:
+      - 1920
+      - 1080
+      scale: 1
+      wait: 0
+    check:
+      name: done
+      from: screen
+      says_any:
+      - - all
+        - done
+      - - you
+        - may
+        - now
+      - - has
+        - been
+        - installed
+      - - todo
+        - listo
+      - - ya
+        - puede
+      - - reiniciar
+      - - instalación
+        - completada
+      - - instalacion
+        - completada
+    until:
+      fact: done
 - name: stop the machine
   shutdown: kill
   timeout: 120

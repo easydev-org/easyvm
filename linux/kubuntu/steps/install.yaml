@@ -32,26 +32,50 @@ steps:
   poll: 5
   keep_alive: true
 - name: wait for the calamares window
-  until_any:
-  - - welcome
-    - to
-    - kubuntu
-  - - choose
-    - your
-    - language
-  - - erase
-    - disk
-  timeout: 600
-  poll: 5
-  keep_alive: true
+  loop:
+    max: 120
+    do:
+    - at:
+      - 420
+      - 300
+      wait_after: 5
+    ocr:
+      name: screen
+      region:
+      - 0
+      - 0
+      - 1920
+      - 1080
+      region_at:
+      - 1920
+      - 1080
+      scale: 1
+      wait: 0
+    check:
+      name: done
+      from: screen
+      says_any:
+      - - welcome
+        - to
+        - kubuntu
+      - - choose
+        - your
+        - language
+      - - erase
+        - disk
+    until:
+      fact: done
 - name: install kubuntu on the live desktop
-  at:
-  - 1326
-  - 841
-  repeat:
-  - 2
-  - 0.8
   wait_after: 25
+  do:
+  - at:
+    - 1326
+    - 841
+    wait_after: 0.8
+  - at:
+    - 1326
+    - 841
+    wait_after: 0.8
 - name: welcome
   repeat_until:
     attempts: 3
@@ -199,14 +223,33 @@ steps:
   - 535
   wait_after: 25
 - name: the installer finishes
-  until_any:
-  - - all
-    - done
-  - - reboot
-    - now
-  - - restart
-  timeout: 5400
-  poll: 20
+  loop:
+    max: 270
+    do:
+    - wait: 20
+    ocr:
+      name: screen
+      region:
+      - 0
+      - 0
+      - 1920
+      - 1080
+      region_at:
+      - 1920
+      - 1080
+      scale: 1
+      wait: 0
+    check:
+      name: done
+      from: screen
+      says_any:
+      - - all
+        - done
+      - - reboot
+        - now
+      - - restart
+    until:
+      fact: done
 - name: stop the machine
   shutdown: kill
   timeout: 120

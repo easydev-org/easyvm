@@ -32,56 +32,77 @@ steps:
   poll: 5
   keep_alive: true
 - name: open the installer
-  at:
-  - 960
-  - 640
-  repeat:
-  - 2
-  - 3
   expect_any:
   - - welcome
   - - language
   - - install
   wait_after: 8
+  do:
+  - at:
+    - 960
+    - 640
+    wait_after: 3
+  - at:
+    - 960
+    - 640
+    wait_after: 3
 - name: open the installer (desktop icon, if the window was not there)
   unless:
   - welcome
   - language
-  at:
-  - 88
-  - 240
-  repeat:
-  - 2
-  - 3
   wait_after: 8
+  do:
+  - at:
+    - 88
+    - 240
+    wait_after: 3
+  - at:
+    - 88
+    - 240
+    wait_after: 3
 - name: open the installer (desktop icon again)
   unless:
   - welcome
   - language
-  at:
-  - 88
-  - 240
-  repeat:
-  - 2
-  - 3
   wait_after: 25
+  do:
+  - at:
+    - 88
+    - 240
+    wait_after: 3
+  - at:
+    - 88
+    - 240
+    wait_after: 3
 - name: calamares is up
-  until_any:
-  - - welcome
-  - - language
-  - - keyboard
-  region:
-  - 0
-  - 0
-  - 1920
-  - 1080
-  region_at:
-  - 1920
-  - 1080
-  scale: 1
-  timeout: 300
-  poll: 10
-  keep_alive: true
+  loop:
+    max: 30
+    do:
+    - at:
+      - 420
+      - 300
+      wait_after: 10
+    ocr:
+      name: screen
+      region:
+      - 0
+      - 0
+      - 1920
+      - 1080
+      region_at:
+      - 1920
+      - 1080
+      scale: 1
+      wait: 0
+    check:
+      name: done
+      from: screen
+      says_any:
+      - - welcome
+      - - language
+      - - keyboard
+    until:
+      fact: done
 - name: welcome
   at_bottom:
   - 1327

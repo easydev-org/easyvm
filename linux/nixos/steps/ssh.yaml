@@ -48,21 +48,33 @@ steps:
   key: esc
   wait_after: 2
 - name: the desktop is up
-  until_any:
-  - - Dashboard
-  - - Activities
-  region:
-  - 0
-  - 0
-  - 1920
-  - 1080
-  region_at:
-  - 1920
-  - 1080
-  scale: 2
-  timeout: 120
-  poll: 10
-  keep_alive: true
+  loop:
+    max: 12
+    do:
+    - at:
+      - 420
+      - 300
+      wait_after: 10
+    ocr:
+      name: screen
+      region:
+      - 0
+      - 0
+      - 1920
+      - 1080
+      region_at:
+      - 1920
+      - 1080
+      scale: 2
+      wait: 0
+    check:
+      name: done
+      from: screen
+      says_any:
+      - - Dashboard
+      - - Activities
+    until:
+      fact: done
 - name: desktop - give the shell focus
   at:
   - 960
@@ -75,20 +87,32 @@ steps:
   type: terminal
   wait_after: 3
 - name: wait for the Console result
-  until_any:
-  - - Console
-  region:
-  - 600
-  - 60
-  - 1330
-  - 500
-  region_at:
-  - 1920
-  - 1080
-  scale: 3
-  timeout: 90
-  poll: 5
-  keep_alive: true
+  loop:
+    max: 18
+    do:
+    - at:
+      - 420
+      - 300
+      wait_after: 5
+    ocr:
+      name: screen
+      region:
+      - 600
+      - 60
+      - 1330
+      - 500
+      region_at:
+      - 1920
+      - 1080
+      scale: 3
+      wait: 0
+    check:
+      name: done
+      from: screen
+      says_any:
+      - - Console
+    until:
+      fact: done
 - name: open the terminal
   at:
   - 960

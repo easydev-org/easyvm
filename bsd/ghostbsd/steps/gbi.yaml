@@ -51,14 +51,33 @@ steps:
   key: ret
   wait_after: 3
 - name: the loader accepted the setting
-  until_any:
-  - - detailed
-    - help
-  - - list
-    - of
-    - commands
-  timeout: 60
-  poll: 2
+  loop:
+    max: 30
+    do:
+    - wait: 2
+    ocr:
+      name: screen
+      region:
+      - 0
+      - 0
+      - 1920
+      - 1080
+      region_at:
+      - 1920
+      - 1080
+      scale: 1
+      wait: 0
+    check:
+      name: done
+      from: screen
+      says_any:
+      - - detailed
+        - help
+      - - list
+        - of
+        - commands
+    until:
+      fact: done
 - name: boot the live system
   type: boot
   type_gap: 0.15
@@ -67,45 +86,93 @@ steps:
   key: ret
   wait_after: 10
 - name: choose the X driver, when the menu appears
-  until_any:
-  - - start
-    - desktop
-    - with
-  - - failed
-    - to
-    - auto
-  timeout: 300
-  poll: 5
+  loop:
+    max: 60
+    do:
+    - wait: 5
+    ocr:
+      name: screen
+      region:
+      - 0
+      - 0
+      - 1920
+      - 1080
+      region_at:
+      - 1920
+      - 1080
+      scale: 1
+      wait: 0
+    check:
+      name: done
+      from: screen
+      says_any:
+      - - start
+        - desktop
+        - with
+      - - failed
+        - to
+        - auto
+    until:
+      fact: done
 - name: reach scfb with four downs
-  key: down
-  repeat:
-  - 4
-  - 1.0
-  wait_after: 2
+  do:
+  - key: down
+    wait_after: 1
+  - key: down
+    wait_after: 1
+  - key: down
+    wait_after: 1
+  - key: down
+    wait_after: 1
 - name: choose scfb
   key: ret
   wait_after: 25
 - name: wait for the live desktop
-  until_any:
-  - - install
-    - ghostbsd
-  - - applications
-  timeout: 1800
-  poll: 10
+  loop:
+    max: 180
+    do:
+    - wait: 10
+    ocr:
+      name: screen
+      region:
+      - 0
+      - 0
+      - 1920
+      - 1080
+      region_at:
+      - 1920
+      - 1080
+      scale: 1
+      wait: 0
+    check:
+      name: done
+      from: screen
+      says_any:
+      - - install
+        - ghostbsd
+      - - applications
+    until:
+      fact: done
 - name: welcome
-  at: &id001
+  at:
   - 1293
   - 781
   expect: keyboard
   wait_after: 12
 - name: keyboard
-  at: *id001
+  at:
+  - 1293
+  - 781
   wait_after: 12
 - name: time zone
-  at: *id001
+  at:
+  - 1293
+  - 781
   wait_after: 12
 - name: installation type
-  at: *id001
+  at:
+  - 1293
+  - 781
   wait_after: 14
 - name: tick the zfs disk
   at:
@@ -113,10 +180,14 @@ steps:
   - 495
   wait_after: 5
 - name: zfs configuration
-  at: *id001
+  at:
+  - 1293
+  - 781
   wait_after: 14
 - name: boot option
-  at: *id001
+  at:
+  - 1293
+  - 781
   wait_after: 14
 - name: real name
   at:
@@ -139,7 +210,9 @@ steps:
   - 643
   type: '{{ password }}'
 - name: install
-  at: *id001
+  at:
+  - 1293
+  - 781
   wait_after: 25
 - name: installation runs
   wait: 1800

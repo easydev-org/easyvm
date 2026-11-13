@@ -32,64 +32,106 @@ steps:
   poll: 5
   keep_alive: true
 - name: wait for the anaconda window
-  until_any:
-  - - installation
-    - method
-  - - installation
-    - summary
-  - - let's
-    - install
-  timeout: 300
-  poll: 5
-  keep_alive: true
+  loop:
+    max: 60
+    do:
+    - at:
+      - 420
+      - 300
+      wait_after: 5
+    ocr:
+      name: screen
+      region:
+      - 0
+      - 0
+      - 1920
+      - 1080
+      region_at:
+      - 1920
+      - 1080
+      scale: 1
+      wait: 0
+    check:
+      name: done
+      from: screen
+      says_any:
+      - - installation
+        - method
+      - - installation
+        - summary
+      - - let's
+        - install
+    until:
+      fact: done
 - name: install fedora linux
-  at:
-  - 838
-  - 708
-  repeat:
-  - 2
-  - 3
   wait_after: 3
+  do:
+  - at:
+    - 838
+    - 708
+    wait_after: 3
+  - at:
+    - 838
+    - 708
+    wait_after: 3
 - name: install fedora linux (again, if anaconda is not up)
   unless:
   - installation
   - method
-  at:
-  - 838
-  - 708
-  repeat:
-  - 2
-  - 3
   wait_after: 25
+  do:
+  - at:
+    - 838
+    - 708
+    wait_after: 3
+  - at:
+    - 838
+    - 708
+    wait_after: 3
 - name: install fedora linux (and once more)
   unless:
   - installation
   - method
-  at:
-  - 838
-  - 708
-  repeat:
-  - 2
-  - 3
   wait_after: 30
+  do:
+  - at:
+    - 838
+    - 708
+    wait_after: 3
+  - at:
+    - 838
+    - 708
+    wait_after: 3
 - name: anaconda is up
-  until_any:
-  - - installation
-    - method
-  - - let's
-    - install
-  region:
-  - 0
-  - 0
-  - 1920
-  - 1080
-  region_at:
-  - 1920
-  - 1080
-  scale: 1
-  timeout: 300
-  poll: 10
-  keep_alive: true
+  loop:
+    max: 30
+    do:
+    - at:
+      - 420
+      - 300
+      wait_after: 10
+    ocr:
+      name: screen
+      region:
+      - 0
+      - 0
+      - 1920
+      - 1080
+      region_at:
+      - 1920
+      - 1080
+      scale: 1
+      wait: 0
+    check:
+      name: done
+      from: screen
+      says_any:
+      - - installation
+        - method
+      - - let's
+        - install
+    until:
+      fact: done
 - name: welcome
   at:
   - 729
@@ -138,27 +180,37 @@ steps:
   - 364
   wait_after: 10
 - name: first boot
-  until_any:
-  - - welcome
-    - to
-    - fedora
-  - - type
-    - to
-    - search
-  - - start
-    - using
-    - fedora
-  region:
-  - 0
-  - 0
-  - 1920
-  - 1080
-  region_at:
-  - 1920
-  - 1080
-  scale: 1
-  timeout: 900
-  poll: 10
+  loop:
+    max: 90
+    do:
+    - wait: 10
+    ocr:
+      name: screen
+      region:
+      - 0
+      - 0
+      - 1920
+      - 1080
+      region_at:
+      - 1920
+      - 1080
+      scale: 1
+      wait: 0
+    check:
+      name: done
+      from: screen
+      says_any:
+      - - welcome
+        - to
+        - fedora
+      - - type
+        - to
+        - search
+      - - start
+        - using
+        - fedora
+    until:
+      fact: done
 - name: language - search for the United States
   at:
   - 960

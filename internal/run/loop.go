@@ -39,9 +39,9 @@ func (e *Executor) doLoop(s walk.Step) error {
 	}
 	for k := range raw {
 		switch k {
-		case "max", "do", "ocr", "until":
+		case "max", "do", "ocr", "check", "until":
 		default:
-			return fail(s.Name, "`loop:` has unknown key %q; it takes max, do, ocr and until", k)
+			return fail(s.Name, "`loop:` has unknown key %q; it takes max, do, ocr, check and until", k)
 		}
 	}
 
@@ -65,7 +65,18 @@ func (e *Executor) doLoop(s walk.Step) error {
 	}
 	untilRaw, ok := raw["until"].(map[string]any)
 	if !ok {
-		return fail(s.Name, "`loop:` must say `until:` - the condition that stops it")
+		return fail(s.Name, "`loop:` must say `until: {fact: <name>}` - the boolean a `check:` "+
+			"step produced")
+	}
+	if _, ok := untilRaw["fact"].(string); !ok {
+		return fail(s.Name, "`until:` takes `fact: <name>`, the boolean a `check:` step produced. "+
+			"IT DOES NOT TAKE A TARGET: the comparison belongs to `check:`, so a loop's stop test "+
+			"cannot also decide what the reading means")
+	}
+	checkRaw, ok := raw["check"].(map[string]any)
+	if !ok {
+		return fail(s.Name, "`loop:` must say `check:` - the comparison that turns its reading "+
+			"into a boolean. Three parts: do:, ocr:, check:, and `until:` tests the boolean")
 	}
 
 	// THE PARTS ARE STEPS, built once and run through the ordinary dispatcher.
@@ -77,11 +88,13 @@ func (e *Executor) doLoop(s walk.Step) error {
 	if _, err := parseOCRStep(ocrStep); err != nil {
 		return err
 	}
-	untilSpec := map[string]any{}
-	for k, v := range untilRaw {
-		untilSpec[k] = v
-	}
+	untilSpec := map[string]any{"until_fact": untilRaw["fact"]}
 	untilStep := walk.Step{Index: s.Index, Name: s.Name + " [until]", Spec: untilSpec}
+	checkSpec := map[string]any{}
+	for k, v := range checkRaw {
+		checkSpec[k] = v
+	}
+	checkStep := walk.Step{Index: s.Index, Name: s.Name + " [check]", Spec: checkSpec}
 
 	e.Driver.Log(fmt.Sprintf("  loop: up to %.0f attempt(s) of %d action(s), then read %q",
 		max, len(action), ocrSpec["name"]))
@@ -107,14 +120,18 @@ func (e *Executor) doLoop(s walk.Step) error {
 			}
 		}
 
-		// 2. THE READING. Its name is stable across attempts, so each one overwrites the last - the
-		// text file always holds the frame the decision was made from.
+		// 2. THE READING -> a TEXT variable and work/ocr/<name>.txt.
 		if err := e.doOCR(ocrStep); err != nil {
 			return err
 		}
 
-		// 3. THE CONDITION, answered from the reading and not from a second capture.
-		err := e.doWhen(untilStep)
+		// 3. THE COMPARISON -> a BOOLEAN.
+		if err := e.doCheck(checkStep); err != nil {
+			return err
+		}
+
+		// 4. THE TEST -> the boolean, and nothing else.
+		err := e.doUntilFact(untilStep)
 		if err == nil {
 			e.Driver.Log(fmt.Sprintf("  loop: satisfied after %d attempt(s)", attempt))
 			return nil

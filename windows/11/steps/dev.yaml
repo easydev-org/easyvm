@@ -233,7 +233,6 @@ steps:
 - name: note what the toolchain reports
   ssh: powershell -Command "'SDK=' + (Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\Include' -Name -ErrorAction SilentlyContinue | Select-Object -Last 1) + ' DOTNET=' + ((& 'C:\Program Files\dotnet\dotnet.exe' --version) 2>&1)"
   timeout: 180
-  optional: true
 - name: stop the machine
   shutdown: ssh
   timeout: 300

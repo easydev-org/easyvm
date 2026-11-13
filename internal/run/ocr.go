@@ -193,41 +193,110 @@ func parseOCRStep(s walk.Step) (ocrSpec, error) {
 	return spec, nil
 }
 
-// doWhen answers a condition from a reading, WITHOUT reading the screen again.
+// doCheck COMPARES a named reading against a target and BINDS A BOOLEAN.
 //
-// IT IS THE THIRD STEP OF THE THREE, and the reason it takes a NAME rather than a region: the screen
-// may have moved on, and a condition has to answer about the frame the action produced.
-func (e *Executor) doWhen(s walk.Step) error {
-	name := s.Get("check")
-	if name == "" {
-		return fail(s.Name, "`check:` must name a reading an `ocr:` step produced")
-	}
-	words, ok := e.seen[name]
+// IT IS THE THIRD OF THREE, AND THE ORDER IS THE POINT:
+//
+//	ocr:    reads a region          -> a TEXT variable  (work/ocr/<name>.txt)
+//	check:  compares that text      -> a BOOLEAN       (`ok: true` / `ok: false`)
+//	until:  tests the boolean       -> nothing else
+//
+// THE FIRST VERSION LET THE CONDITION COMPARE THE TEXT ITSELF - `until: {check: page, says_any: [...]}`
+// - which put two jobs in one step again: a loop's stop test both NAMED a reading and DECIDED what it
+// meant, so "the text was not what I expected" and "the loop should stop" were the same expression.
+// Splitting them means a file can check TWO different questions of one reading, and a post-mortem can
+// see WHICH question failed.
+//
+//	ocr:  {name: page, region: [...], region_at: [...], wait: 0}
+//	check: {name: done, from: page, says_any: [[software, updater], [activities]]}
+//	until: done
+func (e *Executor) doCheck(s walk.Step) error {
+	raw, ok := s.Spec["check"].(map[string]any)
 	if !ok {
-		return fail(s.Name, "`when: %s` names a reading that no `ocr:` step has made. The steps "+
-			"run in file order, and an `ocr:` step has to come first with that `name:`", name)
+		return fail(s.Name, "`check:` must be a mapping: name, from, and says/says_any")
+	}
+	name, _ := raw["name"].(string)
+	if strings.TrimSpace(name) == "" {
+		return fail(s.Name, "`check:` must name the boolean it produces: "+
+			"`check: {name: done, from: page, says_any: [...]}`")
+	}
+	from, _ := raw["from"].(string)
+	if strings.TrimSpace(from) == "" {
+		return fail(s.Name, "`check:` must say `from:` - the reading an `ocr:` step produced")
+	}
+	words, ok := e.seen[from]
+	if !ok {
+		return fail(s.Name, "`check: from: %s` names a reading no `ocr:` step has made. An `ocr:` "+
+			"step has to come first, in file order, with that `name:`", from)
 	}
 
-	if set := wordsOf(s, "says"); len(set) > 0 {
-		if !says(words, set) {
-			return failWithWords(s.Name, words, "the reading %q is not what was expected: wanted %s",
-				name, strings.Join(set, " "))
-		}
-		e.Driver.Log(fmt.Sprintf("  %s: read %s", s.Name, strings.Join(set, " ")))
-		return nil
+	// THE TEST IS `says:` (all of them) OR `says_any:` (one of several sets).
+	var sets [][]string
+	if one := wordsOfMapping(raw, "says"); len(one) > 0 {
+		sets = append(sets, one)
 	}
-	sets := wordSetsOf(s, "says_any")
+	for _, set := range wordSetsOfMapping(raw, "says_any") {
+		sets = append(sets, set)
+	}
 	if len(sets) == 0 {
-		return fail(s.Name, "`when: %s` needs `says:` or `says_any:` - a condition with no test", name)
+		return fail(s.Name, "`check:` needs `says:` or `says_any:` - a comparison with no target")
 	}
+
+	okNow := false
+	var hit string
 	for _, set := range sets {
 		if says(words, set) {
-			e.Driver.Log(fmt.Sprintf("  %s: read %q", s.Name, strings.Join(set, " ")))
-			return nil
+			okNow = true
+			hit = strings.Join(set, " ")
+			break
 		}
 	}
-	return failWithWords(s.Name, words, "the reading %q matched none of %s", name,
-		describeSets(sets))
+	if e.facts == nil {
+		e.facts = make(map[string]bool)
+	}
+	e.facts[name] = okNow
+	if okNow {
+		e.Driver.Log(fmt.Sprintf("  %s: %s = true (read %q)", s.Name, name, hit))
+	} else {
+		e.Driver.Log(fmt.Sprintf("  %s: %s = false (read %q, wanted %s)", s.Name, name,
+			truncateWords(words, 10), describeSets(sets)))
+	}
+	return nil
+}
+
+// wordsOfMapping and wordSetsOfMapping read the same shapes out of a nested mapping that the
+// step-level helpers read out of a step.
+func wordsOfMapping(m map[string]any, key string) []string {
+	list, ok := m[key].([]any)
+	if !ok {
+		return nil
+	}
+	var out []string
+	for _, v := range list {
+		out = append(out, fmt.Sprint(v))
+	}
+	return out
+}
+
+func wordSetsOfMapping(m map[string]any, key string) [][]string {
+	list, ok := m[key].([]any)
+	if !ok {
+		return nil
+	}
+	var out [][]string
+	for _, item := range list {
+		switch t := item.(type) {
+		case []any:
+			var set []string
+			for _, w := range t {
+				set = append(set, fmt.Sprint(w))
+			}
+			out = append(out, set)
+		case string:
+			out = append(out, strings.Fields(t))
+		}
+	}
+	return out
 }
 
 // failWithWords is `fail` with the reading attached, because the reading is what the decision used.
@@ -273,4 +342,29 @@ func pairOfMapping(m map[string]any, key string) ([2]int, bool) {
 		out[i] = int(f)
 	}
 	return out, true
+}
+
+// doUntilFact tests ONE boolean, and it can do nothing else.
+//
+//	until: done
+//
+// IT TAKES A NAME AND NO TARGET. The comparison already happened in the `check:` step that produced
+// the boolean, so a loop's stop test cannot quietly grow a second meaning - which is what happened
+// when `until:` took `{check: page, says_any: [...]}`: the test both named a reading and decided what
+// it meant, and "the text was not what I expected" was the same expression as "the loop should stop".
+func (e *Executor) doUntilFact(s walk.Step) error {
+	name := s.Get("until_fact")
+	if strings.TrimSpace(name) == "" {
+		return fail(s.Name, "`until:` must name a boolean a `check:` step produced, written as "+
+			"`until: {fact: done}`")
+	}
+	value, ok := e.facts[name]
+	if !ok {
+		return fail(s.Name, "`until: {fact: %s}` names a boolean no `check:` step has made. A "+
+			"`check:` step has to come first, in file order, with `name: %s`", name, name)
+	}
+	if !value {
+		return fail(s.Name, "the boolean %q is false", name)
+	}
+	return nil
 }

@@ -289,16 +289,36 @@ steps:
   - key: ret
     wait_after: 2
 - name: the apple account pane is gone
-  expect_any:
-  - - update
-    - automatically
-  - - choose
-    - a
-    - look
-  - - welcome
-    - to
-    - mac
-  timeout: 60
+  loop:
+    max: 20
+    do:
+    - wait: 3
+    ocr:
+      name: screen
+      region:
+      - 0
+      - 0
+      - 1920
+      - 1080
+      region_at:
+      - 1920
+      - 1080
+      scale: 1
+      wait: 0
+    check:
+      name: done
+      from: screen
+      says_any:
+      - - update
+        - automatically
+      - - choose
+        - a
+        - look
+      - - welcome
+        - to
+        - mac
+    until:
+      fact: done
 - name: update mac automatically
   when:
   - update
@@ -306,7 +326,6 @@ steps:
   at:
   - 1306
   - 810
-  optional: true
   wait_after: 15
 - name: click the password field
   at:
@@ -342,7 +361,6 @@ steps:
     wait_after: 2
   - key: esc
     wait_after: 2
-  optional: true
   skip_when_unfinished: true
 - name: wait for the desktop
   desktop: macos

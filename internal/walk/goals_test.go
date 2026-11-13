@@ -1950,7 +1950,17 @@ func TestTheMacOSRecoveryGateAcceptsReadableRows(t *testing.T) {
 	if !ok {
 		t.Fatal("the loop has no `until:`")
 	}
-	sets, _ := until["says_any"].([]any)
+	// `until:` TESTS A BOOLEAN AND NOTHING ELSE - the comparison belongs to `check:`.
+	if _, ok := until["fact"]; !ok {
+		t.Error("`until:` is not `{fact: ...}`. A loop's stop test must be a boolean reference: " +
+			"when it also carried the word-sets it both named a reading and decided what it " +
+			"meant, so \"the text was wrong\" and \"stop the loop\" were one expression")
+	}
+	check, ok := loop["check"].(map[string]any)
+	if !ok {
+		t.Fatal("the loop has no `check:` - the comparison that turns the reading into a boolean")
+	}
+	sets, _ := check["says_any"].([]any)
 	if len(sets) < 3 {
 		t.Errorf("the condition accepts %d row(s). The menu has four labelled rows and two hits is "+
 			"the Python implementation's own rule, because one row can be cut off by a redraw; "+
@@ -2068,4 +2078,137 @@ func TestEveryOCRStepNamesItsRegionAndSize(t *testing.T) {
 		}
 	}
 	t.Logf("checked %d `ocr:` reading(s)", checked)
+}
+
+// `repeat:` IS GONE, AND IT WAS NEVER ALIVE.
+//
+// FOURTEEN OF THEM ACROSS EIGHT FILES, a vocabulary entry describing "(count, settle) for a footer
+// button pressed the same way N times", AND NO DISPATCHER BRANCH THAT READ IT. So
+//
+//   - name: walk the first-login pages to the end
+//     at: [1464, 194]
+//     repeat:
+//   - 10
+//   - 4
+//
+// PRESSED NOTHING AT ALL. The vocabulary test that requires every executable key to have a branch did
+// not catch it because `repeat:` was never claimed as executable - it was only DECLARED, and a
+// declared key with no branch is exactly the "step that reports success and does nothing" the
+// vocabulary exists to refuse.
+//
+// A LOOP IS `loop:`. A FIXED NUMBER OF PRESSES IS A `do:` LIST. Both are visible in the file, which
+// `repeat: [10, 4]` never was - it could not even say WHICH presses it meant.
+func TestThereIsNoRepeatKey(t *testing.T) {
+	root := filepath.Join("..", "..")
+	files, err := filepath.Glob(filepath.Join(root, "*", "*", "steps", "*.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked := 0
+	for _, path := range files {
+		doc, err := Load(path, nil)
+		if err != nil {
+			continue
+		}
+		rel, _ := filepath.Rel(root, path)
+		var walk func(any, string)
+		walk = func(raw any, where string) {
+			m, ok := raw.(map[string]any)
+			if !ok {
+				return
+			}
+			if _, ok := m["repeat"]; ok {
+				t.Errorf("%s: %s still has `repeat:`. It had no implementation - the presses it "+
+					"described never happened - so it is removed from the vocabulary. Use `loop:` "+
+					"for a loop and a `do:` list for a fixed number of presses", rel, where)
+			}
+			for k, v := range m {
+				switch t := v.(type) {
+				case []any:
+					for _, item := range t {
+						walk(item, where+"."+k)
+					}
+				case map[string]any:
+					walk(t, where+"."+k)
+				}
+			}
+		}
+		for _, s := range doc.Steps {
+			checked++
+			walk(s.Spec, s.Name)
+		}
+	}
+	t.Logf("checked %d step(s)", checked)
+}
+
+// A RETRY IS A `loop:`, NOT A `timeout:` ON A CONDITION.
+//
+// 43 STEPS USED TO HIDE A RETRY IN THE EXECUTOR: `until_any:` plus `timeout: 1800` plus `poll: 10`
+// was a `for` loop in Go, so the file said WHAT it looked for and never HOW MANY TIMES it would look,
+// nor that a failed read was swallowed and retried, nor that `keep_alive:` clicked the guest between
+// attempts.
+//
+// THE LOOP IS EXPLICIT NOW, AND EVERY ATTEMPT IS VISIBLE:
+//
+//   - name: the recovery menu is up
+//     loop:
+//     max: 180                      <- how many times
+//     do: [{wait: 10}]              <- what it waits, and any nudge, between attempts
+//     ocr: {name: recovery, ...}    <- what it reads (a TEXT variable)
+//     check: {name: up, from: recovery, says_any: [...]}   <- the comparison (a BOOLEAN)
+//     until: {fact: up}             <- the test, and nothing else
+//
+// SO `timeout:` ON A CONDITION IS REFUSED, because accepting it would silently restore the loop.
+func TestAConditionDoesNotCarryATimeout(t *testing.T) {
+	root := filepath.Join("..", "..")
+	files, err := filepath.Glob(filepath.Join(root, "*", "*", "steps", "*.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked := 0
+	for _, path := range files {
+		doc, err := Load(path, nil)
+		if err != nil {
+			continue
+		}
+		rel, _ := filepath.Rel(root, path)
+		var walk func(any, string)
+		walk = func(raw any, where string) {
+			m, ok := raw.(map[string]any)
+			if !ok {
+				return
+			}
+			cond := false
+			for _, k := range []string{"until", "until_any", "expect", "expect_any", "unless", "unless_any"} {
+				if _, ok := m[k]; ok {
+					cond = true
+				}
+			}
+			if cond {
+				checked++
+				for _, k := range []string{"timeout", "poll", "keep_alive"} {
+					if _, ok := m[k]; ok {
+						t.Errorf("%s: %s has a condition with %q. A retry is a `loop:` with "+
+							"`max:`, `do:`, `ocr:`, `check:` and `until: {fact: ...}` - a `timeout:` "+
+							"on a condition is a hidden loop in the executor, where the file cannot "+
+							"say how many times it looks", rel, where, k)
+					}
+				}
+			}
+			for k, v := range m {
+				switch t := v.(type) {
+				case []any:
+					for _, item := range t {
+						walk(item, where+"."+k)
+					}
+				case map[string]any:
+					walk(t, where+"."+k)
+				}
+			}
+		}
+		for _, s := range doc.Steps {
+			walk(s.Spec, s.Name)
+		}
+	}
+	t.Logf("checked %d condition step(s)", checked)
 }

@@ -58,8 +58,9 @@ steps:
       - 1080
       scale: 6
       wait: 0
-    until:
-      check: recovery
+    check:
+      name: done
+      from: recovery
       says_any:
       - - restore
         - time
@@ -69,6 +70,8 @@ steps:
       - - safari
       - - disk
         - utility
+    until:
+      fact: done
 - name: select disk utility
   at:
   - 837
@@ -130,13 +133,32 @@ steps:
   - 646
   wait_after: 5
 - name: erase - wait for the report
-  until_any:
-  - - erase
-    - complete
-  - - erase
-    - process
-  timeout: 300
-  poll: 5
+  loop:
+    max: 60
+    do:
+    - wait: 5
+    ocr:
+      name: screen
+      region:
+      - 0
+      - 0
+      - 1920
+      - 1080
+      region_at:
+      - 1920
+      - 1080
+      scale: 1
+      wait: 0
+    check:
+      name: done
+      from: screen
+      says_any:
+      - - erase
+        - complete
+      - - erase
+        - process
+    until:
+      fact: done
 - name: erase - done
   at:
   - 1143
@@ -146,20 +168,30 @@ steps:
   key: meta_l+q
   wait_after: 12
 - name: the recovery menu is back
-  until:
-  - reinstall
-  - macos
-  region:
-  - 760
-  - 200
-  - 1400
-  - 560
-  region_at:
-  - 1920
-  - 1080
-  scale: 2
-  timeout: 300
-  poll: 5
+  loop:
+    max: 60
+    do:
+    - wait: 5
+    ocr:
+      name: screen
+      region:
+      - 760
+      - 200
+      - 1400
+      - 560
+      region_at:
+      - 1920
+      - 1080
+      scale: 2
+      wait: 0
+    check:
+      name: done
+      from: screen
+      says:
+      - reinstall
+      - macos
+    until:
+      fact: done
 - name: select reinstall macos
   at:
   - 837
@@ -202,39 +234,58 @@ steps:
   - 712
   wait_after: 10
 - name: the copy runs until the Setup Assistant appears
-  until_any:
-  - - select
-    - your
-    - country
-    - or
-    - region
-  - - how
-    - do
-    - you
-    - want
-    - to
-    - connect
-    - to
-    - the
-    - internet
-  - - transfer
-    - your
-    - information
-    - to
-    - this
-    - mac
-  - - choose
-    - a
-    - wireless
-    - network
-  - - sign
-    - in
-    - with
-    - your
-    - apple
-    - id
-  timeout: 7200
-  poll: 20
+  loop:
+    max: 360
+    do:
+    - wait: 20
+    ocr:
+      name: screen
+      region:
+      - 0
+      - 0
+      - 1920
+      - 1080
+      region_at:
+      - 1920
+      - 1080
+      scale: 1
+      wait: 0
+    check:
+      name: done
+      from: screen
+      says_any:
+      - - select
+        - your
+        - country
+        - or
+        - region
+      - - how
+        - do
+        - you
+        - want
+        - to
+        - connect
+        - to
+        - the
+        - internet
+      - - transfer
+        - your
+        - information
+        - to
+        - this
+        - mac
+      - - choose
+        - a
+        - wireless
+        - network
+      - - sign
+        - in
+        - with
+        - your
+        - apple
+        - id
+    until:
+      fact: done
 - name: stop the machine
   shutdown: '{{ shutdown }}'
   timeout: 300

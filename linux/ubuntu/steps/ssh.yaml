@@ -31,32 +31,65 @@ steps:
   key: ret
   wait_after: 12
 - name: the first-login wizard is up, when this build shows one
-  until_any:
-  - - welcome
-    - to
-    - ubuntu
-  - - complete
-    - your
-    - setup
-  timeout: 90
-  poll: 3
+  loop:
+    max: 30
+    do:
+    - wait: 3
+    ocr:
+      name: screen
+      region:
+      - 0
+      - 0
+      - 1920
+      - 1080
+      region_at:
+      - 1920
+      - 1080
+      scale: 1
+      wait: 0
+    check:
+      name: done
+      from: screen
+      says_any:
+      - - welcome
+        - to
+        - ubuntu
+      - - complete
+        - your
+        - setup
+    until:
+      fact: done
 - name: walk the first-login pages to the end
-  at:
-  - 1464
-  - 194
-  repeat:
-  - 10
-  - 4
-  wait_after: 12
-- name: the wizard is finished
-  until_any:
-  - - software
-    - updater
-  - - updates
-    - available
-  - - activities
-  timeout: 180
-  poll: 3
+  loop:
+    max: 12
+    do:
+    - at:
+      - 1464
+      - 194
+      wait_after: 4
+    ocr:
+      name: page
+      region:
+      - 0
+      - 0
+      - 1920
+      - 1080
+      region_at:
+      - 1920
+      - 1080
+      scale: 1
+      wait: 0
+    check:
+      name: done
+      from: page
+      says_any:
+      - - software
+        - updater
+      - - updates
+        - available
+      - - activities
+    until:
+      fact: done
 - name: open the terminal
   key: ctrl+alt+t
   wait_after: 20

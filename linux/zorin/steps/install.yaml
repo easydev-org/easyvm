@@ -32,34 +32,59 @@ steps:
   poll: 5
   keep_alive: true
 - name: wait for the installer to put itself up
-  until_any:
-  - - install
-    - zorin
-  - - try
-    - zorin
-  - - welcome
-  - - false
-    - localization
-  timeout: 600
-  poll: 5
+  loop:
+    max: 120
+    do:
+    - wait: 5
+    ocr:
+      name: screen
+      region:
+      - 0
+      - 0
+      - 1920
+      - 1080
+      region_at:
+      - 1920
+      - 1080
+      scale: 1
+      wait: 0
+    check:
+      name: done
+      from: screen
+      says_any:
+      - - install
+        - zorin
+      - - try
+        - zorin
+      - - welcome
+      - - false
+        - localization
+    until:
+      fact: done
 - name: install zorin os
-  at:
-  - 1223
-  - 586
-  repeat:
-  - 2
-  - 3
   wait_after: 40
+  do:
+  - at:
+    - 1223
+    - 586
+    wait_after: 3
+  - at:
+    - 1223
+    - 586
+    wait_after: 3
 - name: install zorin os (once more, if the wizard is not up)
   unless:
   - keyboard
-  at:
-  - 1223
-  - 586
-  repeat:
-  - 2
-  - 3
   wait_after: 40
+  do:
+  - at:
+    - 1223
+    - 586
+    wait_after: 3
+  - at:
+    - 1223
+    - 586
+    wait_after: 3
 - name: disable the screen saver and the lock
   run: xrandr --output Virtual-1 --mode 1920x1080 2>/dev/null || xrandr --output Virtual1 --mode 1920x1080 2>/dev/null || xrandr -s 1920x1080 2>/dev/null || true; xset s off; xset -dpms; xset s noblank; gsettings set org.gnome.desktop.session idle-delay
     0; gsettings set org.gnome.desktop.screensaver lock-enabled false; ( for i in $(seq 1 1080); do xdotool mousemove_relative -- 1 0 2>/dev/null; xdotool mousemove_relative -- -1 0 2>/dev/null; sleep 20; done ) >/dev/null 2>&1 & exit
@@ -90,65 +115,160 @@ steps:
   - 764
   wait_after: 18
 - name: the updates pane is done
-  until_any:
-  - - installation
-    - type
-  timeout: 180
-  poll: 3
+  loop:
+    max: 60
+    do:
+    - wait: 3
+    ocr:
+      name: screen
+      region:
+      - 0
+      - 0
+      - 1920
+      - 1080
+      region_at:
+      - 1920
+      - 1080
+      scale: 1
+      wait: 0
+    check:
+      name: done
+      from: screen
+      says_any:
+      - - installation
+        - type
+    until:
+      fact: done
 - name: the keyboard pane is done
-  until_any:
-  - - installation
-    - type
-  - - updates
-    - and
-    - other
-    - software
-  timeout: 240
-  poll: 3
+  loop:
+    max: 80
+    do:
+    - wait: 3
+    ocr:
+      name: screen
+      region:
+      - 0
+      - 0
+      - 1920
+      - 1080
+      region_at:
+      - 1920
+      - 1080
+      scale: 1
+      wait: 0
+    check:
+      name: done
+      from: screen
+      says_any:
+      - - installation
+        - type
+      - - updates
+        - and
+        - other
+        - software
+    until:
+      fact: done
 - name: installation type - install now
   at:
   - 1361
   - 764
   wait_after: 18
 - name: the disk warning is up
-  until_any:
-  - - write
-    - the
-    - changes
-    - to
-    - disks
-  - - partition
-    - tables
-  timeout: 120
-  poll: 2
+  loop:
+    max: 60
+    do:
+    - wait: 2
+    ocr:
+      name: screen
+      region:
+      - 0
+      - 0
+      - 1920
+      - 1080
+      region_at:
+      - 1920
+      - 1080
+      scale: 1
+      wait: 0
+    check:
+      name: done
+      from: screen
+      says_any:
+      - - write
+        - the
+        - changes
+        - to
+        - disks
+      - - partition
+        - tables
+    until:
+      fact: done
 - name: write the changes to disks
   at:
   - 1293
   - 673
   wait_after: 20
 - name: the disk warning is answered
-  until_any:
-  - - where
-    - are
-    - you
-  - - time
-    - zone
-  timeout: 180
-  poll: 3
+  loop:
+    max: 60
+    do:
+    - wait: 3
+    ocr:
+      name: screen
+      region:
+      - 0
+      - 0
+      - 1920
+      - 1080
+      region_at:
+      - 1920
+      - 1080
+      scale: 1
+      wait: 0
+    check:
+      name: done
+      from: screen
+      says_any:
+      - - where
+        - are
+        - you
+      - - time
+        - zone
+    until:
+      fact: done
 - name: where are you
   at:
   - 1361
   - 764
   wait_after: 18
 - name: the time zone pane is done
-  until_any:
-  - - who
-    - are
-    - you
-  - - your
-    - name
-  timeout: 180
-  poll: 3
+  loop:
+    max: 60
+    do:
+    - wait: 3
+    ocr:
+      name: screen
+      region:
+      - 0
+      - 0
+      - 1920
+      - 1080
+      region_at:
+      - 1920
+      - 1080
+      scale: 1
+      wait: 0
+    check:
+      name: done
+      from: screen
+      says_any:
+      - - who
+        - are
+        - you
+      - - your
+        - name
+    until:
+      fact: done
 - name: who are you - your name
   at:
   - 975

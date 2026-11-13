@@ -27,18 +27,24 @@ steps:
   expect: welcome
   wait_after: 25
 - name: welcome
-  at: &id001
+  at:
   - 1306
   - 727
   wait_after: 12
 - name: keyboard layout
-  at: *id001
+  at:
+  - 1306
+  - 727
   wait_after: 12
 - name: multimedia codecs
-  at: *id001
+  at:
+  - 1306
+  - 727
   wait_after: 12
 - name: installation type
-  at: *id001
+  at:
+  - 1306
+  - 727
   wait_after: 15
 - name: write the changes to disks
   at:
@@ -46,7 +52,9 @@ steps:
   - 659
   wait_after: 20
 - name: time zone
-  at: *id001
+  at:
+  - 1306
+  - 727
   wait_after: 15
 - name: full name
   at:
@@ -69,7 +77,9 @@ steps:
   - 492
   type: '{{ password }}'
 - name: create the account
-  at: *id001
+  at:
+  - 1306
+  - 727
   wait_after: 20
 - name: install
   wait: 2400

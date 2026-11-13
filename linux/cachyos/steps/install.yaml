@@ -35,26 +35,32 @@ steps:
   wait: 15
   keep_alive: true
 - name: open the installer
-  at:
-  - 960
-  - 743
-  repeat:
-  - 2
-  - 0.8
   expect_any:
   - - welcome
   - - location
   wait_after: 35
+  do:
+  - at:
+    - 960
+    - 743
+    wait_after: 0.8
+  - at:
+    - 960
+    - 743
+    wait_after: 0.8
 - name: open the installer (once more, if it did not)
   unless:
   - welcome
-  at:
-  - 960
-  - 743
-  repeat:
-  - 2
-  - 0.8
   wait_after: 40
+  do:
+  - at:
+    - 960
+    - 743
+    wait_after: 0.8
+  - at:
+    - 960
+    - 743
+    wait_after: 0.8
 - name: welcome
   at:
   - 1352
@@ -140,34 +146,46 @@ steps:
   - 620
   wait_after: 30
 - name: the installer finishes
-  until_any:
-  - - all
-    - done
-  - - you
-    - may
-    - now
-  - - installation
-    - complete
-  - - reboot
-    - now
-  - - restart
-    - now
-  - - todo
-    - listo
-  - - instalación
-    - completada
-  region:
-  - 0
-  - 0
-  - 1920
-  - 1080
-  region_at:
-  - 1920
-  - 1080
-  scale: 1
-  timeout: 3600
-  poll: 20
-  keep_alive: true
+  loop:
+    max: 180
+    do:
+    - at:
+      - 420
+      - 300
+      wait_after: 20
+    ocr:
+      name: screen
+      region:
+      - 0
+      - 0
+      - 1920
+      - 1080
+      region_at:
+      - 1920
+      - 1080
+      scale: 1
+      wait: 0
+    check:
+      name: done
+      from: screen
+      says_any:
+      - - all
+        - done
+      - - you
+        - may
+        - now
+      - - installation
+        - complete
+      - - reboot
+        - now
+      - - restart
+        - now
+      - - todo
+        - listo
+      - - instalación
+        - completada
+    until:
+      fact: done
 - name: stop the machine
   shutdown: kill
   timeout: 120

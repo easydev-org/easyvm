@@ -638,25 +638,62 @@ func TestSnapshotAndBootFromAreBothDispatched(t *testing.T) {
 //
 // `desktop:` HAS ALWAYS TOLERATED THIS by `continue`ing. `until:` did not, which made a twenty-minute
 // stage end at two minutes with a message about a file format.
-func TestAHalfWrittenFrameDoesNotEndAnUntil(t *testing.T) {
-	// THE CONTRACT, AS THE CODE STATES IT: a frame that cannot be read is retried until the step's
-	// own timeout, and only then is the last read error reported.
+// `until:` IS ONE MEASUREMENT, AND AN UNREADABLE FRAME IS AN ERROR IT REPORTS.
+//
+// IT WAS A RETRY LOOP, AND THAT WAS THE HIDDEN RETRY THIS VOCABULARY IS BEING CLEANED OF. `timeout:`
+// and `poll:` were a `for` in Go, so 43 steps carried an invisible loop: a reader saw
+// `until_any:` and `timeout: 1800` and could not tell that the executor would read the screen up to
+// 180 times, that a failed read was swallowed and retried, or that `keep_alive:` clicked the guest
+// between attempts.
+//
+// THE LOOP IS `loop:` NOW:
+//
+//   - name: the recovery menu is up
+//     loop:
+//     max: 180
+//     do: [{wait: 10}]
+//     ocr: {name: recovery, region: [...], region_at: [...], wait: 0}
+//     check: {name: up, from: recovery, says_any: [[restore, time, machine]]}
+//     until: {fact: up}
+//
+// A HALF-WRITTEN FRAME IS THEREFORE AN ERROR AT A ONE-SHOT `until:`, and a `loop:` retries it because
+// its `do:` list says how long it waits between attempts. The old behaviour - swallow and retry
+// inside the step - is what made a gate that was mostly not looking indistinguishable from one that
+// was looking and not finding.
+func TestUntilIsOneMeasurementAndRefusesATimeout(t *testing.T) {
 	body, err := os.ReadFile("text.go")
 	if err != nil {
 		t.Fatal(err)
 	}
 	src := string(body)
-	if !strings.Contains(src, "A FRAME THAT CANNOT BE READ IS NOT A FAILURE, IT IS A FRAME THAT WAS NOT FINISHED") {
-		t.Fatal("`doUntil` no longer documents why a truncated frame is retried; without that, the " +
-			"next reader will make it fatal again and macos-setup will end at two minutes with a " +
-			"message about a file format")
+
+	i := strings.Index(src, "func (e *Executor) doUntil(")
+	if i < 0 {
+		t.Fatal("doUntil is gone")
 	}
-	if !strings.Contains(src, "lastErr = err") || !strings.Contains(src, "continue") {
-		t.Fatal("`doUntil` does not keep the read error and continue polling")
+	end := strings.Index(src[i:], "\n}\n")
+	// the comment block above the function is where the contract is written
+	head := src[maxInt(0, i-4000):i]
+
+	if strings.Contains(src[i:i+end], "time.Sleep(") || strings.Contains(src[i:i+end], "continue") {
+		t.Error("`doUntil` still loops. A retry belongs to `loop:`, where the file says how many " +
+			"attempts and what it waits between them")
 	}
-	// AND A STEP THAT NEVER GETS A READABLE FRAME STILL FAILS, naming the error rather than a pane.
-	if !strings.Contains(src, "and no frame could be read") {
-		t.Fatal("`doUntil` would report 'never saw ...; last read: ' with an empty read when every " +
-			"frame was unreadable, which says nothing about why")
+	if !strings.Contains(head, "A BARE `until:` REMAINS FOR THE CASE THAT NEEDS NO RETRY") {
+		t.Error("`doUntil` no longer says that a bare `until:` is a ONE-SHOT check; without that " +
+			"the next reader will add a timeout back to it")
 	}
+	// AND THE TWO KEYS THAT USED TO CONFIGURE THE LOOP ARE REFUSED WITH IT.
+	for _, key := range []string{`s.Has("timeout")`, `s.Has("poll")`, `s.Has("keep_alive")`} {
+		if !strings.Contains(src[i:i+end], key) {
+			t.Errorf("`doUntil` does not refuse %s; accepting it would restore the hidden retry", key)
+		}
+	}
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }

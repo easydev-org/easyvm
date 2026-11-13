@@ -75,6 +75,14 @@ type Executor struct {
 	// THE ZERO VALUE IS USABLE, so a walk that never calls an `ocr:` step needs no setup, and the map
 	// is created on first write because an Executor is built by value in places.
 	seen map[string][]string
+
+	// facts is what a `check:` step decided, by the name it gave the boolean.
+	//
+	// THE THIRD OF THREE. `ocr:` produces TEXT, `check:` compares that text and produces a BOOLEAN,
+	// and `until:` tests only the boolean. Keeping the text and the decision in separate stores is
+	// what makes them separate steps: a loop can check two different questions of one reading, and a
+	// failure names WHICH question came back false.
+	facts map[string]bool
 }
 
 // Result is the whole walkthrough's outcome.
@@ -208,7 +216,7 @@ func (e *Executor) runOne(s walk.Step) error {
 	case s.Has("ocr"):
 		return e.doOCR(s)
 	case s.Has("check"):
-		return e.doWhen(s)
+		return e.doCheck(s)
 	case s.Has("loop"):
 		return e.doLoop(s)
 	case s.Has("require_ssh"):

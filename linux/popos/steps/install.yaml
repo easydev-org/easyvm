@@ -42,20 +42,41 @@ steps:
   - 1390
   wait_after: 20
 - name: the installer window is up
-  until_any:
-  - - select
-    - a
-    - language
-  - - clean
-    - install
-  - - erase
-    - and
-    - install
-  - - full
-    - name
-  timeout: 300
-  poll: 3
-  keep_alive: true
+  loop:
+    max: 100
+    do:
+    - at:
+      - 420
+      - 300
+      wait_after: 3
+    ocr:
+      name: screen
+      region:
+      - 0
+      - 0
+      - 1920
+      - 1080
+      region_at:
+      - 1920
+      - 1080
+      scale: 1
+      wait: 0
+    check:
+      name: done
+      from: screen
+      says_any:
+      - - select
+        - a
+        - language
+      - - clean
+        - install
+      - - erase
+        - and
+        - install
+      - - full
+        - name
+    until:
+      fact: done
 - name: select a language
   at_button:
   - 1240
@@ -109,12 +130,31 @@ steps:
   - 845
   wait_after: 44
 - name: wait for the account pane
-  until:
-  - Full
-  - Name
-  - User
-  timeout: 90
-  poll: 2
+  loop:
+    max: 45
+    do:
+    - wait: 2
+    ocr:
+      name: screen
+      region:
+      - 0
+      - 0
+      - 1920
+      - 1080
+      region_at:
+      - 1920
+      - 1080
+      scale: 1
+      wait: 0
+    check:
+      name: done
+      from: screen
+      says:
+      - Full
+      - Name
+      - User
+    until:
+      fact: done
 - name: type the display name
   at:
   - 1188
@@ -133,14 +173,33 @@ steps:
   - 845
   wait_after: 22
 - name: wait for the password pane
-  until_any:
-  - - Choose
-    - Account
-    - Password
-  - - Account
-    - Password
-  timeout: 90
-  poll: 2
+  loop:
+    max: 45
+    do:
+    - wait: 2
+    ocr:
+      name: screen
+      region:
+      - 0
+      - 0
+      - 1920
+      - 1080
+      region_at:
+      - 1920
+      - 1080
+      scale: 1
+      wait: 0
+    check:
+      name: done
+      from: screen
+      says_any:
+      - - Choose
+        - Account
+        - Password
+      - - Account
+        - Password
+    until:
+      fact: done
 - name: dismiss anything a stray click opened
   key: esc
   wait_after: 2

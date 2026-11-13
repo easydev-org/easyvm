@@ -83,7 +83,6 @@ steps:
 - name: do not blank the screen
   ssh: powershell -Command "powercfg /change monitor-timeout-ac 0; powercfg /change monitor-timeout-dc 0; powercfg /change standby-timeout-ac 0; powercfg /change standby-timeout-dc 0"
   timeout: 120
-  optional: true
 - name: no hibernation file
   ssh: powershell -Command "powercfg -h off"
   timeout: 120
@@ -97,7 +96,6 @@ steps:
 - name: compact the component store
   ssh: DISM /Online /Cleanup-Image /StartComponentCleanup
   timeout: 3600
-  optional: true
 - name: prove the power settings took
   ssh: powershell -Command "$m = (powercfg /query SCHEME_CURRENT SUB_VIDEO VIDEOIDLE 2>$null | Select-String 'Current AC Power Setting').ToString().Split(':')[-1].Trim(); $s = (powercfg /query SCHEME_CURRENT SUB_SLEEP STANDBYIDLE 2>$null | Select-String
     'Current AC Power Setting').ToString().Split(':')[-1].Trim(); 'MONITOR=' + $m + ' STANDBY=' + $s + ' HIBER=' + (Test-Path C:\hiberfil.sys)"

@@ -35,7 +35,6 @@ steps:
 - name: wait for the login window
   wait_for: login_window
   timeout: 240
-  optional: true
 - name: dismiss anything over the login window
   key: esc
   wait_after: 2
@@ -97,13 +96,32 @@ steps:
   key: ret
   wait_after: 14
 - name: the settings window is up
-  until_any:
-  - - system
-    - settings
-  - - general
-  - - wi-fi
-  timeout: 90
-  poll: 3
+  loop:
+    max: 30
+    do:
+    - wait: 3
+    ocr:
+      name: screen
+      region:
+      - 0
+      - 0
+      - 1920
+      - 1080
+      region_at:
+      - 1920
+      - 1080
+      scale: 1
+      wait: 0
+    check:
+      name: done
+      from: screen
+      says_any:
+      - - system
+        - settings
+      - - general
+      - - wi-fi
+    until:
+      fact: done
 - name: search for remote login
   at:
   - 715
@@ -113,24 +131,34 @@ steps:
   modifier: meta_l
   wait_after: 10
 - name: the remote login result is on screen
-  until_any:
-  - - sharing
-    - remote
-  - - allow
-    - full
-    - disk
-    - access
-  region:
-  - 590
-  - 240
-  - 1210
-  - 720
-  scale: 2
-  timeout: 90
-  poll: 2
-  region_at:
-  - 1920
-  - 1080
+  loop:
+    max: 45
+    do:
+    - wait: 2
+    ocr:
+      name: screen
+      region:
+      - 590
+      - 240
+      - 1210
+      - 720
+      region_at:
+      - 1920
+      - 1080
+      scale: 2
+      wait: 0
+    check:
+      name: done
+      from: screen
+      says_any:
+      - - sharing
+        - remote
+      - - allow
+        - full
+        - disk
+        - access
+    until:
+      fact: done
 - name: open the remote login pane
   at:
   - 703
@@ -156,22 +184,32 @@ steps:
   - 1920
   - 1080
 - name: the remote login pane is up
-  until_any:
-  - - allow
-    - full
-    - disk
-    - access
-  region:
-  - 726
-  - 300
-  - 1200
-  - 715
-  scale: 2
-  timeout: 90
-  poll: 3
-  region_at:
-  - 1920
-  - 1080
+  loop:
+    max: 30
+    do:
+    - wait: 3
+    ocr:
+      name: screen
+      region:
+      - 726
+      - 300
+      - 1200
+      - 715
+      region_at:
+      - 1920
+      - 1080
+      scale: 2
+      wait: 0
+    check:
+      name: done
+      from: screen
+      says_any:
+      - - allow
+        - full
+        - disk
+        - access
+    until:
+      fact: done
 - name: turn remote login on
   unless:
   - log
@@ -193,24 +231,33 @@ steps:
   - 1920
   - 1080
 - name: the switch reads on
-  until_any:
-  - - log
-    - in
-    - to
-    - this
-    - computer
-  region:
-  - 726
-  - 300
-  - 1200
-  - 715
-  scale: 2
-  timeout: 30
-  poll: 3
-  optional: true
-  region_at:
-  - 1920
-  - 1080
+  loop:
+    max: 10
+    do:
+    - wait: 3
+    ocr:
+      name: screen
+      region:
+      - 726
+      - 300
+      - 1200
+      - 715
+      region_at:
+      - 1920
+      - 1080
+      scale: 2
+      wait: 0
+    check:
+      name: done
+      from: screen
+      says_any:
+      - - log
+        - in
+        - to
+        - this
+        - computer
+    until:
+      fact: done
 - name: close the pane
   at:
   - 1145
@@ -229,7 +276,6 @@ steps:
   ssh: printf '%s\n' "{{ password }}" | sudo -S scutil --set LocalHostName {{ user }}
 - name: note what is absent
   ssh: command -v brew || true
-  optional: true
 - name: stop the machine
   shutdown: '{{ shutdown }}'
   timeout: 300

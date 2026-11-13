@@ -32,71 +32,104 @@ steps:
   poll: 5
   keep_alive: true
 - name: desktop - installer
-  at:
-  - 81
-  - 259
-  repeat:
-  - 2
-  - 3
   wait_after: 28
+  do:
+  - at:
+    - 81
+    - 259
+    wait_after: 3
+  - at:
+    - 81
+    - 259
+    wait_after: 3
 - name: wait for the terms page
-  until:
-  - terms
-  - of
-  - use
-  region:
-  - 690
-  - 225
-  - 1560
-  - 265
-  region_at:
-  - 1920
-  - 1080
-  scale: 2
-  timeout: 180
-  poll: 6
+  loop:
+    max: 30
+    do:
+    - wait: 6
+    ocr:
+      name: screen
+      region:
+      - 690
+      - 225
+      - 1560
+      - 265
+      region_at:
+      - 1920
+      - 1080
+      scale: 2
+      wait: 0
+    check:
+      name: done
+      from: screen
+      says:
+      - terms
+      - of
+      - use
+    until:
+      fact: done
 - name: terms of use
   at:
   - 1482
   - 889
   wait_after: 14
 - name: wait for the installation type page
-  until:
-  - select
-  - type
-  - of
-  - installation
-  region:
-  - 690
-  - 225
-  - 1560
-  - 265
-  region_at:
-  - 1920
-  - 1080
-  scale: 2
-  timeout: 180
-  poll: 6
+  loop:
+    max: 30
+    do:
+    - wait: 6
+    ocr:
+      name: screen
+      region:
+      - 690
+      - 225
+      - 1560
+      - 265
+      region_at:
+      - 1920
+      - 1080
+      scale: 2
+      wait: 0
+    check:
+      name: done
+      from: screen
+      says:
+      - select
+      - type
+      - of
+      - installation
+    until:
+      fact: done
 - name: installation type
   at:
   - 1482
   - 889
   wait_after: 16
 - name: wait for the confirmation page
-  until:
-  - final
-  - review
-  region:
-  - 332
-  - 248
-  - 700
-  - 285
-  region_at:
-  - 1920
-  - 1080
-  scale: 1
-  timeout: 180
-  poll: 6
+  loop:
+    max: 30
+    do:
+    - wait: 6
+    ocr:
+      name: screen
+      region:
+      - 332
+      - 248
+      - 700
+      - 285
+      region_at:
+      - 1920
+      - 1080
+      scale: 1
+      wait: 0
+    check:
+      name: done
+      from: screen
+      says:
+      - final
+      - review
+    until:
+      fact: done
 - name: installation confirmation - start
   at:
   - 1478
@@ -108,83 +141,123 @@ steps:
   - 583
   wait_after: 4
 - name: wait for the swap file page
-  until:
-  - create
-  - a
-  - swap
-  - file
-  region:
-  - 332
-  - 248
-  - 700
-  - 285
-  region_at:
-  - 1920
-  - 1080
-  scale: 1
-  timeout: 240
-  poll: 6
+  loop:
+    max: 40
+    do:
+    - wait: 6
+    ocr:
+      name: screen
+      region:
+      - 332
+      - 248
+      - 700
+      - 285
+      region_at:
+      - 1920
+      - 1080
+      scale: 1
+      wait: 0
+    check:
+      name: done
+      from: screen
+      says:
+      - create
+      - a
+      - swap
+      - file
+    until:
+      fact: done
 - name: swap file
   at:
   - 1482
   - 889
   wait_after: 18
 - name: wait for the computer identity page
-  until:
-  - computer
-  - identity
-  region:
-  - 332
-  - 248
-  - 700
-  - 285
-  region_at:
-  - 1920
-  - 1080
-  scale: 1
-  timeout: 240
-  poll: 6
+  loop:
+    max: 40
+    do:
+    - wait: 6
+    ocr:
+      name: screen
+      region:
+      - 332
+      - 248
+      - 700
+      - 285
+      region_at:
+      - 1920
+      - 1080
+      scale: 1
+      wait: 0
+    check:
+      name: done
+      from: screen
+      says:
+      - computer
+      - identity
+    until:
+      fact: done
 - name: computer identity
   at:
   - 1482
   - 889
   wait_after: 18
 - name: wait for the localization page
-  until:
-  - localization
-  - defaults
-  region:
-  - 332
-  - 248
-  - 700
-  - 285
-  region_at:
-  - 1920
-  - 1080
-  scale: 1
-  timeout: 240
-  poll: 6
+  loop:
+    max: 40
+    do:
+    - wait: 6
+    ocr:
+      name: screen
+      region:
+      - 332
+      - 248
+      - 700
+      - 285
+      region_at:
+      - 1920
+      - 1080
+      scale: 1
+      wait: 0
+    check:
+      name: done
+      from: screen
+      says:
+      - localization
+      - defaults
+    until:
+      fact: done
 - name: localization defaults
   at:
   - 1482
   - 889
   wait_after: 18
 - name: wait for the account page
-  until:
-  - default
-  - user
-  - login
-  region:
-  - 332
-  - 248
-  - 700
-  - 285
-  region_at:
-  - 1920
-  - 1080
-  scale: 1
-  timeout: 180
-  poll: 6
+  loop:
+    max: 30
+    do:
+    - wait: 6
+    ocr:
+      name: screen
+      region:
+      - 332
+      - 248
+      - 700
+      - 285
+      region_at:
+      - 1920
+      - 1080
+      scale: 1
+      wait: 0
+    check:
+      name: done
+      from: screen
+      says:
+      - default
+      - user
+      - login
+    until:
+      fact: done
 - name: account - login name
   at:
   - 1210
@@ -214,23 +287,35 @@ steps:
   - 889
   wait_after: 25
 - name: the installer finishes
-  until_any:
-  - - congratulations
-  - - completed
-    - the
-    - installation
-  region:
-  - 0
-  - 0
-  - 1920
-  - 1080
-  region_at:
-  - 1920
-  - 1080
-  scale: 1
-  timeout: 1800
-  poll: 20
-  keep_alive: true
+  loop:
+    max: 90
+    do:
+    - at:
+      - 420
+      - 300
+      wait_after: 20
+    ocr:
+      name: screen
+      region:
+      - 0
+      - 0
+      - 1920
+      - 1080
+      region_at:
+      - 1920
+      - 1080
+      scale: 1
+      wait: 0
+    check:
+      name: done
+      from: screen
+      says_any:
+      - - congratulations
+      - - completed
+        - the
+        - installation
+    until:
+      fact: done
 - name: stop the machine
   shutdown: kill
   timeout: 120
