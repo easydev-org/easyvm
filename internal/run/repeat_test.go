@@ -224,3 +224,55 @@ func TestUnlessAnyTakesTheAlternatives(t *testing.T) {
 			"file that uses it with `an unknown key used to mean a step that did nothing`")
 	}
 }
+
+// A BARE WORD-SET INSIDE A LOOP MEANS `words:`, THE SAME AS IT DOES ON A STEP.
+//
+// ONE KEY, TWO SPELLINGS WAS A TRAP I FELL INTO. A step's `until_any:` is a list of word-sets:
+//
+//	until_any:
+//	- [restore, time, machine]
+//	- [safari]
+//
+// and inside `repeat_until:` the entries had to be mappings, because a loop's condition can also be
+// `number_between:`, `changed:` or `desktop:`. Writing the list form in a loop - which is what every
+// other `until_any:` in the repository looks like - failed with
+//
+//	until_any[0] is not a mapping
+//
+// on a GhostBSD run, four minutes in, saying nothing about what was actually wrong. THE LIST FORM IS
+// NOW READ AS `words:` SO THE TWO AGREE.
+func TestABareWordSetIsReadAsWordsInALoop(t *testing.T) {
+	ex := &Executor{Work: t.TempDir()}
+	loop, err := ex.parseRepeatUntil(stepWith(t, map[string]any{
+		"repeat_until": map[string]any{
+			"actions":   []any{map[string]any{"key": "3"}},
+			"until_any": []any{[]any{"detailed", "help"}, []any{"list", "of", "commands"}},
+		},
+	}))
+	if err != nil {
+		t.Fatalf("a bare word-set must be accepted in `repeat_until.until_any`: %v", err)
+	}
+	if len(loop.Conditions) != 2 {
+		t.Fatalf("%d conditions, want 2", len(loop.Conditions))
+	}
+	// AND THE WORDS SURVIVE IN ORDER, because they are matched as a phrase.
+	want := []string{"detailed", "help"}
+	for i, w := range want {
+		if loop.Conditions[0].Words[i] != w {
+			t.Fatalf("condition 0 is %v, want %v", loop.Conditions[0].Words, want)
+		}
+	}
+	// THE MAPPING FORM STILL WORKS, because the richer conditions need it.
+	loop2, err := ex.parseRepeatUntil(stepWith(t, map[string]any{
+		"repeat_until": map[string]any{
+			"actions":   []any{map[string]any{"key": "up"}},
+			"until_any": []any{map[string]any{"number_between": []any{60, 200}, "unit": "gb"}},
+		},
+	}))
+	if err != nil {
+		t.Fatalf("the mapping form must still be accepted: %v", err)
+	}
+	if loop2.Conditions[0].NumberBetween == nil {
+		t.Fatal("number_between was dropped from the mapping form")
+	}
+}

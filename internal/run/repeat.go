@@ -213,9 +213,31 @@ func (e *Executor) parseRepeatUntil(s walk.Step) (repeatUntil, error) {
 			"condition is eight presses into a screen nobody measured")
 	}
 	for i, item := range conditions {
-		mapping, ok := item.(map[string]any)
-		if !ok {
-			return loop, fail(s.Name, "until_any[%d] is not a mapping", i)
+		// A BARE WORD-SET MEANS `words:`, BECAUSE THAT IS WHAT IT MEANS EVERYWHERE ELSE.
+		//
+		// `until_any:` IS A STEP'S PROPERTY TOO, and there the entries are lists:
+		//
+		//	until_any:
+		//	- [restore, time, machine]
+		//	- [safari]
+		//
+		// INSIDE `repeat_until:` EACH ENTRY HAS TO BE A MAPPING, because a loop's stop condition can
+		// also be `number_between:`, `changed:` or `desktop:`. Requiring the mapping form for the
+		// plain case made ONE KEY LOOK LIKE TWO, and writing the list form in a loop failed with
+		//
+		//	until_any[0] is not a mapping
+		//
+		// which says nothing about what the author did wrong. A list is now READ as `words:`, so the
+		// two spellings agree and the mapping form stays for the conditions that need it.
+		mapping, isMapping := item.(map[string]any)
+		if !isMapping {
+			list, isList := item.([]any)
+			if !isList {
+				return loop, fail(s.Name, "until_any[%d] is %T: a condition is a list of words "+
+					"(the same form a step's `until_any:` takes) or a mapping with `words:`, "+
+					"`number_between:`, `changed:` or `desktop:`", i, item)
+			}
+			mapping = map[string]any{"words": list}
 		}
 		var cond condition
 		if words, ok := mapping["words"].([]any); ok {
