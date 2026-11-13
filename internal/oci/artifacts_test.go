@@ -133,54 +133,73 @@ func TestEveryStageKeepsItsVideoAndLogs(t *testing.T) {
 //
 // THE PIN MATTERS MORE THAN THE INSTALL. The tags oras writes are what later stages pull, so an
 // unpinned download is a build where the tool that wrote a tag can change without a commit.
-func TestPrepareInstallsOrasAndSkipsWhenPresent(t *testing.T) {
+// THE WORKFLOW USES THE ORGANISATION'S ACTIONS FOR THE THINGS IT USED TO DO BY HAND.
+//
+// THIS REPLACES THREE HAND-WRITTEN BLOCKS that four repositories each had a copy of:
+//
+//	prepare            30 lines probing /dev/kvm, /dev/net/tun and qemu's accelerator, plus a
+//	                   hand-pinned oras download
+//	publish the disk   50 lines of `oras login` and `oras push`, with the 512 MiB floor check
+//	install oras       a download with a sha256, in every leg's prepare
+//
+// THE ACTION CHECKS MORE THAN THE STEP DID. `test -e /dev/kvm` PASSED on run 43063744565 while qemu
+// fell back to TCG, and the symptom was not an error - the guest booted and every stage timed out.
+// `runner-check` starts qemu with `-accel kvm`, which is the handshake, and `ip tuntap add`, which is
+// the node AND the NET_ADMIN capability together.
+func TestTheWorkflowUsesTheOrganisationActions(t *testing.T) {
 	body, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "stage.yml"))
 	if err != nil {
 		t.Skipf("no stage.yml here (%v)", err)
 	}
-	var doc struct {
-		Jobs map[string]struct {
-			Steps []struct {
-				Name string `yaml:"name"`
-				Run  string `yaml:"run"`
-			} `yaml:"steps"`
-		} `yaml:"jobs"`
-	}
-	if err := yaml.Unmarshal(body, &doc); err != nil {
-		t.Fatalf("stage.yml does not parse: %v", err)
-	}
-	var prep string
-	for _, job := range doc.Jobs {
-		for _, st := range job.Steps {
-			if st.Name == "prepare" {
-				prep = st.Run
-			}
+	src := string(body)
+
+	// THE FOUR CALLS, AND WHAT EACH ONE OWNS.
+	for _, want := range []struct{ action, why string }{
+		{"easyactions/runner-check@main",
+			"the devices and the disk: /dev/kvm OPENS, qemu ACCELERATES, /dev/net/tun MAKES A TAP - " +
+				"none of which `test -e` can answer"},
+		{"easyactions/log-stream@main",
+			"the live log: a running step's Actions log is unreadable until it ends"},
+		{"easyactions/oci-push@main",
+			"the publish: idempotent oras install, explicit login, sha256, --distinct-from"},
+	} {
+		if !strings.Contains(src, want.action) {
+			t.Errorf("stage.yml does not use %s, which owns %s", want.action, want.why)
 		}
-	}
-	if prep == "" {
-		t.Fatal("stage.yml has no `prepare` step, so this test checks nothing")
 	}
 
-	// IT PROBES BEFORE DOWNLOADING, so a runner or image that already has oras pays nothing.
-	if !strings.Contains(prep, "if oras version") {
-		t.Error("`prepare` does not check whether oras is already there. `oras version` rather than " +
-			"`command -v` because a binary on PATH that cannot run is the same failure one line later")
+	// AND THE HAND-WRITTEN VERSIONS ARE GONE FROM THE COMMANDS. A half-migrated file is worse than
+	// either end: two probes that disagree, or an oras install that runs in one leg and not another.
+	//
+	// COMMENTS ARE STRIPPED FIRST. The notes above each action quote the lines they replaced - "`test
+	// -e /dev/kvm` PASSED on run 43063744565 while qemu fell back to TCG" is the reason the action
+	// exists - so a search over the whole file finds the explanations and calls them code.
+	var commands []string
+	for _, line := range strings.Split(src, "\n") {
+		if t := strings.TrimSpace(line); strings.HasPrefix(t, "#") {
+			continue
+		}
+		commands = append(commands, line)
 	}
-	// AND IT INSTALLS WHEN IT IS NOT, WITH A PINNED VERSION AND HASH.
-	for _, want := range []string{"ORAS_VERSION=", "ORAS_SHA256=", "sha256sum -c -", "/usr/local/bin/oras"} {
-		if !strings.Contains(prep, want) {
-			t.Errorf("`prepare` installs oras without %q, so the tool that writes the tags later "+
-				"stages pull is not a known tool", want)
+	code := strings.Join(commands, "\n")
+	for _, gone := range []struct{ text, why string }{
+		{"test -e /dev/kvm", "a permission test where the operation is what matters"},
+		{"ORAS_SHA256", "a hand-pinned oras download, now the action's job"},
+		{"oras login", "an explicit login, now inside oci-push"},
+	} {
+		if strings.Contains(code, gone.text) {
+			t.Errorf("stage.yml still RUNS %q (%s); the action owns it now, and two copies drift",
+				gone.text, gone.why)
 		}
 	}
-	// AND THE IMAGE DOES NOT ALSO INSTALL IT - one place, or a version bump is two commits.
-	containerfile, err := os.ReadFile(filepath.Join("..", "..", "Containerfile"))
-	if err != nil {
-		t.Skipf("no Containerfile here (%v)", err)
-	}
-	if strings.Contains(string(containerfile), "ORAS_VERSION") {
-		t.Error("the Containerfile also installs oras. One place installs it: `prepare`. Two places " +
-			"means a version bump is two commits and one of them gets forgotten")
+
+	// THE FLOOR CHECK STAYS, BECAUSE IT IS NOT THE ACTION'S BUSINESS. `qemu-img create` writes a
+	// 197,632-byte qcow2 - a header and nothing else - so a walk whose every click missed still
+	// produces a file `-s` accepts. MEASURED ON linux-zorin: published as 0 MiB, and the next stage
+	// pulled it and failed somewhere unrelated.
+	if !strings.Contains(src, "512 * 1024 * 1024") {
+		t.Error("the 512 MiB floor is gone. A leg whose clicks never reached the installer publishes " +
+			"a qcow2 header, and `-s` accepts one")
 	}
 }
 

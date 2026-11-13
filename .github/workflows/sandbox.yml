@@ -56,24 +56,45 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: prepare
+        # THE DEVICES BY THE ORGANISATION'S ACTION, which checks the OPERATIONS rather than the files:
+        # /dev/kvm OPENS, qemu ACCELERATES, /dev/net/tun MAKES A TAP. A sandbox boots a real machine,
+        # so it needs all three and a wrong answer here is a pod that starts and then hangs.
+        uses: easydev-org/easyactions/runner-check@main
+        with:
+          kvm: true
+          tun: true
+          disk-gb: '40'
+          token: ${{ github.token }}
+
+      - name: the tools
         run: |
           set -eu
-          test -e /dev/kvm || { echo "=== NO /dev/kvm ==="; exit 1; }
-          test -e /dev/net/tun || { echo "=== NO /dev/net/tun ==="; exit 1; }
-          : < /dev/net/tun || { echo "=== /dev/net/tun CANNOT BE OPENED ==="; exit 1; }
           easyvm versions
           qemu-img --version | head -1
+          mkdir -p "$GITHUB_WORKSPACE/work"
 
       - name: pull the disk
+        # THE ORGANISATION'S PULL, WHICH RESUMES. `oras pull` has no resume: a transfer reset at the
+        # other end starts again from byte zero, and a sandbox disk is the same multi-gigabyte blob.
+        #
+        # THIS CALL SITE CAN USE THE ACTION - unlike the stage workflow's, which sits inside a `while`
+        # that waits thirty minutes for a tag a parallel leg has not published yet. There is nothing
+        # to wait for here: the disk was named by the caller and either exists or does not.
+        uses: easydev-org/easyactions/oci-pull@main
+        with:
+          tag: ${{ inputs.disk }}
+          dest: ${{ github.workspace }}/work
+          path: ${{ github.workspace }}/work/disk.qcow2
+          repository: ${{ inputs.disks_repository }}
+          token: ${{ github.token }}
+          check-name: sandbox-pull
+
+      - name: check the disk
         run: |
           set -eu
-          mkdir -p "$GITHUB_WORKSPACE/work"
-          # THE SAME RESUMABLE FETCH THE STAGE WORKFLOW USES. `oras pull` has no resume, and a
-          # sandbox disk is the same multi-gigabyte blob.
-          sh "$GITHUB_WORKSPACE/.github/pull-artifact.sh" \
-             ghcr.io "$(printf '%s' "${{ inputs.disks_repository }}" | tr '[:upper:]' '[:lower:]')" \
-             "${{ inputs.disk }}" "$GITHUB_WORKSPACE/work/disk.qcow2"
           ls -l "$GITHUB_WORKSPACE/work/"
+          # `qemu-img check` REPORTS A CORRUPT IMAGE HERE RATHER THAN IN THE GUEST, where the symptom
+          # is a boot that stops with no message.
           qemu-img check "$GITHUB_WORKSPACE/work/disk.qcow2" || true
 
       - name: write the sandbox file

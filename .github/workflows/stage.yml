@@ -89,100 +89,50 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # THE DEVICES AND THE DISK, BY THE ORGANISATION'S ACTION.
+      #
+      # THIS REPLACES THIRTY LINES OF HAND-WRITTEN PROBES that three other repositories had their own
+      # copy of. The action checks the same things and two that this step did not:
+      #
+      #	/dev/kvm OPENS            not `test -e`: on a GitHub runner the node is 0o660 root:kvm and
+      #	                          the job's uid is neither, so a permission test says no about a
+      #	                          device that works. The action opens it and chmods 0666 when needed.
+      #	qemu ACCELERATES           the handshake behind the open. `test -e /dev/kvm` PASSED on run
+      #	                          43063744565 while qemu fell back to TCG, and the symptom was not an
+      #	                          error - the guest booted, everything took fifty times as long, and
+      #	                          macOS could not get the CPU flags it needs.
+      #	/dev/net/tun MAKES A TAP  not `test -e`: `ip tuntap add` is the only call that tests the node
+      #	                          and the NET_ADMIN capability together.
+      #	DISK                      the leg writes a 128 GiB qcow2, reads a 7 GiB ISO and keeps an mp4.
+      #	                          The action prunes what a VM job never uses - .NET, Android, GHC,
+      #	                          CodeQL - and fails BEFORE the install rather than forty minutes into
+      #	                          it with `no space left on device`.
       - name: prepare
-        # THE DEVICES ARE OPENED, NOT LISTED, BECAUSE A NODE THAT EXISTS IS NOT A DEVICE THAT WORKS.
-        # On run 43063744565 `test -e /dev/kvm` passed while qemu ran on TCG - pure software emulation -
-        # because the node was there and the ioctl behind it was not reachable. The symptom was not an
-        # error: the guest boots, everything takes fifty times as long, and macOS cannot get the CPU
-        # flags it needs.
+        uses: easydev-org/easyactions/runner-check@main
+        with:
+          kvm: true
+          tun: true
+          # THE RECORDING, THE INPUT DISK AND THE OUTPUT DISK ARE ALL ON THIS MOUNT, and the largest
+          # single input is a 7.7 GiB Windows ISO that is read twice.
+          disk-gb: '40'
+          token: ${{ github.token }}
+
+      - name: the tools the files use
+        # NAMED SO A MISSING ONE IS THIS STEP RATHER THAN A FAILURE FORTY MINUTES INTO AN INSTALL that
+        # needed `xorriso` to build an answer CD.
         #
-        # EVERY PROBE HERE ASKS THE OPERATION RATHER THAN THE FILE:
-        #
-        #	: < /dev/net/tun        opens it, and fails if the open is refused
-        #	qemu -accel kvm -S      starts the accelerator and opens /dev/kvm, qemu's own handshake
-        #
-        # ONE SPELLING OF THE ACCELERATOR. `-machine q35,accel=kvm` AND `-accel kvm` ARE MUTUALLY
-        # EXCLUSIVE - qemu says so: "The -accel and \"-machine accel=\" options are incompatible" - and
-        # the first version of this probe passed both, so it reported that the runner could not
-        # accelerate a guest when its KVM had never been asked.
+        # `oras` IS NOT INSTALLED HERE ANY MORE. `oci-push` installs it idempotently when it publishes,
+        # and a leg that publishes nothing does not need it - which is why the install moved to the
+        # action that uses it rather than sitting in every leg's prepare.
         run: |
           set -eu
-          test -e /dev/kvm || { echo "=== NO /dev/kvm ==="; exit 1; }
-          test -e /dev/net/tun || { echo "=== NO /dev/net/tun ==="; exit 1; }
-          ls -l /dev/kvm /dev/net/tun
-          : < /dev/net/tun || { echo "=== /dev/net/tun CANNOT BE OPENED ==="; exit 1; }
-
-          qemu-system-x86_64 -accel kvm -nodefaults -display none -S \
-            -monitor none -serial none > /tmp/kvm-probe.log 2>&1 &
-          QPID=$!
-          sleep 2
-          if kill -0 "$QPID" 2>/dev/null; then
-            echo "=== KVM STARTED (qemu accepted accel=kvm) ==="
-            kill "$QPID" 2>/dev/null || true
-            wait "$QPID" 2>/dev/null || true
-          else
-            wait "$QPID" 2>/dev/null || true
-            echo "=== QEMU REFUSED accel=kvm - THIS CONTAINER CANNOT ACCELERATE A GUEST ==="
-            cat /tmp/kvm-probe.log || true
-            echo "  every leg would run on TCG: fifty times slower, and macOS deadlocks"
-            exit 1
-          fi
-
           easyvm versions
-          qemu-img --version | head -1
-
-          # ORAS, HERE RATHER THAN IN THE IMAGE, AND THE REASON IS THE IMAGE'S OWN RULE.
-          #
-          # PUBLISHING A FINISHED DISK IS A REGISTRY TRANSFER, NOT SOMETHING THIS PROGRAM DOES. That
-          # is why `easyvm push` is gone and `oras push` replaced it: one caller, a real artifact
-          # format, and no second registry implementation to keep correct.
-          #
-          # IT IS INSTALLED PER JOB, NOT PER IMAGE, even though baking it into the Containerfile would
-          # work and saves a download. The image is built from source on every push and rebuilding it
-          # to add a tool means every leg waits for a new image before it can run - the same trade the
-          # reference implementation made when it put this in `lib/ci.py install-oras` instead of its
-          # Dockerfile. A three-second download in `prepare` is cheaper than a ten-minute rebuild, and
-          # a version bump here does not invalidate the layer everything else is cached behind.
-          #
-          # THE VERSION AND HASH ARE PINNED, because the tool that writes a tag must be a known tool:
-          # the tags it writes are what later stages pull.
-          #
-          # IT IS SKIPPED WHEN ALREADY PRESENT, so a runner that ships oras - or an image that later
-          # bakes it in - pays nothing. `oras version` rather than `command -v` because a binary on
-          # PATH that cannot run is the same failure one line later.
-          if oras version > /dev/null 2>&1; then
-            echo "  oras: already present ($(oras version | head -1))"
-          else
-            ORAS_VERSION=1.2.2
-            ORAS_SHA256=bff970346470e5ef888e9f2c0bf7f8ee47283f5a45207d6e7a037da1fb0eae0d
-            oras_arch=$(dpkg --print-architecture)
-            oras_url="https://github.com/oras-project/oras/releases/download/v${ORAS_VERSION}/oras_${ORAS_VERSION}_linux_${oras_arch}.tar.gz"
-            echo "  oras: fetching $oras_url"
-            # THE TOOL IS NAMED BEFORE IT IS USED, BECAUSE ITS ABSENCE WAS A 127 RATHER THAN A
-            # SENTENCE:
-            #
-            #	/__w/_temp/....sh: 53: curl: not found
-            #	Process completed with exit code 127
-            #
-            # `curl` is now in the Containerfile - it was the one tool this image did not have, and
-            # `prepare` is where every other one is assumed. `command -v` first so a future image that
-            # drops it fails here with a name instead of a shell error code.
-            command -v curl > /dev/null || {
-              echo "::error::curl is not in this image, and `prepare` needs it to fetch oras."
-              echo "::error::Add it to the Containerfile's apt list."
-              exit 1
-            }
-            curl -fsSL --retry 5 --retry-all-errors -o /tmp/oras.tgz "$oras_url"
-            echo "${ORAS_SHA256}  /tmp/oras.tgz" | sha256sum -c -
-            tar -xzf /tmp/oras.tgz -C /usr/local/bin oras
-            chmod 0755 /usr/local/bin/oras
-            rm -f /tmp/oras.tgz
-            oras version
-          fi
-          # THE HOST-SIDE TOOLS THE FILES USE, named so a missing one is this step rather than a
-          # failure forty minutes into an install that needed `xorriso` to build an answer CD.
-          for tool in qemu-img 7z xorriso unzip mformat mcopy mdir; do
-            command -v "$tool" > /dev/null || echo "  (optional, not present: $tool)"
+          for tool in qemu-img 7z xorriso unzip mformat mcopy mdir curl; do
+            if command -v "$tool" > /dev/null; then
+              printf '  %-10s %s\n' "$tool" "$(command -v "$tool")"
+            else
+              printf '  %-10s MISSING\n' "$tool"
+            fi
           done
           mkdir -p "$GITHUB_WORKSPACE/work"
 
@@ -278,11 +228,18 @@ jobs:
             echo "=== pull $tag"
             attempt=0
             while :; do
-              # THE TRANSFER IS THE SHELL SCRIPT, NOT `easyvm pull`. `oras pull` HAS NO RESUME,
-              # so a retry around it restarts every multi-gigabyte transfer at byte zero and more
-              # attempts make more failures rather than progress - measured on a 28 GiB blob whose
-              # first four attempts each died at the same stream error. .github/pull-artifact.sh
-              # fetches the blob with `Range:` and keeps a `.part` file.
+              # THE TRANSFER IS A SHELL SCRIPT, NOT `easyvm pull`. `oras pull` HAS NO RESUME: a retry
+              # around it restarts every multi-gigabyte transfer at byte zero, so more attempts make
+              # more failures rather than progress - measured on a 28 GiB blob whose first four
+              # attempts each died at the same stream error. This one fetches the blob with `Range:`
+              # and keeps a `.part` file.
+              #
+              # IT IS THE SAME ALGORITHM AS `easyactions/oci-pull`, DELIBERATELY DUPLICATED FOR ONE
+              # REASON: THIS LOOP RETRIES ON 404. The action is a STEP, and a step cannot sit inside a
+              # `while` that waits thirty minutes for a tag the parallel leg has not published yet - so
+              # the retry stays here and the transfer is the same three requests with the same
+              # `Range:` resume. THE ACTION IS THE ONE TO USE ANYWHERE ELSE; this copy exists because
+              # this call site is a loop.
               if sh "$GITHUB_WORKSPACE/.github/pull-artifact.sh" \
                      ghcr.io "$(printf '%s' "${{ inputs.disks_repository }}" | tr '[:upper:]' '[:lower:]')" \
                      "$tag" "$GITHUB_WORKSPACE/work/disk.qcow2"; then
@@ -452,22 +409,20 @@ jobs:
       - name: publish the disk
         # A LEG THAT PRODUCED A DISK PUBLISHES IT, AND THAT IS HOW THE NEXT STAGE GETS ITS INPUT.
         #
-        # WITHOUT THIS, EVERY LATER STAGE STARTED FROM WHATEVER `ssh` HAD PUBLISHED and an install's
-        # output existed only as a 4-to-8 GiB artifact - which is why five legs sat uploading for an
-        # hour after their walkthroughs had finished, and why nothing downstream ever saw an
-        # installed disk.
+        # THE TRANSFER IS `oci-push`, NOT FIFTY LINES OF `oras login` AND `oras push`. The action adds
+        # the four things this step used to do by hand and one it did not:
         #
-        # `if:` IS THE FILE, NOT THE LEG: an `install` declares `"out"` and a `vm-configure` does too,
-        # while an `ssh` leg's product is the disk it started from. A missing file is a warning rather
-        # than a failure, because the artifact upload behind this still carries the evidence.
+        #	IDEMPOTENT oras INSTALL   it was a block in every leg's prepare; now it is where it is used
+        #	EXPLICIT LOGIN            oras reads no GITHUB_TOKEN from the environment, so an anonymous
+        #	                          push is answered `DENIED`, which reads like a package permission
+        #	SHA256 + --distinct-from  a stage that was supposed to change the disk and did not is a
+        #	                          failure, not a republish of identical bytes
+        #	--stamp                   a tag nothing has to invent twice
+        #
+        # THE FILE IS CHECKED BEFORE ANYTHING IS PUSHED. An `install` declares `out:` and a
+        # `vm-configure` does too, while an `ssh` leg had no `compress:` for months - so "no disk"
+        # is a warning, and a disk below the floor is a refusal.
         if: always()
-        # THE SAME VARIABLE, ON THE STEP THAT WRITES. `oras login` reads `GITHUB_TOKEN` from the
-        # environment; with none set the push is anonymous and is answered
-        #
-        #	FAILED: the registry refused a pull,push token (HTTP 403): {"errors":[{"code":
-        #	"DENIED","message":"requested access to the resource is denied"}]}
-        #
-        # measured on windows-install, whose 10767 MiB disk was finished and unpublished.
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
@@ -483,9 +438,9 @@ jobs:
           #
           # `qemu-img create` writes a 197,632-BYTE qcow2 - a header and nothing else - so a walk whose
           # every click landed on the wrong pane still produces a file that `-s` accepts. MEASURED ON
-          # linux-zorin: the install leg reported success, `oras push` published it, and `windows11`
-          # / `linux-opensuse-tumbleweed` sat beside a `linux-zorin` of 0 MiB in the package. The next
-          # stage then pulled a disk with no system on it and failed somewhere unrelated.
+          # linux-zorin: the install leg reported success, `oras push` published it, and `linux-zorin`
+          # sat beside a 0 MiB file in the package. The next stage then pulled a disk with no system on
+          # it and failed somewhere unrelated.
           #
           # THE FLOOR IS 512 MiB: the smallest real install here - ghostbsd at 2.7 GiB, popos at 2.5 -
           # is several times that, and a bare qcow2 header is three orders of magnitude below it.
@@ -498,7 +453,7 @@ jobs:
             ls -l "$GITHUB_WORKSPACE/work/" || true
             exit 1
           fi
-          echo "  publishing $out: $(( size >> 20 )) MiB"
+
           # `matrix.publish` IS THE TAG, AND `matrix.name` IS ONLY THE JOB'S NAME.
           #
           # THEY WERE THE SAME THING AND THEY MUST NOT BE. Each leg pulls the disk the PREVIOUS stage
@@ -511,60 +466,29 @@ jobs:
           #
           # PUBLISHING UNDER `matrix.name` MEANT the install leg wrote `linux-zorin-install` while every
           # ssh leg pulled `linux-zorin`, so the two names never met and a fresh package could never
-          # boot an installed disk. `publish` defaults to the job's own name for the legs that
-          # continue themselves.
-          # A DIAGNOSTIC, NOT DECORATION. Whether the credential ARRIVED is the one fact this step
-          # cannot otherwise report: an empty credential makes the push anonymous, and GitHub
-          # answers that with `DENIED`, which reads like a permission problem on the package.
-          # The length is printed rather than the value, so a log never carries the secret.
-          if [ -n "${GITHUB_TOKEN:-}" ]; then
-            echo "  credential: GITHUB_TOKEN is set (${#GITHUB_TOKEN} characters)"
-          else
-            echo "::error::GITHUB_TOKEN is EMPTY in this step. The push below will ask the registry"
-            echo "::error::anonymously and be refused with DENIED, which is not a permission problem."
-          fi
+          # boot an installed disk.
           tag="${{ matrix.publish }}"
           if [ -z "$tag" ]; then tag="${{ matrix.name }}"; fi
-          # `oras push`, NOT A SUBCOMMAND OF THIS PROGRAM.
-          #
-          # PUBLISHING IS A REGISTRY TRANSFER, NOT A THING THIS REPOSITORY KNOWS HOW TO DO. The
-          # payload is a bare qcow2 - not a rootfs - and oras stores arbitrary files as OCI
-          # artifacts without inventing a Dockerfile for them. `easyvm push` used to exist and was
-          # 246 lines of registry protocol that duplicated what oras already is, reachable from one
-          # caller and shipped to every user of the binary.
-          #
-          # THE PULL SIDE STAYS: `internal/oci` is how `fetch:` resolves every installer image and
-          # every macOS asset at RUN time, inside the daemon, with no external tool - which is why
-          # the image does not need oras to run a walkthrough, only to publish one.
-          #
-          # ORAS PUSHES FROM THE FILE'S OWN DIRECTORY WITH A BARE FILENAME. It validates the path in
-          # a `file:media:type` reference and rejects an absolute one, and the flag it suggests -
-          # `--disable-path-validation` - turns off ALL of its path checks: absolute paths, "..",
-          # symlinks, anything outside the working directory. Those exist so a mistyped variable
-          # cannot push ~/.ssh/id_rsa to a public package, and turning them off to satisfy one of
-          # them is the wrong trade. A bare name in its own directory satisfies the check instead.
-          repo=$(printf '%s' "${{ inputs.disks_repository }}" | tr '[:upper:]' '[:lower:]')
-          # `printf | oras login --password-stdin`, NOT `<<< "$GITHUB_TOKEN"`.
-          #
-          # `<<<` IS A BASH HERE-STRING AND THIS STEP RUNS UNDER /bin/sh (dash). Measured on
-          # cachyos-install, which had JUST PRODUCED A 6962 MiB DISK:
-          #
-          #	publishing .../linux-cachyos.qcow2: 6962 MiB
-          #	credential: GITHUB_TOKEN is set (377 characters)
-          #	....sh: 74: Syntax error: redirection unexpected
-          #	##[error]Process completed with exit code 2.
-          #
-          # - the credential was there, the disk was there, and the shell refused the line before
-          # oras ever ran. `printf '%s' | ... --password-stdin` is the portable spelling and is what
-          # this file already uses for other stdin.
-          printf '%s' "$GITHUB_TOKEN" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
-          ( cd "$(dirname "$out")" && \
-            oras push "ghcr.io/${repo}:${tag}" \
-              --artifact-type application/vnd.easydev.qcow2 \
-              "$(basename "$out"):application/vnd.oci.image.layer.v1.tar" \
-              --annotation "org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" \
-              --annotation "org.opencontainers.image.revision=${{ github.sha }}" ) \
-            || echo "  the push failed; the recording and console log below are the evidence"
+          echo "tag=$tag" >> "$GITHUB_ENV"
+          echo "out=$out" >> "$GITHUB_ENV"
+
+      - name: push the disk
+        # THE PUSH ITSELF, AS A STEP OF ITS OWN, BECAUSE AN ACTION IS A STEP AND `oci-push` IS WHAT
+        # KNOWS THE REGISTRY. The step above decided WHETHER there is a disk and wrote `out=` and
+        # `tag=` to the environment; this one moves it.
+        #
+        # `env.out` IS EMPTY WHEN THERE WAS NOTHING TO PUBLISH, and an action given an empty `path`
+        # would fail a leg whose walkthrough legitimately writes no disk. So the guard is the
+        # variable the previous step set, not `always()`.
+        if: env.out != '' && env.tag != '' 
+        uses: easydev-org/easyactions/oci-push@main
+        with:
+          path: ${{ env.out }}
+          tag: ${{ env.tag }}
+          repository: ${{ inputs.disks_repository }}
+          media-type: application/vnd.easydev.qcow2
+          token: ${{ github.token }}
+          check-name: ${{ matrix.name }}-publish
 
       # THE RECORDING IS ITS OWN ARTIFACT, AND IT IS THE FIRST ONE TO OPEN AFTER A FAILURE.
       #

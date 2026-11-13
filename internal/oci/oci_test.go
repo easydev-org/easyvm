@@ -130,39 +130,55 @@ func TestPublishingIsOrasAndPullingStaysHere(t *testing.T) {
 // bare filename from the file's own directory, because it rejects an absolute path in a
 // `file:media:type` reference and the flag that disables that check also disables the ones protecting
 // a mistyped variable.
-func TestTheWorkflowPublishesWithOras(t *testing.T) {
+// THE PUBLISH DECIDES WHETHER TO PUBLISH; THE ACTION MOVES THE BYTES.
+//
+// IT USED TO BE ONE STEP that checked the file, the floor, the tag, logged in and pushed - fifty
+// lines, and four repositories had their own copy of the login and the push. THE DECISION STAYS HERE
+// because it is about this pipeline's own rules; THE TRANSFER IS `oci-push` because it is about a
+// registry, and `oras` is the tool.
+func TestThePublishStepDecidesAndTheActionTransfers(t *testing.T) {
 	body, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "stage.yml"))
 	if err != nil {
 		t.Skipf("no stage.yml here (%v)", err)
 	}
 	src := string(body)
-	if !strings.Contains(src, "oras push") {
-		t.Fatal("stage.yml never runs `oras push`, so no stage's disk is published and every later " +
-			"stage starts from a package that has nothing in it")
+
+	// THE ACTION CARRIES THE BYTES.
+	if !strings.Contains(src, "easyactions/oci-push@main") {
+		t.Fatal("stage.yml never pushes, so no stage's disk is published and every later stage " +
+			"starts from a package that has nothing in it")
 	}
-	// COMMENTS MAY NAME IT - the file explains what was removed and why - so only a line that
-	// actually RUNS something counts.
+
+	// THE DECISION STAYS, because it is this pipeline's rule and no action can know it.
+	//
+	//	the floor      a `qemu-img create` header is 197,632 bytes and `-s` accepts it, so a walk
+	//	               whose clicks all missed publishes a disk with no system on it
+	//	the tag        `matrix.publish`, not the job's name: an install leg writes `linux-zorin` and
+	//	               the ssh leg pulls it, so the two names have to be different
+	//	no disk        an `ssh` leg's product is the disk it started from, and several write none
+	for _, want := range []struct{ text, why string }{
+		{"512 * 1024 * 1024", "the floor that stops a qcow2 header being published as an installed system"},
+		{`tag="${{ matrix.publish }}"`, "the tag the next stage pulls, which is not the job's name"},
+		{"no disk to publish at", "the tolerance for a stage that writes no disk"},
+	} {
+		if !strings.Contains(src, want.text) {
+			t.Errorf("stage.yml does not contain %q (%s)", want.text, want.why)
+		}
+	}
+
+	// AND THE HAND-WRITTEN TRANSFER IS GONE FROM THE COMMANDS. Comments may quote it - the note above
+	// the action explains what it replaced - so only lines that RUN something count.
 	for _, line := range strings.Split(src, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "#") {
 			continue
 		}
+		if strings.Contains(trimmed, "oras push") {
+			t.Fatalf("stage.yml still runs `oras push` itself: %q. The action owns the transfer, and "+
+				"two copies drift", trimmed)
+		}
 		if strings.Contains(trimmed, "easyvm push") {
 			t.Fatalf("stage.yml still runs `easyvm push`, which no longer exists: %q", trimmed)
 		}
-	}
-	if !strings.Contains(src, `tag="${{ matrix.publish }}"`) {
-		t.Fatal("the publish step ignores `matrix.publish`, so an install leg writes its own job name " +
-			"and the stage after it pulls a tag nothing publishes")
-	}
-	if !strings.Contains(src, `basename "$out"`) {
-		t.Fatal("oras is given a path rather than a bare filename from the file's own directory, " +
-			"which it refuses - and the flag that would allow it also disables the checks that stop " +
-			"a mistyped variable pushing a key file")
-	}
-	// IT MUST TOLERATE A MISSING FILE: an `ssh` leg's product is the disk it started from, and
-	// several stages write no disk at all.
-	if !strings.Contains(src, "no disk to publish at") {
-		t.Fatal("the publish step does not tolerate a stage that writes no disk")
 	}
 }
