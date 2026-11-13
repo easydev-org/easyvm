@@ -472,6 +472,23 @@ func (e *Executor) doWait(s walk.Step) error {
 	e.Driver.Log(fmt.Sprintf("  waiting %.0fs, as measured", seconds))
 	deadline := time.Now().Add(time.Duration(seconds * float64(time.Second)))
 	for time.Now().Before(deadline) {
+		// A WAIT LISTENS FOR `stop`, BECAUSE A WAIT IS THE LONGEST THING A WALK DOES.
+		//
+		// `ghostbsd`'s `installation runs` is `wait: 1800` - THIRTY MINUTES INSIDE A SINGLE STEP - and
+		// `ShouldStop` was only read BETWEEN steps, so `easyvm stop` set the flag and nothing happened
+		// for the rest of the half hour:
+		//
+		//	status: running step 22/25 "installation runs"
+		//	REFUSED: a run is already in progress (step "installation runs"); stop it first
+		//
+		// and the only way out was to kill PID 1 and restart the container, which threw away the
+		// machine and the frames with it.
+		//
+		// EVERY LONG LOOP NEEDS THIS. A wait that cannot be interrupted is not a wait, it is a wall.
+		if e.ShouldStop != nil && e.ShouldStop() {
+			e.Driver.Log("  stopping the wait as asked")
+			return errStopped
+		}
 		if f, err := e.Driver.Frame(); err == nil {
 			_ = f // a frame keeps the screendump path warm, as the Python one did
 		}

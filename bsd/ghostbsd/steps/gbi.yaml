@@ -308,7 +308,22 @@ steps:
   - 1331
   - 785
   wait_after: 14
-# THE CHECK BOX IS AT (810,376), MEASURED OFF THE FRAME.
+# THE CHECK BOX IS AT (800,377), READ OFF THE FRAME'S OWN PIXELS.
+#
+# The box is a light SQUARE OUTLINE, and the ASCII of the region says exactly where:
+#
+#	y=370  .................##..............##     <- x=792 and x=809, the two sides
+#	y=385  .................##################     <- the bottom edge, x=792..809
+#
+# so it spans x=792..809, y=370..385 and its centre is (800,377).
+#
+# THREE ATTEMPTS MISSED IT AND EVERY ONE WAS SURE. 592,495 came from the reference implementation's
+# gbi; 810,376 came from a brightness scan whose bounding box included the WORD `vtbd0` to the right of
+# the box, which pushed the computed centre 15 px right; 807,367 came from the same scan at a threshold
+# that found only the top edge, so the y landed 3 px ABOVE the box.
+#
+# A CLICK 3 PX OUTSIDE A CHECK BOX DOES NOTHING, and the pane then looks identical to a run whose
+# coordinate was never sent - which is what made this look like a dispatch bug twice.
 #
 # The pane draws one drive row - `vtbd0 131072` - and the box that selects it sits in the Check column.
 # Until it is ticked, **Next is drawn greyed out**, so a click on Next does nothing and the walk reports
@@ -319,8 +334,8 @@ steps:
 # y=368..385, so the centre is (810,376).
 - name: tick the zfs disk
   click:
-  - 810
-  - 376
+  - 800
+  - 377
   wait_after: 5
 - name: zfs configuration
   click:

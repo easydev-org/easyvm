@@ -280,12 +280,51 @@ steps:
   - 1005
   - 713
   wait_after: 5
+# THE SHEET IS A SEPARATE WINDOW, AND ITS OWN AGREE IS THE ONE THAT MATTERS.
+#
+# MEASURED OFF A FRAME OF THE SHEET ITSELF: its two buttons are the light runs y=509..536, `Disagree`
+# at x=846..955 and `Agree` at x=964..1073 - CENTRE (1018, 520).
+#
+# THE OLD PAIR WAS (1060, 530), which is 42 px right of centre and 13 px from the button's edge. It
+# worked when the sheet drew wide and missed when it did not, and a click on the sheet's title or its
+# body does nothing and looks exactly like a button being ignored.
+#
+# AND IT IS WAITED FOR RATHER THAN ASSUMED: `wait: 10` was a hope. The sheet is confirmed by the words
+# it puts on screen, so a run that is slow to draw waits instead of clicking the licence text
+# underneath - which is the other way this step fails silently.
 - name: wait for the licence sheet
-  wait: 10
+  loop:
+    max: 12
+    do:
+    - wait: 5
+    ocr:
+      name: sheet
+      region:
+      - 780
+      - 330
+      - 1140
+      - 560
+      region_at:
+      - 1920
+      - 1080
+      scale: 2
+      wait: 0
+    check:
+      name: sheet_up
+      from: sheet
+      mode: says_any
+      words:
+      - - read
+        - and
+        - agree
+      - - disagree
+        - agree
+    until:
+      fact: sheet_up
 - name: agree in the sheet
   click:
-  - 1060
-  - 530
+  - 1018
+  - 520
   wait_after: 10
 - name: select the destination card
   click:
