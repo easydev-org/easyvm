@@ -104,3 +104,65 @@ func TestARecordingLandsInTheWorkDirectory(t *testing.T) {
 		}
 	}
 }
+
+// STOPPING THE SAMPLER IS A JOIN, NOT A CLOSE.
+//
+// CLOSING THE DONE CHANNEL DOES NOT STOP A TICK THAT IS ALREADY IN FLIGHT. The goroutine can be
+// inside `Driver.Frame()` - up to five seconds, because a screendump waits for the file to settle -
+// while `finishRecording` clears `e.rec` and starts encoding. Two things went wrong from that, and
+// `go test -race` reported both:
+//
+//	WARNING: DATA RACE
+//	Read at ... by goroutine 14:  (*Executor).sampler.func1()      publish.go:198
+//	Previous write ... by goroutine 13:  (*Executor).stopSampler()  publish.go:227
+//
+//	WARNING: DATA RACE
+//	Read at ... by goroutine 14:  (*Executor).pendingRecorder()    publish.go:34
+//	Previous write ... by goroutine 13:  (*Executor).finishRecording() publish.go:324
+//
+// ...and `panic: close of nil channel`, because the goroutine's deferred close read a field the
+// stopper had just set to nil.
+//
+// THE SYMPTOM IN A RUN IS THE ONE THAT MATTERS: `pendingRecorder()` CREATES a recorder when `e.rec`
+// is nil, so a late tick made a SECOND one, appended its frame to that, and the frame was dropped.
+// The last second of every recording was racing the encoder.
+func TestStoppingTheSamplerWaitsForTheGoroutine(t *testing.T) {
+	src, err := os.ReadFile("publish.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(src)
+
+	i := strings.Index(s, "func (e *Executor) stopSampler(")
+	if i < 0 {
+		t.Fatal("stopSampler is gone")
+	}
+	body := s[i:]
+	if end := strings.Index(body[1:], "\nfunc "); end > 0 {
+		body = body[:end+1]
+	}
+	code := stripCommentsForTest(body)
+	if !strings.Contains(code, "<-stopped") {
+		t.Error("`stopSampler` closes the channel and returns. A tick already inside `Frame()` then " +
+			"outlives `finishRecording`, which makes a second recorder and drops the frame - and " +
+			"`go test -race` flags it")
+	}
+	if !strings.Contains(code, "close(done)") {
+		t.Error("`stopSampler` does not close the done channel the goroutine listens on")
+	}
+
+	// AND THE GOROUTINE TAKES ITS OWN CHANNEL VALUES, not the fields. Reading `e.recStopped` in a
+	// deferred close is what panicked with `close of nil channel`.
+	j := strings.Index(s, "e.recDone = make(chan struct{})")
+	if j < 0 {
+		t.Fatal("the sampler no longer creates its channel")
+	}
+	head := s[j:]
+	if end := strings.Index(head, "go func()"); end > 0 {
+		head = head[:end]
+	}
+	if !strings.Contains(head, "stopped := ") && !strings.Contains(head, "stopped,") {
+		t.Error("the sampler goroutine reads its channel from the Executor in a deferred close; the " +
+			"stopper nils that field, and the goroutine then panics with `close of nil channel`")
+	}
+}

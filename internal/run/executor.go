@@ -27,12 +27,15 @@ type Executor struct {
 	StartAt    string
 	StopBefore string
 
-	// rec is the recording in progress, and recDone stops its sampler.
+	// rec is the recording in progress. recDone stops its sampler and recStopped is closed by the
+	// goroutine on its way out, so stopping it is a JOIN rather than a hope - a tick in flight can
+	// otherwise outlive `finishRecording` clearing `rec`.
 	rec *recorder
 	// recVideo is where the running recording is being written, so a walk that fails can still
 	// produce the file - the `record: false` step is unreachable once a step before it fails.
-	recVideo string
-	recDone  chan struct{}
+	recVideo   string
+	recDone    chan struct{}
+	recStopped chan struct{}
 
 	// BootDisk is the disk a `boot:` starts when no `disk:` step named one - the --boot-disk flag.
 	BootDisk string

@@ -49,6 +49,9 @@ type Conn struct {
 	frame int
 	lastW int
 	lastH int
+	// wire serialises every command that goes down the socket. `mu` above guards the struct's
+	// own state; this one guards the CONVERSATION, which is what two concurrent readers corrupt.
+	wire sync.Mutex
 }
 
 // Open connects to path and completes the capability handshake.
@@ -103,6 +106,23 @@ type Frame struct {
 // which is correct and hides the reason. Waiting for the size to stop changing costs a few
 // milliseconds and removes the ambiguity.
 func (c *Conn) Screendump(dir string) (Frame, error) {
+	// THE WHOLE DUMP IS SERIALISED, NOT JUST THE COUNTER, AND THE DIFFERENCE COST macos-setup
+	// THIRTY MINUTES OF BLIND WAITING.
+	//
+	// TWO READERS SHARE THIS CONNECTION: the recording sampler, which asks for a frame EVERY
+	// SECOND, and whatever gate is polling. Only the frame counter was under the mutex, so
+	// `raw.Screendump` ran concurrently on one QMP socket and the two calls interleaved their
+	// commands and responses.
+	//
+	// MEASURED, AND IT IS ARITHMETIC RATHER THAN A GUESS - macos-setup's gate ran
+	// `poll: 10` for `timeout: 1800`, which is about 180 attempts, and its own log holds
+	// FOURTEEN. The other 166 returned an error and `doUntil` continued without a word.
+	//
+	// SO THE SAMPLER WON ALMOST EVERY TICK and the gate mostly read nothing at all. The gate is
+	// what decides whether a step passed; losing nine attempts in ten to the recorder is not a
+	// recording problem.
+	c.wire.Lock()
+	defer c.wire.Unlock()
 	c.mu.Lock()
 	c.frame++
 	n := c.frame

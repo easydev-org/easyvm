@@ -190,12 +190,22 @@ func (e *Executor) sampler(dir string) error {
 		return err
 	}
 	e.recDone = make(chan struct{})
+	e.recStopped = make(chan struct{})
+	done, stopped := e.recDone, e.recStopped
+	// THE RECORDER IS CAPTURED HERE, NOT LOOKED UP PER TICK.
+	//
+	// `pendingRecorder()` CREATES ONE WHEN `e.rec` IS NIL, and `finishRecording` sets it nil before
+	// it stops the sampler. A tick landing in between made a NEW recorder, appended the frame to it
+	// and dropped it - and the race detector reported the read/write pair as well. One pointer,
+	// taken once, is the whole fix.
+	rec := e.pendingRecorder()
 	go func() {
 		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
+		defer close(stopped) // stopSampler joins on this, so no tick outlives the recorder
 		for {
 			select {
-			case <-e.recDone:
+			case <-done:
 				return
 			case <-ticker.C:
 				// ONE FRAME A SECOND, AND A FAILED ONE IS COUNTED RATHER THAN SILENTLY DROPPED.
@@ -207,24 +217,41 @@ func (e *Executor) sampler(dir string) error {
 				// the machine spent those minutes doing nothing.
 				f, err := e.Driver.Frame()
 				if err != nil {
-					e.pendingRecorder().mu.Lock()
-					e.pendingRecorder().missed++
-					e.pendingRecorder().mu.Unlock()
+					rec.mu.Lock()
+					rec.missed++
+					rec.mu.Unlock()
 					continue
 				}
-				e.pendingRecorder().mu.Lock()
-				e.pendingRecorder().frames = append(e.pendingRecorder().frames, f.Path())
-				e.pendingRecorder().mu.Unlock()
+				rec.mu.Lock()
+				rec.frames = append(rec.frames, f.Path())
+				rec.mu.Unlock()
 			}
 		}
 	}()
 	return nil
 }
 
+// stopSampler stops the goroutine AND WAITS FOR IT.
+//
+// CLOSING THE CHANNEL ALONE IS NOT STOPPING IT. The tick is already in flight when the close lands,
+// so the goroutine can be inside `Driver.Frame()` - up to five seconds, because a screendump waits
+// for the file to settle - while `finishRecording` clears `e.rec` and starts encoding. Two things
+// went wrong from that: `pendingRecorder()` made a SECOND recorder and threw the frame away, and the
+// race detector flagged both fields.
+//
+// THE WAIT IS THE POINT. `recDone` is closed by the goroutine itself on the way out, so receiving
+// from it is a join rather than a sleep.
 func (e *Executor) stopSampler() {
-	if e.recDone != nil {
-		close(e.recDone)
-		e.recDone = nil
+	if e.recDone == nil {
+		return
+	}
+	done, stopped := e.recDone, e.recStopped
+	e.recDone, e.recStopped = nil, nil
+	close(done)
+	// `done` is what the goroutine listens on; `stopped` is what it closes on the way out, so this
+	// receive is a join rather than a sleep.
+	if stopped != nil {
+		<-stopped
 	}
 }
 

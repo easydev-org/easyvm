@@ -197,9 +197,18 @@ func (e *Executor) doUntil(s walk.Step) error {
 	start := time.Now()
 	var last []string
 	var lastErr error
+	// COUNTS THE POLLS THAT READ NOTHING, because they used to vanish without a trace.
+	//
+	// MEASURED ON macos-setup: `poll: 10` over `timeout: 1800` is about 180 attempts, and the
+	// step's own log held FOURTEEN read lines. Every other attempt returned an error, `continue`d,
+	// and left no evidence - so a gate that was mostly not looking read as a gate that was
+	// looking and not finding.
+	attempts, blind := 0, 0
 	for time.Since(start) < timeout {
+		attempts++
 		words, err := e.readScreen(s, s.Name)
 		if err != nil {
+			blind++
 			// A FRAME THAT CANNOT BE READ IS NOT A FAILURE, IT IS A FRAME THAT WAS NOT FINISHED.
 			//
 			// MEASURED ON macos-setup, AT STEP 6 OF 30:
@@ -235,8 +244,14 @@ func (e *Executor) doUntil(s walk.Step) error {
 		time.Sleep(poll)
 	}
 	if lastErr != nil && len(last) == 0 {
-		return fail(s.Name, "never saw %s within %s, and no frame could be read: %v",
-			describeSets(alternatives), timeout, lastErr)
+		return fail(s.Name, "never saw %s within %s, and no frame could be read in %d of %d "+
+			"poll(s): %v", describeSets(alternatives), timeout, blind, attempts, lastErr)
+	}
+	if blind > 0 {
+		// A GATE THAT ONLY HALF LOOKED IS NOT A GATE THAT FAILED, and saying so is the difference
+		// between "the pane never appeared" and "the reads were failing".
+		e.Driver.Log(fmt.Sprintf("  %s: %d of %d poll(s) read no frame at all%s",
+			s.Name, blind, attempts, describeLastError(lastErr)))
 	}
 	return failWithScreen(s.Name, e.Driver, "never saw %s within %s; last read: %s",
 		describeSets(alternatives), timeout, truncateWords(last, 16))
@@ -838,4 +853,12 @@ func (e *Executor) doRun(s walk.Step) error {
 		return e.doExpectAny(s)
 	}
 	return nil
+}
+
+// describeLastError renders the last failed read for a log line, or nothing when the last poll read.
+func describeLastError(err error) string {
+	if err == nil {
+		return ""
+	}
+	return ": " + firstLineOf(err.Error())
 }

@@ -374,3 +374,67 @@ func dropComments(src string) string {
 	}
 	return string(out)
 }
+
+// TWO READERS ON ONE CONNECTION MUST NOT INTERLEAVE THEIR COMMANDS.
+//
+// MEASURED ON macos-setup, AND IT IS ARITHMETIC: the recovery-menu gate ran `poll: 10` with
+// `timeout: 1800`, which is about 180 attempts, and its own daemon.log holds FOURTEEN read lines.
+// The other 166 returned an error and `doUntil` continued without a word - so the gate that decides
+// whether a step passed was reading nothing nine times in ten.
+//
+// THE OTHER READER IS THE RECORDING SAMPLER, WHICH ASKS FOR A FRAME EVERY SECOND. Only the frame
+// COUNTER was under the mutex, so `raw.Screendump` ran concurrently on one QMP socket: the two
+// calls interleave commands and responses, and the loser gets an answer to somebody else's request.
+//
+// `Screendump` now holds `wire` for its whole conversation. This test is a source check because the
+// failure needs a real qemu to reproduce, and the thing that must not regress is the locking.
+func TestScreendumpHoldsTheWireForTheWholeConversation(t *testing.T) {
+	body, err := os.ReadFile("qmp.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(body)
+	start := strings.Index(src, "func (c *Conn) Screendump(")
+	if start < 0 {
+		t.Fatal("Screendump is gone")
+	}
+	end := strings.Index(src[start:], "\n}\n")
+	if end < 0 {
+		t.Fatal("cannot find the end of Screendump")
+	}
+	fn := src[start : start+end]
+
+	if !strings.Contains(fn, "c.wire.Lock()") {
+		t.Error("Screendump does not take `wire`. Two readers share this connection - the " +
+			"recording sampler ticks every second - and without serialisation they interleave " +
+			"their QMP commands. Measured on macos-setup: 14 of ~180 polls read a frame and 166 " +
+			"failed silently")
+	}
+	if !strings.Contains(fn, "defer c.wire.Unlock()") {
+		t.Error("Screendump takes `wire` without releasing it on every path")
+	}
+	// AND THE WHOLE DUMP IS INSIDE IT. A lock taken after `raw.Screendump` is a lock that guards
+	// the bookkeeping and not the conversation. COMMENTS ARE STRIPPED FIRST: the note above the
+	// lock mentions `raw.Screendump` by name, and matching that made this check fail on code that
+	// was right.
+	var code []string
+	for _, line := range strings.Split(fn, "\n") {
+		if t := strings.TrimSpace(line); strings.HasPrefix(t, "//") {
+			continue
+		}
+		code = append(code, line)
+	}
+	lines := strings.Join(code, "\n")
+	iLock := strings.Index(lines, "c.wire.Lock()")
+	iDump := strings.Index(lines, "raw.Screendump")
+	if iLock < 0 || iDump < 0 || iLock > iDump {
+		t.Errorf("`wire` is not taken before the screendump call (lock at %d, dump at %d), so it "+
+			"does not serialise it", iLock, iDump)
+	}
+	// `mu` MUST NOT BE HELD ACROSS THE WAIT: the wait is up to five seconds and `screen()` takes
+	// `mu` for every click.
+	if strings.Contains(fn, "defer c.mu.Unlock()") {
+		t.Error("Screendump holds `mu` for its whole body; `mu` guards the struct's state and a " +
+			"five-second wait under it stops every click")
+	}
+}
