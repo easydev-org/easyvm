@@ -26,9 +26,17 @@ steps:
   os: bsd
   iso: installer_iso
   timeout: 1800
-- name: the loader prompt appears
+- name: the boot menu is counting down
+  until_console: any other key for boot menu
+  timeout: 600
+  poll: 1
+  blind_after: 240
+- name: escape to the loader prompt
+  key: '3'
+  wait_after: 3
+- name: the loader prompt is up
   repeat_until:
-    attempts: 60
+    attempts: 20
     until_any:
     - - detailed
       - help
@@ -39,7 +47,7 @@ steps:
     - key: '3'
       wait_after: 2
     wait_after: 2
-  timeout: 200
+  timeout: 120
 - name: clear the loader command line
   key: ctrl+u
   wait_after: 1
