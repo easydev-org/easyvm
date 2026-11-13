@@ -149,11 +149,23 @@ steps:
       from: screen
       mode: says_any
       words:
-      # THE DESKTOP'S OWN WINDOW. `install ghostbsd` is gbi's menu entry and `applications` is the
-      # MATE panel; either one means the session is up and nothing is waiting to be chosen.
+      # THE INSTALLER'S OWN FIRST WINDOW, WHICH IS WHAT ACTUALLY APPEARS.
+      #
+      # MEASURED ON THE LOCAL POD: X starts on the default driver, the MATE desktop is drawn, and gbi
+      # opens `Welcome to GhostBSD / Please select your language` by itself - the X driver menu is
+      # never shown, because it only exists when X FAILS.
+      #
+      # `welcome` AND `ghostbsd` TOGETHER are the pair a reader can trust: `ghostbsd` alone is on the
+      # loader's own output and on the desktop's wallpaper, and `welcome` alone is a word any dialog
+      # may carry.
+      - - welcome
+        - ghostbsd
+      # THE DESKTOP WITHOUT THE INSTALLER, for a boot that comes up to a panel and no window. `install
+      # ghostbsd` is gbi's menu entry; `applications` is the MATE panel, which the reference
+      # implementation reads as `places` because OCR turns `Applications` into `Ppplications`.
       - - install
         - ghostbsd
-      - - applications
+      - - places
       # THE MENU, WHICH ONLY EXISTS WHEN X FAILED TO START.
       - - start
         - desktop
@@ -175,6 +187,9 @@ steps:
     - 1920
     - 1080
     scale: 1
+    # NO PAUSE: the loop above has just read this screen and the question is about THAT reading. A
+    # `wait:` here would be a second look at a later frame, and the two answers could disagree.
+    wait: 0
   check:
     name: menu
     from: screen
@@ -227,9 +242,11 @@ steps:
       from: screen
       mode: says_any
       words:
+      - - welcome
+        - ghostbsd
       - - install
         - ghostbsd
-      - - applications
+      - - places
     until:
       fact: done
 - name: welcome

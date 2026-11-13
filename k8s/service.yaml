@@ -11,10 +11,49 @@
 apiVersion: v1
 kind: Service
 metadata:
+  name: easyvm-ubuntu
+spec:
+  selector:
+    app: easyvm-ubuntu
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: easyvm-windows
+spec:
+  selector:
+    app: easyvm-windows
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+
+---
+apiVersion: v1
+kind: Service
+metadata:
   name: easyvm-macos
 spec:
   selector:
     app: easyvm-macos
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: easyvm-ghostbsd
+spec:
+  selector:
+    app: easyvm-ghostbsd
   ports:
     - name: http
       port: 80

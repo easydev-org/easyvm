@@ -149,6 +149,20 @@ RUN set -eux; \
         aria2 \
         zstd \
         wimtools \
+        # novnc IS WHAT MAKES THE MACHINE VISIBLE IN A BROWSER, and its absence is silent.
+        #
+        # `internal/daemon/console.go` serves /usr/share/novnc verbatim and bridges its WebSocket to
+        # qemu's VNC port - and when the directory is missing it logs one line and returns, because
+        # "the guest is the product, the page is how a person looks at it" and taking a VM down over
+        # a console script is the wrong trade. The effect was that every local pod reported a noVNC
+        # URL that nothing listened on:
+        #
+        #	noVNC:   http://127.0.0.1:6080/vnc.html      <- printed by the launcher, unconditionally
+        #	noVNC: no page at /usr/share/novnc/vnc.html; the guest is reachable on VNC port 5900 only
+        #
+        # WHICH ARE THE TWO HALVES OF THE SAME CONFUSION, and both are fixed: the package is here, and
+        # the launcher now prints the URL only when the daemon says a page exists.
+        novnc \
     ; \
     # THE PINNED qemu, FROM A DATED SNAPSHOT RATHER THAN FROM trixie.
     echo "deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT}/ sid main" \

@@ -1037,3 +1037,18 @@ func humanBytes(n int64) string {
 // a hung guest. That is the same rule `Registry` exists to enforce, and it is why the click and key
 // commands live in the daemon rather than in a process of their own.
 func (d *Driver) QMP() (*qmp.Conn, error) { return d.qmpSocket() }
+
+// ConsolePort is where the noVNC page is actually listening, or 0 when there is none.
+//
+// IT ANSWERED A LIE: `status` printed a URL for `req.NoVNCPort`, the number on the command line, so
+// a daemon whose image lacked /usr/share/novnc reported `http://127.0.0.1:6080/vnc.html` for a port
+// nothing was bound to. The console server is the only thing that knows, and this is how the daemon
+// asks it.
+func (d *Driver) ConsolePort() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.page == nil {
+		return 0
+	}
+	return d.novncPort
+}

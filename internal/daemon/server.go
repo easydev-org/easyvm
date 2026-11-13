@@ -334,8 +334,30 @@ func (d *Daemon) startRun(req Request) Response {
 // snapshot copies the state under the lock.
 func (d *Daemon) snapshot() State {
 	d.mu.Lock()
-	defer d.mu.Unlock()
-	return d.st
+	st := d.st
+	machine := d.machine
+	d.mu.Unlock()
+
+	// THE noVNC PORT IS THE ONE THAT IS LISTENING, NOT THE ONE THAT WAS ASKED FOR.
+	//
+	// `run` used to record `req.NoVNCPort` - a NUMBER FROM THE COMMAND LINE - and `status` printed it
+	// as a URL. When the image had no /usr/share/novnc the console refused to start, said so in the
+	// log, and `status` still printed
+	//
+	//	noVNC:   http://127.0.0.1:6080/vnc.html
+	//
+	// for a port with nothing on it. A reader who clicked it got a connection refused and had no way
+	// to tell a missing package from a broken bridge.
+	//
+	// THE DRIVER KNOWS, because it holds the console it started. Asking it is the only answer that
+	// cannot be stale or optimistic.
+	if c, ok := machine.(interface{ ConsolePort() int }); ok {
+		st.NoVNCPort = c.ConsolePort()
+	} else if machine == nil {
+		// a daemon with no machine has no console, whatever the flag said
+		st.NoVNCPort = 0
+	}
+	return st
 }
 
 // errors callers may compare against.
