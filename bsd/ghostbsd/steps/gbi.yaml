@@ -26,21 +26,20 @@ steps:
   os: bsd
   iso: installer_iso
   timeout: 1800
-- name: escape to the loader prompt
-  key: '3'
-  repeat:
-  - 3
-  - 2
-  settle: 4
-- name: the loader prompt is up
-  until_any:
-  - - detailed
-    - help
-  - - list
-    - of
-    - commands
-  timeout: 120
-  poll: 3
+- name: the loader prompt appears
+  repeat_until:
+    attempts: 60
+    settle: 2
+    until_any:
+    - - detailed
+      - help
+    - - list
+      - of
+      - commands
+    actions:
+    - key: '3'
+      settle: 2
+  timeout: 200
 - name: clear the loader command line
   key: ctrl+u
   settle: 1

@@ -1869,7 +1869,13 @@ func TestGhostBSDSetsTheLoaderVariableThatMakesClicksWork(t *testing.T) {
 	// which selects another boot entry.
 	confirmed := false
 	for _, s := range doc.Steps {
+		// the guard now lives inside `repeat_until`, which presses and reads in one loop
 		sets, _ := s.Spec["until_any"].([]any)
+		if inner, ok := s.Spec["repeat_until"].(map[string]any); ok {
+			if nested, ok := inner["until_any"].([]any); ok {
+				sets = nested
+			}
+		}
 		for _, raw := range sets {
 			words, _ := raw.([]any)
 			var parts []string
