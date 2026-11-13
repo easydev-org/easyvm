@@ -1,10 +1,12 @@
 package qmp
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/easydev-org/easyvm/internal/keys"
 )
@@ -436,5 +438,65 @@ func TestScreendumpHoldsTheWireForTheWholeConversation(t *testing.T) {
 	if strings.Contains(fn, "defer c.mu.Unlock()") {
 		t.Error("Screendump holds `mu` for its whole body; `mu` guards the struct's state and a " +
 			"five-second wait under it stops every click")
+	}
+}
+
+// A FRAME IS FINISHED WHEN ITS HEADER SAYS IT IS, NOT WHEN ITS SIZE STOPS MOVING.
+//
+// MEASURED ON macos-setup, ON EVERY POLL OF A THIRTY-MINUTE GATE:
+//
+//	165 of 178 poll(s) read no frame at all: frame-001972.ppm: unexpected EOF
+//	                                        (is the write still in progress? format "ppm")
+//
+// A 640x480 frame is 921 KB and a gap between qemu's write chunks rarely lands badly. A 1920x1080
+// frame is 6.2 MB, and the old check - "the size did not change for forty milliseconds" - read a
+// half-written image whenever a chunk boundary fell inside that window. The recorded video looked
+// perfect the whole time, because it is built from the frames that did decode.
+//
+// THIS TEST WRITES A REAL 1920x1080 PPM IN TWO CHUNKS WITH A 100 ms GAP, which is far longer than the
+// old stability window. The old code accepted the file after the first chunk; the new one waits for
+// the header's own arithmetic.
+func TestAFrameIsCompleteWhenItsHeaderSaysSo(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "frame-000001.ppm")
+
+	const w, h = 1920, 1080
+	header := fmt.Sprintf("P6\n%d %d\n255\n", w, h)
+	pixels := make([]byte, w*h*3)
+	for i := range pixels {
+		pixels[i] = byte(i)
+	}
+
+	// THE FIRST CHUNK IS THE HEADER AND PART OF THE PIXELS - a state the old check called "stable".
+	half := len(pixels) / 2
+	if err := os.WriteFile(path, append([]byte(header), pixels[:half]...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- waitForStable(path, 5*time.Second) }()
+
+	// THE GAP THAT USED TO BE MISTAKEN FOR THE END OF THE WRITE.
+	time.Sleep(100 * time.Millisecond)
+
+	// A READER THAT IS RELEASED HERE WOULD SEE A TRUNCATED FILE. It must not be released yet.
+	select {
+	case err := <-done:
+		t.Fatalf("waitForStable returned after only half the pixels were written (err=%v); a "+
+			"reader released here decodes a truncated image, which is the `unexpected EOF` that "+
+			"made 165 of 178 polls of macos-setup's recovery-menu gate read nothing", err)
+	default:
+	}
+
+	if err := os.WriteFile(path, append([]byte(header), pixels...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("waitForStable did not accept the finished frame: %v", err)
+		}
+	case <-time.After(4 * time.Second):
+		t.Fatal("waitForStable never accepted a complete 1920x1080 frame")
 	}
 }

@@ -149,29 +149,37 @@ func (c *Conn) Screendump(dir string) (Frame, error) {
 	return Frame{Path: path, Width: w, Height: h}, nil
 }
 
+// waitForStable waits until the PPM is COMPLETE, which is not the same as "its size stopped moving".
+//
+// A STABLE SIZE FOR FORTY MILLISECONDS IS NOT A FINISHED FILE. qemu writes a screendump in chunks,
+// and a gap between two chunks is indistinguishable from the end of the write if the only thing
+// being watched is the size - so the reader was handed a truncated image and answered
+//
+//	frame-001972.ppm: unexpected EOF (is the write still in progress? format "ppm")
+//
+// MEASURED ON macos-setup: `165 of 178 poll(s) read no frame at all`, EVERY ONE OF THEM UNEXPECTED
+// EOF. At 640x480 a frame is 921 KB and the gaps rarely land badly; at 1920x1080 it is 6.2 MB and
+// the gate spent thirty minutes reading half-written pictures. The recorded video looked perfect
+// throughout, because it is made from the frames that DID decode.
+//
+// THE HEADER ALREADY SAYS HOW BIG THE FILE MUST BE - `P6`, width, height, maxval - so completion is
+// arithmetic rather than a guess: header length plus width*height*3 bytes. `ppmSize` performs
+// exactly that check and is what the caller needs anyway, so this waits on it instead of on a clock.
 func waitForStable(path string, limit time.Duration) error {
 	deadline := time.Now().Add(limit)
-	var last int64 = -1
-	stable := 0
+	var lastErr error
 	for time.Now().Before(deadline) {
-		fi, err := os.Stat(path)
-		if err != nil {
-			time.Sleep(20 * time.Millisecond)
-			continue
-		}
-		size := fi.Size()
-		if size > 0 && size == last {
-			stable++
-			if stable >= 2 {
-				return nil
-			}
+		if _, _, err := ppmSize(path); err == nil {
+			return nil
 		} else {
-			stable = 0
+			lastErr = err
 		}
-		last = size
 		time.Sleep(20 * time.Millisecond)
 	}
-	return fmt.Errorf("screendump: %s never stopped growing within %s", path, limit)
+	if lastErr == nil {
+		lastErr = fmt.Errorf("the file never appeared")
+	}
+	return fmt.Errorf("screendump: %s was not complete within %s: %w", path, limit, lastErr)
 }
 
 // ppmSize reads the width and height from a binary PPM's header.
