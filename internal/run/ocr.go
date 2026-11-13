@@ -230,7 +230,16 @@ func (e *Executor) doCheck(s walk.Step) error {
 			"step has to come first, in file order, with that `name:`", from)
 	}
 
-	// THE TEST IS `says:` (all of them) OR `says_any:` (one of several sets).
+	// THREE KINDS OF COMPARISON, AND A CHECK MAY USE ONE OF THEM:
+	//
+	//	says: / says_any:      the reading holds these words
+	//	number_between: [a, b] the reading holds a number in this range
+	//	size_between: [a, b]   the same, in GB, for a disk's capacity
+	//
+	// THE NUMBER FORM IS WHAT MAKES A CHOICE EXPRESSIBLE. "Click the first disk, read its capacity,
+	// and use it only if it is between 60 and 200 GB" is a decision about arithmetic, and a word list
+	// cannot say it - `says: [200]` would match any reading that happened to contain the digits,
+	// including `1,200 GB` and `20.0 GB`.
 	var sets [][]string
 	if one := wordsOfMapping(raw, "says"); len(one) > 0 {
 		sets = append(sets, one)
@@ -238,8 +247,15 @@ func (e *Executor) doCheck(s walk.Step) error {
 	for _, set := range wordSetsOfMapping(raw, "says_any") {
 		sets = append(sets, set)
 	}
-	if len(sets) == 0 {
-		return fail(s.Name, "`check:` needs `says:` or `says_any:` - a comparison with no target")
+	lo, hasLo := numberOf(raw["number_between"], 0)
+	hi, hasHi := numberOf(raw["number_between"], 1)
+	sizeLo, hasSizeLo := numberOf(raw["size_between"], 0)
+	sizeHi, hasSizeHi := numberOf(raw["size_between"], 1)
+	isNumber := hasLo && hasHi
+	isSize := hasSizeLo && hasSizeHi
+	if len(sets) == 0 && !isNumber && !isSize {
+		return fail(s.Name, "`check:` needs `says:`, `says_any:`, `number_between:` or "+
+			"`size_between:` - a comparison with no target")
 	}
 
 	okNow := false
@@ -249,6 +265,26 @@ func (e *Executor) doCheck(s walk.Step) error {
 			okNow = true
 			hit = strings.Join(set, " ")
 			break
+		}
+	}
+	if !okNow && (isNumber || isSize) {
+		wantLo, wantHi := lo, hi
+		if isSize {
+			wantLo, wantHi = sizeLo, sizeHi
+		}
+		// `capacities` already converts MB to GB, so both units a pane might print are comparable.
+		found := capacities(words)
+		for _, n := range found {
+			if n >= wantLo && n <= wantHi {
+				okNow = true
+				hit = fmt.Sprintf("%.1f GB", n)
+				break
+			}
+		}
+		if !okNow {
+			hit = "nothing in range"
+			e.Driver.Log(fmt.Sprintf("  %s: capacities read %s; wanted %.0f..%.0f GB",
+				s.Name, formatNumbers(found), wantLo, wantHi))
 		}
 	}
 	if e.facts == nil {
@@ -439,4 +475,13 @@ func (e *Executor) doIf(s walk.Step) error {
 		}
 	}
 	return nil
+}
+
+// numberOf pulls one element out of a two-element numeric list.
+func numberOf(raw any, index int) (float64, bool) {
+	list, ok := raw.([]any)
+	if !ok || len(list) != 2 {
+		return 0, false
+	}
+	return toFloat(list[index])
 }

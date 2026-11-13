@@ -74,7 +74,13 @@ type condition struct {
 	Changed bool
 }
 
-var numberPattern = regexp.MustCompile(`(\d+(?:\.\d+)?)\s*(gb|mb)\b`)
+// TB IS A CAPACITY THE SAME WAY GB IS, AND IT APPEARS ON A REAL DISK PANE.
+//
+// MEASURED: macOS Disk Utility prints `1.2 TB` for a 1200 GB volume and `268.4 MB` for the boot
+// image. A pattern that knew only gb and mb read the first as no number at all, so a range test
+// silently answered false for the largest disk on the machine - which is the disk a macOS install
+// usually wants.
+var numberPattern = regexp.MustCompile(`(\d+(?:\.\d+)?)\s*(tb|gb|mb)\b`)
 
 // doRepeatUntil runs the loop.
 func (e *Executor) doRepeatUntil(s walk.Step) error {
@@ -347,8 +353,11 @@ func capacities(words []string) []float64 {
 		if err != nil {
 			continue
 		}
-		if m[2] == "mb" {
+		switch m[2] {
+		case "mb":
 			value /= 1024.0
+		case "tb":
+			value *= 1024.0
 		}
 		out = append(out, value)
 	}

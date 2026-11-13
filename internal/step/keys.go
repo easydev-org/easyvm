@@ -365,6 +365,11 @@ var Keys = map[string]Key{
 			"costs nothing to re-ask"},
 	"says": {Name: "says", Kind: KindWords,
 		Summary: "with `check:`: every one of these words must be in the reading"},
+	"size_between": {Name: "size_between", Kind: KindList,
+		Summary: "with `check:`: a capacity in this GB range must appear in the reading, e.g. " +
+			"[60, 200]. The unit is converted, so a pane printing MB is comparable"},
+	"number_between": {Name: "number_between", Kind: KindList,
+		Summary: "with `check:`: any number in this range must appear in the reading"},
 	"says_any": {Name: "says_any", Kind: KindWordSets,
 		Summary: "with `check:`: any one of these word-sets must be in the reading"},
 	"as": {Name: "as", Kind: KindString,

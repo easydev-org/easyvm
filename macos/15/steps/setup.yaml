@@ -83,26 +83,31 @@ steps:
   - 586
   wait_after: 5
 - name: choose the target disk by capacity
-  repeat_until:
-    attempts: 8
-    until_any:
-    - number_between:
-      - 60
-      - 200
-      unit: gb
-    actions:
+  loop:
+    max: 8
+    do:
     - key: up
       wait_after: 3
-    wait_after: 3
-  region:
-  - 690
-  - 480
-  - 1500
-  - 700
-  region_at:
-  - 1920
-  - 1080
-  scale: 4
+    ocr:
+      name: disk
+      region:
+      - 690
+      - 480
+      - 1500
+      - 700
+      region_at:
+      - 1920
+      - 1080
+      scale: 4
+      wait: 3
+    check:
+      name: right_disk
+      from: disk
+      size_between:
+      - 60
+      - 200
+    until:
+      fact: right_disk
 - name: erase - open the sheet
   at_window:
   - 1289
