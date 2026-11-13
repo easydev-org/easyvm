@@ -119,24 +119,28 @@ steps:
   - 1139
   - 393
   type: '{{ user }}'
+  clear: true
   wait_after: 2
 - name: create your account - username
   click:
   - 1139
   - 501
   type: '{{ user }}'
+  clear: true
   wait_after: 2
 - name: create your account - password
   click:
   - 1050
   - 563
   type: '{{ password }}'
+  clear: true
   wait_after: 2
 - name: create your account - confirm password
   click:
   - 1139
   - 616
   type: '{{ password }}'
+  clear: true
   wait_after: 3
 - name: clear 'require my password to log in'
   click:

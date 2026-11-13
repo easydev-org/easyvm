@@ -310,8 +310,8 @@ steps:
   wait_after: 14
 - name: tick the zfs disk
   click:
-  - 592
-  - 495
+  - 804
+  - 382
   wait_after: 5
 - name: zfs configuration
   click:
