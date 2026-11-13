@@ -732,3 +732,48 @@ func TestACommandOnASilentPeerTimesOut(t *testing.T) {
 		t.Fatalf("the command took %s, and the deadline is %s", elapsed, commandTimeout)
 	}
 }
+
+// A SECOND CALLER FOR THE SAME SOCKET GETS `ErrBusy`, AND THAT IS A HANDOVER RATHER THAN A FAILURE.
+//
+// THIS IS THE CONTRACT THE DAEMON'S BOOT RELIES ON. The recorder's sampler asks for a frame every second
+// and `Frame()` needs the connection, so during a boot the sampler and the boot race for it. Whoever
+// loses gets `ErrBusy` - and the daemon turns that into "wait for the winner's connection" instead of
+// "this machine cannot boot".
+//
+// MEASURED ON CI: without that translation, ubuntu-install and bsd-ghostbsd-install sat at
+// `status: starting` until the job timed out, produced a ONE-SECOND video, and never printed the
+// `qemu is up` line - because `Boot` returned the busy error for a machine that was running perfectly.
+func TestASecondAcquireOnOneSocketIsBusyRatherThanASecondClient(t *testing.T) {
+	f := newFakeQMP(t)
+	reg := NewRegistry()
+
+	first, err := reg.Acquire(f.path, "the-recorder", 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reg.Release(f.path)
+
+	// THE SECOND CALLER MUST BE TOLD, NOT GIVEN A SECOND CONNECTION - qemu greets one client and
+	// queues the rest in a backlog it never answers.
+	_, err = reg.Acquire(f.path, "the-boot", 5*time.Second)
+	if !errors.Is(err, ErrBusy) {
+		t.Fatalf("the second Acquire returned %v, wanted ErrBusy: qemu serves ONE client per socket, "+
+			"and a second connection blocks in the greeting until the first is closed", err)
+	}
+	// AND THE MESSAGE NAMES THE HOLDER, because "busy" without a name sends a reader to the socket.
+	if !strings.Contains(err.Error(), "the-recorder") {
+		t.Fatalf("the busy error %q does not name the first owner", err.Error())
+	}
+
+	// AND AFTER THE RELEASE IT IS AVAILABLE AGAIN, which is what makes the wait worthwhile: the winner
+	// publishes its connection and the loser never has to ask a second time.
+	if err := reg.Release(f.path); err != nil {
+		t.Fatal(err)
+	}
+	_ = first
+	again, err := reg.Acquire(f.path, "the-boot", 5*time.Second)
+	if err != nil {
+		t.Fatalf("the socket was not acquirable after Release: %v", err)
+	}
+	_ = again.Close()
+}

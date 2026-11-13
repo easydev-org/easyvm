@@ -363,3 +363,57 @@ func TestTheOldQMPPathIsReleasedBeforeQemuStarts(t *testing.T) {
 			"closes the connection it just made", release, connect)
 	}
 }
+
+// A BOOT THAT LOSES THE QMP RACE WAITS FOR THE WINNER'S CONNECTION, INSTEAD OF REPORTING IT AS A
+// FAILURE.
+//
+// THE RECORDER'S SAMPLER CALLS `Frame()` EVERY SECOND, and `Frame()` asks for the QMP connection. During
+// a boot those two race: the sampler asks a moment after qemu creates the socket, wins `Registry.Acquire`,
+// and the boot then gets `ErrBusy` FOR A MACHINE IT JUST STARTED.
+//
+// MEASURED ON CI, ON ubuntu-install AND bsd-ghostbsd-install, AND THE SYMPTOM DID NOT LOOK LIKE A RACE:
+//
+//	=== boot the installer
+//	qemu -machine q35,accel=kvm ...
+//	(then `status: starting` until the job timed out, with NO `qemu is up` line)
+//
+// and the artifact was a ONE-SECOND video, because the step failed immediately after the boot - the
+// `recording: 1 frame(s)` line is the sampler's single successful tick before the run died.
+//
+// A LOSER MUST WAIT, NOT REFUSE: the winner publishes its connection into the same field within
+// milliseconds, so the "another caller is mid-handshake" case is an ordinary handover.
+func TestABootThatLosesTheQMPRaceWaitsForTheWinner(t *testing.T) {
+	body, err := os.ReadFile("driver.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	code := dropLineComments(string(body))
+
+	i := strings.Index(code, "func (d *Driver) qmpSocket() (*qmp.Conn, error) {")
+	if i < 0 {
+		t.Fatal("no qmpSocket")
+	}
+	fn := functionBody(code[i:])
+
+	// `ErrBusy` IS THE LOSER'S ANSWER, so it must be recognised...
+	if !strings.Contains(fn, "qmp.ErrBusy") {
+		t.Fatal("`qmpSocket` does not recognise `ErrBusy`. The recorder's sampler takes the socket " +
+			"first on a boot that is millimetres behind it, and the boot then reports a busy socket " +
+			"as a failed boot - measured on CI as `status: starting` forever and a 1-second video")
+	}
+	// ...AND IT MUST GO SOMEWHERE THAT WAITS, not be returned.
+	if !strings.Contains(fn, "waitForQMP(") {
+		t.Fatal("`qmpSocket` recognises `ErrBusy` but does not wait for the winner's connection, so " +
+			"the loser still fails")
+	}
+	// AND THE WAIT IS BOUNDED BY SOMETHING, or a wedged winner is a hang.
+	j := strings.Index(code, "func (d *Driver) waitForQMP() (*qmp.Conn, error) {")
+	if j < 0 {
+		t.Fatal("no `waitForQMP`")
+	}
+	wait := functionBody(code[j:])
+	if !strings.Contains(wait, "Before(deadline)") {
+		t.Fatal("`waitForQMP` waits without a deadline, so a caller that took the socket and threw it " +
+			"away would park the boot forever")
+	}
+}

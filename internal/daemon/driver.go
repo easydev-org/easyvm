@@ -1182,6 +1182,27 @@ func (d *Driver) qmpSocket() (*qmp.Conn, error) {
 	// a dead qemu will never create - and every other caller of this driver would block behind it.
 	conn, err := d.qmpRegistry().Acquire(path, "easyvm", 30*time.Second)
 	if err != nil {
+		// `ErrBusy` MEANS SOMEONE ELSE ALREADY DID THIS, AND THAT IS A SUCCESS.
+		//
+		// THE RECORDER'S SAMPLER CALLS `Frame()` EVERY SECOND, AND `Frame()` CALLS THIS. During a boot
+		// those two race: the sampler asks for a frame a moment after qemu creates the socket, wins the
+		// Acquire, and `Boot` then gets `ErrBusy` for a machine it just started successfully.
+		//
+		// MEASURED ON CI, ON ubuntu-install AND bsd-ghostbsd-install, AS A HANG THAT LOOKED LIKE A LOCK:
+		//
+		//	=== boot the installer
+		//	qemu -machine q35,accel=kvm ...
+		//	(the run then sat at `status: starting` until the job timed out)
+		//
+		// - no `qemu is up` line, and a ONE-SECOND VIDEO, because `Boot` returned the busy error and
+		// `doBoot` reported `boot: qmp ... is already held by "easyvm"` on a machine that was running.
+		//
+		// So the other caller's connection is waited for rather than refused. It is the same rule as
+		// the "another caller won the race" branch below, and the wait is bounded by the caller's own
+		// retry: the sampler stores its connection in `d.qmp` before this returns.
+		if errors.Is(err, qmp.ErrBusy) {
+			return d.waitForQMP()
+		}
 		return nil, err
 	}
 
@@ -1198,6 +1219,38 @@ func (d *Driver) qmpSocket() (*qmp.Conn, error) {
 	d.mu.Unlock()
 	return conn, nil
 }
+
+// waitForQMP waits for ANOTHER caller's connection to be published, and returns it.
+//
+// IT EXISTS FOR ONE RACE, described on `qmpSocket`: the recorder's sampler and a boot both ask for the
+// QMP socket within a second of each other, and only one of them can hold it. The loser waits here for
+// the winner's connection rather than reporting `ErrBusy` about a machine that is running.
+//
+// THE WAIT IS BOUNDED AND IT NAMES THE REAL PROBLEM WHEN IT EXPIRES: a connection that never appears is
+// either a qemu that died or a caller that took one and threw it away, and both are worth a sentence
+// rather than a hang.
+func (d *Driver) waitForQMP() (*qmp.Conn, error) {
+	deadline := time.Now().Add(qmpHandshakeWait)
+	for time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
+		d.mu.Lock()
+		conn := d.qmp
+		d.mu.Unlock()
+		if conn != nil {
+			return conn, nil
+		}
+	}
+	return nil, fmt.Errorf("another caller has held the qmp socket for %s and never published a "+
+		"connection; that caller is stuck, and it has to be found rather than waited for",
+		qmpHandshakeWait)
+}
+
+// qmpHandshakeWait is how long a loser of the QMP race waits for the winner's connection.
+//
+// IT IS SHORTER THAN `Acquire`'S OWN THIRTY SECONDS BY DESIGN: this wait only covers "the winner is
+// mid-handshake", which is milliseconds, so a number that bounds a wedged winner quickly is worth more
+// than one that would tolerate it.
+const qmpHandshakeWait = 10 * time.Second
 
 // shutdown releases everything this machine owns, AND IT IS IDEMPOTENT.
 //
