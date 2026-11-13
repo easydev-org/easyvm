@@ -59,6 +59,14 @@ spec:
         - name: walks
           mountPath: /walks
           readOnly: true
+        # THE ARTIFACT PVC IS READ-ONLY HERE: this pod RUNS walks, and the installer images are
+        # fetched by the other pod so that recreating this one never re-downloads 20 GiB.
+        - name: artifacts
+          mountPath: /artifacts
+          readOnly: true
+        - name: tools
+          mountPath: /tools
+          readOnly: true
         - name: dev-kvm
           mountPath: /dev/kvm
         - name: dev-tun
@@ -101,6 +109,13 @@ spec:
     - name: walks
       configMap:
         name: easyvm-walks
+    - name: artifacts
+      persistentVolumeClaim:
+        claimName: easyvm-artifacts
+    - name: tools
+      configMap:
+        name: easyvm-tools
+        defaultMode: 0755
     - name: dev-kvm
       hostPath:
         path: /dev/kvm

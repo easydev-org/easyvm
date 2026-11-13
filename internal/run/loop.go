@@ -80,24 +80,33 @@ func (e *Executor) doLoop(s walk.Step) error {
 	}
 
 	// THE PARTS ARE STEPS, built once and run through the ordinary dispatcher.
-	ocrSpec := map[string]any{}
-	for k, v := range ocrRaw {
-		ocrSpec[k] = v
-	}
-	ocrStep := walk.Step{Index: s.Index, Name: s.Name + " [ocr]", Spec: ocrSpec}
+	// THE SUB-STEP CARRIES THE `ocr:` KEY, NOT ITS CONTENTS.
+	//
+	// `parseOCRStep` reads `s.Spec["ocr"]`, because a top-level `ocr:` step is written
+	//
+	//	- name: read the pane
+	//	  ocr: {name: screen, region: [...]}
+	//
+	// so the mapping has to sit UNDER that key. The first version copied the contents straight into
+	// the spec, so the parser looked for an `ocr` key that was not there and every loop in every
+	// walkthrough failed on its first attempt with
+	//
+	//	wait for the installer window [ocr]: `ocr:` must be a mapping
+	//
+	// WHICH READ AS A MISTAKE IN THE FILE, and it was a mistake in this function.
+	ocrStep := walk.Step{Index: s.Index, Name: s.Name + " [ocr]",
+		Spec: map[string]any{"ocr": ocrRaw}}
 	if _, err := parseOCRStep(ocrStep); err != nil {
 		return err
 	}
 	untilSpec := map[string]any{"until_fact": untilRaw["fact"]}
 	untilStep := walk.Step{Index: s.Index, Name: s.Name + " [until]", Spec: untilSpec}
-	checkSpec := map[string]any{}
-	for k, v := range checkRaw {
-		checkSpec[k] = v
-	}
-	checkStep := walk.Step{Index: s.Index, Name: s.Name + " [check]", Spec: checkSpec}
+	// THE SAME SHAPE FOR `check:` - its mapping sits under its own key.
+	checkStep := walk.Step{Index: s.Index, Name: s.Name + " [check]",
+		Spec: map[string]any{"check": checkRaw}}
 
 	e.Driver.Log(fmt.Sprintf("  loop: up to %.0f attempt(s) of %d action(s), then read %q",
-		max, len(action), ocrSpec["name"]))
+		max, len(action), ocrRaw["name"]))
 
 	for attempt := 1; attempt <= int(max); attempt++ {
 		if e.ShouldStop != nil && e.ShouldStop() {

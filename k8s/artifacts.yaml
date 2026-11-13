@@ -1,0 +1,66 @@
+# A PVC FOR EVERY PUBLISHED ARTIFACT, AND A POD THAT FILLS IT ONCE.
+#
+# WHY A SEPARATE PVC AND A SEPARATE POD. The walk pod is torn down and re-created constantly - every
+# YAML change, every crash - and an artifact pull must not be part of that cycle: a 7.7 GiB Windows ISO
+# re-downloaded because a step changed would make the local loop useless. This PVC outlives both pods,
+# and `artifacts-fetch` is run once (or again, deliberately) to fill it.
+#
+# EVERYTHING COMES FROM ghcr, NOT FROM THE VENDOR. The artifacts are already published there by
+# artifacts-publish.yml, so a fetch is one registry call per artifact with Range-based resume
+# (.github/pull-artifact.sh). Reaching a vendor CDN would be a second path with a second set of URLs,
+# a second checksum story, and a second thing that can be slow - and from this cluster the Microsoft
+# CDN ran at 13 KB/s while ghcr through the proxy ran at 54 MB/s.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: easyvm-artifacts
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: workspace-local
+  resources:
+    requests:
+      storage: 300Gi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: easyvm-artifacts-fetch
+spec:
+  restartPolicy: Never
+  terminationGracePeriodSeconds: 5
+  containers:
+    - name: fetch
+      image: ghcr.io/easydev-org/easyvm:latest
+      command: ["sleep", "infinity"]
+      resources:
+        requests:
+          cpu: "2"
+          memory: 2Gi
+      volumeMounts:
+        - name: artifacts
+          mountPath: /artifacts
+        - name: tools
+          mountPath: /tools
+          readOnly: true
+      env:
+        # THE PROXY IS THE DIFFERENCE BETWEEN 13 KB/s AND 54 MB/s FROM THIS CLUSTER.
+        - name: https_proxy
+          value: http://mihomo.develop.svc.cluster.local:7890
+        - name: http_proxy
+          value: http://mihomo.develop.svc.cluster.local:7890
+        - name: no_proxy
+          value: localhost,127.0.0.1,.svc,.cluster.local
+        - name: GITHUB_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: easyvm-lab-token
+              key: token
+              optional: true
+  volumes:
+    - name: artifacts
+      persistentVolumeClaim:
+        claimName: easyvm-artifacts
+    - name: tools
+      configMap:
+        name: easyvm-tools
+        defaultMode: 0755

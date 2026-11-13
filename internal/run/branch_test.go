@@ -128,3 +128,57 @@ func fmtStr(v any) string {
 	}
 	return "step"
 }
+
+// A `loop:` SUB-STEP CARRIES ITS OWN KEY, AND GETTING THAT WRONG BROKE EVERY LOOP IN THE REPOSITORY.
+//
+// MEASURED ON THE FIRST LOCAL ubuntu-install, at step 6 of 29:
+//
+//	wait for the installer window [ocr]: `ocr:` must be a mapping: name, region, region_at, scale
+//
+// THE FILE WAS RIGHT AND THE EXECUTOR WAS WRONG. `parseOCRStep` reads `s.Spec["ocr"]`, because a
+// top-level `ocr:` step is written `ocr: {name: ...}` - so the mapping has to sit UNDER that key. The
+// loop built its sub-step by copying the mapping's CONTENTS into the spec, so the parser looked for an
+// `ocr` key that was not there. Every `loop:` in every walkthrough failed on its first attempt, and
+// the message pointed at the file.
+//
+// THE ASSERTION IS ON THE ASSEMBLY, which is where the bug was: a loop's parts must be handed to their
+// parsers as `{ocr: {...}}` and `{check: {...}}`. Running the whole loop would need a real frame and a
+// real tesseract, which would make this a slow test of OCR rather than a fast test of the executor.
+func TestALoopAssemblesItsPartsWithTheirKeys(t *testing.T) {
+	ocrRaw := map[string]any{
+		"name": "screen", "region": []any{0, 0, 1920, 1080},
+		"region_at": []any{1920, 1080}, "scale": 1, "wait": 0,
+	}
+	// THE SHAPE THE LOOP MUST BUILD. Built here the same way doLoop builds it.
+	ocrStep := walk.Step{Name: "probe [ocr]", Spec: map[string]any{"ocr": ocrRaw}}
+	spec, err := parseOCRStep(ocrStep)
+	if err != nil {
+		t.Fatalf("a sub-step built as {ocr: {...}} is refused: %v", err)
+	}
+	if spec.Name != "screen" {
+		t.Fatalf("the reading's name came out %q, want screen", spec.Name)
+	}
+
+	// AND THE SHAPE THAT WAS WRONG is refused, so a future edit in the same direction fails here.
+	bad := walk.Step{Name: "probe [ocr]", Spec: ocrRaw}
+	if _, err := parseOCRStep(bad); err == nil {
+		t.Fatal("a sub-step passed as the mapping's CONTENTS was accepted; it must be refused, " +
+			"because that is the mistake that made every loop in the repository fail with a " +
+			"message that pointed at the walkthrough")
+	}
+
+	// `check:` IS THE SAME SHAPE.
+	checkRaw := map[string]any{
+		"name": "done", "from": "screen", "mode": "says",
+		"words": []any{"welcome"},
+	}
+	ex, _ := newExec(&fakeDriver{})
+	ex.seen = map[string][]string{"screen": {"welcome", "to", "ubuntu"}}
+	checkStep := walk.Step{Name: "probe [check]", Spec: map[string]any{"check": checkRaw}}
+	if err := ex.doCheck(checkStep); err != nil {
+		t.Fatalf("a sub-step built as {check: {...}} is refused: %v", err)
+	}
+	if !ex.facts["done"] {
+		t.Fatal("the check did not bind its boolean")
+	}
+}
