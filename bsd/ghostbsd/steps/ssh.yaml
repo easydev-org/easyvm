@@ -81,6 +81,39 @@ steps:
 - name: open MATE Terminal
   key: ret
   wait_after: 15
+# OPENSSH IS NOT IN A GhostBSD MATE INSTALL, AND NOTHING UNTIL NOW EVER INSTALLED IT.
+#
+# MEASURED ON A DISK THIS REPOSITORY PUBLISHED AND THEN DROVE HERE: the machine booted the installed
+# system correctly - the console showed the FreeBSD probe log, `ugen0.2: <QEMU QEMU USB Tablet>` and a
+# login prompt - and then every step after `open MATE Terminal` wrote into files that do not exist:
+#
+#	echo admin | sudo -S sysrc sshd_enable=YES
+#	sudo -S sh -c 'printf "PasswordAuthentication yes" >> /etc/ssh/sshd_config'
+#	sudo -S sh -c 'service sshd status; sockstat -4 -l | grep sshd'
+#	  -> No such file or directory
+#
+# `/etc/ssh/sshd_config` IS NOT THERE, because the base system ships no ssh server (FreeBSD keeps it in
+# the ports tree as `security/openssh-portable`), and `service sshd` has no script to run. So the walk
+# configured a daemon that was never installed, `sshd` never listened, and `wait for sshd` spent its ten
+# minutes dialling a closed port:
+#
+#	still waiting after 5m58s (dial tcp 172.30.0.1:2222: i/o timeout)
+#
+# THE INSTALL GOES FIRST, AND IT IS THE ONE STEP THAT NEEDS THE NETWORK. `pkg install -y openssh-portable`
+# is what every FreeBSD tutorial does, and `-y` keeps it from stopping on a prompt a walk cannot answer.
+- name: install openssh
+  # THE FIRST ATTEMPT OFTEN FAILS WHILE `pkg` CREATES ITS DATABASE, so the command retries itself once
+  # rather than leaving the walk to discover it at `wait for sshd`.
+  run: echo {{ password }} | sudo -S sh -c 'pkg install -y openssh-portable || (pkg update -f >/dev/null 2>&1; pkg install -y openssh-portable)' 2>&1 | tail -5
+  terminal_wait: 0
+  wait_after: 60
+- name: prove openssh is installed
+  # A FILE THAT MUST EXIST AFTERWARDS. The install's own output is long and its tail is a progress line,
+  # so the check is the artifact rather than a phrase.
+  run: >-
+    echo {{ password }} | sudo -S sh -c 'test -f /etc/ssh/sshd_config && echo INSTALLED' 2>&1 | tail -3
+  terminal_wait: 0
+  wait_after: 5
 - name: enable sshd at boot
   run: echo {{ password }} | sudo -S sysrc sshd_enable=YES 2>&1 | tail -3
   terminal_wait: 0
