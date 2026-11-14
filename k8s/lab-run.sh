@@ -24,7 +24,9 @@ leg=${2:-install}
 
 case "$leg" in
     install|setup|gbi) prev="" ;;
-    ssh)               prev=install ;;
+    # macOS REACHES `ssh` FROM `setup`, NOT FROM `install`: the installer's output has no user on it, and
+    # the ssh stage is what answers the wizard and creates one. Every other OS goes install -> ssh.
+    ssh)               case "$os" in macos) prev=setup ;; *) prev=install ;; esac ;;
     vm|vm-configure)   prev=ssh ;;
     dev)               prev=vm-configure ;;
     *)                 prev="" ;;

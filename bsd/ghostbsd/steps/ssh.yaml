@@ -101,33 +101,55 @@ steps:
 #
 # THE INSTALL GOES FIRST, AND IT IS THE ONE STEP THAT NEEDS THE NETWORK. `pkg install -y openssh-portable`
 # is what every FreeBSD tutorial does, and `-y` keeps it from stopping on a prompt a walk cannot answer.
-- name: install openssh
+- name: bootstrap the package manager
   # THE FIRST ATTEMPT OFTEN FAILS WHILE `pkg` CREATES ITS DATABASE, so the command retries itself once
   # rather than leaving the walk to discover it at `wait for sshd`.
-  run: echo {{ password }} | sudo -S sh -c 'pkg install -y openssh-portable || (pkg update -f >/dev/null 2>&1; pkg install -y openssh-portable)' 2>&1 | tail -5
+  # ONE SHORT COMMAND, BECAUSE THE FIRST VERSION KILLED THE MACHINE.
+  #
+  # It was a single 143-character line with `||`, `>`, a subshell and two `pkg` calls, and the run died
+  # mid-typing:
+  #
+  #	install openssh: typing line 1: input-send-event []+p:
+  #	  write unix @->/work/drive.sock.qmp: write: broken pipe
+  #
+  # with qemu STILL ALIVE - so the QMP socket went away under a guest that was fine. A command that long
+  # typed at 150 ms a character is twenty seconds of keystrokes into a shell that is simultaneously
+  # fetching a package index, and the retry the old text baked in (`|| (pkg update -f; pkg install)`)
+  # made it twice as long.
+  #
+  # THE RETRY IS A SECOND STEP NOW, not a subshell inside the first: a step that fails says so, and
+  # `pkg update -f` is a separate reading.
+  run: ASSUME_ALWAYS_YES=yes pkg bootstrap
+  terminal_wait: 0
+  wait_after: 25
+- name: fetch the package index
+  run: ASSUME_ALWAYS_YES=yes pkg update -f
   terminal_wait: 0
   wait_after: 60
+- name: install openssh
+  run: ASSUME_ALWAYS_YES=yes pkg install -y openssh-portable
+  terminal_wait: 0
+  wait_after: 90
 - name: prove openssh is installed
   # A FILE THAT MUST EXIST AFTERWARDS. The install's own output is long and its tail is a progress line,
   # so the check is the artifact rather than a phrase.
-  run: >-
-    echo {{ password }} | sudo -S sh -c 'test -f /etc/ssh/sshd_config && echo INSTALLED' 2>&1 | tail -3
+  run: test -f /etc/ssh/sshd_config && echo INSTALLED
   terminal_wait: 0
   wait_after: 5
 - name: enable sshd at boot
-  run: echo {{ password }} | sudo -S sysrc sshd_enable=YES 2>&1 | tail -3
+  run: sysrc sshd_enable=YES
   terminal_wait: 0
   wait_after: 5
 - name: allow password authentication
-  run: echo {{ password }} | sudo -S sh -c 'printf "PasswordAuthentication yes\n" >> /etc/ssh/sshd_config; grep -c "^PasswordAuthentication yes" /etc/ssh/sshd_config' 2>&1 | tail -3
+  run: sh -c 'printf "PasswordAuthentication yes\n" >> /etc/ssh/sshd_config; grep -c "^PasswordAuthentication yes" /etc/ssh/sshd_config'
   terminal_wait: 0
   wait_after: 5
 - name: start sshd
-  run: echo {{ password }} | sudo -S sh -c 'service sshd restart || service sshd start' 2>&1 | tail -3
+  run: service sshd restart
   terminal_wait: 0
   wait_after: 20
 - name: prove sshd is listening
-  run: echo {{ password }} | sudo -S sh -c 'service sshd status; sockstat -4 -l | grep sshd' 2>&1 | tail -6
+  run: sh -c 'service sshd status; sockstat -4 -l | grep sshd'
   terminal_wait: 0
   wait_after: 8
 - name: wait for sshd

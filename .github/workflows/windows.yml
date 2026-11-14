@@ -45,6 +45,14 @@ permissions:
 
 jobs:
   install:
+    # `from_tag:` NAMES A PUBLISHED DISK AND THE CHAIN STARTS FROM IT - SO THE INSTALL DOES NOT RUN.
+    #
+    # THIS JOB HAD NO `if:` AT ALL, so `gh workflow run -f from_tag=windows11` dispatched the INSTALL
+    # ANYWAY: measured on run 43591537026, whose first job was `windows-install` on a request that named
+    # an already-published disk. The ssh and vm jobs below already had their gates; the one that
+    # produces the input did not, and every later gate is written in terms of tags this job would have
+    # replaced.
+    if: github.event_name != 'workflow_dispatch' || inputs.from_tag == ''
     uses: ./.github/workflows/stage.yml
     secrets: inherit
     with:

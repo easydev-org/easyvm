@@ -62,6 +62,20 @@ jobs:
           }
         ]
 
+  # THE `ssh` STAGE, WHICH STARTS BY ANSWERING THE WIZARD.
+  #
+  # `setup` ENDS WHERE THE INSTALLER ENDS - it waits for the Setup Assistant to appear and stops, which
+  # is the right end for an INSTALL. What that disk does NOT have is a user, and the `ssh` stage's first
+  # act is `click the password field`. MEASURED on the disk this repository published as `macos15`,
+  # pulled back and driven locally:
+  #
+  #	wait for the desktop [11/33]   <- stuck on "Select Your Country or Region"
+  #
+  # THE WIZARD CAN TAKE 45 MINUTES, so it must not sit inside `setup`: a failure here has to cost the
+  # wizard, not the two hours of install before it. AND REMOTE LOGIN IS PART OF IT, because the machine
+  # is already on the desktop with a session by the time the wizard is answered - a second stage would
+  # boot the disk again and walk back to the same place. The guest is then powered off through its own
+  # sshd, so APFS closes its journal and the wizard's writes survive being published.
   ssh:
     needs: [setup]
     if: always() && !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.from_tag == '' || inputs.from_tag == 'macos15')
@@ -78,7 +92,7 @@ jobs:
             "pull": "macos15",
             "out": "macos15-ssh.qcow2",
             "publish": "macos15-ssh",
-            "timeout": 90
+            "timeout": 120
           }
         ]
 

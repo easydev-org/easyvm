@@ -1,4 +1,4 @@
-name: macos 15 remote login
+name: macos 15 ssh - the setup assistant, remote login, and a graceful shutdown
 resolution:
 - 1920
 - 1080
@@ -16,11 +16,50 @@ vars:
     default: out/macos15-ssh.qcow2
   shutdown:
     from: args.shutdown
-    default: ssh
+    # A STAGE WHOSE OUTPUT IS THE DISK MAY NOT BE KILLED. The three clicks above are the real shutdown;
+    # this is what happens if the guest refused them.
+    default: acpi
 boot_disk: from_caller
+
+# THIS IS THE `ssh` STAGE, AND IT STARTS BY ANSWERING THE WIZARD.
+#
+# `setup.yaml` ENDS WHERE THE INSTALLER ENDS: it waits for the Setup Assistant to appear, which is the
+# correct end of an INSTALL. What it produces is a disk with macOS on it and NO USER - so a stage that
+# logs in over ssh has nothing to log in AS. MEASURED on the disk this repository published as
+# `macos15`, pulled back and driven:
+#
+#	wait for the desktop [11/33]   <- stuck on "Select Your Country or Region"
+#
+# and the pointer fix in 62e444d is what let it get that far.
+#
+# SO THE WIZARD, THE REMOTE LOGIN AND THE SHUTDOWN ARE ONE STAGE. They used to be two: a `desktop` stage
+# that finished the wizard, and an `ssh` stage that booted the same disk again, logged in again, and
+# walked back to the same desktop before it could enable anything. THE MACHINE IS ALREADY SITTING ON
+# THAT DESKTOP with a session, so the remote-login steps run here.
+#
+# AND THE SHUTDOWN IS THE REASON THE MERGE IS WORTH MORE THAN THE STEPS IT SAVES: with sshd up the guest
+# is powered off through its OWN init, which closes APFS's journal first. See `stop the machine`.
+#
+# THE PANE ORDER IS NOT FIXED. macOS 15 shows between eleven and fifteen panes depending on the
+# answers - "Transfer Your Data" only on some, the Apple Account pane on most, the keyboard dialog on
+# all. So the walk cannot be a straight line of clicks: it reads the screen, decides WHICH pane is up,
+# and answers that one.
+#
+# THE COORDINATES AND THE MATCHING WORDS ARE THE REFERENCE IMPLEMENTATION'S, MEASURED THERE OVER
+# SEVERAL YEARS: `easydiskbake/macos/15/steps/sequoia.yaml`. Its own notes are quoted where a number
+# looks arbitrary, because every one of them cost a run.
 steps:
 - name: start recording
-  record: install.mp4
+  record: macos15-ssh.mp4
+# THE OPENCORE PIECES ARE NEEDED BY EVERY MACOS BOOT, NOT ONLY BY AN INSTALL.
+#
+# `boot.img` is OpenCore itself, and the guest cannot start without it - a mac has no firmware that can
+# read the disk on its own. `build: opencore` derives it from the recovery image, and the recovery image
+# is where Apple's APFS driver comes out of. MEASURED the first time this stage ran without them:
+#
+#	boot the disk: boot: no OpenCore's boot image at /work/boot.img
+#
+# SO EVERY macOS STAGE THAT BOOTS A DISK REBUILDS THEM, which is the same two steps `ssh.yaml` has.
 - name: fetch the recovery image
   release: '15'
   asset: recovery_macos
@@ -32,24 +71,526 @@ steps:
   boot: true
   os: macos
   timeout: 900
-- name: wait for the login window
-  wait_for: login_window
-  timeout: 240
+
+# THE WIZARD RUNS UNTIL THE DESKTOP IS THERE, AND EACH PASS ANSWERS ONE PANE.
+#
+# TWENTY ATTEMPTS OF A MINUTE is the reference's `assistant_timeout` of 2700s apportioned - enough for
+# the account pane's own three-minute "Creating account..." spinner plus every other pane.
+- name: answer the wizard until the desktop appears
+  # THE LOOP'S OWN READING IS THE CLASSIFIER, AND `do:` IS WHAT ANSWERS IT.
+  #
+  # `loop:` TAKES `ocr:`/`check:`/`until:` AT ITS OWN LEVEL - a condition with no reading is refused -
+  # and `do:` is the action list it repeats. So one pass is:
+  #
+  #	ocr    read the screen once
+  #	check  decide whether the WIZARD IS OVER (the login window's "Enter Password")
+  #	do     read the screen AGAIN into `pane`, classify it with a `check` per pane, and click the
+  #	       one whose `if:` fired
+  #
+  # THE TWO READINGS ARE NOT REDUNDANT. The loop's is the stop test and the `do:`'s feeds the
+  # branches; merging them would mean the stop test could only be answered by a check that the loop
+  # has to have run BEFORE the actions, which is a different order.
+  loop:
+    max: 40
+    do:
+    - name: read the pane
+      ocr:
+        name: pane
+        # THE WHOLE SCREEN, because the panes put their text in different places and a narrower
+        # region was measured to miss the titles on two of them.
+        region:
+        - 0
+        - 0
+        - 1920
+        - 1080
+        region_at:
+        - 1920
+        - 1080
+        scale: 1
+        wait: 0
+    # --- THE PANES THAT ONLY NEED THE FOOTER ------------------------------------------------
+    #
+    # (1306,810) IS THE FOOTER'S FORWARD BUTTON on macOS 15. It is (1276,798) on 26, a button's width
+    # apart, which is why this file is 15 and a 26 file repeats the numbers instead of sharing a table.
+    # --- WHICH PANE IS UP: ONE READING, MANY QUESTIONS ---------------------------------------
+    #
+    # `if:` TESTS A BOOLEAN A `check:` MADE, so the screen is classified FIRST and answered second.
+    # One `check` per pane, all from the `pane` reading above - which is why the `ocr:` is its own item
+    # in `do:`: several panes can be asked about one screen.
+    - name: classify - analytics
+      check:
+        name: analytics
+        from: pane
+        mode: says
+        words:
+        - analytics
+        - improve
+    - name: classify - data and privacy
+      # THE WORDS ARE THE PAGE'S OWN SENTENCE, NOT TWO ITS NEIGHBOUR ALSO SAYS. `data` + `privacy`
+      # matched the ANALYTICS page too ("... sending diagnostics and usage data. Diagnostic data may
+      # include location information. About Analytics & Privacy..."), so the walk answered that pane as
+      # this one and never unticked 'Share Mac Analytics with Apple'.
+      check:
+        name: privacy_pane
+        from: pane
+        mode: says
+        words:
+        - privacy
+        - fundamental
+    - name: classify - spoken languages
+      check:
+        name: languages
+        from: pane
+        mode: says
+        words:
+        - spoken
+        - languages
+    - name: classify - accessibility
+      check:
+        name: accessibility
+        from: pane
+        mode: says
+        words:
+        - accessibility
+        - individual
+    - name: classify - transfer
+      check:
+        name: transfer
+        from: pane
+        mode: says
+        words:
+        - transfer
+        - data
+    - name: classify - country
+      check:
+        name: country
+        from: pane
+        mode: says
+        words:
+        - country
+        - region
+    - name: classify - account
+      check:
+        name: account
+        from: pane
+        mode: says
+        words:
+        - create
+        - mac
+        - account
+    - name: classify - location
+      # 'approximate location' IS ON THIS PAGE and on none of the six others checked - Analytics' body
+      # says "location information", which is a different phrase.
+      check:
+        name: location
+        from: pane
+        mode: says
+        words:
+        - approximate
+        - location
+    - name: classify - screen time
+      check:
+        name: screen_time
+        from: pane
+        mode: says
+        words:
+        - screen
+        - report
+    - name: classify - time zone
+      check:
+        name: time_zone
+        from: pane
+        mode: says
+        words:
+        - time
+        - zone
+    - name: classify - look
+      check:
+        name: look
+        from: pane
+        mode: says
+        words:
+        - look
+        - appearance
+    - name: classify - terms
+      check:
+        name: terms
+        from: pane
+        mode: says
+        words:
+        - terms
+        - conditions
+    - name: classify - welcome
+      check:
+        name: welcome
+        from: pane
+        mode: says
+        words:
+        - welcome
+        - mac
+    - name: classify - keyboard
+      check:
+        name: keyboard
+        from: pane
+        mode: says
+        words:
+        - keyboard
+        - assistant
+    - name: classify - apple account
+      # THE TITLE STRIP, NOT A PHRASE IN THE BODY. The account pane's body reads "The password you
+      # create here will be used to log in to your Apple Account", so `sign` + `apple` matched IT.
+      check:
+        name: apple_account
+        from: pane
+        mode: says
+        words:
+        - sign
+        - in
+        - to
+        - your
+        - apple
+        - account
+    - name: classify - the apple account sheet
+      # "ARE YOU SURE YOU WANT TO SKIP" IS THE SHEET'S OWN SENTENCE and appears on no page of the
+      # wizard, which is what makes it a classifier rather than a guess.
+      check:
+        name: apple_sheet
+        from: pane
+        mode: says
+        words:
+        - are
+        - you
+        - sure
+    - name: classify - update
+      check:
+        name: update
+        from: pane
+        mode: says
+        words:
+        - update
+        - automatically
+    - name: analytics - untick sharing first
+      if: analytics
+      then:
+        - name: untick share analytics
+          click:
+          - 808
+          - 513
+          wait_after: 3
+        - name: analytics continue
+          click:
+          - 1306
+          - 810
+          wait_after: 10
+    - name: data and privacy
+      if: privacy_pane
+      then:
+        - name: privacy continue
+          click:
+          - 1306
+          - 810
+          wait_after: 8
+    - name: spoken languages
+      if: languages
+      then:
+        - name: languages continue
+          click:
+          - 1306
+          - 810
+          wait_after: 8
+    - name: accessibility
+      if: accessibility
+      then:
+        # NOT "CONTINUE": this pane's forward button says NOT NOW and sits four pixels higher, so
+        # (1306,810) selects nothing at all.
+        - name: accessibility not now
+          click:
+          - 1306
+          - 806
+          wait_after: 12
+    - name: transfer your data
+      if: transfer
+      then:
+        - name: choose not to transfer
+          # THE ROW IS THE CONTROL, NOT THE LABEL: two clicks on the circle at (825,669) take the
+          # selection where a click on the label at (880,666) did nothing.
+          click:
+          - 825
+          - 669
+          wait_after: 4
+        - name: transfer continue
+          click:
+          - 1306
+          - 810
+          wait_after: 10
+    - name: country or region
+      if: country
+      then:
+        - name: focus the country list
+          click:
+          - 900
+          - 500
+          wait_after: 2
+        - name: type the country
+          # TYPING SELECTS THE ROW. The list takes nothing from a click except focus; typing jumps to
+          # the section with the row already highlighted.
+          click:
+          - 900
+          - 500
+          wait_after: 1
+        - name: country text
+          type: united states
+          wait_after: 3
+        - name: country continue
+          click:
+          - 1306
+          - 810
+          wait_after: 8
+    - name: the account, which is what this whole stage exists for
+      if: account
+      then:
+        - name: account user name
+          # `meta_l` IS NOT COSMETIC: select-all is Command+A on macOS, and Control+A moves the
+          # cursor instead - the installer's suggested name stays and the typed value is INSERTED in
+          # front of it, the form never validates, Continue stays disabled, and every later pane is
+          # matched against this one's text.
+          click:
+          - 945
+          - 447
+          wait_after: 2
+        - name: account user text
+          type: '{{ user }}'
+          wait_after: 3
+        - name: account password
+          click:
+          - 850
+          - 531
+          wait_after: 2
+        - name: account password text
+          type: '{{ password }}'
+          wait_after: 3
+        - name: account verify
+          click:
+          - 1086
+          - 531
+          wait_after: 2
+        - name: account verify text
+          type: '{{ password }}'
+          wait_after: 3
+        - name: account continue
+          # CONTINUE STARTS A PROCESS, NOT A TRANSITION, AND IT TAKES UP TO THREE MINUTES. The pane
+          # answers by going "Creating account..." with Continue greyed out, so a loop that looks
+          # again too early runs this `do` list a second time and types into fields that already hold
+          # it - measured on a live guest as three passes and an unusable form.
+          #
+          # THE REFERENCE'S NUMBER IS 180 AND ITS HISTORY IS 6 -> 25 -> 80 -> 180, with 80 STILL NOT
+          # ENOUGH: a first boot on a cold disk writes a home directory, generates keys and talks to
+          # the keychain.
+          click:
+          - 1306
+          - 810
+          wait_after: 180
+    - name: location services
+      if: location
+      then:
+        # THE SHEET'S "DON'T USE" IS ITS DEFAULT BUTTON: a click darkens it and leaves the sheet up,
+        # and Return is what fires it.
+        - name: location continue
+          click:
+          - 1306
+          - 810
+          wait_after: 6
+        - name: dont use focus
+          click:
+          - 960
+          - 632
+          wait_after: 3
+        - name: dont use confirm
+          key: ret
+          wait_after: 6
+    - name: screen time
+      if: screen_time
+      then:
+        # "SET UP LATER", AND ITS OWN BUTTON - not the footer.
+        - name: screen time later
+          click:
+          - 619
+          - 806
+          wait_after: 8
+    - name: time zone
+      if: time_zone
+      then:
+        - name: time zone continue
+          click:
+          - 1306
+          - 806
+          wait_after: 10
+    - name: choose your look
+      if: look
+      then:
+        - name: look continue
+          click:
+          - 1306
+          - 805
+          wait_after: 12
+    - name: terms and conditions
+      if: terms
+      then:
+        # THE FOOTER'S AGREE OPENS A LICENCE SHEET, whose own Agree is a different click.
+        - name: terms agree
+          click:
+          - 1298
+          - 806
+          wait_after: 8
+        - name: licence agree
+          click:
+          - 1019
+          - 616
+          wait_after: 10
+    - name: welcome to mac
+      if: welcome
+      then:
+        # "WELCOME TO MAC" IS A PANE, NOT THE DESKTOP: a full-screen card with a Continue button, and
+        # treating it as arrival leaves the wizard one click from finished.
+        - name: welcome continue
+          click:
+          - 960
+          - 990
+          wait_after: 12
+    - name: the keyboard assistant, which eats the next keystroke
+      if: keyboard
+      then:
+        - name: keyboard continue
+          click:
+          - 1222
+          - 818
+          wait_after: 12
+    - name: apple account - set up later
+      if: apple_account
+      then:
+        # "SIGN IN TO YOUR APPLE ACCOUNT" IS THE PANE'S TITLE and appears nowhere else. Matching
+        # `sign` and `apple` anywhere instead matched the ACCOUNT pane, whose body reads "The password
+        # you create here will be used to log in to your Apple Account".
+        - name: apple account later
+          click:
+          - 619
+          - 806
+          wait_after: 10
+    # THE APPLE ACCOUNT PAGE ASKS TWICE: THE PAGE'S OWN "Set Up Later", THEN A CONFIRMATION SHEET.
+    #
+    # MEASURED ON THIS STAGE'S OWN RUN: after the account was created the walk reached the Apple
+    # Account page, clicked its "Set Up Later", and the wizard put up
+    #
+    #	Are you sure you want to skip signing in with an Apple Account?
+    #	[Don't Skip]  [Skip]
+    #
+    # - and the walk had no step for it. Forty attempts then ran against that sheet, each classifying
+    # it as no pane at all, and the stage failed on a wizard that was ONE CLICK from the desktop:
+    #
+    #	the loop ran 40 attempt(s) and the condition never held
+    #
+    # THE SHEET'S SKIP IS THE BLUE BUTTON, MEASURED AT (1018,641); "Don't Skip" is the grey one to its
+    # left and is the wrong answer here.
+    - name: the apple account confirmation sheet
+      if: apple_sheet
+      then:
+        - name: skip the apple account
+          click:
+          - 1018
+          - 641
+          wait_after: 10
+    - name: update mac automatically
+      if: update
+      then:
+        - name: update continue
+          click:
+          - 1306
+          - 810
+          wait_after: 15
+
+    ocr:
+      name: wizard
+      # THE WHOLE SCREEN, BECAUSE THIS WIZARD CAN END IN TWO PLACES AND BOTH ARE FINE.
+      #
+      # THE REFERENCE IMPLEMENTATION ENDS AT THE LOGIN WINDOW and reads its `Enter Password` pill at
+      # x=880..1210 y=960..1000. THIS STAGE ENDS AT THE DESKTOP, because the account it just created is
+      # the only account and macOS logs it in automatically:
+      #
+      #	Finder  File  Edit  View  Go  Window  Help        Sat Nov 14 2:23 AM
+      #	(Dock: Finder, Safari, Messages, Mail, ... System Settings, Trash)
+      #
+      # MEASURED ON THIS STAGE'S OWN RUN: the wizard's last pane was the keyboard assistant, the walk
+      # clicked it at (1222,818), and the next frame was the desktop - while the loop's narrow region
+      # read ZERO WORDS forty times and failed a stage that had succeeded:
+      #
+      #	answer the wizard until the desktop appears [ocr]: 0 word(s) -> ocr/wizard.txt
+      #	the loop ran 40 attempt(s) and the condition never held
+      #
+      # SO THE READING IS THE WHOLE SCREEN AND THE TEST IS EITHER ENDING. A menu bar and a Dock are
+      # what a finished macOS session looks like and neither appears on any wizard pane.
+      region:
+      - 0
+      - 0
+      - 1920
+      - 1080
+      region_at:
+      - 1920
+      - 1080
+      scale: 1
+      wait: 0
+    check:
+      name: finished
+      from: wizard
+      # THE WIZARD IS OVER WHEN THERE IS NO FOOTER LEFT TO CLICK, AND `finder` ALONE WAS NOT THAT.
+      #
+      # MEASURED ON THIS STAGE'S OWN RUN: the loop reported `finished` while the ACCESSIBILITY page was
+      # on screen - `Vision / Motor / Hearing / Cognitive`, and a `Back` / `Not Now` footer. The wizard
+      # has THREE more pages after that one (Time Zone, Choose Your Look, Welcome to Mac), so every step
+      # after this loop was driving a session that did not exist yet:
+      #
+      #	the remote login result is on screen [check]: done = false (none of "sharing remote" or
+      #	"allow full disk access" in "Accessibility Accessibility features adapt your Mac to ...")
+      #
+      # `finder` IS IN THE MENU BAR OF EVERY WIZARD PAGE that has one, and `system settings` is in the
+      # SEARCH RESULTS this walk types into. Neither says "the wizard is over".
+      #
+      # A WIZARD PAGE ALWAYS HAS ONE OF THOSE FOOTER LABELS AND A LOGGED-IN SESSION HAS NONE. That is
+      # the whole test, and it is a negative one because the FOOTER is what the wizard cannot hide.
+      mode: matches
+      pattern: '^(?!.*(not now|continue|go back)).*(finder|enter password).*$'
+    until:
+      fact: finished
+
+# ==========================================================================================
+# THE EPILOGUE: WHAT THE WIZARD LEFT BEHIND
+# ==========================================================================================
+#
+# The first session is where the disk becomes usable, and each of these was a separate measured defect
+# in the reference implementation.
 - name: dismiss anything over the login window
   key: esc
   wait_after: 2
 - name: click the password field
+  # THE FIELD IS CLICKED BEFORE ANYTHING IS TYPED: it is focused on some boots and not on others, and
+  # a password typed into an unfocused window goes nowhere and then reads as "the password was wrong".
+  # (965,981) IS THE CENTRE OF THE "Enter Password" PILL, which spans x=880..1210 at y=960..1000.
   click:
   - 965
   - 981
-  wait_after: 1
+  wait_after: 2
 - name: type the password
   type: '{{ password }}'
-  wait_after: 1
+  wait_after: 2
 - name: press return
   key: ret
   wait_after: 20
 - name: dismiss the overlays macOS puts up on a first login
+  # THE KEYBOARD SETUP ASSISTANT COMES UP WITH THE FIRST DESKTOP SESSION AND EATS THE NEXT KEYSTROKE -
+  # which is how `sshd` was never enabled on six runs of the reference implementation.
+  #
+  # IT IS FOUR DISMISSALS AND NOT ONE, AND THE SHAPE IS MEASURED: macOS puts up "Set Up Your Keyboard"
+  # and it comes back after each Continue until the dialog has been answered twice, then the last esc
+  # and Cmd+Q clear what is left. (1228,826) IS ITS CONTINUE, measured on this guest.
   do:
   - click:
     - 1228
@@ -70,19 +611,61 @@ steps:
   - key: esc
     wait_after: 2
 - name: wait for the desktop
-  repeat_until:
-    attempts: 10
-    until_any:
-    - desktop: macos
-    actions:
+  # THE DESKTOP IS THE VERDICT ON THE WHOLE STAGE: the wallpaper test is the only thing that can
+  # confirm the password was accepted, and this is a first session on a disk that never had one.
+  loop:
+    max: 30
+    do:
+    - wait: 10
     - key: esc
-      wait_after: 1
-    - key: meta_l+q
-      wait_after: 1
-    - key: esc
-      wait_after: 1
-    wait_after: 60
-  timeout: 600
+    ocr:
+      name: desk
+      region:
+      - 0
+      - 0
+      - 1920
+      - 1080
+      region_at:
+      - 1920
+      - 1080
+      scale: 1
+      wait: 0
+    check:
+      name: ready
+      from: desk
+      # A WIZARD PAGE WEARS A FOOTER, AND THE DESKTOP DOES NOT - SO THE FOOTER IS THE TEST'S SUBJECT,
+      # AND THIS IS WHY THE FIRST VERSION FAILED.
+      #
+      # `finder` + `system settings` USED TO BE ENOUGH, AND `system settings` MATCHED A WIZARD PAGE:
+      # the Accessibility pane reads "Accessibility features adapt your Mac to your individual needs",
+      # which contains neither word... but the SEARCH RESULT pane's body does, and on the run that
+      # stopped here the walk was looking at Accessibility while `ready` had already gone TRUE. `finder`
+      # is worse: the menu bar says Finder on every wizard page that has one.
+      #
+      # MEASURED, ON THIS STAGE'S OWN RUN: the wizard's Accessibility page was on screen with
+      # `Vision / Motor / Hearing / Cognitive` cards and a `Back` / `Not Now` footer, and the remote-login
+      # steps then searched a System Settings window that was never opened:
+      #
+      #	the remote login result is on screen [check]: done = false (none of "sharing remote" or
+      #	"allow full disk access" in "Accessibility Accessibility features adapt your Mac to ...")
+      #
+      # A DESKTOP HAS A DOCK AND A MENU BAR AND NO FOOTER BUTTON. The three words below are the wizard's
+      # own footer labels, and are absent from a logged-in session.
+      mode: matches
+      pattern: '^(?!.*(not now|continue|go back)).*(finder|system settings).*$'
+# ==========================================================================================
+# REMOTE LOGIN, WHICH IS THE OTHER HALF OF "THE DISK IS USABLE"
+# ==========================================================================================
+#
+# THIS STAGE USED TO END AT THE DESKTOP AND HAND A `macos15-desktop` TAG TO A SEPARATE `ssh` STAGE. That
+# split had a cost with no benefit: the ssh stage's first act is to boot the very disk this stage just
+# finished with, log in again, and navigate to the SAME desktop before it can do anything. The machine
+# is already sitting on that desktop with a session - so the remote-login steps run HERE, and the disk
+# that gets published already has sshd on.
+#
+# THE STEPS BELOW ARE `ssh.yaml`'S OWN, UNCHANGED, INCLUDING THEIR COORDINATES: they drive System
+# Settings with the GUI because that is what the walkthroughs in this repository do and what was
+# measured. `systemsetup -setremotelogin on` would be shorter and was deliberately not used.
 - name: dismiss anything over the desktop
   key: esc
   wait_after: 2
@@ -267,21 +850,39 @@ steps:
   - 1145
   - 679
   wait_after: 5
+
 - name: wait for sshd
   require_ssh: true
   timeout: 600
-- name: prove the build
+- name: prove the build over ssh
   ssh: sw_vers -productVersion
-- name: prove the account
+- name: prove the account over ssh
   ssh: id -un
 - name: prove disk utility works over ssh
+  # A TOOL THAT NEEDS THE GUI SUBSYSTEM. `diskutil list` walks the IOKit registry, so it answers only if
+  # the session behind sshd is a real one - a daemon that came up without a window server fails here
+  # rather than at the first thing that needs a device.
   ssh: diskutil list | head -5
 - name: name the machine
   ssh: printf '%s\n' "{{ password }}" | sudo -S scutil --set LocalHostName {{ user }}
 - name: note what is absent
+  # HOME-BREW IS NOT INSTALLED, and saying so in the log is better than a later stage discovering it.
   ssh: command -v brew || true
+# AND NOW THE MACHINE GOES DOWN OVER ITS OWN SSHD, WHICH IS WHY THE MERGE IS WORTH MORE THAN THE STEPS
+# IT SAVES.
+#
+# `shutdown: kill` DISCARDED THE WIZARD'S WORK, and this stage's whole output is that work:
+#
+#	desktop stage:   diff written      878 MiB   flattened to desktop.qcow2
+#	rebooted disk:   "Select Your Country or Region"       <- Setup Assistant, first pane
+#	grep vmuser in the flattened disk's first 200 MiB -> 0
+#
+# `/var/db/.AppleSetupDone` and `/Users/vmuser` are written at the END of the wizard and were still in
+# the page cache when qemu was killed, so APFS rolled back to a journal point before they existed. With
+# sshd up, `shutdown: ssh` asks macOS to power off through its own init, which unmounts and closes the
+# journal first - the same reason ghostbsd's `a39075b` replaced its kill.
 - name: stop the machine
-  shutdown: '{{ shutdown }}'
+  shutdown: ssh
   timeout: 300
 - name: publish the disk
   compress: '{{ out }}'
