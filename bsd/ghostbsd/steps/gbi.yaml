@@ -428,6 +428,37 @@ steps:
   - 1331
   - 785
   wait_after: 14
+# THE BOOT OPTION PAGE IS THE WHOLE REASON A DISK FROM THIS WALK CAME UP IN THE INSTALLER.
+#
+# MEASURED ON THE DISK IT BAKED, PULLED BACK FROM ghcr AND BOOTED HERE: the machine came up in GBI's
+# own `Please select your language` pane, and the disk's partition table said why:
+#
+#	entry0  freebsd-boot    28732ac1-1ff8-d211-ba4b-00a0c93ec93b
+#	entry1  freebsd-swap    ba7c6e51-cf6e-d611-8ff8-00022d09712b
+#	entry2  freebsd-zfs     b57c6e51-cf6e-d611-8ff8-00022d09712b
+#	entry3  (empty)
+#
+# THREE PARTITIONS AND NO EFI SYSTEM PARTITION. Our guests are UEFI - OVMF, `-drive if=pflash` - so
+# the firmware looks for an ESP with a loader on it, finds none, and falls through to the boot CD.
+#
+# THE PAGE OFFERS THREE WAYS TO INSTALL A BOOT LOADER, and the DEFAULT is the one that cannot work:
+#
+#	Setup rEFInd boot manager      creates an ESP and puts rEFInd on it        <- what UEFI needs
+#	Setup FreeBSD boot manager     writes boot0 to the MBR                    <- BIOS only
+#	FreeBSD UEFI loader only       (DEFAULT) puts loader.efi inside the ZFS pool, no ESP at all
+#
+# `FreeBSD UEFI loader only` reads like the modern choice and is not: without an ESP there is nothing
+# for UEFI firmware to boot, and every later stage meets a machine that starts its own installer.
+#
+# SO rEFInd IS SELECTED EXPLICITLY, before Next. MEASURED ON THE INSTALLER'S OWN PANE at 1920x1080:
+#
+#	622,388   -> the rEFInd radio button
+#	1584,773  -> Next
+- name: boot option - chosse rEFInd so the disk is UEFI bootable
+  click:
+  - 622
+  - 388
+  wait_after: 3
 - name: boot option
   click:
   - 1331
