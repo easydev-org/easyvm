@@ -2,6 +2,7 @@ package run
 
 import (
 	"errors"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -106,3 +107,70 @@ func (m recordingMachine) ReleaseDiff() error  { return nil }
 type noMachineDriver struct{ fakeFrameDriver }
 
 func (d *noMachineDriver) Machine() Machine { return nil }
+
+// A DIFF IS MEASURED BY WHAT IT FLATTENS TO, NOT BY ITS OWN BLOCKS.
+//
+// MEASURED ON A DISK PULLED FROM ghcr AND PUT THROUGH THE ssh WALKTHROUGH LOCALLY:
+//
+//	=== publish the disk
+//	error: the disk is 359 MiB, below the 512 MiB floor for an installed system
+//
+// on a disk holding a complete Ubuntu system. The stage runs on an overlay, so `Disk()` returns the
+// DIFF - and the diff of "boot, install openssh, shut down" is 359 MiB while the disk it sits on is
+// 10.1 GiB:
+//
+//	qemu-img measure -O qcow2 run-overlay.qcow2
+//	required size:        10620305408      <- 10.1 GiB, what the flatten produces
+//	fully allocated size: 137460187136     <- 128 GiB, the virtual size
+//
+// The floor exists to catch an install that never happened; measuring the diff catches "this stage
+// changed little", which is what a later stage is SUPPOSED to do.
+//
+// THE TEST DOES NOT NEED A BIG DIFF. What it checks is WHICH MEASUREMENT IS USED: a file with a
+// backing chain must be measured by `qemu-img measure`, and one without must use `stat`.
+func TestADiffIsMeasuredByItsFlattenedSize(t *testing.T) {
+	dir := t.TempDir()
+	base := filepath.Join(dir, "base.qcow2")
+	diff := filepath.Join(dir, "diff.qcow2")
+	plain := filepath.Join(dir, "plain.qcow2")
+
+	run(t, "qemu-img", "create", "-f", "qcow2", base, "1G")
+	run(t, "qemu-img", "create", "-f", "qcow2", "-b", base, "-F", "qcow2", diff)
+	run(t, "qemu-img", "create", "-f", "qcow2", plain, "1G")
+
+	// A DIFF IS MEASURED BY WHAT IT WOULD FLATTEN TO.
+	measured, how := installedBytes(diff)
+	if !contains(how, "flattened") {
+		t.Fatalf("a file with a backing chain was measured by %q; it must use the flattened size, "+
+			"or a stage that installs 300 MiB of packages is refused as an empty disk", how)
+	}
+	// AND THE NUMBER IS A PROPERTY OF THE WHOLE IMAGE, NOT OF THE DIFF.
+	//
+	// IT IS NOT ASSERTED TO BE BIG: a 1 GiB base containing nothing compresses to a few hundred
+	// kilobytes, and that is the honest answer - which is why this test checks the METHOD rather than
+	// a threshold. The 10.1 GiB figure in the note above came from a disk with a system on it.
+	if measured <= 0 {
+		t.Fatalf("the diff measured %d bytes by %q", measured, how)
+	}
+	if diffOnly, _ := installedBytesPlain(diff); measured == diffOnly {
+		t.Logf("the flattened size (%d) happens to equal the diff's own blocks (%d); the method is "+
+			"what this test is about", measured, diffOnly)
+	}
+
+	// A PLAIN FILE STILL USES `stat`: cheaper, and it needs no qemu-img.
+	if _, plainHow := installedBytes(plain); !contains(plainHow, "blocks") {
+		t.Fatalf("a file with no backing chain was measured by %q, and it should use its own blocks",
+			plainHow)
+	}
+}
+
+// installedBytesPlain is the `stat` measurement, so the test can say which one it compared.
+func installedBytesPlain(path string) (int64, string) { return allocatedBytes(path), "blocks" }
+
+// run fails the test if a command fails.
+func run(t *testing.T, name string, args ...string) {
+	t.Helper()
+	if out, err := exec.Command(name, args...).CombinedOutput(); err != nil {
+		t.Fatalf("%s %v: %v (%s)", name, args, err, out)
+	}
+}

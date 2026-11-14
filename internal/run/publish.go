@@ -340,6 +340,45 @@ func (e *Executor) doDiskSettle(s walk.Step) error {
 			"started", timeout, float64(allocatedBytes(path))/(1<<20))
 }
 
+// installedBytes is how big the SYSTEM is, which for a diff is not the same as the diff's own file.
+//
+// THE FLOOR CHECK WAS MEASURING THE WRONG FILE, AND A PULLED DISK PROVED IT. A later stage runs on an
+// overlay - a read-only base plus a throwaway diff - so `Disk()` returns the DIFF, and the diff of
+// "boot the disk, install openssh, shut down" is 359 MiB. The check read that as the whole system and
+// refused to publish:
+//
+//	publish the disk: the disk is 359 MiB, below the 512 MiB floor for an installed system
+//
+// on a disk whose real content is 10.1 GiB. MEASURED WITH `qemu-img measure -O qcow2 <diff>`:
+//
+//	required size:        10620305408      <- what the flattened disk occupies, 10.1 GiB
+//	fully allocated size: 137460187136     <- 128 GiB, the virtual size
+//
+// SO AN OVERLAY IS MEASURED BY WHAT IT WOULD FLATTEN TO, NOT BY ITS OWN BLOCKS. `qemu-img measure`
+// walks the backing chain and accounts for the compression the convert will achieve, which is exactly
+// the question the floor is asking: is there a system in here.
+//
+// A PLAIN FILE HAS NO BACKING CHAIN, and `stat` is cheaper and needs no qemu-img - so the ordinary
+// case keeps the old answer. The method is returned so a failure can say which one it used, because a
+// message that reports 359 when the number is really 10 GiB has to explain itself.
+func installedBytes(path string) (int64, string) {
+	if info, err := exec.Command("qemu-img", "info", "--output=json", path).Output(); err == nil {
+		// `full-backing-filename` IS PRESENT ONLY WHEN THERE IS A CHAIN, so this tests "is this a
+		// diff" rather than guessing from the file's size.
+		if strings.Contains(string(info), "full-backing-filename") {
+			if out, err := exec.Command("qemu-img", "measure", "-O", "qcow2", path).Output(); err == nil {
+				for _, line := range strings.Split(string(out), "\n") {
+					var n int64
+					if _, scanErr := fmt.Sscanf(strings.TrimSpace(line), "required size: %d", &n); scanErr == nil {
+						return n, "measured as the flattened image, because this disk runs on a diff"
+					}
+				}
+			}
+		}
+	}
+	return allocatedBytes(path), "the file's own blocks"
+}
+
 // allocatedBytes is st_blocks * 512: what the file actually occupies, which is what grows on a
 // sparse qcow2. Stat().Size() is the virtual size from the first second and says nothing.
 func allocatedBytes(path string) int64 {

@@ -795,12 +795,12 @@ func (e *Executor) doCompress(s walk.Step) error {
 	// IT IS `disk_min_mb:` WHEN A FILE SAYS SO, because a file that produces a deliberately small
 	// artifact should be able to say what small means for it.
 	floor, _ := s.Float("disk_min_mb", 512)
-	if size := allocatedBytes(disk); size >= 0 && floor > 0 {
+	if size, how := installedBytes(disk); size >= 0 && floor > 0 {
 		if mb := float64(size) / (1 << 20); mb < floor {
 			return fail(s.Name, "the disk is %.0f MiB, below the %.0f MiB floor for an installed "+
-				"system. This is a qcow2 header with nothing written to it - the steps above ran "+
-				"without installing anything, and publishing it would put an empty disk behind a "+
-				"tag the next stage pulls", mb, floor)
+				"system (%s). This is a qcow2 header with nothing written to it - the steps above "+
+				"ran without installing anything, and publishing it would put an empty disk behind "+
+				"a tag the next stage pulls", mb, floor, how)
 		}
 	}
 

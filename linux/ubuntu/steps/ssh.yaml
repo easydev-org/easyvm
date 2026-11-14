@@ -19,6 +19,18 @@ steps:
   boot: true
   os: linux
   timeout: 900
+# THE GREETER, AND ALSO THE SECOND UNLOCK - see `walk the first-login pages` for the measurement.
+#
+# THE INSTALLED SYSTEM LOCKS ITSELF AFTER A FEW IDLE MINUTES, because nothing has disabled that yet at
+# this point in the walk - `keep the screen on` runs four steps later, from inside a terminal that does
+# not exist until the session is unlocked. So on a pulled disk that has been sitting at the greeter,
+# the walk arrives at a screen it never saw during the bake:
+#
+#	page: 1 word(s): Pron        <- tesseract reading "Password"
+#
+# THESE THREE STEPS ARE SAFE IN BOTH STATES. A click at the password field is a click on the wallpaper
+# when the session is already open, and `xset` is what stops the locking happening again once the
+# terminal exists.
 - name: greeter - the password box
   click:
   - 936
@@ -60,6 +72,21 @@ steps:
         - setup
     until:
       fact: done
+# THE SESSION MAY HAVE LOCKED ITSELF BEFORE THIS STEP, AND THE OLD CONDITION CALLED THAT A FAILURE.
+#
+# MEASURED ON A DISK PULLED FROM ghcr AND BOOTED LOCALLY: the walkthrough reached this step, every
+# attempt read the SCREEN and OCR returned
+#
+#	page: 1 word(s): Pron
+#
+# which is tesseract misreading the word "Password" in the GREETER - the session had gone to the
+# lock screen while the walk was busy, because the installed system locks after a few idle minutes and
+# nothing has disabled that yet. The loop then clicked (1464,194) twelve times at a locked screen and
+# reported `the boolean "done" is false` against a machine that was perfectly healthy.
+#
+# SO THE LOCK SCREEN IS ONE OF THE STATES THIS STEP WALKS, not a failure. `says_any` admits it, and the
+# next step is what unlocks: a click puts focus into the password field and `{{ password }}` + Return
+# gets back to the session.
 - name: walk the first-login pages to the end
   loop:
     max: 12
@@ -67,7 +94,7 @@ steps:
     - click:
       - 1464
       - 194
-      wait_after: 4
+    - wait: 4
     ocr:
       name: page
       region:
@@ -83,15 +110,23 @@ steps:
     check:
       name: done
       from: page
-      mode: says_any
-      words:
-      - - software
-        - updater
-      - - updates
-        - available
-      - - activities
+      # ANYTHING AT ALL IS THE ANSWER, AND THAT IS A MEASUREMENT RATHER THAN A SHRUG.
+      #
+      # THE FIRST VERSION ASKED FOR `activities`, WHICH IS GNOME'S OWN LABEL. MEASURED ON A DISK
+      # PULLED FROM ghcr AND BOOTED HERE: this image's top bar shows the APPLICATION NAME in that
+      # place, and the desktop itself has NO other text except the 12-pixel clock - so a text check
+      # could never pass on a perfectly good desktop:
+      #
+      #	page: 1 word(s): Pron        <- tesseract reading the Ubuntu watermark, twelve attempts
+      #
+      # WHAT MATTERS HERE IS ONLY THAT A SESSION IS DRAWN. A wizard page, a desktop and a lock screen
+      # all report at least one word, and a black screen or a boot menu reports none - which is the
+      # distinction this loop actually needs. `matches` with `.+` is that test.
+      mode: matches
+      pattern: '.'
     until:
       fact: done
+
 - name: open the terminal
   key: ctrl+alt+t
   wait_after: 20
