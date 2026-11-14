@@ -45,6 +45,13 @@ permissions:
 
 jobs:
   setup:
+    # `from_tag:` NAMES A PUBLISHED DISK AND THE CHAIN STARTS FROM IT - SO THE INSTALL DOES NOT RUN.
+    #
+    # THIS JOB HAD NO `if:` AT ALL, which is the same defect `6643303` fixed for ubuntu and windows:
+    # `gh workflow run macos.yml -f from_tag=macos15` was meant to pick up the disk setup had already
+    # published and run the later stages against it, and instead it started a two-hour install that
+    # would REPUBLISH the very tag the caller named.
+    if: github.event_name != 'workflow_dispatch' || inputs.from_tag == ''
     uses: ./.github/workflows/stage.yml
     secrets: inherit
     with:
