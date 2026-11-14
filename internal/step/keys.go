@@ -403,11 +403,16 @@ var Keys = map[string]Key{
 			"what an `ocr:` step read; `mode:` says HOW to compare. It never reads the screen, so " +
 			"it costs nothing to re-ask"},
 	"mode": {Name: "mode", Kind: KindString,
-		Summary: "with `check:`: how the reading is compared - says, says_any, size_between, " +
-			"number_between, equals, contains or matches. The modes are the extension point: a " +
-			"new kind of comparison is a new value, not a new top-level key"},
+		Summary: "with `check:`: how the reading is compared - says, says_any, says_without, " +
+			"size_between, number_between, equals, contains or matches. The modes are the extension " +
+			"point: a new kind of comparison is a new value, not a new top-level key"},
 	"words": {Name: "words", Kind: KindList,
-		Summary: "with `check: mode: says`/`says_any`: the word list, or a list of word-sets"},
+		Summary: "with `check: mode: says`/`says_any`/`says_without`: the word list, or a list of " +
+			"word-sets"},
+	"without": {Name: "without", Kind: KindWords,
+		Summary: "with `check: mode: says_without`: words that must NOT be on screen - for a test " +
+			"that has to say \"this page is gone\", which Go's regexp cannot express because RE2 has " +
+			"no lookahead"},
 	"range": {Name: "range", Kind: KindList,
 		Summary: "with `check: mode: size_between`/`number_between`: [low, high]. GB for a size, " +
 			"so a pane printing MB or TB is comparable"},

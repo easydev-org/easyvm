@@ -186,3 +186,94 @@ func run(t *testing.T, name string, args ...string) {
 		t.Fatalf("%s %v: %v (%s)", name, args, err, out)
 	}
 }
+
+// `says_without` IS THE ONLY WAY TO SAY "THIS PAGE IS GONE", AND IT EXISTS BECAUSE RE2 HAS NO LOOKAHEAD.
+//
+// MEASURED ON THE macOS ssh STAGE: the check that ends its wizard loop was written
+//
+//	mode: matches
+//	pattern: '^(?!.*(not now|continue|go back)).*(finder|enter password).*$'
+//
+// which is a Python-compatible expression and does not compile in Go - and the failure did not read as
+// a syntax problem, it read as a stage that could not answer its own question:
+//
+//	`mode: matches` pattern "...": error parsing regexp: invalid or unsupported Perl syntax
+//
+// so every later step ran against `finished = false` and the remote-login steps searched a System
+// Settings window that was never opened.
+func TestSaysWithoutIsTwoFacts(t *testing.T) {
+	// THE MAPPING SHAPE THE YAML PRODUCES: a list of `any`, because that is what a parsed `words:` is.
+	check := func(words, without []string) map[string]any {
+		m := map[string]any{}
+		wl := make([]any, len(words))
+		for i, w := range words {
+			wl[i] = w
+		}
+		m["words"] = wl
+		if without != nil {
+			ol := make([]any, len(without))
+			for i, w := range without {
+				ol[i] = w
+			}
+			m["without"] = ol
+		}
+		return m
+	}
+
+	cases := []struct {
+		name     string
+		screen   string
+		words    []string
+		without  []string
+		wantPass bool
+	}{
+		{"a desktop", "finder file edit view go window help", []string{"finder"},
+			[]string{"continue", "back", "now"}, true},
+		{"a wizard page that has the word and the footer",
+			"accessibility adapt your mac finder back not now", []string{"finder"},
+			[]string{"continue", "back", "now"}, false},
+		{"nothing of the sort", "boot menu", []string{"finder"},
+			[]string{"continue"}, false},
+	}
+	for _, c := range cases {
+		got, why, err := runCheckMode("t", "says_without", splitWords(c.screen), check(c.words, c.without))
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		if got != c.wantPass {
+			t.Errorf("%s: says_without returned %v (%s), wanted %v", c.name, got, why, c.wantPass)
+		}
+	}
+
+	// `without` IS A LIST OF WORDS, NOT PHRASES, AND THE FIRST VERSION OF THIS TEST HAD IT WRONG in the
+	// same way the YAML did: "not now" normalises to the single token "notnow", which no screen
+	// contains, so the exclusion silently never fired.
+	//
+	// AND A MISSING `without:` IS AN ERROR, NOT AN EMPTY LIST - a test that forgot its second half
+	// would pass on every screen and say nothing about it.
+	if _, _, err := runCheckMode("t", "says_without", []string{"finder"},
+		map[string]any{"words": []string{"finder"}}); err == nil {
+		t.Error("`says_without` accepted a check with no `without:`, so half the test silently " +
+			"disappeared")
+	}
+}
+
+// splitWords is the reading a step hands to a check: one string per word.
+func splitWords(s string) []string {
+	var out []string
+	cur := ""
+	for _, r := range s {
+		if r == ' ' {
+			if cur != "" {
+				out = append(out, cur)
+			}
+			cur = ""
+			continue
+		}
+		cur += string(r)
+	}
+	if cur != "" {
+		out = append(out, cur)
+	}
+	return out
+}

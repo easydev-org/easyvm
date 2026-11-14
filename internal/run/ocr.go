@@ -285,6 +285,47 @@ func runCheckMode(step, mode string, words []string, raw map[string]any) (bool, 
 		}
 		return false, fmt.Sprintf("none of %s in %q", describeSets(sets), truncateWords(words, 10)), nil
 
+	case "says_without":
+		// SOME WORDS PRESENT AND OTHERS ABSENT - which is the only way to say "the wizard is over".
+		//
+		// WHY NOT `matches:` WITH A LOOKAHEAD: Go's regexp is RE2, which has NO lookahead, so
+		// `^(?!.*(not now|continue)).*finder.*$` does not compile - measured as
+		//
+		//	`mode: matches` pattern "...": error parsing regexp: invalid or unsupported Perl syntax
+		//
+		// on a stage whose every later step then failed, because the check that ends the wizard loop
+		// could never be evaluated at all.
+		//
+		// A WIZARD PAGE WEARS A FOOTER AND A LOGGED-IN SESSION DOES NOT, so the honest test is two
+		// facts at once: the words that mean DESKTOP, and the absence of the words that mean FOOTER.
+		// `words:` is what must be there; `without:` is what must not.
+		want, err := modeWords(raw, "words")
+		if err != nil {
+			return false, "", err
+		}
+		absent, err := modeWords(raw, "without")
+		if err != nil {
+			return false, "", err
+		}
+		// `says` IS PER-WORD, AND THAT IS WHY `without` IS TESTED ONE WORD AT A TIME.
+		//
+		// `says(words, ["not","now"])` means "the reading contains BOTH of these words", which is what
+		// `words:` should be. For `without:` that would be wrong in the other direction: a wizard footer
+		// that says only "Continue" would not match `["not","now"]` and the page would pass as a desktop.
+		// ANY ONE of these words on screen means the footer is there.
+		if !says(words, want) {
+			return false, fmt.Sprintf("missing %q from %q", strings.Join(want, " "),
+				truncateWords(words, 10)), nil
+		}
+		for _, w := range absent {
+			if says(words, []string{w}) {
+				return false, fmt.Sprintf("read %q, but %q is also on screen - that is a page with "+
+					"a footer, not a desktop", strings.Join(want, " "), w), nil
+			}
+		}
+		return true, fmt.Sprintf("read %q and none of %q", strings.Join(want, " "),
+			strings.Join(absent, " ")), nil
+
 	case "size_between":
 		// A CAPACITY in this GB range - the disk-choice comparison.
 		lo, hi, err := modeRange(raw)
@@ -365,7 +406,8 @@ func runCheckMode(step, mode string, words []string, raw map[string]any) (bool, 
 
 // checkModeNames is the single list, so a new mode is added HERE and named in the error above.
 func checkModeNames() []string {
-	return []string{"says", "says_any", "size_between", "number_between", "equals", "contains", "matches"}
+	return []string{"says", "says_any", "says_without", "size_between", "number_between", "equals",
+		"contains", "matches"}
 }
 
 // modeWords reads a plain word list, `words:`.

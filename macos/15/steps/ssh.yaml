@@ -556,8 +556,21 @@ steps:
       #
       # A WIZARD PAGE ALWAYS HAS ONE OF THOSE FOOTER LABELS AND A LOGGED-IN SESSION HAS NONE. That is
       # the whole test, and it is a negative one because the FOOTER is what the wizard cannot hide.
-      mode: matches
-      pattern: '^(?!.*(not now|continue|go back)).*(finder|enter password).*$'
+      mode: says_without
+      # THE DESKTOP
+      words:
+      - finder
+      # AND NOT THE FOOTER OF A WIZARD PAGE
+      # SINGLE WORDS, BECAUSE `says` COMPARES WORDS AND NOT PHRASES: `normalise` turns "not now" into
+      # the one token "notnow", which no screen contains.
+      #
+      # AND THE WORDS ARE THE ONES A FOOTER SAYS AND A DESKTOP DOES NOT. `now` was in the first list and
+      # is too common to be evidence - a notification can say it. These three are the wizard's own
+      # button labels.
+      without:
+      - continue
+      - back
+      - later
     until:
       fact: finished
 
@@ -651,8 +664,21 @@ steps:
       #
       # A DESKTOP HAS A DOCK AND A MENU BAR AND NO FOOTER BUTTON. The three words below are the wizard's
       # own footer labels, and are absent from a logged-in session.
-      mode: matches
-      pattern: '^(?!.*(not now|continue|go back)).*(finder|system settings).*$'
+      mode: says_without
+      # THE DESKTOP
+      words:
+      - finder
+      # AND NOT THE FOOTER OF A WIZARD PAGE
+      # SINGLE WORDS, BECAUSE `says` COMPARES WORDS AND NOT PHRASES: `normalise` turns "not now" into
+      # the one token "notnow", which no screen contains.
+      #
+      # AND THE WORDS ARE THE ONES A FOOTER SAYS AND A DESKTOP DOES NOT. `now` was in the first list and
+      # is too common to be evidence - a notification can say it. These three are the wizard's own
+      # button labels.
+      without:
+      - continue
+      - back
+      - later
 # ==========================================================================================
 # REMOTE LOGIN, WHICH IS THE OTHER HALF OF "THE DISK IS USABLE"
 # ==========================================================================================
