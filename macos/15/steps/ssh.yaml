@@ -679,6 +679,8 @@ steps:
       - continue
       - back
       - later
+    until:
+      fact: ready
 # ==========================================================================================
 # REMOTE LOGIN, WHICH IS THE OTHER HALF OF "THE DISK IS USABLE"
 # ==========================================================================================
@@ -747,11 +749,21 @@ steps:
     - wait: 2
     ocr:
       name: screen
+      # THE SEARCH RESULT'S OWN COLUMN, AND THE LEFT EDGE IS THE POINT.
+      #
+      # THIS REGION STARTED AT x=590, WHICH IS THE DETAIL PANE. The result list is at x=480..700 and its
+      # group heading `Sharing` sits at x≈500, so the one word this step waits for was outside the crop:
+      #
+      #	the remote login result is on screen [check]: done = false (none of "sharing" or "allow"
+      #	  in "Q remote login} tx) (c) " oy Remote login General ...")
+      #
+      # - the reading held `Remote login` and `General` and nothing else, on a screen that plainly said
+      # `Sharing / Remote login` in the sidebar. MEASURED at 1920x1080 on this guest's own frame.
       region:
-      - 590
+      - 480
       - 240
-      - 1210
-      - 720
+      - 760
+      - 420
       region_at:
       - 1920
       - 1080
