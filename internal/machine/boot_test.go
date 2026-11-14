@@ -534,12 +534,34 @@ func TestTheRecoveryDeviceHasAController(t *testing.T) {
 		t.Fatalf("`usb-storage,bus=xhci.0` comes before the controller it names:\n%s", joined)
 	}
 
-	// AND WITHOUT A RECOVERY IMAGE THERE IS NEITHER THE DEVICE NOR THE CONTROLLER: an installed macOS
-	// disk does not install, and an extra USB disk is one more row in Disk Utility's sidebar.
+	// AND WITHOUT A RECOVERY IMAGE THE CONTROLLER AND THE POINTER ARE STILL THERE - THE RECOVERY IMAGE
+	// IS THE ONLY THING THAT GOES AWAY.
+	//
+	// THIS TEST USED TO REQUIRE THE OPPOSITE, and that requirement was the bug: `usb-tablet` lived
+	// inside `if b.Recovery != ""`, so a macOS guest booted from an INSTALLED disk had no pointer at
+	// all. MEASURED on the disk this repository publishes as `macos15`, pulled back and driven:
+	//
+	//	click (965, 981): pointer to (965, 981): Input handler not found for event type abs
+	//
+	// on a machine that had booted to its Setup Assistant with a perfectly good screen. A MAC HAS NO
+	// PS/2, so a pointer that is not on USB is a pointer that does not exist.
 	installed := Boot{OS: MacOS, Disk: disk, OpenCoreROM: rom, OpenCoreVars: vars, BootImage: bootImg}
 	body := strings.Join(installed.StorageArgs(), " ")
-	if strings.Contains(body, "qemu-xhci") || strings.Contains(body, "usb-storage") {
-		t.Fatalf("a macOS boot with no recovery image attached USB devices anyway:\n%s", body)
+	if strings.Contains(body, "usb-storage") {
+		t.Fatalf("a macOS boot with no recovery image attached the recovery image anyway:\n%s", body)
+	}
+	if !strings.Contains(body, "qemu-xhci") {
+		t.Fatalf("a macOS boot from an installed disk has no qemu-xhci, and `bus=xhci.0` below names "+
+			"a bus that does not exist:\n%s", body)
+	}
+	if !strings.Contains(body, "usb-tablet,bus=xhci.0") {
+		t.Fatalf("a macOS boot from an installed disk has NO POINTER. A mac has no PS/2, so nothing "+
+			"can click it - measured as `Input handler not found for event type abs` on the first "+
+			"click of the ssh walkthrough:\n%s", body)
+	}
+	// AND THE CONTROLLER STILL COMES FIRST, which is the ordering that makes `bus=xhci.0` exist.
+	if at := strings.Index(body, "qemu-xhci"); at > strings.Index(body, "usb-tablet") {
+		t.Fatalf("`usb-tablet,bus=xhci.0` comes before the controller it names:\n%s", body)
 	}
 }
 

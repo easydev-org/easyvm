@@ -277,17 +277,34 @@ func (b Boot) StorageArgs() []string {
 		//
 		// `usb-storage` has no bootindex and does not need one: the firmware reaches it only
 		// after OpenCore hands over.
+		// THE POINTER IS ATTACHED WHETHER OR NOT THERE IS A RECOVERY IMAGE, AND THAT WAS THE BUG.
+		//
+		// `usb-tablet,bus=xhci.0` USED TO LIVE INSIDE `if b.Recovery != ""`, so a macOS guest booted
+		// FROM AN INSTALLED DISK - every `ssh`, `vm-configure` and `dev` leg - had NO POINTER AT ALL.
+		// The first click of such a walk died in qemu rather than on the screen:
+		//
+		//	click (965, 981): pointer to (965, 981): Input handler not found for event type abs
+		//
+		// MEASURED ON THE DISK THIS REPOSITORY PUBLISHED AS `macos15`, pulled back and driven: the
+		// machine booted to its Setup Assistant - the screen was right - and the walk could not touch
+		// it. The device list had NO POINTER IN IT:
+		//
+		//	isa-serial  virtio-blk-pci(oc)  virtio-blk-pci(target)  vmware-svga  virtio-net-pci
+		//
+		// AND A MAC HAS NO PS/2, so a pointer that is not on USB is a pointer that does not exist.
+		// `vmport=off` in the daemon's `-machine` does not help either: it removes a competing
+		// HANDLER, and there was no device for the handler to belong to.
+		//
+		// SO THE CONTROLLER AND THE TABLET COME FIRST AND UNCONDITIONALLY, and the recovery image is
+		// what is conditional - it is one more device ON the bus that is already there.
+		args = append(args, "-device", "qemu-xhci,id=xhci")
 		if b.Recovery != "" {
 			args = append(args,
-				"-device", "qemu-xhci,id=xhci",
 				"-drive", "file="+b.Recovery+",media=disk,if=none,id=rec,readonly=on",
 				"-device", "usb-storage,bus=xhci.0,drive=rec",
-				// AND THE POINTER ON THE SAME BUS, which is what the reference implementation gives
-				// its mac and the reason a recovery screen can be clicked at all. A MAC HAS NO PS/2,
-				// so a pointer that is not on USB is a pointer that does not exist.
-				"-device", "usb-tablet,bus=xhci.0",
 			)
 		}
+		args = append(args, "-device", "usb-tablet,bus=xhci.0")
 		return args
 	}
 
