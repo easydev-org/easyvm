@@ -807,17 +807,43 @@ steps:
   - 1920
   - 1080
 - name: the remote login pane is up
+  # THE WORD LIST WAS FOR A PANE macOS 15 DOES NOT DRAW, AND IT COST 200 SECONDS ON EVERY RUN.
+  #
+  # IT WAITED FOR `allow full disk access`. MEASURED ON THIS STAGE'S OWN RECORDING - every frame from
+  # t=660s to t=860s is the same Sharing window:
+  #
+  #	Sharing
+  #	Content & Media     File Sharing / Media Sharing / Screen Sharing / Content Caching
+  #	Accessories & Internet   Bluetooth / Printer / Internet Sharing
+  #	Advanced            Remote Management
+  #
+  # There is no "Allow full disk access" anywhere on it. That phrase belongs to a DIFFERENT pane, and
+  # the loop asked for it thirty times at three seconds a turn:
+  #
+  #	the remote login pane is up: ... (the boolean never held)
+  #	turn remote login on:  unless: 38 word(s) "Remote Login: Off ..."     <- and then it worked anyway
+  #
+  # SO THE STAGE SUCCEEDED WITH THREE MINUTES OF NOTHING IN THE MIDDLE OF ITS RECORDING, and the audio
+  # of that silence is what this comment replaces.
+  #
+  # THE PANE THAT IS ACTUALLY WANTED SAYS `Remote Login:` AND THEN `On` OR `Off`. The colon is part of
+  # it because the Sharing LIST also says "Remote Login" and the list is not the pane.
   loop:
-    max: 30
+    max: 20
     do:
-    - wait: 3
+    - wait: 2
     ocr:
       name: screen
       region:
-      - 726
-      - 300
-      - 1200
-      - 715
+      # THE DETAIL PANE, x=790..1310 - the switch and its heading are both in it.
+      #
+      # x=830 WAS MEASURED TO CLIP THE FIRST LETTERS, and the reading came back `te Login: Off` - which
+      # still matched, but only because the words are `remote` `login` `off` and two of the three
+      # survived. A word list that passes on a truncated reading is a word list that will one day not.
+      - 790
+      - 230
+      - 1310
+      - 620
       region_at:
       - 1920
       - 1080
@@ -828,10 +854,12 @@ steps:
       from: screen
       mode: says_any
       words:
-      - - allow
-        - full
-        - disk
-        - access
+      - - remote
+        - login
+        - off
+      - - remote
+        - login
+        - on
     until:
       fact: done
 - name: turn remote login on
