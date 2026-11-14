@@ -570,7 +570,26 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 		//
 		// `-accel kvm` MAKES THE FAILURE LOUD: a container without a usable /dev/kvm now says so at
 		// startup instead of running at a fiftieth of the speed and timing out forty minutes later.
-		"-machine", "q35,accel=kvm",
+		// `vmport=off` IS WHAT MAKES THE ABSOLUTE POINTER WORK ON A q35 GUEST.
+		//
+		// q35 GIVES THE GUEST THE VMWARE BACKDOOR PORT BY DEFAULT, and Linux's `psmouse` driver binds
+		// `vmmouse` through it and CLAIMS THE ABSOLUTE-POINTER ROLE. QMP's `input-send-event` with an
+		// `abs` axis then goes to a device that cannot read it, and qemu refuses the event outright:
+		//
+		//	click (965, 981): pointer to (965, 981): Input handler not found for event type abs
+		//
+		// MEASURED ON A DISK PULLED FROM ghcr: `macos-setup`'s ssh leg reached step 7 of 33 and died
+		// there, on the first click of a walk whose earlier stages ran on the SAME qemu arguments -
+		// because the guests that were driven before this one did not have `vmmouse` bound, and the
+		// macOS disk boots into a state where it is:
+		//
+		//	QEMU PS/2 Mouse      current=False  abs=False
+		//	QEMU HID Tablet      current=False  abs=True
+		//	vmmouse              current=True   abs=True     <- every absolute event lands here
+		//
+		// THE TABLET IS STILL ATTACHED (`usb-tablet,bus=xhci.0`): this disables the COMPETING handler,
+		// so the events reach the device the walkthrough was measured against.
+		"-machine", "q35,accel=kvm,vmport=off",
 		"-cpu", cpu,
 		"-smp", boot.SMP(opts.CPUs),
 		"-m", fmt.Sprint(opts.MemMB),

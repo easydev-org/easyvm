@@ -417,3 +417,80 @@ func TestABootThatLosesTheQMPRaceWaitsForTheWinner(t *testing.T) {
 			"away would park the boot forever")
 	}
 }
+
+// A q35 GUEST MUST NOT GET THE VMWARE BACKDOOR PORT, OR ITS ABSOLUTE POINTER GOES TO vmmouse.
+//
+// q35 enables `vmport` by default. Linux's `psmouse` binds `vmmouse` through it and CLAIMS THE
+// ABSOLUTE-POINTER ROLE, so QMP's `input-send-event` with an `abs` axis reaches a device that cannot
+// read it and qemu refuses the event outright:
+//
+//	click (965, 981): pointer to (965, 981): Input handler not found for event type abs
+//
+// MEASURED ON A DISK PULLED FROM ghcr: `macos-setup`'s ssh leg died at step 7 of 33 - the first click
+// - on a machine whose screen was perfectly drawn, because the walk could not move the pointer.
+//
+//	QEMU PS/2 Mouse   current=False  abs=False
+//	QEMU HID Tablet   current=False  abs=True
+//	vmmouse           current=True   abs=True     <- every absolute event lands here
+//
+// `vmport=off` disables the competing handler; the `usb-tablet` the walkthroughs were measured
+// against stays attached.
+func TestTheMachineDisablesTheVMwareBackdoorPort(t *testing.T) {
+	body, err := os.ReadFile("driver.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	code := dropLineComments(string(body))
+
+	// THE -machine ARGUMENT IS WHERE THIS LIVES, and it must keep the accelerator it also names.
+	i := strings.Index(code, `"-machine", "q35,accel=kvm`)
+	if i < 0 {
+		t.Fatal("no `-machine q35,accel=kvm` argument; the machine's own options have moved")
+	}
+	line := code[i:]
+	if end := strings.Index(line, "\n"); end > 0 {
+		line = line[:end]
+	}
+	if !strings.Contains(line, "vmport=off") {
+		t.Fatalf("the machine is started with %s, and q35's default `vmport=on` binds `vmmouse`, "+
+			"which takes the absolute pointer: `Input handler not found for event type abs` on the "+
+			"first click of a walk", strings.TrimSpace(line))
+	}
+	if !strings.Contains(line, "accel=kvm") {
+		t.Fatalf("the machine is started with %s - adding vmport must not drop the accelerator, "+
+			"or every guest silently runs on TCG", strings.TrimSpace(line))
+	}
+}
+
+// AND THE COMMENT THAT DESCRIBED A DEVICE WHICH IS NOT IN THE ARGUMENT VECTOR.
+//
+// `internal/machine/boot.go` said "This build gives the tablet its own `virtio-tablet-pci`, which macOS
+// drives". `grep virtio-tablet-pci` found that sentence, a test's failure message, and nothing qemu is
+// ever given - and the device it named is the one that would have met `vmmouse` on equal terms, so the
+// sentence explained away exactly the bug that `vmport=off` fixes.
+func TestNoCommentClaimsAVirtioTablet(t *testing.T) {
+	body, err := os.ReadFile("../machine/boot.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, line := range strings.Split(string(body), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "//") {
+			continue
+		}
+		// THE SENTENCE MAY NAME THE DEVICE, but only to say it is NOT here.
+		if strings.Contains(trimmed, "give the tablet its own `virtio-tablet-pci`") ||
+			strings.Contains(trimmed, "gives the tablet its own `virtio-tablet-pci`") {
+			t.Fatalf("boot.go:%d still claims the build gives the tablet a virtio-tablet-pci: %q",
+				i+1, trimmed)
+		}
+	}
+	// AND THE ARGUMENT VECTOR ITSELF MUST NOT CONTAIN ONE, or this test is checking prose while the
+	// machine has the device.
+	code := dropLineComments(string(body))
+	if strings.Contains(code, `"virtio-tablet-pci"`) {
+		t.Fatal("the argument vector now attaches a virtio-tablet-pci. That is a legitimate change, " +
+			"but the walkthroughs' clicks were measured against `usb-tablet` - measure them again " +
+			"before landing it")
+	}
+}

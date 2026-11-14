@@ -258,8 +258,22 @@ func (b Boot) StorageArgs() []string {
 		//
 		// THE CONTROLLER IS UNCONDITIONAL WHEN THERE IS A RECOVERY IMAGE, and it is not only for the
 		// disk: lib/vm.py gives the same bus a usb-tablet and a usb-kbd, because a macOS guest has no
-		// PS/2 and every pointer or key it receives arrives over USB. This build gives the tablet its
-		// own `virtio-tablet-pci`, which macOS drives; the bus here exists for the installer.
+		// PS/2 and every pointer or key it receives arrives over USB.
+		//
+		// THE TABLET IS ON THIS BUS - `usb-tablet,bus=xhci.0`, below and again for a disk boot. THIS
+		// COMMENT USED TO SAY the build gave the tablet "its own `virtio-tablet-pci`, which macOS
+		// drives", AND THAT DEVICE HAS NEVER BEEN IN THE ARGUMENT VECTOR: `grep virtio-tablet-pci`
+		// finds this sentence, a test's failure message, and nothing that qemu is ever given.
+		//
+		// IT IS WORTH CORRECTING RATHER THAN DELETING, because the sentence described a real design
+		// and the difference explains a real failure. A `virtio-tablet-pci` would meet q35's `vmmouse`
+		// on equal terms; a `usb-tablet` does not, and on a guest where Linux binds `vmmouse` the
+		// absolute events reach that instead:
+		//
+		//	click (965, 981): pointer to (965, 981): Input handler not found for event type abs
+		//
+		// The fix for that is `-machine q35,...,vmport=off` (see the daemon's argument list), not a
+		// different tablet - the tablet the walkthroughs were measured against is this one.
 		//
 		// `usb-storage` has no bootindex and does not need one: the firmware reaches it only
 		// after OpenCore hands over.
