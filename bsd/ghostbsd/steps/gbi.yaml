@@ -458,12 +458,89 @@ steps:
   - 1331
   - 785
   wait_after: 25
+# THE INSTALLER HAS TO SAY IT FINISHED, AND A FIXED THIRTY MINUTES IS NOT THAT.
+#
+# MEASURED ON A DISK THIS FILE BAKED AND THEN PULLED BACK FROM ghcr: `boot:` on it came up in the
+# GBI INSTALLER - `root@ghostbsd` with `GhostBSD Install Setup` in the title - because the disk had no
+# partition table at all:
+#
+#	qemu-img dd ... bs=512 count=1 | od -An -tx1   ->  00 00 00 00 00 00 00 00 ...
+#	qemu-img dd ... skip=2048                       ->  cannot skip to specified offset
+#
+# 2.4 GiB of an installer's scratch space, written, and nothing bootable. The old body was
+#
+#	- name: installation runs
+#	  wait: 1800          <- thirty minutes, and NO READING OF THE SCREEN
+#
+# so a run that finished in twenty minutes sat there for ten more and then killed a machine whose
+# installer was still writing, and a run that needed thirty-five had qemu killed underneath it.
+#
+# THE RECORDING OF THAT RUN SHOWS WHAT THE SCREEN SAID, at second 1800 and at 2100:
+#
+#	Installation Completed
+#	Installation is complete. You need to restart the computer in order to use the new
+#	installation.
+#
+# - the installer finished and was WAITING, and the walk killed it without ever looking.
 - name: installation runs
-  wait: 1800
-  keep_alive: true
+  loop:
+    max: 120
+    do:
+    - wait: 20
+    # A CLICK KEEPS THE CONSOLE'S SCREEN BLANKING FROM STOPPING THE PROGRESS BAR, which this installer
+    # does draw - and the click is harmless on the completion pane.
+    - click:
+      - 400
+      - 300
+    ocr:
+      name: progress
+      region:
+      - 0
+      - 0
+      - 1920
+      - 1080
+      region_at:
+      - 1920
+      - 1080
+      scale: 1
+      wait: 0
+    check:
+      name: installed
+      from: progress
+      mode: says_any
+      words:
+      - - installation
+        - completed
+      - - installation
+        - is
+        - complete
+      - - restart
+        - now
+    until:
+      fact: installed
+- name: let the installer finish writing
+  # THE COMPLETION PANE IS DRAWN BEFORE THE LAST BLOCKS ARE ON DISK, so the machine sits for a moment
+  # with everything still mounted. Killing it here is what left a disk with no partition table.
+  wait: 45
+- name: restart the installed system
+  # `Restart` IS THE INSTALLER'S OWN WAY OUT, AND IT IS WHAT WRITES THE LAST OF THE BOOT CODE.
+  #
+  # MEASURED FROM THIS RUN'S OWN RECORDING - the completion pane draws two buttons, `Continue` and
+  # `Restart`, at y=641:
+  #
+  #	1077,641  ->  "Restart"
+  #
+  # and pressing it is the difference between a machine that reboots into GhostBSD and one that is
+  # killed with its pools still open.
+  click:
+  - 1077
+  - 641
+  wait_after: 10
 - name: stop the machine
-  shutdown: kill
-  timeout: 120
+  # AND IT IS GIVEN TIME. `shutdown: kill` was the old body, and it discarded writes the installer had
+  # not flushed - the disk it produced had 2.4 GiB of scratch space and a FIRST SECTOR OF ZEROS.
+  shutdown: acpi
+  timeout: 180
 - name: publish the disk
   compress: '{{ out }}'
 - name: stop recording
