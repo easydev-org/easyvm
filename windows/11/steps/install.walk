@@ -44,6 +44,22 @@ walkthrough "windows 11 - install to a desktop"
   #
   # 3% IS THE CEILING AND THE MEASUREMENT IS WHY: the same screen a second later differs by 0.5-0.9%,
   # and two different screens by 98-100%, so the gap is three orders of magnitude wide.
+  # A FIRST LOGIN LEAVES THINGS OPEN THAT A DESKTOP DOES NOT HAVE LATER.
+  #
+  # MEASURED ON RUN 44341011692, which failed here at 0.7092 similar with the reference at 0.9700:
+  # the frame the walk captured had the START MENU open and a "Screen resolution" notification in the
+  # corner, and the reference - taken from this same leg's own recording - was the clean desktop.
+  # `desktop: windows` had passed because it decides on brightness, variance and saturation, and a
+  # menu over a wallpaper moves none of them past its thresholds.
+  #
+  # SO THE SCREEN IS SETTLED BEFORE IT IS COMPARED, which is the same reason every later step in this
+  # file starts with an Escape: the desktop is the state, the menu is the leftover.
+  # A CLICK ON THE WALLPAPER, NOT ONLY AN ESCAPE. Escape closes the START PANEL; the notification
+  # in the corner is a separate window and the click is what dismisses it - measured on the frame
+  # this comparison rejected, where both were up at once.
+  click "the desktop, to dismiss anything a first login left open" at 960 540, waiting 3s, named "click the empty desktop"
+  press Escape, waiting 2s, named "and an Escape in case a panel was the thing that took it"
+  settle 3s
   step "the desktop is the one this file was written against"
     see == shot
   step "the screen is the one this file was written against"
