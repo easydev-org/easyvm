@@ -600,6 +600,27 @@ steps:
 - name: dismiss anything over the desktop
   key: esc
   wait_after: 2
+# THE KEYBOARD SETUP ASSISTANT COMES UP WITH THE FIRST DESKTOP SESSION AND IT IS BIGGER THAN THE
+# WINDOW THAT LANDS ON TOP OF IT.
+#
+# MEASURED ON THIS STAGE'S OWN RUN: the walk reached System Settings and its search step pressed
+# (714,285), and the frame showed the settings window with an EMPTY search field while the sheet
+# reading `Keyboard Setup Assistant` was still visible BEHIND it. The assistant's Quit at (1133,816)
+# was under the settings window's own content, so every press aimed at Quit landed on System
+# Settings instead - and `the remote login result is on screen` then waited forty-five times for a
+# search that had never been typed.
+#
+# `Cmd+Q` IS THE DISMISSAL THAT DOES NOT DEPEND ON WHICH WINDOW IS ON TOP: it closed System Settings
+# in the same run, which exposed the assistant, and the press at (1133,816) then took Quit and left a
+# clean desktop. So quit first, then press Quit, then let Spotlight open the settings app again.
+- name: quit the window that is covering the keyboard assistant
+  key: meta_l+q
+  wait_after: 5
+- name: quit the keyboard assistant itself
+  click:
+  - 1133
+  - 816
+  wait_after: 8
 - name: open spotlight
   key: meta_l+spc
   wait_after: 4
@@ -649,11 +670,19 @@ steps:
 #
 # THE PRESS IS ITS OWN STEP so the field has settled before the text arrives - the same lesson as the
 # two password fields, and the third time this file has learned it.
-- name: press the settings search field
-  click:
-  - 714
-  - 285
-  wait_after: 4
+- name: focus the settings search field
+  # `Cmd+F` IS THE SYSTEM SETTINGS SEARCH SHORTCUT, AND IT IS USED HERE BECAUSE THE FIELD MOVES.
+  #
+  # MEASURED ON TWO CONSECUTIVE RUNS OF THIS STAGE: the settings window landed with its search field at
+  # y=285 on one boot and y=317 on the next, because the window remembers its own position and macOS
+  # puts it wherever it last was. A press at (714,285) then lands in the sidebar instead of the field,
+  # the typing goes nowhere, and `the remote login result is on screen` waits forty-five times for a
+  # search nobody typed.
+  #
+  # A KEYBOARD SHORTCUT DOES NOT CARE WHERE THE WINDOW IS. `Cmd+F` focuses the search field on macOS
+  # 13 and later, which is what this needs and what no absolute coordinate can promise.
+  key: meta_l+f
+  wait_after: 3
 - name: search for remote login
   type: remote login
   clear: true
