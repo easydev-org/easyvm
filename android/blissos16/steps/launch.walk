@@ -4,7 +4,6 @@ walkthrough "android 13 (blissos 16.9.7) - start the installed disk"
   var out == {default: out/blissos16-launch.qcow2, from: args.out}
   header recording_resolution == [1920, 1080]
 
-  step "start recording"
   step "boot the installed disk"
     boot == true
     memory_mb == 4096
@@ -23,4 +22,3 @@ walkthrough "android 13 (blissos 16.9.7) - start the installed disk"
   step "stop the machine"
     shutdown == kill
     timeout == 120
-  step "stop recording"

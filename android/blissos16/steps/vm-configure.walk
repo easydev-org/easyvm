@@ -6,7 +6,6 @@ walkthrough "android 13 (blissos 16.9.7) - configure the vm"
   var timezone == {default: America/Los_Angeles, from: args.timezone}
   header recording_resolution == [1920, 1080]
 
-  step "start recording"
   step "boot the installed disk"
     boot == true
     memory_mb == 4096
@@ -59,4 +58,3 @@ walkthrough "android 13 (blissos 16.9.7) - configure the vm"
     timeout == 120
   step "publish the disk"
     compress == '{{ out }}'
-  step "stop recording"

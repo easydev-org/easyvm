@@ -6,7 +6,6 @@ walkthrough "android 13 (blissos 16.9.7) - install onto a disk this file makes"
   header recording_resolution == [1920, 1080]
 
   needs blissos-16.9.7.iso, named "the media this stage boots from is already on disk"
-  step "start recording"
   step "give the installer a disk with its ESP already there"
     disk == disk.qcow2
     disk_esp_mib == '{{ esp_mib }}'
@@ -55,4 +54,3 @@ walkthrough "android 13 (blissos 16.9.7) - install onto a disk this file makes"
     esp_fallback == {disk: disk, from: /EFI/BLISSOS}
   step "publish the disk"
     compress == '{{ out }}'
-  step "stop recording"
