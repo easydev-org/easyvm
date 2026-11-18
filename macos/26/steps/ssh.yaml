@@ -524,9 +524,17 @@ steps:
       mode: says_without
       words:
       - finder
+      # `back` WAS IN THIS LIST AND IT IS NOT A WIZARD WORD ON A DESKTOP. MEASURED on this stage's own
+      # run: the desktop read
+      #
+      #	@ Finder File Edit View Go Window Help ... Click Wallpaper to Show Desktop Items ...
+      #	... Click again to bring windows BACK. You can change this in System Settings ...
+      #
+      # - macOS's own "Click Wallpaper to Show Desktop Items" bubble uses BACK, so the test answered
+      # "a wizard page is on screen" about a desktop and the loop never ended. `continue` and `later`
+      # are the wizard's BUTTON LABELS and appear on no desktop; `back` is ordinary English.
       without:
       - continue
-      - back
       - later
     until:
       fact: finished
@@ -554,9 +562,17 @@ steps:
       mode: says_without
       words:
       - finder
+      # `back` WAS IN THIS LIST AND IT IS NOT A WIZARD WORD ON A DESKTOP. MEASURED on this stage's own
+      # run: the desktop read
+      #
+      #	@ Finder File Edit View Go Window Help ... Click Wallpaper to Show Desktop Items ...
+      #	... Click again to bring windows BACK. You can change this in System Settings ...
+      #
+      # - macOS's own "Click Wallpaper to Show Desktop Items" bubble uses BACK, so the test answered
+      # "a wizard page is on screen" about a desktop and the loop never ended. `continue` and `later`
+      # are the wizard's BUTTON LABELS and appear on no desktop; `back` is ordinary English.
       without:
       - continue
-      - back
       - later
     until:
       fact: ready
