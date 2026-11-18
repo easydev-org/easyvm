@@ -86,7 +86,21 @@ walkthrough "windows 11 - install to a desktop"
   step "the desktop is the one this file was written against"
     see == shot
   step "the screen is the one this file was written against"
-    check == {name: matched, must: true, from: shot, mode: like, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], reference: reference/desktop.png, range: [0.97, 1.0]}
+    # THE TASKBAR IS EXCLUDED, BECAUSE EVERY RUN PUTS DIFFERENT ICONS IN IT.
+    #
+    # MEASURED: two clean Windows desktops from two runs score 0.9555 over the whole frame and
+    # 0.9999 over everything above the taskbar. The wall paper, the two desktop icons and the
+    # notification area are identical; the PINNED ICONS AND THE CLOCK ARE NOT - one run had Firefox
+    # and Explorer pinned, the other did not, and the clocks read 9:52 and 11:13.
+    #
+    # A COMPARISON THAT FAILS ON A CHANGING CLOCK IS MEASURING THE CLOCK. What this step is for is
+    # "the desktop came up and it is this system", and the region above the taskbar says exactly that
+    # while the taskbar says what was pinned at the time.
+    #
+    # `rect` as a PIXEL pair with `rect_at`, rather than a fraction, because 1000/1080 is the edge of
+    # a taskbar that is 40 px tall at this resolution - a fraction would move with the guest's size
+    # and the taskbar's edge is what has to be excluded.
+    check == {name: matched, must: true, from: shot, mode: like, rect: [0, 0, 1920, 1000], rect_at: [1920, 1080], reference: reference/desktop.png, range: [0.97, 1.0]}
   step "reboot into the installed system"
     boot == true
     os == windows
