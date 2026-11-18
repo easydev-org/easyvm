@@ -40,8 +40,23 @@ walkthrough "freebsd 15.1 - bsdinstall, to an installed system"
     do == [{key: tab, settle: 1}, {key: tab, settle: 1}, {key: tab, settle: 1}, {key: tab, settle: 1}, {key: tab, settle: 1}, {key: tab, settle: 1}, {key: ret, settle: 10}]
   press Return, waiting 15s, named "commit the layout"
   press Return, waiting 15s, named "distribution select - accept the default set"
+  # THE INSTALL ENDS BY ASKING FOR THE ROOT PASSWORD, AND THAT IS THE SIGNAL THE SCREEN GIVES.
+  #
+  # MEASURED ON RUN 44377971855, WHICH WAITED THE WHOLE 180 ATTEMPTS AND THEN FAILED:
+  #
+  #   status: failed step 20/62 "wait for the install to finish"
+  #   error:  the loop ran 180 attempt(s) and the condition never held
+  #
+  # and the frame from that run is already at the NEXT step - bsdinstall's "Set root password"
+  # dialog, with "Please select a password for the system management account (root)". THE INSTALL
+  # HAD FINISHED AND THE WALK DID NOT NOTICE, because the words it waited for ("installation
+  # completed", "console") never appear on this screen: bsdinstall goes straight to the account
+  # dialog, and the next step in this file types the password into it.
+  #
+  # SO THE DIALOG'S OWN TITLE IS AN ACCEPTED ANSWER. It is what the very next step assumes, so a
+  # loop that ends here is a loop that agrees with the file.
   step "wait for the install to finish"
-    loop == {check: {from: done, mode: text, name: finished, words: [[console], [installation, completed], [account, root], [system, management, account], [repeat, password], [add, user], [manual, configuration]], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, do: [{settle: 15}], max: 180, see: {name: done}, until: {fact: finished}}
+    loop == {check: {from: done, mode: text, name: finished, words: [[root, password], [please, select, a, password], [installation, completed], [system, management, account], [manual, configuration]], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, do: [{settle: 15}], max: 180, see: {name: done}, until: {fact: finished}}
   step "the root password - first field"
     settle == 2
     type == '{{ password }}'
