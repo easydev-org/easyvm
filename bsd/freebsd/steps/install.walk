@@ -47,6 +47,11 @@ walkthrough "freebsd 15.1 - bsdinstall, to an installed system"
   #   status: failed step 20/62 "wait for the install to finish"
   #   error:  the loop ran 180 attempt(s) and the condition never held
   #
+  # AND A SECOND RUN SHOWED THE OTHER HALF: the frame at 180 seconds was the package extractor at
+  # 90 of 320 files - "Extracting FreeBSD-kernel-generic-15.1". THIS MEDIUM INSTALLS 320 PACKAGES
+  # OFFLINE and 180 attempts of 15 seconds is 45 minutes, which is not enough for it on a runner.
+  # So the ceiling is 400 attempts (100 minutes) as well as the words being right.
+  #
   # and the frame from that run is already at the NEXT step - bsdinstall's "Set root password"
   # dialog, with "Please select a password for the system management account (root)". THE INSTALL
   # HAD FINISHED AND THE WALK DID NOT NOTICE, because the words it waited for ("installation
@@ -56,7 +61,7 @@ walkthrough "freebsd 15.1 - bsdinstall, to an installed system"
   # SO THE DIALOG'S OWN TITLE IS AN ACCEPTED ANSWER. It is what the very next step assumes, so a
   # loop that ends here is a loop that agrees with the file.
   step "wait for the install to finish"
-    loop == {check: {from: done, mode: text, name: finished, words: [[root, password], [please, select, a, password], [installation, completed], [system, management, account], [manual, configuration]], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, do: [{settle: 15}], max: 180, see: {name: done}, until: {fact: finished}}
+    loop == {check: {from: done, mode: text, name: finished, words: [[root, password], [please, select, a, password], [installation, completed], [system, management, account], [manual, configuration]], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, do: [{settle: 15}], max: 400, see: {name: done}, until: {fact: finished}}
   step "the root password - first field"
     settle == 2
     type == '{{ password }}'
