@@ -62,7 +62,7 @@ jobs:
         [
           {
             "name": "linux-popos-ssh",
-            "file": "linux/popos/steps/ssh.yaml",
+            "file": "linux/popos/steps/ssh.walk",
             "pull": "linux-popos",
             "out": "linux-popos-ssh.qcow2",
             "timeout": 60,
@@ -70,7 +70,7 @@ jobs:
           },
           {
             "name": "linux-popos-install",
-            "file": "linux/popos/steps/install.yaml",
+            "file": "linux/popos/steps/install.walk",
             "pull": "",
             "assets": ["iso-popos-desktop:popos.iso"],
             "out": "linux-popos.qcow2",
@@ -79,7 +79,7 @@ jobs:
           },
           {
             "name": "linux-popos-vm",
-            "file": "linux/popos/steps/vm-configure.yaml",
+            "file": "linux/popos/steps/vm-configure.walk",
             "pull": "linux-popos-ssh",
             "fallback": "linux-popos",
             "out": "linux-popos-vm.qcow2",

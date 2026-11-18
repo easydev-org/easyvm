@@ -62,7 +62,7 @@ jobs:
         [
           {
             "name": "linux-fedora-workstation-ssh",
-            "file": "linux/fedora-workstation/steps/ssh.yaml",
+            "file": "linux/fedora-workstation/steps/ssh.walk",
             "pull": "linux-fedora-workstation",
             "out": "linux-fedora-workstation-ssh.qcow2",
             "timeout": 60,
@@ -70,7 +70,7 @@ jobs:
           },
           {
             "name": "linux-fedora-workstation-install",
-            "file": "linux/fedora-workstation/steps/install.yaml",
+            "file": "linux/fedora-workstation/steps/install.walk",
             "pull": "",
             "assets": ["iso-fedora-workstation:fedora-workstation.iso"],
             "out": "linux-fedora-workstation.qcow2",
@@ -79,7 +79,7 @@ jobs:
           },
           {
             "name": "linux-fedora-workstation-vm",
-            "file": "linux/fedora-workstation/steps/vm-configure.yaml",
+            "file": "linux/fedora-workstation/steps/vm-configure.walk",
             "pull": "linux-fedora-workstation-ssh",
             "fallback": "linux-fedora-workstation",
             "out": "linux-fedora-workstation-vm.qcow2",

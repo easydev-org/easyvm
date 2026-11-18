@@ -70,7 +70,7 @@ jobs:
         [
           {
             "name": "linux-opensuse-leap-16.1-ssh",
-            "file": "linux/opensuse-leap-16.1/steps/ssh.yaml",
+            "file": "linux/opensuse-leap-16.1/steps/ssh.walk",
             "pull": "linux-opensuse-leap-16.1",
             "out": "linux-opensuse-leap-16.1-ssh.qcow2",
             "timeout": 60,
@@ -78,7 +78,7 @@ jobs:
           },
           {
             "name": "linux-opensuse-leap-16.1-install",
-            "file": "linux/opensuse-leap-16.1/steps/install.yaml",
+            "file": "linux/opensuse-leap-16.1/steps/install.walk",
             "pull": "",
             "assets": ["iso-opensuse-leap-16.1:opensuse-leap-16.1.iso"],
             "out": "linux-opensuse-leap-16.1.qcow2",
@@ -87,7 +87,7 @@ jobs:
           },
           {
             "name": "linux-opensuse-leap-16.1-vm",
-            "file": "linux/opensuse-leap-16.1/steps/vm-configure.yaml",
+            "file": "linux/opensuse-leap-16.1/steps/vm-configure.walk",
             "pull": "linux-opensuse-leap-16.1-ssh",
             "fallback": "linux-opensuse-leap-16.1",
             "out": "linux-opensuse-leap-16.1-vm.qcow2",

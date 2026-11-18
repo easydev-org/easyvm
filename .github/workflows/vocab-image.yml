@@ -236,7 +236,7 @@ jobs:
           set -e
           easyvm versions
           echo "the walkthrough this run installs:"
-          easyvm list linux/kubuntu/steps/install.yaml | head -5
+          easyvm list linux/kubuntu/steps/install.walk | head -5
 
       - name: the medium, pulled before the run so nothing downloads mid-install
         # THE SAME SCRIPT THE PRODUCT'S STAGES USE. `easyvm pull` no longer exists - it was removed
@@ -251,7 +251,7 @@ jobs:
       - name: install, and prove the disk was written
         run: |
           set -e
-          easyvm run linux/kubuntu/steps/install.yaml \
+          easyvm run linux/kubuntu/steps/install.walk \
             --work work \
             --out vocab-kubuntu.qcow2 \
             --password admin

@@ -56,7 +56,7 @@ jobs:
       # otherwise compare the runner against an empty string and pass everything.
       - uses: actions/checkout@v4
         with:
-          sparse-checkout: macos/26/steps/setup.yaml
+          sparse-checkout: macos/26/steps/setup.walk
       - name: the guest's memory has to fit in the runner's
         run: |
           set -eu
@@ -67,15 +67,19 @@ jobs:
           # dash, where they are syntax errors - and its check is a plain text match, so an awk
           # character class for whitespace trips it. MEASURED: internal/oci's
           # TestNoWorkflowUsesABashOnlyConstruct failed on the awk version of this line.
-          need_mib=$(grep -m1 'memory_mb:' macos/26/steps/setup.yaml | cut -d: -f2 | tr -cd '0-9')
+          # THE `.walk` SPELLS IT `memory_mb == 12288`, so the field separator is `==` and not `:`.
+          # THE VALUE IS THE LAST WORD ON THE LINE, which is true of both spellings - so `awk
+          # '{print $NF}'` reads either one and the check does not have to be edited again when a
+          # file moves between formats.
+          need_mib=$(grep -m1 'memory_mb' macos/26/steps/setup.walk | awk '{print $NF}' | tr -cd '0-9')
           if [ -z "$need_mib" ]; then
-            echo "::error::macos/26/steps/setup.yaml declares no memory_mb, so this check cannot say whether the guest fits"
+            echo "::error::macos/26/steps/setup.walk declares no memory_mb, so this check cannot say whether the guest fits"
             exit 1
           fi
           need_gib=$(( need_mib / 1024 ))
           total_kib=$(awk '/^MemTotal:/{print $2}' /proc/meminfo)
           total_gib=$(( total_kib / 1024 / 1024 ))
-          echo "runner: ${total_gib} GiB, guest: ${need_gib} GiB (macos/26/steps/setup.yaml memory_mb: ${need_mib})"
+          echo "runner: ${total_gib} GiB, guest: ${need_gib} GiB (macos/26/steps/setup.walk memory_mb: ${need_mib})"
           # THE MARGIN IS TWO GIB, AND IT COMES FROM THE MEASUREMENT RATHER THAN FROM FEAR.
           #
           # Measured on a host with room: a 12 GiB guest's qemu RSS climbs to 12.01 GiB during the copy
@@ -90,7 +94,7 @@ jobs:
           # runner that this walk is now sized for.
           margin_gib=2
           if [ "$total_gib" -lt $(( need_gib + margin_gib )) ]; then
-            echo "::error::this runner has ${total_gib} GiB and the macOS 26 setup walk asks for ${need_gib} GiB plus about ${margin_gib} GiB for qemu itself. The guest will be killed by the OOM killer a few minutes into the copy, with no error in any log - measured on run 44122437321, where a 16 GiB guest on a 15 GiB runner left disk.qcow2 at 194 KiB. Lower memory_mb in macos/26/steps/setup.yaml, or use a larger runner."
+            echo "::error::this runner has ${total_gib} GiB and the macOS 26 setup walk asks for ${need_gib} GiB plus about ${margin_gib} GiB for qemu itself. The guest will be killed by the OOM killer a few minutes into the copy, with no error in any log - measured on run 44122437321, where a 16 GiB guest on a 15 GiB runner left disk.qcow2 at 194 KiB. Lower memory_mb in macos/26/steps/setup.walk, or use a larger runner."
             exit 1
           fi
 
@@ -105,7 +109,7 @@ jobs:
         [
           {
             "name": "macos26-setup",
-            "file": "macos/26/steps/setup.yaml",
+            "file": "macos/26/steps/setup.walk",
             "pull": "",
             "assets": ["macos-recovery-tahoe:recovery.dmg", "macos-asset-boot-26:boot.img", "macos-asset-rom-26:macos.rom", "macos-asset-vars-26:macos.vars"],
             "out": "macos26.qcow2",

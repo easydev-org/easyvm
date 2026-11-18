@@ -62,7 +62,7 @@ jobs:
         [
           {
             "name": "linux-nixos-ssh",
-            "file": "linux/nixos/steps/ssh.yaml",
+            "file": "linux/nixos/steps/ssh.walk",
             "pull": "linux-nixos",
             "out": "linux-nixos-ssh.qcow2",
             "timeout": 60,
@@ -70,7 +70,7 @@ jobs:
           },
           {
             "name": "linux-nixos-install",
-            "file": "linux/nixos/steps/install.yaml",
+            "file": "linux/nixos/steps/install.walk",
             "pull": "",
             "assets": ["iso-nixos-graphical:nixos.iso"],
             "out": "linux-nixos.qcow2",
@@ -79,7 +79,7 @@ jobs:
           },
           {
             "name": "linux-nixos-vm",
-            "file": "linux/nixos/steps/vm-configure.yaml",
+            "file": "linux/nixos/steps/vm-configure.walk",
             "pull": "linux-nixos-ssh",
             "fallback": "linux-nixos",
             "out": "linux-nixos-vm.qcow2",

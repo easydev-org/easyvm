@@ -62,7 +62,7 @@ jobs:
         [
           {
             "name": "linux-manjaro-ssh",
-            "file": "linux/manjaro/steps/ssh.yaml",
+            "file": "linux/manjaro/steps/ssh.walk",
             "pull": "linux-manjaro",
             "out": "linux-manjaro-ssh.qcow2",
             "timeout": 60,
@@ -70,7 +70,7 @@ jobs:
           },
           {
             "name": "linux-manjaro-install",
-            "file": "linux/manjaro/steps/install.yaml",
+            "file": "linux/manjaro/steps/install.walk",
             "pull": "",
             "assets": ["iso-manjaro-kde:manjaro.iso"],
             "out": "linux-manjaro.qcow2",
@@ -79,7 +79,7 @@ jobs:
           },
           {
             "name": "linux-manjaro-vm",
-            "file": "linux/manjaro/steps/vm-configure.yaml",
+            "file": "linux/manjaro/steps/vm-configure.walk",
             "pull": "linux-manjaro-ssh",
             "fallback": "linux-manjaro",
             "out": "linux-manjaro-vm.qcow2",

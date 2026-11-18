@@ -62,7 +62,7 @@ jobs:
         [
           {
             "name": "linux-endeavour-ssh",
-            "file": "linux/endeavour/steps/ssh.yaml",
+            "file": "linux/endeavour/steps/ssh.walk",
             "pull": "linux-endeavour",
             "out": "linux-endeavour-ssh.qcow2",
             "timeout": 60,
@@ -70,7 +70,7 @@ jobs:
           },
           {
             "name": "linux-endeavour-install",
-            "file": "linux/endeavour/steps/install.yaml",
+            "file": "linux/endeavour/steps/install.walk",
             "pull": "",
             "assets": ["iso-endeavouros:endeavour.iso"],
             "out": "linux-endeavour.qcow2",
@@ -79,7 +79,7 @@ jobs:
           },
           {
             "name": "linux-endeavour-vm",
-            "file": "linux/endeavour/steps/vm-configure.yaml",
+            "file": "linux/endeavour/steps/vm-configure.walk",
             "pull": "linux-endeavour-ssh",
             "fallback": "linux-endeavour",
             "out": "linux-endeavour-vm.qcow2",

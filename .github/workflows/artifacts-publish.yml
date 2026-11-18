@@ -395,7 +395,7 @@ jobs:
             recovery: macos-recovery-sequoia
             suffix: ""
           - release: "26"
-            walk: macos/26/steps/firmware.yaml
+            walk: macos/26/steps/firmware.walk
             recovery: macos-recovery-tahoe
             suffix: "-26"
     if: github.event_name != 'workflow_dispatch' || (inputs.which == '' && (inputs.group == 'all' || inputs.group == 'macos'))
@@ -417,8 +417,21 @@ jobs:
         run: |
           set -eu
           mkdir -p "$GITHUB_WORKSPACE/work"
+          # THE SOURCE IS WHERE THE IMAGE IS PRODUCED, NOT WHERE THE LEG PULLS ITS DISKS.
+          #
+          # THIS SAID `inputs.disks_repository`, AND THAT BROKE IN TWO DIRECTIONS AT ONCE. The `recovery`
+          # job above mirrors these images from `easydiskbake` into this repository, but this job has no
+          # `needs: recovery`, so it cannot rely on that copy existing. And with the input's default
+          # emptied - which is what makes a fork write to its own package - the name arrived as the
+          # EMPTY STRING:
+          #
+          #	ghcr.io "" "macos-recovery-sequoia" ...
+          #	/home/runner/.../pull-artifact.sh: 31: 2: repository
+          #
+          # MEASURED on run 44309909257, where both opencore jobs failed at step 3 and the build that
+          # produces boot.img never ran.
           sh "$GITHUB_WORKSPACE/.github/pull-artifact.sh" \
-            ghcr.io "$(printf '%s' "${{ inputs.disks_repository }}" | tr '[:upper:]' '[:lower:]')" \
+            ghcr.io easydev-org/easydiskbake \
             "${{ matrix.recovery }}" "$GITHUB_WORKSPACE/work/recovery.dmg"
           ls -l "$GITHUB_WORKSPACE/work/recovery.dmg"
 
