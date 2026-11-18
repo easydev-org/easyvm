@@ -587,7 +587,22 @@ func (e *Executor) doRequireSSH(s walk.Step) error {
 	if err != nil {
 		return fail(s.Name, "%v", err)
 	}
-	if err := guest.Probe(target, 3, 10*time.Second); err != nil {
+	// TEN ATTEMPTS, NOT THREE, AND THE REASON IS MEASURED TWICE.
+	//
+	// FIRST: on macOS 26 the first handshake against a starting sshd ends in `handshake failed: EOF`
+	// because the daemon accepts TCP before it can serve a session. SECOND, and this is the one that
+	// made three useless: on the run where this step failed, the stage reported
+	//
+	//	the port is open but no shell answers: ssh: handshake failed: EOF
+	//
+	// and the SAME guest answered `sw_vers -productVersion` and `id -un` from the same client code
+	// immediately afterwards. So the three attempts were spent inside the window where sshd is up
+	// enough to open the port and not up enough to run a command.
+	//
+	// With the pause `Probe` now takes between attempts, ten attempts is about half a minute of a
+	// daemon that has already accepted a connection - long enough for macOS to finish starting it,
+	// and still a ceiling.
+	if err := guest.Probe(target, 10, 10*time.Second); err != nil {
 		return fail(s.Name, "the port is open but no shell answers: %v", err)
 	}
 	e.Driver.Log(fmt.Sprintf("  ssh answers on port %d after %s",
