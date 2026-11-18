@@ -44,7 +44,18 @@ steps:
     # too-short wait this file no longer has) and never reached the panes after it. The loop also
     # answers the update pane by resetting the guest (issue #3's Defect 1: that pane never advances)
     # and then the login window, and each reset costs a full boot inside a single attempt.
-    max: 90
+    #
+    # TWO HUNDRED NOW, BECAUSE THE WIZARD RUNS TWICE. MEASURED ON THIS STAGE'S OWN RUN: after the login
+    # the Setup Assistant came back and asked Apple Account, Location Services, Analytics, FileVault and
+    # the update pane AGAIN - issue #3 records the same thing ("on the run where Apple ID had NOT been
+    # skipped, Continue went backwards to the Apple ID pane"), and it means one pass through this loop
+    # answers about fifteen panes, then a reboot for the update pane, then a login, then ANOTHER fifteen.
+    #
+    # Ninety attempts was measured to run out mid-way: the run ended at the login window with
+    # "the loop ran 90 attempt(s) and the condition never held" after the walk had already reached the
+    # second pass's Update pane. Two hundred attempts at this step's pace is about eighty minutes, which
+    # is the two passes plus two reboots.
+    max: 200
     do:
     - name: read the pane
       ocr:
@@ -512,7 +523,13 @@ steps:
       # `esc` FIRST, because a login window that has just appeared can be behind a screen-saver style
       # fade that eats the first click.
       - name: let the login window come up
-        wait: 180
+        # FIVE MINUTES, BECAUSE THREE WAS MEASURED TO BE TOO SHORT.
+        #
+        # At `wait: 180` the loop then pressed the field and typed into it, and the run ended with the
+        # field EMPTY after ninety attempts. The same guest accepted the same presses BY HAND a few
+        # minutes later. So the field is drawn long before it accepts a keystroke, and the window is
+        # wider than three minutes on this host. Five is what the hand-run needed.
+        wait: 300
       - name: wake the window before pressing it
         key: esc
         wait_after: 3
