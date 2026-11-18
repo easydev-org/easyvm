@@ -205,17 +205,29 @@ func Probe(t Target, attempts int, perAttempt time.Duration) error {
 				return nil
 			}
 			if runErr != nil {
+				// A BROKEN CHANNEL IS NOT ALWAYS A BROKEN GUEST, AND TREATING IT AS ONE COST THIS
+				// STAGE ITS VERDICT. MEASURED on macOS 26: `the port is open but no shell answers:
+				// ssh: handshake failed: EOF` was reported at the switch's first probe, and the same
+				// guest answered `sw_vers` seconds later - sshd accepts the TCP connection before it
+				// can serve a session, and the first handshake therefore ends in EOF.
+				//
+				// The old comment said "a broken channel is not a slow guest" and broke out of the
+				// loop, so `attempts: 3` was really `attempts: 1` for exactly the case the attempts
+				// were there for. The error is kept, the loop goes on, and a guest that really is
+				// broken still ends it - by running out of attempts with the last error reported.
 				lastErr = runErr
-				// A broken channel is not a slow guest.
-				break
+				time.Sleep(3 * time.Second)
+				continue
 			}
 			lastErr = fmt.Errorf("echo ok answered %d", res.Status)
-			break
+			time.Sleep(3 * time.Second)
+			continue
 		}
 		lastErr = err
-		if !isTimeout(err) {
-			break
-		}
+		// A CONNECTION THAT IS REFUSED OR TIMES OUT IS ALSO WORTH ANOTHER TRY: sshd is started by a
+		// launchd job that this repository turns on with a click, so there is a window in which the
+		// port is not open yet.
+		time.Sleep(3 * time.Second)
 	}
 	return lastErr
 }
