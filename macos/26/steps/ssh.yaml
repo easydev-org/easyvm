@@ -726,6 +726,52 @@ steps:
   region_at:
   - 1920
   - 1080
+# TURNING REMOTE LOGIN ON ASKS FOR THE ACCOUNT PASSWORD, AND THIS STEP IS WHY THE STAGE USED TO STOP
+# HERE.
+#
+# MEASURED ON THIS STAGE'S OWN RUN, at the switch: macOS put up a sheet reading
+#
+#	Sharing
+#	Remote Login is trying to modify system settings.
+#	Enter your password to allow this.
+#	[vmuser        ]
+#	[ Password     ]
+#	[ Modify Settings ]  [ Cancel ]
+#
+# The walk had no step for it, so `the switch reads on` looped ten times looking for "log in to this
+# computer" behind an unanswered sheet and failed the stage. The sheet is the SYSTEM's authorisation,
+# not a Setup Assistant pane - which is why the wizard loop never saw it either.
+#
+# THE COORDINATES ARE MEASURED FROM THAT FRAME: the password field at (960,584), the blue
+# `Modify Settings` at (960,631). The user name is already filled in.
+- name: authorise the change
+  # ONLY WHEN THE SHEET IS UP. `unless:` skips these three presses when the switch took without
+  # asking, which prsses into a password field that is not on screen would do nothing visible and
+  # would look like a working step.
+  unless:
+  - modify
+  - settings
+  region:
+  - 830
+  - 400
+  - 1090
+  - 660
+  scale: 2
+  region_at:
+  - 1920
+  - 1080
+  click:
+  - 960
+  - 584
+  wait_after: 2
+- name: type the account password
+  type: '{{ password }}'
+  wait_after: 2
+- name: confirm
+  click:
+  - 960
+  - 631
+  wait_after: 12
 - name: the switch reads on
   loop:
     max: 10
