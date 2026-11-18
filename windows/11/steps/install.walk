@@ -74,7 +74,15 @@ walkthrough "windows 11 - install to a desktop"
   # this comparison rejected, where both were up at once.
   click "the desktop, to dismiss anything a first login left open" at 960 540, waiting 3s, named "click the empty desktop"
   press Escape, waiting 2s, named "and an Escape in case a panel was the thing that took it"
-  settle 3s
+  # A NOTIFICATION IS NOT DISMISSED BY A CLICK ON THE WALLPAPER. MEASURED ON RUN 44377939172, after
+  # the click and the Escape had been added: 0.9088 similar, and the frame is a clean Windows desktop
+  # with ONE "Settings / Searching for Display Driver" panel in the bottom-right corner. The click
+  # went to the desktop; a toast belongs to the shell.
+  #
+  # IT EXPIRES ON ITS OWN in about thirty seconds, which is what this settles for. Waiting is the
+  # honest fix: the alternative is a reference that contains a transient toast, and then the compare
+  # is measuring how fast the runner is rather than whether the desktop came up.
+  settle 45s
   step "the desktop is the one this file was written against"
     see == shot
   step "the screen is the one this file was written against"
