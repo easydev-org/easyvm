@@ -17,6 +17,14 @@ walkthrough "ubuntu - the subiquity walk"
   step "wait for the live desktop"
     desktop == linux/gnome
     timeout == 5400
+  # THE LIVE SESSION'S RIGHT-CLICK MENU IS OPEN MORE OFTEN THAN NOT, because the installer puts it
+  # there and the walk's own clicks leave it behind. MEASURED on run 44361392014, where the captured
+  # frame had the menu open over the wallpaper and the reference did not: 0.6664 similar.
+  #
+  # AND THE REFERENCE IS THE INSTALLER'S OWN WINDOW, which is what the next step waits for - so the
+  # comparison is about "the live session got this far", not "the desktop is empty".
+  press Escape, waiting 2s, named "close the right-click menu the live session leaves open"
+  settle 2s
   step "the desktop is the one this file was written against"
     see == shot
   step "the screen is the one this file was written against"
