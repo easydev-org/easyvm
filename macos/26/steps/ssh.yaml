@@ -836,10 +836,15 @@ steps:
 - name: type the account password
   type: '{{ password }}'
   wait_after: 4
-- name: confirm
-  click:
-  - 960
-  - 631
+- name: confirm the change
+  # `ret`, NOT A CLICK ON `Modify Settings`. MEASURED ON THIS STAGE'S OWN RUN: with the password
+  # correctly in the field (six dots) a press at the button's centre - measured at (959,659) from that
+  # frame's own blue pixels - did nothing at all, three times in a row. `ret` closed the sheet on the
+  # first try and the panel then read `Remote Login: On`.
+  #
+  # This is the sheet's DEFAULT button, so Return is the same action without depending on a
+  # coordinate that moves with the window.
+  key: ret
   wait_after: 15
 - name: the switch reads on
   loop:
