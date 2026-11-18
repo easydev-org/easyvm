@@ -735,10 +735,18 @@ steps:
         - access
     until:
       fact: done
+# (672,387) IS THE RESULT ROW, MEASURED ON THIS STAGE'S OWN RUN, AND (703,336) IS NOT.
+#
+# MEASURED: the search results sat with `Sharing / Remote login` at y=387 in that frame - the window had
+# come up lower than the run the old coordinate came from - so presses at (703,336) landed on the
+# window's own title area and the panel never opened. The loop that follows then waited thirty times
+# for "allow full disk access" behind a panel that was never shown.
+#
+# A press at (672,387) opened it on the first try, and the panel read `Remote Login: Off`.
 - name: open the remote login pane
   click:
-  - 703
-  - 336
+  - 672
+  - 387
   wait_after: 12
 - name: open the remote login pane again
   unless:
@@ -753,8 +761,8 @@ steps:
   - 715
   scale: 2
   click:
-  - 703
-  - 336
+  - 672
+  - 387
   wait_after: 12
   region_at:
   - 1920
