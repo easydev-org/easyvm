@@ -50,14 +50,48 @@ permissions:
   # live log is a check run, and publishing one needs `checks: write`.
   checks: write
 
+# THE LEGS ARE JOBS THAT DEPEND ON EACH OTHER, NOT A MATRIX.
+#
+# THIS FILE USED TO PASS ALL THREE LEGS AS ONE `stages:` MATRIX, so they STARTED AT ONCE - and the
+# ssh leg asks for the tag the install leg publishes, which does not exist yet. MEASURED on run
+# 44346623094: `linux-manjaro-install` finished 32 of 32 steps and pushed its disk, while
+# `linux-manjaro-ssh` failed at step 5 with
+#
+#	linux-manjaro-ssh is not in the package
+#
+# because it was pulling a tag ANOTHER LEG IN ITS OWN MATRIX had not written. `needs:` is the fix,
+# and `cachyos.yml` already had it.
 jobs:
-  stages:
+  install:
+    if: github.event_name != 'workflow_dispatch' || inputs.from_tag == ''
     uses: ./.github/workflows/stage.yml
     secrets: inherit
     with:
       group: zorin
       disks_repository: ${{ inputs.disks_repository }}
-      # THE LEGS, AS JSON. `fromJSON` in the called workflow turns this back into a matrix.
+      stages: |
+        [
+          {
+            "name": "linux-zorin-install",
+            "file": "linux/zorin/steps/install.walk",
+            "pull": "",
+            "assets": [
+              "iso-zorin-core:zorin.iso"
+            ],
+            "out": "linux-zorin.qcow2",
+            "publish": "linux-zorin",
+            "timeout": 90
+          }
+        ]
+
+  ssh:
+    needs: [install]
+    if: always() && !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.from_tag == 'linux-zorin')
+    uses: ./.github/workflows/stage.yml
+    secrets: inherit
+    with:
+      group: zorin
+      disks_repository: ${{ inputs.disks_repository }}
       stages: |
         [
           {
@@ -67,16 +101,19 @@ jobs:
             "out": "linux-zorin-ssh.qcow2",
             "timeout": 60,
             "publish": "linux-zorin-ssh"
-          },
-          {
-            "name": "linux-zorin-install",
-            "file": "linux/zorin/steps/install.walk",
-            "pull": "",
-            "assets": ["iso-zorin-core:zorin.iso"],
-            "out": "linux-zorin.qcow2",
-            "publish": "linux-zorin",
-            "timeout": 90
-          },
+          }
+        ]
+
+  vm:
+    needs: [ssh]
+    if: always() && !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.from_tag == 'linux-zorin' || inputs.from_tag == 'linux-zorin-ssh')
+    uses: ./.github/workflows/stage.yml
+    secrets: inherit
+    with:
+      group: zorin
+      disks_repository: ${{ inputs.disks_repository }}
+      stages: |
+        [
           {
             "name": "linux-zorin-vm",
             "file": "linux/zorin/steps/vm-configure.walk",
