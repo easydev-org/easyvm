@@ -37,7 +37,14 @@ steps:
   timeout: 900
 - name: answer the wizard until the desktop appears
   loop:
-    max: 40
+    # NINETY ATTEMPTS, BECAUSE THIS LOOP OWNS THREE THINGS THAT EACH COST A BOOT.
+    #
+    # MEASURED: forty was not enough and the failure said so - "the loop ran 40 attempt(s) and the
+    # condition never held" - because the walkthrough spent its whole budget on Analytics (the
+    # too-short wait this file no longer has) and never reached the panes after it. The loop also
+    # answers the update pane by resetting the guest (issue #3's Defect 1: that pane never advances)
+    # and then the login window, and each reset costs a full boot inside a single attempt.
+    max: 90
     do:
     - name: read the pane
       ocr:
@@ -52,25 +59,6 @@ steps:
         - 1080
         scale: 1
         wait: 0
-    - name: read the login window's clock
-      ocr:
-        name: clock
-        region:
-        - 820
-        - 90
-        - 1100
-        - 250
-        region_at:
-        - 1920
-        - 1080
-        scale: 1
-        wait: 0
-    - name: classify - the login window
-      check:
-        name: at_login
-        from: clock
-        mode: matches
-        pattern: '[0-9]+[:.][0-9]+'
     - name: classify - country or region
       check:
         name: country
@@ -423,15 +411,25 @@ steps:
       if: analytics
       then:
       - name: untick share analytics
+        # (742,521) IS THE CHECKBOX, MEASURED ON THE RUN THAT FAILED HERE: the blue tick spans
+        # x=735..750, y=514..529 on a 1920x1080 frame, so (745,520) was inside it and the click was
+        # never the problem - the WAIT was. `wait_after: 2` pressed Continue before the tick had been
+        # taken, that press did nothing, and the loop spent all forty attempts on this pane:
+        #
+        #	answer the wizard until the desktop appears: the loop ran 40 attempt(s) and the
+        #	condition never held
+        #
+        # Measured by hand on the same frame: one click unticked it and one press of Continue reached
+        # Screen Time. Five seconds is the settle this workbench gives a checkbox.
         click:
-        - 745
-        - 520
-        wait_after: 2
+        - 742
+        - 521
+        wait_after: 5
       - name: analytics continue
         click:
-        - 1284
+        - 1281
         - 799
-        wait_after: 7
+        wait_after: 9
     - name: screen time
       if: screen_time
       then:
@@ -475,14 +473,28 @@ steps:
     - name: update mac automatically - reset past it
       if: update
       then:
+      # THE UPDATE PANE NEVER ADVANCES, SO A RESET IS WHAT MOVES IT - AND THE LOGIN THAT FOLLOWS IS A
+      # FIXED SEQUENCE, NOT SOMETHING THIS LOOP TRIES TO RECOGNISE.
+      #
+      # WHY FIXED AND NOT DETECTED, MEASURED ON THE RUN THAT REACHED THE LOGIN WINDOW: that window
+      # shows a clock and two small words, and tesseract read the clock as "5: AS". The pattern
+      # `[0-9]+[:.][0-9]+` that used to stand here therefore matched nothing, `at_login` was false on
+      # every attempt, and the walk sat at the login window until its ceiling - the frame was fine,
+      # the READING was not, and no word list fixes a clock read as noise.
+      #
+      # WHAT IS RELIABLE IS THE ORDER, because issue #3 measured it: resetting past the update pane
+      # lands on the login window every time. So the reset is followed by a wait and then by the three
+      # presses, unconditionally.
+      #
+      # ONE HUNDRED AND TWENTY SECONDS, NOT SIXTY. A CI runner boots this guest far slower than the
+      # workbench does (the same install took ~40 minutes there against ~25 here), and typing into a
+      # password field that does not exist yet spends the attempt and leaves the walk at a window it
+      # can no longer see.
       - name: reset the guest
         reboot: true
         timeout: 300
-      - name: let it come back
-        wait: 60
-    - name: the login window - log in
-      if: at_login
-      then:
+      - name: let the login window come up
+        wait: 120
       - name: click the password field
         click:
         - 960
@@ -493,7 +505,7 @@ steps:
         wait_after: 2
       - name: press return
         key: ret
-        wait_after: 25
+        wait_after: 30
     ocr:
       name: wizard
       region:
