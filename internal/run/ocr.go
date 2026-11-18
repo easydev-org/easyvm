@@ -253,7 +253,28 @@ func (e *Executor) doCheck(s walk.Step) error {
 	// THE FRAME WAS CAPTURED BY THE `see:`, so this reads a picture rather than the screen - which is
 	// what keeps `check:` free to re-ask. Every question about one screen is answered from the same
 	// capture, each with its own `rect`.
-	if path, isShot := e.shots[from]; isShot && hasRect(raw) {
+	// A `from:` THAT NAMES A CAPTURED FRAME IS A QUESTION ABOUT THE PICTURE, AND IT NEEDS A REGION.
+	//
+	// THE `&& hasRect(raw)` USED TO BE THE WHOLE GUARD, so a frame check that FORGOT its `rect:`
+	// fell through to the word path, looked for `from` in `e.seen` - which a `see:` never writes -
+	// and failed with
+	//
+	//	`check: from: details` names a reading no `ocr:` or `see:` step has made
+	//
+	// which names the wrong problem twice: the capture EXISTS, and the missing thing is the region.
+	// MEASURED on `macos/15/steps/setup.walk` step 11 of 33, on the real CI runner, where the step
+	// was `check: {from: details, mode: contains, text: Uninitialized}` and the walk stopped two
+	// steps before Disk Utility could be driven at all.
+	//
+	// SO THE TWO CASES ARE TOLD APART: a name in `e.shots` IS a frame, and a frame question without
+	// a `rect:` is refused with the sentence that says so - which is what the file's author needs.
+	if path, isShot := e.shots[from]; isShot {
+		if !hasRect(raw) {
+			return fail(s.Name, "`check: from: %s` reads a frame a `see:` captured, so it needs "+
+				"`rect:` - the region to measure, as a fraction (`middle`, `bottom 4.5%%`) or "+
+				"`[x0, y0, x1, y1]` with `rect_at:`. A picture with no region has nothing to ask "+
+				"about", from)
+		}
 		return e.checkFrame(s.Name, raw, from, path)
 	}
 

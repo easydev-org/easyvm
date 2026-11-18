@@ -30,9 +30,9 @@ walkthrough "macos 15 setup (recovery image to setup assistant)"
   step "is the first disk the uninitialised one"
     see == details
   step "the first disk is the uninitialised one"
-    check == {from: details, mode: contains, name: uninitialised, text: Uninitialized}
+    check == {from: details, mode: contains, name: uninitialised, rect: [360, 100, 1000, 160], rect_at: [1920, 1080], scale: 4, text: Uninitialized}
   step "step down to the uninitialised disk"
-    else == [{loop: {check: {from: details, mode: contains, name: uninitialised, text: Uninitialized}, do: [{key: down}, {settle: 1}], max: 4, see: {name: details}, until: {fact: uninitialised}}}]
+    else == [{loop: {check: {from: details, mode: contains, name: uninitialised, rect: [360, 100, 1000, 160], rect_at: [1920, 1080], scale: 4, text: Uninitialized}, do: [{key: down}, {settle: 1}], max: 4, see: {name: details}, until: {fact: uninitialised}}}]
     if == uninitialised
   step "erase - open the sheet"
     loop == {check: {from: sheet, mode: text, name: sheet_up, words: [[erase, deleted], [free, space], [security, option], [cancel, erase]], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, do: [{click: [1681, 57]}, {settle: 3}], max: 6, see: {name: sheet}, until: {fact: sheet_up}}

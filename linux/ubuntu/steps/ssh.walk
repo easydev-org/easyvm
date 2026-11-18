@@ -19,7 +19,7 @@ walkthrough "linux-ubuntu - sshd"
   step "the first-login wizard is up, when this build shows one"
     loop == {check: {from: screen, mode: text, name: done, words: [[welcome, to, ubuntu], [complete, your, setup]], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, do: [{settle: 3}], max: 30, see: {name: screen}, until: {fact: done}}
   step "walk the first-login pages to the end"
-    loop == {check: {from: page, mode: matches, name: done, pattern: .}, do: [{click: [1464, 194]}, {settle: 4}], max: 12, see: {name: page}, until: {fact: done}}
+    loop == {check: {from: page, mode: matches, name: done, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1, pattern: .}, do: [{click: [1464, 194]}, {settle: 4}], max: 12, see: {name: page}, until: {fact: done}}
   press ctrl+alt+t, waiting 20s, named "open the terminal"
   step "keep the screen on"
     run == xset s off; xset -dpms; xset s noblank
