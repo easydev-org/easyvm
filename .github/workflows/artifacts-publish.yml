@@ -63,8 +63,21 @@ on:
         type: boolean
         default: false
 
+# A RE-RUN OF ONE ARTIFACT MUST NOT WAIT FOR ANOTHER ARTIFACT'S SLOW MIRROR.
+#
+# THE GROUP WAS `${{ github.ref }}` ALONE, so every dispatch queued behind the previous one no matter
+# what it asked for. MEASURED: `-f which=iso-blissos-16.9.7` sat in `download and verify` for forty
+# minutes on a 2.34 GiB mirror, and a `-f which=macos-asset-ovmf-code` dispatched to check a one-line
+# fix waited behind it the whole time - a 1.9 MB download blocked by an unrelated 2.34 GiB one.
+#
+# SO THE REQUEST IS PART OF THE GROUP NAME. Two runs that name DIFFERENT things are different work and
+# may proceed at once; two that name the same thing still queue, which is the property worth keeping -
+# a double dispatch of one tag must not write the same tag twice.
+#
+# `cancel-in-progress` STAYS FALSE. Cancelling a half-finished 7.7 GiB download to start an identical
+# one costs the transfer and gains nothing.
 concurrency:
-  group: artifacts-publish-${{ github.ref }}
+  group: artifacts-publish-${{ github.ref }}-${{ inputs.which }}-${{ inputs.group }}
   cancel-in-progress: false
 
 jobs:
