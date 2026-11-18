@@ -134,6 +134,31 @@ type Driver struct {
 // because a `disk:` step could name it - but a machine has exactly one disk and it is chosen before
 // qemu starts. A setter meant the answer could change under a running guest, and the field was read
 // in three places that each had to remember it might.
+// Facts reports the machine's measured state, for a `wait_until:` step.
+//
+// THIS WAS MISSING AND THAT IS A REAL DEFECT: `doWaitUntil` asserts its driver implements
+//
+//	interface{ Facts() (map[string]string, error) }
+//
+// and `Daemon` HAS `Facts` - the snapshot `/api/state` serves - but the DRIVER a walk runs through
+// did not forward it. So every `wait_until: stopped` in the tree failed with
+//
+//	wait for the machine to stop: this driver cannot report the facts a `wait_until:` waits on
+//
+// MEASURED on windows/11/steps/install.walk step 19 of 20, which is the step that waits for the
+// installed guest to power off before the disk is published - the last thing the leg does, after
+// nineteen steps that had all worked.
+//
+// IT IS A FORWARD RATHER THAN A SECOND IMPLEMENTATION, because `Daemon.Facts` is already built from
+// the same snapshot `/api/state` reads. Two sources for "is sshd up" is how a step comes to wait on
+// one answer while the log shows another.
+func (d *Driver) Facts() (map[string]string, error) {
+	if d.daemon == nil {
+		return nil, fmt.Errorf("this driver has no daemon, so it cannot report the machine's facts")
+	}
+	return d.daemon.Facts()
+}
+
 func NewDriver(owner *Daemon, f *walk.File, work, bootDisk string, port int,
 	password string) (run.Driver, func(), error) {
 	if err := os.MkdirAll(work, 0o755); err != nil {
