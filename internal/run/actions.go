@@ -148,6 +148,17 @@ func (e *Executor) doBoot(s walk.Step) error {
 	if err := m.Boot(spec); err != nil {
 		return fail(s.Name, "boot: %v", err)
 	}
+	// THE BUDGET THE FILE PUT ON THE BOOT IS HANDED TO THE WAIT THAT FOLLOWS IT.
+	//
+	// `doBoot` starts qemu and returns, and every waiting step after it had a hard-coded default -
+	// `untilConsole` 180 seconds, `doRequireSSH` 900. A file that wrote `timeout == 900` on its boot
+	// was describing its guest to a step that never read it. See Executor.bootBudget.
+	if budget := seconds(s, "timeout", 0); budget > 0 {
+		e.bootBudget = budget
+		e.bootBudgetSet = true
+		e.Driver.Log(fmt.Sprintf("  the boot's %s becomes the budget for the wait that follows",
+			budget))
+	}
 	e.Driver.Log("  qemu started")
 	return nil
 }

@@ -49,6 +49,28 @@ type Executor struct {
 	// madeDisk is true once a `disk_gb:` step has created the target, so a later `boot:` knows the
 	// disk is this run's rather than one from somewhere else. See BootSpec.FreshDisk.
 	madeDisk bool
+	// bootBudget is the `timeout:` a `boot:` step carried, for the wait that follows it.
+	//
+	// `timeout:` ON A BOOT STEP WAS WRITTEN 53 TIMES IN THIS TREE AND READ BY NOTHING. `doBoot`
+	// starts qemu and returns; the waiting is the NEXT step's, and every waiting step had its own
+	// hard-coded default - `untilConsole` 180 seconds. So a file that wrote
+	//
+	//	boot == true
+	//	os == macos
+	//	timeout == 900
+	//
+	// was saying "this guest may take fifteen minutes" to a step that never looked, and the wait
+	// that did matter was budgeted at three. MEASURED on a loaded runner: a NixOS guest whose boot
+	// needed longer than the following step's 180 seconds failed at that step, whose name says
+	// nothing about a boot.
+	//
+	// SO THE NUMBER IS CARRIED FORWARD rather than dropped: a waiting step that does NOT name its
+	// own `timeout:` uses the boot's. A step that names one still wins, because a per-step budget
+	// is more specific than the one a boot declared.
+	bootBudget time.Duration
+	// bootBudgetSet distinguishes a boot that said `timeout == 0` from no boot at all, so the
+	// inheritance is opt-in and a run with no boot behaves exactly as it did before.
+	bootBudgetSet bool
 	// adb is the Android Debug Bridge connection, when a step asked for one.
 	//
 	// IT IS A FIELD BESIDE THE ssh ONE AND NOT A Driver METHOD: adb is one family's transport, not
@@ -617,7 +639,7 @@ func (e *Executor) doWait(s walk.Step) error {
 // --- ssh ------------------------------------------------------------------------------
 
 func (e *Executor) doRequireSSH(s walk.Step) error {
-	timeout := seconds(s, "timeout", 900)
+	timeout := e.budget(s, "timeout", 900)
 	probe := s.Get("ssh_probe")
 	if probe == "" {
 		probe = "echo ok"
@@ -678,7 +700,7 @@ func (e *Executor) doRequireSSH(s walk.Step) error {
 
 func (e *Executor) doSSH(s walk.Step) error {
 	command := s.Get("ssh")
-	timeout := seconds(s, "timeout", 900)
+	timeout := e.budget(s, "timeout", 900)
 
 	var res guest.Result
 	run := func(client *guest.Client) error {
@@ -832,6 +854,19 @@ func (e *Executor) settle(s walk.Step) error {
 		time.Sleep(minDuration(5*time.Second, time.Until(deadline)))
 	}
 	return nil
+}
+
+// budget is `seconds` for the waits that FOLLOW a boot, so a step that says nothing inherits the
+// patience the file already declared for its guest.
+//
+// A STEP THAT NAMES ITS OWN `timeout:` STILL WINS - a per-step budget is more specific than the one
+// a boot step declared - and a run with no `boot:` behaves exactly as it did before, because
+// `bootBudgetSet` is only true once a boot carried a number.
+func (e *Executor) budget(s walk.Step, key string, fallback float64) time.Duration {
+	if _, named := s.Spec[key]; !named && e != nil && e.bootBudgetSet && e.bootBudget > 0 {
+		return e.bootBudget
+	}
+	return seconds(s, key, fallback)
 }
 
 func seconds(s walk.Step, key string, fallback float64) time.Duration {

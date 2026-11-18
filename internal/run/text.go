@@ -865,7 +865,8 @@ func (e *Executor) untilConsole(s walk.Step) error {
 	if want == "" {
 		return fail(s.Name, "`until: {from: console}` must name the text to wait for")
 	}
-	timeout := seconds(s, "timeout", 180)
+	// THE 180 IS NOT A CONSTANT ANY MORE WHEN THE FILE'S OWN `boot:` SAID OTHERWISE.
+	timeout := e.budget(s, "timeout", 180)
 	poll := seconds(s, "poll", 1)
 	// THE BLIND FALLBACK, AND IT IS FROM MEASUREMENT RATHER THAN CAUTION. Some media boot without
 	// any prompt, and some firmwares never emit the marker - so a step that waited for text alone

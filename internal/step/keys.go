@@ -443,7 +443,11 @@ var Keys = map[string]Key{
 	"poll": {Name: "poll", Kind: KindFloat,
 		Summary: "seconds between looks in an until: loop"},
 	"timeout": {Name: "timeout", Kind: KindTemplated,
-		Summary: "seconds the step may run before it is a failure"},
+		Summary: "seconds THIS step may wait. THE DEFAULT DEPENDS ON THE VERB, because the waits " +
+			"are not one thing: ssh and require_ssh 900, until from: console 180, disk_settle 3600, " +
+			"adb_connect 300, adb 60, a desktop 900, a shutdown grace 0. AND ON A `boot:` IT IS THE " +
+			"BUDGET THE FOLLOWING WAIT INHERITS, because a boot returns before the guest is up - " +
+			"previously the number was written 53 times and read by nothing"},
 	// `keep_alive:` IS GONE. It was written `true` in all 25 places it appeared and never once
 	// `false`, so it was not a switch - it was the behaviour, spelled as an option. A screen that
 	// blanks during a boot is normal, and both waits that need to survive it now wake it
