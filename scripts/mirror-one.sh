@@ -106,7 +106,7 @@ while [ "$attempt" -lt "$attempts" ]; do
     if curl -fL -C - --retry 3 --retry-delay 5 --retry-all-errors \
             --connect-timeout 30 --no-progress-meter \
             -w '  this attempt: %{size_download} bytes in %{time_total}s (%{speed_download} B/s)\n' \
-            -o "$part" "$url"; then
+            -o "$part" "$url" >&2; then
         got=$(stat -c %s "$part" 2>/dev/null || echo 0)
         # A MIRROR THAT SERVES A PARTIAL BODY WITHOUT FAILING is why the size is checked here and not
         # only after the loop: `curl` returns 0 for a connection closed after the headers.
