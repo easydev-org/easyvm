@@ -466,9 +466,13 @@ steps:
       if: keyboard
       then:
       - name: keyboard quit
+        # (1133,816), MEASURED ON THIS GUEST'S OWN FRAME. (1228,826) came from 15 and lands past the
+        # Quit button on 26: the sheet's two buttons sit at x=1069..1196 and x=1211..1339, y=802..830,
+        # so 1228 was inside CONTINUE - and a Continue there walks further into the keyboard setup
+        # instead of dismissing it, leaving the dialog over System Settings for the rest of the run.
         click:
-        - 1228
-        - 826
+        - 1133
+        - 816
         wait_after: 10
     - name: update mac automatically - reset past it
       if: update
@@ -633,10 +637,24 @@ steps:
       - - wi-fi
     until:
       fact: done
-- name: search for remote login
+# THE SEARCH FIELD HAS TO BE FOCUSED BEFORE ANYTHING IS TYPED, AND IT WAS NOT.
+#
+# MEASURED ON THIS STAGE'S OWN RUN: the walk clicked (715,267) and typed in one step, and the screen
+# afterwards showed System Settings sitting on GAME CENTER with an EMPTY search field - the typing had
+# gone nowhere, and `the remote login result is on screen` then waited forty-five times for a result
+# that was never searched for.
+#
+# (714,285) IS THE FIELD, measured on that frame: the search box spans x=612..818 at y=274..296. The
+# old (715,267) was nine pixels above it, inside the title bar.
+#
+# THE PRESS IS ITS OWN STEP so the field has settled before the text arrives - the same lesson as the
+# two password fields, and the third time this file has learned it.
+- name: press the settings search field
   click:
-  - 715
-  - 267
+  - 714
+  - 285
+  wait_after: 4
+- name: search for remote login
   type: remote login
   clear: true
   modifier: meta_l
