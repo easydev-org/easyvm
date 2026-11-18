@@ -493,13 +493,30 @@ steps:
       - name: reset the guest
         reboot: true
         timeout: 300
+      # THREE MINUTES, NOT TWO, AND THE MEASUREMENT IS THIS STAGE'S OWN FAILURE.
+      #
+      # At `wait: 120` the loop then pressed the password field and typed into it, and the login
+      # window still had an EMPTY field at the end of the run - 90 attempts, all wasted:
+      #
+      #	answer the wizard until the desktop appears: the loop ran 90 attempt(s) and the condition
+      #	never held
+      #
+      # The same machine accepted the same three presses BY HAND five minutes after the reset, so the
+      # coordinates and the sequence were right and the WAIT was not: the field is drawn before it
+      # accepts a keystroke, and the click that arrives too early leaves it unfocused.
+      #
+      # `esc` FIRST, because a login window that has just appeared can be behind a screen-saver style
+      # fade that eats the first click.
       - name: let the login window come up
-        wait: 120
+        wait: 180
+      - name: wake the window before pressing it
+        key: esc
+        wait_after: 3
       - name: click the password field
         click:
         - 960
         - 983
-        wait_after: 3
+        wait_after: 5
       - name: type the password
         type: '{{ password }}'
         wait_after: 2
@@ -760,18 +777,23 @@ steps:
   region_at:
   - 1920
   - 1080
+  # THE SAME LESSON AS THE LOGIN WINDOW, MEASURED ON THE SAME RUN: this sheet's password field is
+  # drawn before it accepts a keystroke. With `wait_after: 2` the typed password vanished, the sheet
+  # stayed up, `the switch reads on` never saw "log in to this computer", and the stage failed.
+  # Pressed by hand with five seconds between the click and the typing, the same presses filled the
+  # field and `Modify Settings` took the change.
   click:
   - 960
   - 584
-  wait_after: 2
+  wait_after: 5
 - name: type the account password
   type: '{{ password }}'
-  wait_after: 2
+  wait_after: 4
 - name: confirm
   click:
   - 960
   - 631
-  wait_after: 12
+  wait_after: 15
 - name: the switch reads on
   loop:
     max: 10
