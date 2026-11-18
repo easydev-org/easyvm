@@ -34,9 +34,24 @@ walkthrough "windows 11 - install to a desktop"
   press Escape, waiting 2s, named "and once more, for a loader that was not listening yet"
   step "Setup is on screen"
     loop == {check: {from: screen, mode: text, name: done, words: [Windows, Setup], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, do: [{settle: 5}], max: 180, see: {name: screen}, until: {fact: done}}
+  # NINETY MINUTES WAS NOT ENOUGH ON A GITHUB RUNNER, AND THE FRAME SAYS WHY.
+  #
+  # MEASURED ON RUN 44377939172, which spent its whole 1h30m and failed:
+  #
+  #   wait for the desktop: no windows desktop within 1h30m0s; drop=+20.7 (need 15)
+  #     ratio=0.1x (need 2) sat=+0.07 (need 0.10) on a 1920x1080 frame
+  #
+  # THAT FRAME IS "Please keep your computer on. Your computer may restart a few times." - the
+  # installer's own OOBE, still posting. `desktop: windows` is RIGHT to refuse it: a black screen with
+  # one line of white text has no variance and no saturation, which is exactly the two measurements
+  # that failed.
+  #
+  # SO THE BUDGET IS THE THING THAT WAS WRONG, not the predicate. Two hours is the same order as the
+  # install above it (`timeout: 1800` for the boot, then this), and a leg whose guest is slow loses
+  # the whole run to a number chosen before one had been measured on this runner.
   step "wait for the desktop"
     desktop == windows
-    timeout == 5400
+    timeout == 7200
   # THE DESKTOP IS THE PICTURE, NOT ONLY THE NUMBERS. `desktop:` decides on seven measurements -
   # brightness drop, variance ratio, saturation - and several panes can share all seven. This step
   # says the screen is THE ONE THIS FILE WAS MEASURED ON, by comparing pixels to a frame taken from
