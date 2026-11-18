@@ -25,12 +25,24 @@ walkthrough "ubuntu - the subiquity walk"
   # comparison is about "the live session got this far", not "the desktop is empty".
   press Escape, waiting 2s, named "close the right-click menu the live session leaves open"
   settle 2s
+  # THE INSTALLER WINDOW HAS TO BE UP BEFORE THE COMPARISON, NOT AFTER IT.
+  #
+  # THE ORDER WAS "compare the screen, then wait for the installer", and the two raced. MEASURED
+  # ACROSS THREE RUNS: run 44349187441 captured the desktop with the installer's window as a black
+  # rectangle (0.6753), run 44361392014 captured it with a right-click menu open (0.6664), and run
+  # 44365861355 captured it with "Welcome to Ubuntu / Choose your language" fully drawn (0.6710).
+  # Three different screens, because `desktop:` says "brightness, variance and saturation look like
+  # a table" and the installer appears somewhere inside that window.
+  #
+  # SO THE WINDOW IS WAITED FOR FIRST, which makes the screen the comparison sees ONE screen instead
+  # of three, and the reference is the frame from a run where it was already up.
+  step "wait for the installer window"
+    loop == {check: {from: screen, mode: text, name: done, words: [[welcome, to, ubuntu], [choose, your, language]], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, do: [{click: [420, 300]}, {settle: 5}], max: 120, see: {name: screen}, until: {fact: done}}
+  settle 3s
   step "the desktop is the one this file was written against"
     see == shot
   step "the screen is the one this file was written against"
     check == {name: matched, must: true, from: shot, mode: like, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], reference: reference/desktop.png, range: [0.97, 1.0]}
-  step "wait for the installer window"
-    loop == {check: {from: screen, mode: text, name: done, words: [[welcome, to, ubuntu], [choose, your, language]], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, do: [{click: [420, 300], settle: 5}], max: 120, see: {name: screen}, until: {fact: done}}
   click "welcome / language" at 1355 848, waiting 12s, named "welcome / language"
   step "wait for the accessibility page, because a click that assumes the page before it is a click that can miss"
     loop == {check: {from: page, mode: text, name: there, words: [[accessibility]], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, do: [{settle: 5}], max: 24, see: {name: page}, until: {fact: there}}
