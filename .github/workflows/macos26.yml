@@ -113,3 +113,40 @@ jobs:
             "timeout": 400
           }
         ]
+
+  # THE `ssh` STAGE, WHICH STARTS BY ANSWERING THE WIZARD.
+  #
+  # `setup` ENDS WHERE THE INSTALLER ENDS: the Setup Assistant is up and there is no user yet. This
+  # stage answers every pane, logs in as the account it creates, turns Remote Login on, proves the
+  # session over ssh, and powers the guest off through its own init - so APFS closes its journal
+  # before the disk is published.
+  #
+  # IT IS A SEPARATE JOB FOR THE SAME REASON macos.yml HAS ONE: the wizard plus the login plus the
+  # ssh proof is its own hour, and a failure here must cost that hour rather than the whole install.
+  #
+  # ITS OWN `timeout` IS 200 MINUTES. Measured: the wizard took ~25 minutes on the workbench and the
+  # CI runner is slower (the install there is ~40 minutes against ~25), and the update pane's
+  # reset-then-wait-then-log-in sequence alone spends two and a half minutes.
+  ssh:
+    needs: [setup]
+    # ONLY WHEN THE SETUP STAGE PUBLISHED A DISK. `always()` would run this against whatever `macos26`
+    # already pointed at - which, after a failed setup, is the PREVIOUS release's disk, and the ssh
+    # stage would then spend its hour proving something about a disk nobody asked it about.
+    if: needs.setup.result == 'success'
+    uses: ./.github/workflows/stage.yml
+    secrets: inherit
+    with:
+      group: macos26
+      disks_repository: ${{ inputs.disks_repository }}
+      stages: |
+        [
+          {
+            "name": "macos26-ssh",
+            "file": "macos/26/steps/ssh.yaml",
+            "pull": "macos26",
+            "assets": ["macos-asset-boot-26:boot.img", "macos-asset-rom-26:macos.rom", "macos-asset-vars-26:macos.vars"],
+            "out": "macos26-ssh.qcow2",
+            "publish": "macos26-ssh",
+            "timeout": 200
+          }
+        ]
