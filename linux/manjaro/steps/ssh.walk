@@ -11,6 +11,23 @@ walkthrough "linux-manjaro - sshd"
     # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
     memory_mb == 4096
     timeout == 900
+  # THE DISK COMES UP ON GRUB AND WAITS FOR A KEY, AS endeavour's DOES.
+  #
+  # MEASURED ON RUN 44557318104's SUCCESSOR, whose ssh recording ends on
+  #
+  #	[ manjaro ]
+  #	Manjaro Linux
+  #	Advanced options for Manjaro Linux
+  #	UEFI Firmware Settings
+  #	Memory Tester (memtest86+)
+  #	E = Edit Boot Options   C = GRUB Commandline
+  #
+  # and stays there. The greeter wait below then pressed Escape into it sixty times.
+  # The first entry is already highlighted; Return boots it.
+  step "the disk's boot menu, when it has one"
+    loop == {check: {from: grubmenu, mode: text, name: at_menu, rect: [300, 300, 1640, 480], rect_at: [1920, 1080], scale: 1, words: [[manjaro], [advanced, options], [uefi, firmware, settings]]}, do: [{settle: 5}], max: 12, see: {name: grubmenu}, until: {fact: at_menu}}
+    optional == true
+  press Return, waiting 25s, named "boot the highlighted entry, which is the installed system"
   # THE GREETER IS ASKED FOR BEFORE IT IS CLICKED, AND THE WAIT WAKES THE SCREEN.
   #
   # MEASURED ON RUN 44557318104, whose ssh recording at 150 s is SDDM's login screen with the
