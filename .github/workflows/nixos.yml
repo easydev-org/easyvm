@@ -26,6 +26,10 @@ on:
       disks_repository:
         description: "the ghcr repository that holds the disks"
         default: "easydev-org/easyvm"
+      from_tag:
+        description: >-
+          start from a PUBLISHED disk: linux-nixos or linux-nixos-ssh. Empty runs the whole chain.
+        default: ""
 
 concurrency:
   group: nixos
