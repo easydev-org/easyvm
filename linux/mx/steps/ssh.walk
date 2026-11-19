@@ -41,8 +41,18 @@ walkthrough "linux-mx - sshd"
   #
   # The click below is at 259,568 - LightDM's position - so it is moved to SDDM's field as well.
   # MEASURED on this medium's own install recording, whose greeter is the same SDDM.
+  # THIS DISK AUTO-LOGS-IN, SO THERE IS NO GREETER TO WAIT FOR.
+  #
+  # MEASURED ON RUN 44557723577's successor, whose ssh recording ends on a COMPLETE MX desktop -
+  # the MX Welcome window with its eight cards, the side panel, the clock - while the gate was still
+  # asking for SDDM's password field and the stage failed at step 6.
+  #
+  # The wait is kept (a disk that DOES show SDDM still uses it) but is optional: an auto-login
+  # desktop must not be a failure. A click and a type: to a greeter that is not there are already
+  # optional in this file.
   step "the greeter is drawn"
-    loop == {check: {from: greeter, mode: text, name: up, rect: [740, 470, 1340, 770], rect_at: [1920, 1080], scale: 2, words: [[password], [vmuser]]}, do: [{key: esc, settle: 3}], max: 60, see: {name: greeter}, until: {fact: up}}
+    loop == {check: {from: greeter, mode: text, name: up, rect: [740, 470, 1340, 770], rect_at: [1920, 1080], scale: 2, words: [[password], [vmuser]]}, do: [{settle: 5}], max: 12, see: {name: greeter}, until: {fact: up}}
+    optional == true
   click "greeter - the password box" at 936 628, waiting 2s, optionally, named "greeter - the password box"
 
   step "greeter - log in"
