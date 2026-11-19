@@ -112,10 +112,10 @@ walkthrough "linux-zorin - sshd"
   # raise it; both are stopped here (they were the subject of a step this file used to have, whose
   # CLICK on the updater was the thing pressing Install).
   step "stop the update notifier before it raises polkit"
-    run == sudo systemctl stop packagekit unattended-upgrades apt-daily.service apt-daily-upgrade.service 2>/dev/null; sudo systemctl disable --now packagekit 2>/dev/null; pkill -f update-notifier 2>/dev/null; echo NOTIFIER_STOPPED
+    run == sudo systemctl stop packagekit unattended-upgrades apt-daily.service apt-daily-upgrade.service; sudo systemctl disable --now packagekit; pkill -f update-notifier; echo NOTIFIER_STOPPED
     settle == 6
   step "refresh the package index"
-    run == sudo apt-get update 2>&1 | tail -3
+    run == sudo apt-get update
     settle == 45
   step "install openssh-server"
     run == sudo apt-get install -y openssh-server
