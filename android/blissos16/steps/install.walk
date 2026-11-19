@@ -21,7 +21,7 @@ walkthrough "android 13 (blissos 16.9.7) - install onto a disk this file makes"
   step "read the menu"
     see == name: menu
   step "the menu offers Installation"
-    check == {from: menu, mode: text, name: has_install, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], words: [installation]}
+    check == {from: menu, mode: text, name: has_install, rect: [816, 507, 965, 571], rect_at: [1920, 1080], words: [installation]}
   press down, waiting 1s, named "down to the second row"
   press down, waiting 1s, named "down to the third row"
   press down, waiting 1s, named "down to the fourth row"
@@ -46,7 +46,7 @@ walkthrough "android 13 (blissos 16.9.7) - install onto a disk this file makes"
   step "read the result"
     see == name: done
   step "it says the install succeeded"
-    check == {from: done, mode: text, name: installed, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], words: [[congratulations], [successfully]]}
+    check == {from: done, mode: text, name: installed, rect: [818, 392, 1033, 453], rect_at: [1920, 1080], words: [[congratulations], [successfully]]}
   step "stop the installer"
     shutdown == kill
     timeout == 120

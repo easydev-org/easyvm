@@ -48,7 +48,7 @@ walkthrough "ubuntu - the subiquity walk"
   # SO THE WINDOW IS WAITED FOR FIRST, which makes the screen the comparison sees ONE screen instead
   # of three, and the reference is the frame from a run where it was already up.
   step "wait for the installer window"
-    loop == {check: {from: screen, mode: text, name: done, words: [[welcome, to, ubuntu], [choose, your, language]], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, do: [{click: [420, 300]}, {settle: 5}], max: 120, see: {name: screen}, until: {fact: done}}
+    loop == {check: {from: screen, mode: text, name: done, words: [[welcome, to, ubuntu], [choose, your, language]], rect: [873, 208, 1133, 395], rect_at: [1920, 1080]}, do: [{click: [420, 300]}, {settle: 5}], max: 120, see: {name: screen}, until: {fact: done}}
   settle 3s
   step "the desktop is the one this file was written against"
     see == shot
@@ -59,35 +59,35 @@ walkthrough "ubuntu - the subiquity walk"
     loop == {check: {from: page, mode: text, name: there, words: [[accessibility]], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, do: [{settle: 5}], max: 24, see: {name: page}, until: {fact: there}}
   click accessibility at 1355 848, waiting 12s, named "accessibility"
   step "wait for the keyboard layout page, because a click that assumes the page before it is a click that can miss"
-    loop == {check: {from: page, mode: text, name: there, words: [[keyboard], [layout]], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, do: [{settle: 5}], max: 24, see: {name: page}, until: {fact: there}}
+    loop == {check: {from: page, mode: text, name: there, words: [[keyboard], [layout]], rect: [885, 208, 1036, 271], rect_at: [1920, 1080]}, do: [{settle: 5}], max: 24, see: {name: page}, until: {fact: there}}
   click keyboard at 1355 848, waiting 12s, named "keyboard layout"
   step "wait for the internet connection page, because a click that assumes the page before it is a click that can miss"
-    loop == {check: {from: page, mode: text, name: there, words: [[internet], [connection]], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, do: [{settle: 5}], max: 24, see: {name: page}, until: {fact: there}}
+    loop == {check: {from: page, mode: text, name: there, words: [[internet], [connection]], rect: [873, 210, 1046, 268], rect_at: [1920, 1080]}, do: [{settle: 5}], max: 24, see: {name: page}, until: {fact: there}}
   click internet at 1355 848, waiting 12s, named "internet connection"
   step "read whether the installer offered to update itself, which blocks every page behind it"
     see == page
   step "is the update dialog up"
-    check == {from: page, mode: text, name: update_offered, words: [update, available], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}
+    check == {from: page, mode: text, name: update_offered, words: [update, available], rect: [883, 208, 1036, 271], rect_at: [1920, 1080]}
   step "leave the update page by the same Next every other page uses"
     if == update_offered
     then == [{click: [1355, 848], name: "next, past the update offer", settle: 8}]
   step "wait for the what do you want to do with ubuntu page, because a click that assumes the page before it is a click that can miss"
-    loop == {check: {from: page, mode: text, name: there, words: [[install], [ubuntu]], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, do: [{settle: 5}], max: 24, see: {name: page}, until: {fact: there}}
+    loop == {check: {from: page, mode: text, name: there, words: [[install], [ubuntu]], rect: [944, 477, 1085, 554], rect_at: [1920, 1080]}, do: [{settle: 5}], max: 24, see: {name: page}, until: {fact: there}}
   click "what do you want to do with ubuntu" at 1355 848, waiting 12s, named "what do you want to do with ubuntu"
   step "wait for the type of installation page, because a click that assumes the page before it is a click that can miss"
-    loop == {check: {from: page, mode: text, name: there, words: [[interactive], [installation]], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, do: [{settle: 5}], max: 24, see: {name: page}, until: {fact: there}}
+    loop == {check: {from: page, mode: text, name: there, words: [[interactive], [installation]], rect: [944, 209, 1045, 501], rect_at: [1920, 1080]}, do: [{settle: 5}], max: 24, see: {name: page}, until: {fact: there}}
   click "type of installation" at 1355 848, waiting 12s, named "type of installation"
   step "wait for the applications page, because a click that assumes the page before it is a click that can miss"
-    loop == {check: {from: page, mode: text, name: there, words: [[apps]], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, do: [{settle: 5}], max: 24, see: {name: page}, until: {fact: there}}
+    loop == {check: {from: page, mode: text, name: there, words: [[apps]], rect: [937, 433, 1027, 496], rect_at: [1920, 1080]}, do: [{settle: 5}], max: 24, see: {name: page}, until: {fact: there}}
   click applications at 1355 848, waiting 12s, named "applications"
   step "wait for the optimise your computer page, because a click that assumes the page before it is a click that can miss"
-    loop == {check: {from: page, mode: text, name: there, words: [[proprietary]], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, do: [{settle: 5}], max: 24, see: {name: page}, until: {fact: there}}
+    loop == {check: {from: page, mode: text, name: there, words: [[proprietary]], rect: [1082, 397, 1232, 465], rect_at: [1920, 1080]}, do: [{settle: 5}], max: 24, see: {name: page}, until: {fact: there}}
   click "optimise your computer" at 1355 848, waiting 12s, named "optimise your computer"
   step "wait for the disk setup page, because a click that assumes the page before it is a click that can miss"
-    loop == {check: {from: page, mode: text, name: there, words: [[erase], [disk]], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, do: [{settle: 5}], max: 24, see: {name: page}, until: {fact: there}}
+    loop == {check: {from: page, mode: text, name: there, words: [[erase], [disk]], rect: [944, 473, 1054, 545], rect_at: [1920, 1080]}, do: [{settle: 5}], max: 24, see: {name: page}, until: {fact: there}}
   click disk at 1355 848, waiting 12s, named "disk setup"
   step "wait for the encryption page, because a click that assumes the page before it is a click that can miss"
-    loop == {check: {from: page, mode: text, name: there, words: [[encryption]], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, do: [{settle: 5}], max: 24, see: {name: page}, until: {fact: there}}
+    loop == {check: {from: page, mode: text, name: there, words: [[encryption]], rect: [852, 210, 967, 271], rect_at: [1920, 1080]}, do: [{settle: 5}], max: 24, see: {name: page}, until: {fact: there}}
   click encryption at 1355 848, waiting 12s, named "encryption"
   step "wait for the account page before typing into it"
     loop == {check: {from: page, mode: text, name: there, words: [[create, account]], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, do: [{settle: 5}], max: 24, see: {name: page}, until: {fact: there}}
@@ -114,12 +114,12 @@ walkthrough "ubuntu - the subiquity walk"
   click "clear 'require my password to log in'" at 923 670, waiting 3s, named "clear 'require my password to log in'"
   click "create your account" at 1355 848, waiting 12s, named "create your account"
   step "wait for the time zone page"
-    loop == {check: {from: page, mode: text, name: there, words: [[timezone]], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, do: [{settle: 5}], max: 24, see: {name: page}, until: {fact: there}}
+    loop == {check: {from: page, mode: text, name: there, words: [[timezone]], rect: [944, 210, 1050, 268], rect_at: [1920, 1080]}, do: [{settle: 5}], max: 24, see: {name: page}, until: {fact: there}}
   click "time zone - new york on the map" at 762 483, waiting 4s, named "time zone - new york on the map"
   click time at 1355 848, waiting 14s, named "time zone"
   click "ready to install - the green install button" at 1355 848, waiting 30s, named "ready to install - the green install button"
   step "the installer finishes"
-    loop == {check: {from: screen, mode: text, name: done, words: [[installed, and, ready, to, use], [restart, to, complete, the, installation], [restart, now]], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, do: [{click: [420, 300], settle: 20}], max: 270, see: {name: screen}, until: {fact: done}}
+    loop == {check: {from: screen, mode: text, name: done, words: [[installed, and, ready, to, use], [restart, to, complete, the, installation], [restart, now]], rect: [918, 631, 1237, 703], rect_at: [1920, 1080]}, do: [{click: [420, 300], settle: 20}], max: 270, see: {name: screen}, until: {fact: done}}
   settle 20s, named "give the installer its last few seconds, because \"ready to use\" is not \"flushed\""
   step "stop the machine"
     shutdown == kill

@@ -17,7 +17,7 @@ walkthrough "freebsd 15.1 - bsdinstall, to an installed system"
     os == bsd
     timeout == 1800
   step "wait for the installer menu"
-    loop == {check: {from: pane, mode: text, name: menu_up, words: [[install], [live, system]], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, do: [{settle: 10}], max: 60, see: {name: pane}, until: {fact: menu_up}}
+    loop == {check: {from: pane, mode: text, name: menu_up, words: [[install], [live, system]], rect: [234, 1038, 333, 1080], rect_at: [1920, 1080]}, do: [{settle: 10}], max: 60, see: {name: pane}, until: {fact: menu_up}}
   press Return, waiting 10s, named "welcome - Install is preselected"
   press Return, waiting 8s, named "keymap - continue with the default"
   step hostname
@@ -29,7 +29,7 @@ walkthrough "freebsd 15.1 - bsdinstall, to an installed system"
     do == [{key: right, settle: 1}, {key: ret, settle: 10}]
   settle 12s, named "partitioning - automatic ufs"
   step "wait for the partitioning menu before choosing on it"
-    loop == {check: {from: partmenu, mode: text, name: part_showing, words: [guided, manual], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, do: [{settle: 6}], max: 25, see: {name: partmenu}, until: {fact: part_showing}}
+    loop == {check: {from: partmenu, mode: text, name: part_showing, words: [guided, manual], rect: [184, 286, 277, 344], rect_at: [1920, 1080]}, do: [{settle: 6}], max: 25, see: {name: partmenu}, until: {fact: part_showing}}
   step "choose auto ufs"
     do == [{key: down, settle: 1}, {key: ret, settle: 10}]
   press Return, waiting 10s, named "entire disk, not a shared partition"

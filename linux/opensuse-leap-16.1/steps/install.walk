@@ -19,13 +19,13 @@ walkthrough "opensuse-leap-16.1 - Agama, the storage editor, and ext4"
     memory_mb == 4096
     timeout == 1800
   step "wait for the installer's product chooser to draw"
-    loop == {check: {from: chooser, mode: text, name: up, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1, words: [[Select], [mode]]}, do: [{settle: 6}], max: 40, see: {name: chooser}, until: {fact: up}}
+    loop == {check: {from: chooser, mode: text, name: up, rect: [45, 125, 242, 561], rect_at: [1920, 1080], scale: 1, words: [[Select], [mode]]}, do: [{settle: 6}], max: 40, see: {name: chooser}, until: {fact: up}}
   click "choose the product" at 66 199, waiting 5s, named "choose the product"
   click "choose the Standard system" at 94 324, waiting 3s, named "choose the Standard system"
   click "accept the licence" at 47 420, waiting 3s, named "accept the licence"
   click select at 160 470, waiting 20s, named "select it"
   step "wait for the installer's summary to draw"
-    loop == {check: {from: summary, mode: text, name: up, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1, words: [[Installation], [Storage]]}, do: [{settle: 6}], max: 40, see: {name: summary}, until: {fact: up}}
+    loop == {check: {from: summary, mode: text, name: up, rect: [43, 71, 434, 593], rect_at: [1920, 1080], scale: 1, words: [[Installation], [Storage]]}, do: [{settle: 6}], max: 40, see: {name: summary}, until: {fact: up}}
   click "open the storage section" at 120 387, waiting 10s, named "open the storage section"
   click "open the mount list" at 455 330, waiting 6s, named "open the mount list"
   click "the root row's menu" at 850 420, waiting 5s, named "the root row's menu"
@@ -66,7 +66,7 @@ walkthrough "opensuse-leap-16.1 - Agama, the storage editor, and ext4"
   step "the changes are applied"
     see == name: auth_applied
   step "changes were applied"
-    check == {from: auth_applied, mode: text, name: applied, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1, words: [[applied], [successfully]]}
+    check == {from: auth_applied, mode: text, name: applied, rect: [132, 73, 338, 138], rect_at: [1920, 1080], scale: 1, words: [[applied], [successfully]]}
   click "back to the summary, where install is now enabled" at 177 129, waiting 10s, named "back to the summary, where install is now enabled"
   click "start the install" at 110 515, waiting 20s, named "start the install"
   click "confirm, because this medium asks" at 756 669, waiting 30s, named "confirm, because this medium asks"
@@ -76,7 +76,7 @@ walkthrough "opensuse-leap-16.1 - Agama, the storage editor, and ext4"
     poll == 20
     timeout == 3600
   step "the install finishes"
-    loop == {check: {from: done, mode: text, name: finished, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1, words: [[complete], [reboot]]}, do: [{settle: 15}], max: 120, see: {name: done}, until: {fact: finished}}
+    loop == {check: {from: done, mode: text, name: finished, rect: [311, 225, 397, 283], rect_at: [1920, 1080], scale: 1, words: [[complete], [reboot]]}, do: [{settle: 15}], max: 120, see: {name: done}, until: {fact: finished}}
   step "stop the machine"
     shutdown == kill
     timeout == 600

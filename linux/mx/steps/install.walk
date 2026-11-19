@@ -19,7 +19,7 @@ walkthrough "mx - the minstall walk"
   step "the medium's boot menu is up"
     see == name: mxmenu
   step "that menu is the language submenu this medium opens on"
-    check == {from: mxmenu, mode: text, name: is_mx_menu, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1, words: [[Language], [Keyboard], [Timezone]]}
+    check == {from: mxmenu, mode: text, name: is_mx_menu, rect: [664, 328, 949, 408], rect_at: [1920, 1080], scale: 1, words: [[Language], [Keyboard], [Timezone]]}
   press Escape, waiting 4s, named "leave the language submenu for the real boot menu"
   press up, waiting 1s, named "up to the first entry, which is the live session"
   press up, waiting 1s, named "up again"
@@ -51,26 +51,26 @@ walkthrough "mx - the minstall walk"
     do == [{click: [81, 259], settle: 3}, {click: [81, 259], settle: 3}]
     settle == 28
   step "wait for the terms page"
-    loop == {check: {from: screen, mode: text, name: done, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], words: [terms, of, use]}, do: [{settle: 6}], max: 30, see: {name: screen}, until: {fact: done}}
+    loop == {check: {from: screen, mode: text, name: done, rect: [842, 276, 914, 372], rect_at: [1920, 1080], words: [terms, of, use]}, do: [{settle: 6}], max: 30, see: {name: screen}, until: {fact: done}}
   click "terms of use" at 1482 889, waiting 14s, named "terms of use"
   step "wait for the installation type page"
-    loop == {check: {from: screen, mode: text, name: done, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], words: [select, type, of, installation]}, do: [{settle: 6}], max: 30, see: {name: screen}, until: {fact: done}}
+    loop == {check: {from: screen, mode: text, name: done, rect: [842, 276, 914, 372], rect_at: [1920, 1080], words: [select, type, of, installation]}, do: [{settle: 6}], max: 30, see: {name: screen}, until: {fact: done}}
   click installation at 1482 889, waiting 16s, named "installation type"
   step "wait for the confirmation page"
-    loop == {check: {from: screen, mode: text, name: done, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], words: [final, review]}, do: [{settle: 6}], max: 30, see: {name: screen}, until: {fact: done}}
+    loop == {check: {from: screen, mode: text, name: done, rect: [457, 284, 547, 340], rect_at: [1920, 1080], words: [final, review]}, do: [{settle: 6}], max: 30, see: {name: screen}, until: {fact: done}}
   click "installation confirmation - start" at 1478 889, waiting 25s, named "installation confirmation - start"
   click "dismiss the invalid settings modal if it is up" at 1069 583, waiting 4s, named "dismiss the invalid settings modal if it is up"
   step "wait for the swap file page"
     loop == {check: {from: screen, mode: text, name: done, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], words: [create, a, swap, file]}, do: [{settle: 6}], max: 40, see: {name: screen}, until: {fact: done}}
   click swap at 1482 889, waiting 18s, named "swap file"
   step "wait for the computer identity page"
-    loop == {check: {from: screen, mode: text, name: done, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], words: [computer, identity]}, do: [{settle: 6}], max: 40, see: {name: screen}, until: {fact: done}}
+    loop == {check: {from: screen, mode: text, name: done, rect: [387, 241, 579, 548], rect_at: [1920, 1080], words: [computer, identity]}, do: [{settle: 6}], max: 40, see: {name: screen}, until: {fact: done}}
   click computer at 1482 889, waiting 18s, named "computer identity"
   step "wait for the localization page"
-    loop == {check: {from: screen, mode: text, name: done, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], words: [localization, defaults]}, do: [{settle: 6}], max: 40, see: {name: screen}, until: {fact: done}}
+    loop == {check: {from: screen, mode: text, name: done, rect: [314, 241, 644, 616], rect_at: [1920, 1080], words: [localization, defaults]}, do: [{settle: 6}], max: 40, see: {name: screen}, until: {fact: done}}
   click localization at 1482 889, waiting 18s, named "localization defaults"
   step "wait for the account page"
-    loop == {check: {from: screen, mode: text, name: done, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], words: [default, user, login]}, do: [{settle: 6}], max: 30, see: {name: screen}, until: {fact: done}}
+    loop == {check: {from: screen, mode: text, name: done, rect: [314, 284, 569, 412], rect_at: [1920, 1080], words: [default, user, login]}, do: [{settle: 6}], max: 30, see: {name: screen}, until: {fact: done}}
   step "account - login name"
     click == [1210, 342]
     settle == 2
@@ -86,7 +86,7 @@ walkthrough "mx - the minstall walk"
   click autologin at 700 561, waiting 4s, named "autologin"
   click "default user login" at 1482 889, waiting 25s, named "default user login"
   step "the installer finishes"
-    loop == {check: {from: screen, mode: text, name: done, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], words: [[congratulations], [completed, the, installation]]}, do: [{click: [420, 300], settle: 20}], max: 90, see: {name: screen}, until: {fact: done}}
+    loop == {check: {from: screen, mode: text, name: done, rect: [314, 241, 594, 331], rect_at: [1920, 1080], words: [[congratulations], [completed, the, installation]]}, do: [{click: [420, 300], settle: 20}], max: 90, see: {name: screen}, until: {fact: done}}
   step "stop the machine"
     shutdown == kill
     timeout == 120

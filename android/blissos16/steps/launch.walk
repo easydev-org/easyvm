@@ -10,7 +10,7 @@ walkthrough "android 13 (blissos 16.9.7) - start the installed disk"
     os == android
     timeout == 300
   step "the firmware found the ESP and GRUB is running"
-    loop == {check: {from: boot, mode: text, name: reached, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], words: [[blissos], [android], [grub]]}, do: [{settle: 5}], max: 60, see: {name: boot}, until: {fact: reached}}
+    loop == {check: {from: boot, mode: text, name: reached, rect: [548, 689, 1184, 868], rect_at: [1920, 1080], words: [[blissos], [android], [grub]]}, do: [{settle: 5}], max: 60, see: {name: boot}, until: {fact: reached}}
   step "wait for the home-app chooser"
     loop == {check: {from: chooser, mode: text, name: asked, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], words: [home, app]}, do: [{settle: 5}], max: 20, see: {name: chooser}, until: {fact: asked}}
   click "choose Taskbar for Bliss OS" at 666 722, waiting 3s, named "choose Taskbar for Bliss OS"

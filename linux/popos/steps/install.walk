@@ -29,29 +29,29 @@ walkthrough "popos - the pop installer walk"
     timeout == 5400
   click "open the installer from the dock" at 1211 1050, waiting 20s, named "open the installer from the dock"
   step "the installer window is up"
-    loop == {check: {from: screen, mode: text, name: done, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1, words: [[Install], [Language], [Clean], [Erase], [Account]]}, do: [{click: [420, 300], settle: 3}], max: 100, see: {name: screen}, until: {fact: done}}
+    loop == {check: {from: screen, mode: text, name: done, rect: [698, 153, 945, 755], rect_at: [1920, 1080], scale: 1, words: [[Install], [Language], [Clean], [Erase], [Account]]}, do: [{click: [420, 300], settle: 3}], max: 100, see: {name: screen}, until: {fact: done}}
   step "select the language, all the way to the keyboard page"
-    loop == {check: {from: kb, mode: text, name: there, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1, words: [[Layout]]}, do: [{click: [1367, 810], settle: 6}], max: 8, see: {name: kb}, until: {fact: there}}
+    loop == {check: {from: kb, mode: text, name: there, rect: [728, 680, 857, 755], rect_at: [1920, 1080], scale: 1, words: [[Layout]]}, do: [{click: [1367, 810], settle: 6}], max: 8, see: {name: kb}, until: {fact: there}}
   step "the keyboard page is up"
-    loop == {check: {from: kb, mode: text, name: there, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1, words: [[Layout], [Type]]}, do: [{settle: 3}], max: 20, see: {name: kb}, until: {fact: there}}
+    loop == {check: {from: kb, mode: text, name: there, rect: [728, 680, 857, 755], rect_at: [1920, 1080], scale: 1, words: [[Layout], [Type]]}, do: [{settle: 3}], max: 20, see: {name: kb}, until: {fact: there}}
   click "the keyboard layout, which is US" at 1190 696, waiting 3s, named "the keyboard layout, which is US"
   step "the layout types latin letters"
     loop == {check: {from: layout_test, mode: matches, name: latin, pattern: "^[a-z]{2,5}$", rect: [968, 743, 1351, 770], rect_at: [1920, 1080], scale: 6}, do: [{clear: true, click: [1190, 757], settle: 1, type: abc, type_gap: 0.12}], max: 4, see: {name: layout_test}, until: {fact: latin}}
   click "take the keyboard layout" at 1367 810, waiting 6s, named "take the keyboard layout"
   step "the install page is up"
-    loop == {check: {from: inst, mode: text, name: there, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1, words: [[Clean], [Custom]]}, do: [{settle: 3}], max: 20, see: {name: inst}, until: {fact: there}}
+    loop == {check: {from: inst, mode: text, name: there, rect: [1012, 391, 1105, 548], rect_at: [1920, 1080], scale: 1, words: [[Clean], [Custom]]}, do: [{settle: 3}], max: 20, see: {name: inst}, until: {fact: there}}
   click clean at 1000 433, waiting 3s, named "clean install"
   click install at 1367 810, waiting 6s, named "install"
   step "the drive page is up"
-    loop == {check: {from: drv, mode: text, name: there, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1, words: [[drive], [Virtio]]}, do: [{settle: 3}], max: 20, see: {name: drv}, until: {fact: there}}
+    loop == {check: {from: drv, mode: text, name: there, rect: [726, 458, 1217, 748], rect_at: [1920, 1080], scale: 1, words: [[drive], [Virtio]]}, do: [{settle: 3}], max: 20, see: {name: drv}, until: {fact: there}}
   click "select a drive" at 1185 497, waiting 4s, named "select a drive"
   click "erase and install" at 1367 810, waiting 10s, named "erase and install"
   step "wait for the account pane"
-    loop == {check: {from: screen, mode: text, name: done, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1, words: [[Account], [User]]}, do: [{settle: 2}], max: 45, see: {name: screen}, until: {fact: done}}
+    loop == {check: {from: screen, mode: text, name: done, rect: [731, 533, 1021, 790], rect_at: [1920, 1080], scale: 1, words: [[Account], [User]]}, do: [{settle: 2}], max: 45, see: {name: screen}, until: {fact: done}}
   step "type the display name"
     loop == {check: {from: name_box, mode: text, name: took, rect: [968, 518, 1411, 541], rect_at: [1920, 1080], scale: 6, words: [[VM], [User]]}, do: [{clear: true, click: [1190, 530], settle: 2, type: "VM User", type_gap: 0.09}], max: 4, see: {name: name_box}, until: {fact: took}}
   step "create user account, and wait for the password pane"
-    loop == {check: {from: pw_pane, mode: text, name: there, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 3, words: [[Confirm], [Password]]}, do: [{click: [1367, 816], settle: 8}], max: 6, see: {name: pw_pane}, until: {fact: there}}
+    loop == {check: {from: pw_pane, mode: text, name: there, rect: [943, 383, 1161, 544], rect_at: [1920, 1080], scale: 3, words: [[Confirm], [Password]]}, do: [{click: [1367, 816], settle: 8}], max: 6, see: {name: pw_pane}, until: {fact: there}}
   step "type the password"
     clear == true
     click == [1200, 448]
@@ -67,7 +67,7 @@ walkthrough "popos - the pop installer walk"
   click "account password next" at 1367 810, waiting 25s, named "account password next"
   click "drive encryption - don't encrypt" at 1367 810, waiting 15s, named "drive encryption - don't encrypt"
   step "the install has started"
-    loop == {check: {from: started, mode: text, name: begun, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 3, words: [[Extracting], [Installing], [Copying]]}, do: [{settle: 6}], max: 20, see: {name: started}, until: {fact: begun}}
+    loop == {check: {from: started, mode: text, name: begun, rect: [491, 722, 598, 784], rect_at: [1920, 1080], scale: 3, words: [[Extracting], [Installing], [Copying]]}, do: [{settle: 6}], max: 20, see: {name: started}, until: {fact: begun}}
     settle == 35
   step "the install is written"
     disk_min_mb == 512
