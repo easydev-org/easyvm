@@ -34,19 +34,22 @@ walkthrough "mx - the minstall walk"
   # leave a GRUB language submenu; here Escape is OVMF's "exit this page", and the six `up` presses
   # and the `Return` after it went to whatever Escape left behind.
   #
-  # THE PANEL'S OWN ANSWER IS `Continue`: one Return, and the firmware boots the DVD. The check now
-  # reads the left column where the words actually are, and the keys are one Return.
-  step "that menu is OVMF's language panel"
-    check == {from: mxmenu, mode: text, name: is_mx_menu, rect: [0, 100, 500, 220], rect_at: [1920, 1080], scale: 1, words: [[Language], [Continue], [Reset]]}
-  press Return, waiting 30s, named "Continue, which is the panel's own answer"
-  # THE SIX `up` PRESSES AND THE SECOND `Return` THAT USED TO BE HERE WERE FOR A DIFFERENT PANEL.
+  # THE PANEL'S ANSWER IS `Back to main menu`, WHICH IS ITS LAST ROW.
   #
-  # They were written for "Please select boot device" - run 44471069613's screen, which is a DEVICE
-  # LIST. The panel this medium actually opens on is OVMF's LANGUAGE page, whose entries are
-  # `Continue` and `Reset`; `up` there moves between those two, so six of them landed on `Reset` and
-  # the Return after them asked the machine to reboot. That is the opposite of booting the DVD.
+  # ITS OWN FOOTER SAYS SO: "Use up and down, Hit ENTER to select/deselect. Press e to edit, ESC to
+  # go back." The rows are Language, Keyboard, Timezone, Reset and `<= Back to main menu`, and the
+  # live session is behind the last one. So the key sequence is: down until the highlight is on the
+  # last row, then Enter.
   #
-  # One Return on this panel is the whole job, and it is above.
+  # MEASURED ON RUN 44520492586, whose recording is this panel for its whole 18 minutes - that run
+  # was cancelled while the walk waited on a screen it never left.
+  step "that menu is this medium's own language panel"
+    check == {from: mxmenu, mode: text, name: is_mx_menu, rect: [560, 180, 1460, 580], rect_at: [1920, 1080], scale: 1, words: [[Language], [Keyboard], [Timezone], [Back, to, main, menu]]}
+  press down, waiting 1s, named "down to Keyboard"
+  press down, waiting 1s, named "down to Timezone"
+  press down, waiting 1s, named "down to Reset"
+  press down, waiting 1s, named "down to Back to main menu"
+  press Return, waiting 25s, named "open the main menu, where the live session is"
   step "wait for the live desktop"
     desktop == linux/xfce
     reference == reference/desktop.png

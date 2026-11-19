@@ -20,17 +20,25 @@ walkthrough "fedora-workstation - anaconda and the first boot"
     desktop == linux/gnome
     reference == reference/desktop.png
     range == [0.90, 1.0]
-    # THE BAND IS WALLPAPER, NOT THE MENU BAR, AND THAT IS THE WHOLE POINT.
-    #
-    # MEASURED ON THIS MEDIUM'S OWN RECORDING, which is why the previous band is gone. The top 120
-    # rows hold the CENTRE CLOCK - "Nov 18 4:08 AM" - and a reference taken at another minute scores
-    # 0.2608 against every frame of a desktop that is plainly up. That is what run 44484636885 did
-    # for 47 minutes: `wait for the live desktop`, never satisfied, on a screen that was fine.
-    #
-    # THE LEFT 300 PIXELS OF THE WALLPAPER, rows 300..500, are the same in every frame from 60 s on:
-    # 1.0000 across 17 samples. Boot and splash frames score 0.0000 there. The installer window does
-    # not reach this far left, so the gate does not depend on where the installer happens to be.
-    rect == [0, 300, 300, 500]
+    # THE REFERENCE IS THIS BOOT'S OWN DESKTOP, AND THE BAND IS THE BOTTOM OF THE SCREEN.
+  #
+  # MEASURED ON RUN 44519496307, WHICH NEVER SATISFIED THE GATE WHILE ITS DESKTOP WAS UP:
+  #
+  #	t=300   a complete GNOME session - the welcome dialog, the Dock, the top bar
+  #	t>=350  black, because the guest blanks its own display
+  #
+  # and every frame scored 0.0000 against the old reference, whose wall paper is a DIFFERENT PIECE
+  # OF ART (the shipped one is the gold-gears splash art; this boot draws a pale gradient behind an
+  # Overview that is scaling the wall paper down and blurring it). Two different pictures, so no
+  # band could have matched both.
+  #
+  # THE REFERENCE IS NOW THAT FRAME. THE BAND IS ROWS 820..1020, the wall paper below the Overview's
+  # app grid and above the Dock: 1.0000 on every desktop frame from 60 s, 0.0002 on the boot and
+  # splash frames before it.
+  #
+  # AND THE SCREEN BLANKS AT ABOUT 350 s, which is why the gate has to open early: `poll: 5` is what
+  # gives it that chance, and it is already there.
+    rect == [0, 820, 1920, 1020]
     rect_at == [1920, 1080]
     poll == 5
     timeout == 5400
