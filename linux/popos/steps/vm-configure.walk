@@ -18,6 +18,26 @@ walkthrough "linux-popos - configure the vm (name, share, guest agent)"
     # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
     memory_mb == 4096
     timeout == '{{ boot_timeout }}'
+  # THIS DISK IS ENCRYPTED, AND THIS STAGE HAS TO ANSWER PLYMOUTH LIKE THE SSH STAGE DOES.
+  #
+  # MEASURED ON RUN 44577959145's vm leg: THIRTY MINUTES of
+  #
+  #	still waiting after 29m56s (dial tcp 172.30.0.1:2222: i/o timeout)
+  #
+  # - note TIMEOUT, not refused: the guest never finished booting, so there was nothing to refuse.
+  # pop's installer takes one passphrase and uses it for the account too, so the passphrase is the
+  # same {{ password }}.
+  #
+  # The ssh leg has had this step since the same fault was found there; the vm leg boots the disk
+  # that leg produced, and needed the same step to see a system at all.
+  step "the disk asks for its passphrase, when it is encrypted"
+    loop == {check: {from: unlock, mode: text, name: locked, rect: [600, 480, 1320, 600], rect_at: [1920, 1080], scale: 1, words: [[unlock, disk], [cryptsetup]]}, do: [{settle: 5}], max: 40, see: {name: unlock}, until: {fact: locked}}
+    optional == true
+  step "answer the passphrase prompt"
+    when == [unlock]
+    settle == 2
+    type == '{{ password }}'
+  press Return, waiting 25s, named "submit the passphrase"
   step "wait for sshd"
     require_ssh == true
     timeout == '{{ boot_timeout }}'
