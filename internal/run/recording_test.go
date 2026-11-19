@@ -86,6 +86,7 @@ func (d *fakeFrameDriver) Click(int, int) error  { return errors.New("fake") }
 func (d *fakeFrameDriver) DoubleClick(int, int) error {
 	return errors.New("fake")
 }
+func (d *fakeFrameDriver) Drag(int, int, int, int) error { return nil }
 func (d *fakeFrameDriver) Key(string) error              { return errors.New("fake") }
 func (d *fakeFrameDriver) Stroke([]string, string) error { return errors.New("fake") }
 func (d *fakeFrameDriver) Type(string, time.Duration) ([]rune, error) {

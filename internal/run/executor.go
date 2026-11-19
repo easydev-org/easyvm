@@ -390,6 +390,8 @@ func (e *Executor) runOne(s walk.Step) error {
 		return e.doKey(s)
 	case s.Has("double"):
 		return e.doDoubleClick(s)
+	case s.Has("drag"):
+		return e.doDrag(s)
 	case s.Has("click"):
 		return e.doClick(s)
 	case s.Has("wait"):
@@ -464,6 +466,47 @@ func (e *Executor) doDoubleClick(s walk.Step) error {
 		return fail(s.Name, "double-click (%d, %d): %v", x, y, err)
 	}
 	e.Driver.Log(fmt.Sprintf("  double-clicked (%d, %d)", x, y))
+	return e.settle(s)
+}
+
+// doDrag presses at one point, moves while held, and releases at another.
+//
+// THE POINT IS A WINDOW THAT MOVES BETWEEN BOOTS. macOS remembers System Settings' origin from the
+// previous session, and this stage measured its search field at y=285, y=317 and y=345 on three boots
+// and its "Remote login" result row at SIX different heights. Every coordinate in the pane was a guess
+// about a position that had changed since the last run, and three commits tried to correct the row's
+// height - the height was never the problem.
+//
+// AFTER A DRAG TO A FIXED POINT, EVERY COORDINATE IN THE PANE IS A FACT. That is what `click:` already
+// claims ("a button's position is a measured fact about a screen") and could not deliver while the
+// window itself moved.
+func (e *Executor) doDrag(s walk.Step) error {
+	list, ok := s.Spec["drag"].([]any)
+	if !ok || len(list) != 4 {
+		return fail(s.Name, "`drag:` must be [from_x, from_y, to_x, to_y]")
+	}
+	vals := make([]int, 4)
+	for i, raw := range list {
+		f, ok := toFloat(raw)
+		if !ok {
+			return fail(s.Name, "`drag[%d]` is not a number: %v", i, raw)
+		}
+		vals[i] = int(f)
+	}
+	// THE SAME GUARD AS `click:`, FOR THE SAME REASON: every coordinate in this repository was measured
+	// on a 1920x1080 frame, and a drag at another size lands somewhere else silently.
+	if f, ferr := e.Driver.Frame(); ferr == nil {
+		if w, h := f.Size(); w != 0 && h != 0 && (w != 1920 || h != 1080) {
+			return fail(s.Name, "`drag:` points are coordinates measured at 1920x1080 but the "+
+				"framebuffer is %dx%d", w, h)
+		}
+	}
+	if err := e.Driver.Drag(vals[0], vals[1], vals[2], vals[3]); err != nil {
+		return fail(s.Name, "drag from (%d, %d) to (%d, %d): %v",
+			vals[0], vals[1], vals[2], vals[3], err)
+	}
+	e.Driver.Log(fmt.Sprintf("  dragged (%d, %d) -> (%d, %d)",
+		vals[0], vals[1], vals[2], vals[3]))
 	return e.settle(s)
 }
 

@@ -22,6 +22,9 @@ type Driver interface {
 	Click(x, y int) error
 	// DoubleClick presses twice with the gap that makes it a double-click.
 	DoubleClick(x, y int) error
+	// Drag presses at one point, moves while held, and releases at another. This is how a window is
+	// put where a file measured it, so the coordinates inside it stop moving between boots.
+	Drag(x0, y0, x1, y1 int) error
 	// Key sends one qemu qcode.
 	Key(qcode string) error
 	// Stroke sends keys held together, for shift'd characters and ctrl combos.

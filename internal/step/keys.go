@@ -41,6 +41,8 @@ const (
 	KindPair
 	// KindRect is [x0, y0, x1, y1].
 	KindRect
+	// KindQuad is [a, b, c, d] - four numbers, the shape a drag has.
+	KindQuad
 	// KindWords is a phrase, or a list of words that must all be present.
 	KindWords
 	// KindWordSets is a list of phrases, any one of which satisfies the key.
@@ -68,6 +70,8 @@ func (k Kind) String() string {
 		return "[x, y]"
 	case KindRect:
 		return "[x0, y0, x1, y1]"
+	case KindQuad:
+		return "[from_x, from_y, to_x, to_y]"
 	case KindWords:
 		return "words"
 	case KindWordSets:
@@ -253,6 +257,28 @@ var Keys = map[string]Key{
 			"somewhere else on the screen too"},
 	"at_bottom": {Name: "at_bottom", Kind: KindPair,
 		Summary: "[x, dy] - click x at dy pixels above the window's bottom edge"},
+	// `drag:` IS TWO POINTS AND A HELD BUTTON, AND IT EXISTS BECAUSE WINDOWS MOVE.
+	//
+	// MEASURED ON macOS 26's System Settings, NINE TIMES: the window remembers its origin from the
+	// previous session, so its search field was at y=285, y=317 and y=345 on three boots and the
+	// "Remote login" result row at y=336, y=343, y=355, y=358, y=387 and y=389. EVERY coordinate
+	// inside it was a guess about a position that had changed. Three commits tried to correct the
+	// row's height, and the height was never the problem.
+	//
+	// THE WINDOW CAN BE PUT WHERE THE FILE SAYS, ONCE, WITH THE POINTER. After that every coordinate
+	// in the pane is a fact rather than a guess - which is what this repository's `click:` already
+	// claims ("a button's position is a measured fact about a screen") and could not deliver while
+	// the window itself moved.
+	//
+	//	- name: put the settings window where this file measured it
+	//	  drag: [960, 100, 220, 100]
+	//
+	// `[from_x, from_y, to_x, to_y]`, and the press is held across the move - a release between them
+	// is a click, not a drag.
+	"drag": {Name: "drag", Kind: KindQuad,
+		Summary: "[from_x, from_y, to_x, to_y] - press at the first point, move while held, release " +
+			"at the second. For putting a window where the file measured it, so the coordinates " +
+			"inside it stop moving between boots. A release between the move is a click, not a drag"},
 	"key": {Name: "key", Kind: KindString,
 		Summary: "a qemu qcode, or a + combo such as ctrl+alt+t"},
 	"type": {Name: "type", Kind: KindString,

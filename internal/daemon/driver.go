@@ -261,6 +261,15 @@ func (d *Driver) Stroke(modifiers []string, key string) error {
 }
 
 // Type sends text one keystroke at a time, at the pace the caller measured.
+// Drag presses at one point, moves while held, and releases at another.
+func (d *Driver) Drag(x0, y0, x1, y1 int) error {
+	conn, err := d.qmpSocket()
+	if err != nil {
+		return err
+	}
+	return conn.Drag(x0, y0, x1, y1)
+}
+
 func (d *Driver) Type(text string, perChar time.Duration) ([]rune, error) {
 	conn, err := d.qmpSocket()
 	if err != nil {
