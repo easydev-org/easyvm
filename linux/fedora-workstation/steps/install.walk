@@ -103,7 +103,10 @@ walkthrough "fedora-workstation - anaconda and the first boot"
   step "the list is up, with free space on it"
     loop == {check: {from: back_at_list, mode: text, name: up, rect: [618, 277, 694, 354], rect_at: [1920, 1080], scale: 1, words: [[Unformatted], [GPT]]}, do: [{settle: 2}], max: 12, see: {name: back_at_list}, until: {fact: up}}
   step "the new free space's menu"
-    loop == {check: {from: fs_menu, mode: text, name: open, rect: [411, 194, 519, 257], rect_at: [1920, 1080], scale: 1, words: [[Create]]}, do: [{click: [1185, 407], settle: 3}], max: 6, see: {name: fs_menu}, until: {fact: open}}
+    # SAME MENU AS STEP 24, SAME PLACE: the small pop-up under the row's three-dot button, at
+    # x 1070..1200, y 396..418. This rect was [411,194,519,257] - the top-left of the page.
+    # MEASURED on run 44532343964's own recording, whose last frame has that menu open.
+    loop == {check: {from: fs_menu, mode: text, name: open, rect: [1030, 380, 1350, 460], rect_at: [1920, 1080], scale: 1, words: [[Create]]}, do: [{click: [1185, 407], settle: 3}], max: 6, see: {name: fs_menu}, until: {fact: open}}
   click "create the ESP" at 1132 449, waiting 8s, named "create the ESP"
   step "the ESP dialog is up"
     loop == {check: {from: esp_dialog, mode: text, name: up, rect: [571, 485, 700, 599], rect_at: [1920, 1080], scale: 1, words: [[Overwrite], [Encryption]]}, do: [{settle: 2}], max: 12, see: {name: esp_dialog}, until: {fact: up}}
