@@ -61,7 +61,20 @@ walkthrough "freebsd 15.1 - bsdinstall, to an installed system"
   # SO THE DIALOG'S OWN TITLE IS AN ACCEPTED ANSWER. It is what the very next step assumes, so a
   # loop that ends here is a loop that agrees with the file.
   step "wait for the install to finish"
-    loop == {check: {from: done, mode: text, name: finished, words: [[root, password], [please, select, a, password], [installation, completed], [system, management, account], [manual, configuration]], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, do: [{settle: 15}], max: 400, see: {name: done}, until: {fact: finished}}
+    # THE REGION IS THE DIALOG, BECAUSE A WHOLE FRAME AT SCALE 3 LOSES ITS TEXT.
+    #
+    # MEASURED on the frame from run 44401975665: cropping the dialog and enlarging it 4x reads
+    # "Please select a password for the system management account (root) / Password / Repeat
+    # password" perfectly, while the WHOLE 1920x1080 frame at the default scale 3 reads exactly
+    #
+    #	tesseract: FreeBSD Installer
+    #
+    # and nothing else - 5760x3240 is past the point where the page segmenter finds the small grey
+    # body text inside a large blue field. So the loop waited 100 minutes on a screen that had been
+    # showing the dialog the whole time, and every word it looked for was on it.
+    #
+    # `rect` covers the dialog box; `scale: 4` is the enlargement that was measured to work.
+    loop == {check: {from: done, mode: text, name: finished, words: [[root, password], [please, select, a, password], [installation, completed], [system, management, account], [manual, configuration]], rect: [700, 420, 1200, 640], rect_at: [1920, 1080], scale: 4}, do: [{settle: 15}], max: 400, see: {name: done}, until: {fact: finished}}
   step "the root password - first field"
     settle == 2
     type == '{{ password }}'
