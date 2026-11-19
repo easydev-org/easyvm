@@ -93,9 +93,17 @@ walkthrough "linux-endeavour - sshd"
     desktop == linux/kde
     timeout == 600
   press ctrl+alt+t, waiting 20s, named "open the terminal"
-  step "the terminal answers"
-    run == echo TERMINAL_READY
-    settle == 3
+  # NO PROBE COMMAND FIRST. MEASURED ON RUN 44586147027, whose terminal reads
+  #
+  #	$ echo TERMINAL_READYXSET S OFF; XSET S NOBLANK; ECHO ADMIN | sudo S pacman ...
+  #	[sudo] password for vmuser:
+  #
+  # - the probe's Return was lost, so the NEXT step's command was appended to it, and every
+  # character of that command arrived in capitals (the shift state again). The probe cost nothing to
+  # remove and removes the seam: the first thing typed after the chord is the command that matters.
+  step "keep the screen on and unlock sudo"
+    run == printf '%s\n' {{ password }} | sudo -S -v; /usr/bin/xset s off; /usr/bin/xset s noblank
+    settle == 6
     terminal_wait == 0
   # NO `terminal_wait:` HERE, AND THAT IS THE FIX RATHER THAN AN OMISSION.
   #
