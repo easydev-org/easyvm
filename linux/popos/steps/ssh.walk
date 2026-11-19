@@ -73,6 +73,22 @@ walkthrough "linux-popos - sshd"
   step "unlock sudo once for this session"
     run == printf '%s\n' {{ password }} | sudo -S -v
     settle == 4
+  # THE PACKAGE INDEX IN THIS DISK IS STALE, AND THE FIRST ATTEMPT GOT A 404.
+  #
+  # MEASURED ON RUN 44557723577's successor, whose terminal reads
+  #
+  #	Err:1 http://apt.pop-os.org/ubuntu noble-updates/main amd64 openssh-sftp-server 1:9.6p1-3ubuntu13.5
+  #	  404  Not Found
+  #	Err:2 http://apt.pop-os.org/ubuntu noble-updates/main amd64 openssh-server 1:9.6p1-3ubuntu13.5
+  #	  404  Not Found
+  #	E: Failed to fetch ... 404  Not Found
+  #
+  # sudo was already unlocked and the terminal was fine - the failure is the index: this disk's
+  # apt lists point at a package version pop-os has since replaced. `apt-get update` first, which is
+  # what the error message itself recommends.
+  step "refresh the package index"
+    run == sudo apt-get update 2>&1 | tail -3
+    settle == 45
   step "install openssh-server"
     run == sudo apt-get install -y openssh-server
     settle == 60

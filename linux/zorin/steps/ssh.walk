@@ -93,6 +93,11 @@ walkthrough "linux-zorin - sshd"
   step "unlock sudo once for this session"
     run == printf '%s\n' {{ password }} | sudo -S -v
     settle == 4
+  # `apt-get update` FIRST: this disk's index can point at a version the archive has replaced,
+  # which answers 404 and reads like a network problem (measured on popos, same family).
+  step "refresh the package index"
+    run == sudo apt-get update 2>&1 | tail -3
+    settle == 45
   step "install openssh-server"
     run == sudo apt-get install -y openssh-server
     settle == 60
