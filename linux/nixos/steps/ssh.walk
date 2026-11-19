@@ -39,7 +39,20 @@ walkthrough "linux-nixos - sshd"
     type == '{{ password }}'
   press Return, waiting 12s, named "greeter - submit"
   settle 240s, named "let the session finish starting"
-  click "skip the welcome dialog" at 858 748, waiting 5s, named "skip the welcome dialog"
+  # THE WELCOME DIALOG IS CLICKED ONLY ONCE THE DESKTOP HAS PAINTED IT, AND THE CLICK REPEATS.
+  #
+  # MEASURED ON RUN 44557723577's successor: at 150 s the desktop is complete - dock, background,
+  # 'Welcome to NixOS 26.05 (Yarara)' with its Skip button at 857,751 - while the stage was on
+  # 'wait for sshd' with nothing typed. The single click this file made came BEFORE the dialog
+  # existed, so the window stayed and took the keyboard from the terminal the walk opened next.
+  #
+  # The wait gives it time to appear; three clicks give it the same number of chances the retries
+  # elsewhere use; Escape after them closes whatever is left.
+  step "the welcome dialog is up, when this desktop shows one"
+    loop == {check: {from: welcome, mode: text, name: showing, rect: [740, 600, 1180, 700], rect_at: [1920, 1080], scale: 1, words: [[welcome, to, nixos]]}, do: [{settle: 5}], max: 20, see: {name: welcome}, until: {fact: showing}}
+    optional == true
+  step "close it"
+    do == [{click: [857, 751], settle: 3}, {click: [857, 751], settle: 3}, {click: [857, 751], settle: 3}]
   press Escape, waiting 2s, named "clear anything left over"
   # NO WORD AND NO PICTURE DECIDES THIS DESKTOP, SO THE SHELL DOES.
   #
