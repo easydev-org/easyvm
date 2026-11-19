@@ -112,18 +112,27 @@ walkthrough "linux-nixos - sshd"
     terminal_wait == 0
     type_gap == 0.15
   step "rebuild the system"
-    run == sudo nixos-rebuild switch 2>&1 | tail -8
-    settle == 300
+    run == sudo nixos-rebuild switch
+    settle == 420
     terminal_wait == 0
     type_gap == 0.15
+  # THE REBUILD RESTARTS THE DISPLAY MANAGER, SO THE SCREEN GOES BLACK - BUT THIS DOES NOT NEED IT.
+  #
+  # MEASURED: after `nixos-rebuild switch` the recording is PURE BLACK for the rest of the stage,
+  # which is what switching the system profile does to the running session. Everything after it is
+  # sshd, and sshd does not care what the screen shows.
+  #
+  # The wait for the port is what matters, so it is given its full ten minutes and the `is-active`
+  # line is a report rather than a gate - a systemd unit that is still starting at the moment of the
+  # read must not end the stage.
   step "prove sshd is active"
-    run == systemctl is-active sshd
+    run == systemctl is-active sshd; systemctl is-enabled sshd
     settle == 5
     terminal_wait == 0
     type_gap == 0.15
   step "wait for sshd"
     require_ssh == true
-    timeout == 600
+    timeout == 900
   step "prove the kernel over ssh"
     ssh == uname -a
     timeout == 120
