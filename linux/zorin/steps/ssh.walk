@@ -142,25 +142,58 @@ walkthrough "linux-zorin - sshd"
   # SO THE NOTIFIER IS STOPPED BEFORE THE INDEX IS TOUCHED. `apt-daily` and PackageKit are what
   # raise it; both are stopped here (they were the subject of a step this file used to have, whose
   # CLICK on the updater was the thing pressing Install).
-  step "stop the update notifier before it raises polkit"
-    run == sudo systemctl stop packagekit unattended-upgrades apt-daily.service apt-daily-upgrade.service; sudo systemctl disable --now packagekit; pkill -f update-notifier; echo notifier_stopped
-    settle == 6
+  # THE LONG LINES ARRIVE WITH DOUBLED CHARACTERS, SO THERE ARE NO LONG LINES.
+  #
+  # MEASURED ON RUN 44614135879's terminal, in full:
+  #
+  #	$ pkill -f update-nnnotifier; pkill -f gnome-software; pkill -f packagekitd
+  #	$ sudo systemctl stop packagekit unattended-upgrades apt--daily.service apt-daily-upgrade.service
+  #	  ; sudo systemctl disable ---now packagekit; ...
+  #	Failed to stop apt--daily.service: Unit apt--daily.service not loaded.
+  #	systemctl: unrecognized option '---now'
+  #
+  # `nnn`, `--`, `---` - each one a key ARRIVING TWICE. That is autorepeat: the engine sends key-down
+  # and key-up in one event list (see qmp.Conn.Stroke), but a guest under load can still latch a key
+  # down for a frame too long, and a 184-character line is 184 chances for it to happen. The line
+  # that BROKE was the one command this stage cannot do without.
+  #
+  # SO EVERY COMMAND IS SHORT, and `type_gap` is wide enough that each key is released before the
+  # next is sent. A short command that doubles a character still names a real unit; a long one that
+  # doubles a `-` fails on its first word.
+  step "stop the update notifier, one short command at a time"
+    run == sudo systemctl stop packagekit
+    settle == 3
+    type_gap == 0.09
+  step "stop the unattended upgrades"
+    run == sudo systemctl stop unattended-upgrades
+    settle == 3
+    type_gap == 0.09
+  step "stop the timers that start them again"
+    run == sudo systemctl stop apt-daily.timer apt-daily-upgrade.timer
+    settle == 3
+    type_gap == 0.09
   step "refresh the package index"
     run == sudo apt-get update
     settle == 60
-    type_gap == 0.06
+    type_gap == 0.09
   step "install openssh-server"
     run == sudo apt-get install -y openssh-server
     settle == 90
-    type_gap == 0.06
+    type_gap == 0.09
   step "allow password authentication"
     run == sudo sed -i "s/^#\?\s*PasswordAuthentication.*/PasswordAuthentication yes/" /etc/ssh/sshd_config ; sudo grep -i "^PasswordAuthentication" /etc/ssh/sshd_config
     settle == 3
-  # `policy-rc.d returned 101` MEANS THE PACKAGE INSTALL WAS TOLD NOT TO START THE SERVICE, so the
-  # enable is not decoration - it is the step that makes sshd run at all.
-  step "enable and start ssh"
-    run == sudo systemctl enable --now ssh.socket; sudo systemctl enable --now ssh; systemctl is-active ssh || systemctl is-active ssh.socket
-    settle == 10
+    type_gap == 0.09
+  # THE ENABLE IS NOT DECORATION: `policy-rc.d returned 101` means the package install was told NOT
+  # to start the service, so this is the step that makes sshd run at all.
+  step "enable ssh at boot"
+    run == sudo systemctl enable ssh
+    settle == 5
+    type_gap == 0.09
+  step "start ssh now"
+    run == sudo systemctl start ssh
+    settle == 8
+    type_gap == 0.09
   step "wait for sshd"
     require_ssh == true
     timeout == 600
