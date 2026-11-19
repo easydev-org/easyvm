@@ -51,8 +51,28 @@ walkthrough "linux-cachyos - sshd"
   # The desktop was up the whole time the stage was waiting - the recording's last 15 minutes are a
   # finished CachyOS desktop with its welcome window and its panel. `desktop:` spent them asking a
   # question this DE answers false to.
+  # A REFERENCE IMAGE, BECAUSE THE PANEL TEST IS NOT STABLE ON THIS GUEST.
+  #
+  # `desktop: linux/kde` ANSWERED IN 0 s ON RUN 44509536049 AND NEVER ONCE IN 15 MINUTES ON RUN
+  # 44514871063 - and the second run's recording ends on a PERFECT CACHYOS DESKTOP: welcome window,
+  # panel, clock reading 6:37 AM. `IsKDEDesktop` measures the panel's contrast against the rest of
+  # the screen, and the same desktop scores above its threshold on one boot and below it on the next.
+  #
+  # `desktop:` with a `reference:` compares a NAMED BAND against a picture, which does not drift:
+  # measured on that recording, the band below scores 0.0000 on every boot and splash frame and
+  # 1.0000 on every desktop frame from 55 s on.
+  #
+  # THE REFERENCE IS reference/desktop-ssh.png - taken from THIS stage's own recording, not from the
+  # install stage, whose desktop has a different wallpaper and an installer window on it.
+  # THE BAND IS WALLPAPER to the right of centre: clear of the welcome window (x 560..1355), of the
+  # panel along the bottom, and of the clock in the bottom-right corner.
   step "wait for the desktop"
     desktop == linux/kde
+    reference == reference/desktop-ssh.png
+    range == [0.90, 1.0]
+    rect == [1350, 740, 1700, 990]
+    rect_at == [1920, 1080]
+    poll == 5
     timeout == 900
   # THE SCREEN GOES BLACK BEFORE THE FIRST COMMAND, AND A BLACK SCREEN TAKES NO KEYS.
   #
