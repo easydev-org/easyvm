@@ -11,6 +11,24 @@ walkthrough "linux-endeavour - sshd"
     # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
     memory_mb == 4096
     timeout == 900
+  # THE DISK COMES UP ON GRUB AND WAITS FOR A KEY, SO THE KEY IS PRESSED FIRST.
+  #
+  # MEASURED ON RUN 44557720029, whose ssh log reads this same screen over and over:
+  #
+  #	EndeavourOS (7.1.8-arch1-3)
+  #	EndeavourOS (7.1.8-arch1-3-fallback)
+  #	Reboot Into Firmware Interface
+  #	Press Enter to ...
+  #
+  # and the greeter wait then pressed Escape into it sixty times. This walk had no boot step at all:
+  # it went from `boot: true` straight to a greeter wait, so on a medium whose disk shows GRUB the
+  # stage never reached the system.
+  #
+  # The gate is the menu's own words; Return picks the highlighted first entry.
+  step "the disk's boot menu, when it has one"
+    loop == {check: {from: grubmenu, mode: text, name: at_menu, rect: [400, 300, 1520, 780], rect_at: [1920, 1080], scale: 1, words: [[endeavour], [reboot, into, firmware]]}, do: [{settle: 5}], max: 12, see: {name: grubmenu}, until: {fact: at_menu}}
+    optional == true
+  press Return, waiting 20s, named "boot the highlighted entry, which is the installed system"
   # THE GREETER IS ASKED FOR, AND THE DESKTOP IS WAITED FOR, AND NEITHER WAS HERE.
   #
   # MEASURED ON RUN 44557514172, whose ssh recording at 90 s is SDDM's login screen with a password
