@@ -56,10 +56,9 @@ walkthrough "linux-manjaro - sshd"
     desktop == linux/kde
     timeout == 600
   press ctrl+alt+t, waiting 20s, named "open the terminal"
-  step "the terminal answers"
-    run == echo TERMINAL_READY
-    settle == 3
-    terminal_wait == 0
+  # NO PROBE COMMAND. MEASURED ON endeavour AND mx: a lone 'echo XXX' right after the chord loses
+  # its Return, the next command is appended to it, and every character arrives in capitals. The
+  # first thing typed after the chord is the command that matters.
   step "unlock sudo once for this session"
     run == printf '%s\n' {{ password }} | sudo -S -v
     settle == 4

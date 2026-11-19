@@ -104,10 +104,6 @@ walkthrough "linux-opensuse-tumbleweed - sshd"
     type == '{{ password }}'
     settle == 3
   press Return, waiting 12s, named "the console takes the password"
-  step "the console is a shell, which every command below can use"
-    run == echo CONSOLE_READY
-    settle == 3
-    terminal_wait == 0
   # AND SUDO IS UNLOCKED ONCE HERE, FOR THE SAME REASON AS THE OTHER DISTRIBUTIONS: a password that
   # travels inside a command line is lost when that command's Return is lost. `sudo -v` stores a
   # timestamp, and every later `sudo` is plain.
