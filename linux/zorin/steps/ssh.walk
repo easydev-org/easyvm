@@ -52,7 +52,7 @@ walkthrough "linux-zorin - sshd"
   #
   # MEASURED ON RUN 44545555943's kubuntu ssh recording, whose terminal shows exactly that:
   #
-  #	vmuser@kubuntu:~$ xset s off; xset -dpms; xset s noblank; echo SCREEN_KEPT_ONECHO ADMIN | sudo ...
+  #	vmuser@kubuntu:~$ xset s off; xset -dpms; xset s noblank; echo screen_kept_onECHO ADMIN | sudo ...
   #	server does not have extension for -dpms option
   #	[sudo: authenticate] Password:
   #
@@ -92,7 +92,7 @@ walkthrough "linux-zorin - sshd"
   # `xset s off` is not enough on its own for this desktop: the blanking policy here also involves
   # the screensaver daemon, so both are set, and the power settings are set through them.
   step "keep the screen on, all three ways"
-    run == xset s off; xset s noblank; xset -dpms; gsettings set org.gnome.desktop.session idle-delay 0 2>/dev/null; echo SCREEN_KEPT_ON
+    run == xset s off; xset s noblank; xset -dpms; gsettings set org.gnome.desktop.session idle-delay 0 2>/dev/null; echo screen_kept_on
     settle == 4
   # THE SOFTWARE UPDATER STEALS FOCUS AND THE LONG COMMANDS ARRIVE IN PIECES.
   #
@@ -131,7 +131,7 @@ walkthrough "linux-zorin - sshd"
   # raise it; both are stopped here (they were the subject of a step this file used to have, whose
   # CLICK on the updater was the thing pressing Install).
   step "stop the update notifier before it raises polkit"
-    run == sudo systemctl stop packagekit unattended-upgrades apt-daily.service apt-daily-upgrade.service; sudo systemctl disable --now packagekit; pkill -f update-notifier; echo NOTIFIER_STOPPED
+    run == sudo systemctl stop packagekit unattended-upgrades apt-daily.service apt-daily-upgrade.service; sudo systemctl disable --now packagekit; pkill -f update-notifier; echo notifier_stopped
     settle == 6
   step "refresh the package index"
     run == sudo apt-get update

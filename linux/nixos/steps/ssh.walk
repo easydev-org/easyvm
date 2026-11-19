@@ -86,7 +86,7 @@ walkthrough "linux-nixos - sshd"
   #
   # MEASURED ON RUN 44545555943's kubuntu ssh recording, whose terminal shows exactly that:
   #
-  #	vmuser@kubuntu:~$ xset s off; xset -dpms; xset s noblank; echo SCREEN_KEPT_ONECHO ADMIN | sudo ...
+  #	vmuser@kubuntu:~$ xset s off; xset -dpms; xset s noblank; echo screen_kept_onECHO ADMIN | sudo ...
   #	server does not have extension for -dpms option
   #	[sudo: authenticate] Password:
   #
@@ -94,7 +94,7 @@ walkthrough "linux-nixos - sshd"
   # command went to the OTHER window. And the `xset -dpms` failure - "server does not have extension
   # for -dpms option" - is harmless; the screen is still kept awake by `s off` and `s noblank`.
   step "keep the screen on, because a blanked screen takes no keys"
-    run == xset s off; xset s noblank; echo SCREEN_KEPT_ON
+    run == xset s off; xset s noblank; echo screen_kept_on
     settle == 5
   # UBUNTU'S SHAPE: unlock sudo ONCE, then plain sudo - the password stops travelling in commands.
   #
