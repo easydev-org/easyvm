@@ -27,6 +27,13 @@ walkthrough "mx - the minstall walk"
   press Return, waiting 25s, named "boot it"
   step "wait for the live desktop"
     desktop == linux/xfce
+    reference == reference/desktop.png
+    range == [0.90, 1.0]
+    # THE TOP 120 ROWS ARE WALLPAPER AND A MENU BAR: a boot splash scores 0.0002
+    # there and every desktop frame 1.0000, including the ones with an installer
+    # window over the middle. The clock sits below this band, which is why 120.
+    rect == [0, 0, 1920, 120]
+    rect_at == [1920, 1080]
     timeout == 5400
   step "desktop - installer"
     do == [{click: [81, 259], settle: 3}, {click: [81, 259], settle: 3}]

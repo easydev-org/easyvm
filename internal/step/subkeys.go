@@ -26,9 +26,10 @@ package step
 var Subkeys = map[string]Key{
 	// --- where a question is asked, and what it is compared with --------------------------------
 	"rect": {Name: "rect", Kind: KindRect,
-		Summary: "the region to measure, as a FRACTION of the frame (`middle`, `bottom 4.5%`, " +
-			"`bottom 40px`) or `[x0, y0, x1, y1]` with `rect_at:`. A region belongs to the " +
-			"QUESTION, so one captured frame can answer several"},
+		Summary: "the region to measure: as a FRACTION of the frame (`middle`, `bottom 4.5%`), or " +
+			"`[x0, y0, x1, y1]` pixels. With `check:`, the region asked about; with `desktop: {reference:}`, " +
+			"the part of the picture compared - which is how a wallpaper is compared without the " +
+			"installer window that comes to sit over it"},
 	"rect_at": {Name: "rect_at", Kind: KindPair,
 		Summary: "with a PIXEL `rect:`: [width, height] the rectangle was measured at, so it can be " +
 			"scaled for a guest drawing at another size"},

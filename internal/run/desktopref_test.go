@@ -123,3 +123,64 @@ func writePNG(t *testing.T, path string, img image.Image) {
 }
 
 var _ = screen.Compare
+
+// A `rect:` ON A `desktop:` KEEPS THE DECISION ABOUT THE WALLPAPER.
+//
+// MEASURED ON cachyos, whole frame against the same frame's wallpaper:
+//
+//	boot splash                                  0.0000
+//	the desktop                                 1.0000
+//	the desktop with its installer window over it 0.6019 .. 0.6788
+//
+// The installer window is most of the middle of the screen, so a whole-frame comparison changes its
+// answer when a window opens - and the window is what the walk does NEXT. Over the top 200 rows the
+// same three frames are 0.0000, 1.0000 and 1.0000.
+func TestADesktopReferenceCanBeScopedToTheWallpaper(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "steps"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// The reference: a distinct top strip, and a middle that a window will cover.
+	ref := image.NewRGBA(image.Rect(0, 0, 1920, 1080))
+	for y := 0; y < 1080; y++ {
+		for x := 0; x < 1920; x++ {
+			if y < 200 {
+				ref.Set(x, y, color.RGBA{0x20, 0x60, 0xa0, 0xff})
+			} else {
+				ref.Set(x, y, color.RGBA{0x80, 0x20, 0x20, 0xff})
+			}
+		}
+	}
+	refPath := filepath.Join(dir, "steps", "desktop.png")
+	writePNG(t, refPath, ref)
+
+	// A frame that is the same wallpaper with a big white "window" over the middle.
+	withWindow := image.NewRGBA(image.Rect(0, 0, 1920, 1080))
+	for y := 0; y < 1080; y++ {
+		for x := 0; x < 1920; x++ {
+			if y < 200 {
+				withWindow.Set(x, y, color.RGBA{0x20, 0x60, 0xa0, 0xff})
+			} else if y > 300 && y < 900 && x > 400 && x < 1500 {
+				withWindow.Set(x, y, color.RGBA{0xf0, 0xf0, 0xf0, 0xff})
+			} else {
+				withWindow.Set(x, y, color.RGBA{0x80, 0x20, 0x20, 0xff})
+			}
+		}
+	}
+	winPath := filepath.Join(dir, "window.png")
+	writePNG(t, winPath, withWindow)
+
+	d := &oneFrameDriver{path: winPath}
+	ex, _ := newExec(d, map[string]any{"name": "x"})
+	ex.Work = dir
+	ex.File = &walk.File{Path: filepath.Join(dir, "steps", "install.walk")}
+	err := ex.doDesktop(walk.Step{Index: 1, Name: "wait for the desktop", Spec: map[string]any{
+		"name": "wait for the desktop", "desktop": "windows",
+		"reference": refPath, "range": []any{0.90, 1.0},
+		"rect":    []any{0, 0, 1920, 200},
+		"timeout": float64(2),
+	}})
+	if err != nil {
+		t.Fatalf("a window over the wallpaper failed a comparison scoped to the wallpaper: %v", err)
+	}
+}

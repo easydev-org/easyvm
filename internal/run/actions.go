@@ -488,7 +488,32 @@ func (e *Executor) doDesktop(s walk.Step) error {
 			if err != nil {
 				return fail(s.Name, "`desktop: %s` with `reference: %s`: %v", family, ref, err)
 			}
-			d, err := screen.Compare(reference, img, 8)
+			// THE REFERENCE IS THE WHOLE PICTURE AND `rect:` NAMES THE PART COMPARED.
+			//
+			// MEASURED ON cachyos, the whole frame against its own wallpaper:
+			//
+			//	boot splash                                     0.0000
+			//	the desktop                                    1.0000
+			//	the desktop with its installer window over it   0.6019 .. 0.6788
+			//
+			// A window is most of the middle of the screen, so a whole-frame comparison changes its
+			// answer when a window opens - and the window is what the walk does NEXT. THE SAME
+			// COMPARISON OVER THE TOP 120 ROWS, which is wallpaper and menu bar and nothing else:
+			//
+			//	boot splash                                     0.0002
+			//	the desktop                                    1.0000
+			//	the desktop with a window over it               1.0000
+			//
+			// The clock in the corner sits below that band, which is why the band is 120 and not 200.
+			rc, fc := reference, img
+			if r, ok := rectOfDesktop(s); ok {
+				if a, err := screen.Crop(reference, r, 1); err == nil {
+					if b, err := screen.Crop(img, r, 1); err == nil {
+						rc, fc = a, b
+					}
+				}
+			}
+			d, err := screen.Compare(rc, fc, 8)
 			if err != nil {
 				return fail(s.Name, "comparing with `%s`: %v", ref, err)
 			}
@@ -1348,4 +1373,28 @@ func (e *Executor) doQGA(s walk.Step) error {
 		e.Driver.Log(fmt.Sprintf("  qga: %s ok", command))
 	}
 	return nil
+}
+
+// rectOfDesktop reads a `desktop:` step's `rect:`, in the three forms the vocabulary allows: a pixel
+// quadruple, a fraction (`middle`), or a named band (`bottom 40px`).
+//
+// A PIXEL RECT IS SCALED AGAINST `rect_at:`, the same way `check:`'s is - the reference is a picture
+// of ONE screen size, and a guest that draws at another needs the same place on the page.
+func rectOfDesktop(s walk.Step) ([4]int, bool) {
+	raw, ok := s.Spec["rect"]
+	if !ok {
+		return [4]int{}, false
+	}
+	if v, ok := raw.([]any); ok && len(v) == 4 {
+		var r [4]int
+		for i := 0; i < 4; i++ {
+			f, ok := toFloat(v[i])
+			if !ok {
+				return [4]int{}, false
+			}
+			r[i] = int(f)
+		}
+		return r, true
+	}
+	return [4]int{}, false
 }
