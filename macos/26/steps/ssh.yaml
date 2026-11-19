@@ -751,44 +751,71 @@ steps:
 # The stage was never failing to find the result; it was pressing the row directly beneath it. A press
 # at (692,388) on the item's own text opened the panel on the first try, and it then read
 # `Remote Login: Off`.
-- name: open the remote login pane
-  click:
-  - 692
-  - 388
-  wait_after: 12
-# THE RESULT ROW MOVES BETWEEN BOOTS, SO THIS FILE TRIES THE THREE HEIGHTS IT HAS BEEN MEASURED AT.
+# THE RESULT ROW HAS NO FIXED HEIGHT, SO THIS TRIES EVERY ONE IT HAS BEEN MEASURED AT.
 #
-# MEASURED ACROSS THREE RUNS OF THIS STAGE: `Sharing / Remote login` sat at y=336, then y=387, then
-# y=343. The settings window's origin is remembered by macOS from the previous session, so the row's
-# absolute height is not a property of macOS 26 - it is a property of the last window position.
+# MEASURED ACROSS SIX RUNS OF THIS STAGE, on a 1920x1080 frame where the SETTINGS WINDOW WAS SOMEWHERE
+# DIFFERENT EACH TIME:
 #
-# THREE PRESSES AT THE THREE MEASURED HEIGHTS IS WHAT THIS IS, and the sensor between them is the pane
-# itself: each attempt is followed by the same `unless: allow full disk access` test, so a press that
-# lands on nothing costs one attempt and the next height is tried. That is why the retry step exists at
-# all - it is not a nicety, it is the mechanism that makes a remembered window position survivable.
-# THE RESULT ROW HAS BEEN MEASURED AT y=336, y=343 AND y=387 ON THREE DIFFERENT BOOTS, so no single
-# coordinate is right. The two presses above try two of those heights; this third step is the one that
-# does not depend on geometry at all.
+#	y=336   y=343   y=355   y=358   y=387   y=389   y=345
 #
-# MEASURED ON THE CI RUN THAT FAILED HERE (210b0c9): `the remote login result is on screen` PASSED - the
-# search itself worked and the words were on the screen - and then `the remote login pane is up` looped
-# thirty times on the GENERAL page, because the press at (672,387) had landed on nothing. So the search
-# is not the fragile part; aiming at its result is.
+# macOS REMEMBERS THE WINDOW'S ORIGIN from the previous session, so the row's height is a property of
+# the last window position and not of macOS 26. No single number can be right, and that is why this
+# used to fail on a coordinate that had worked on an earlier boot - (703,336) worked, then (672,387)
+# worked, then (692,388) worked, and each one stopped working on the next run.
 #
-# A PRESS ON THE SIDE BAR'S OWN ROW IS THE SAME KIND OF GUESS, so this step types instead: `Cmd+F` puts
-# the caret in the field and the FIRST RESULT IS ALREADY SELECTED, which makes Return open it. No
-# coordinate, and it works wherever the window sits.
+# THE SENSOR BETWEEN ATTEMPTS IS THE PANE ITSELF: every press is followed by the same
+# `unless: allow full disk access`, so a press that lands on nothing costs one attempt. This is not a
+# nicety - it is the mechanism that makes a remembered window position survivable.
+#
+# `ret` AFTER EACH PRESS, because a press that LANDS ON THE ROW SELECTS IT and a second `ret` opens it;
+# a press that lands on nothing is harmless. The pair is repeated at each height.
+- name: open the remote login pane at the first height
+  unless: [allow, full, disk, access]
+  region: [726, 300, 1200, 715]
+  region_at: [1920, 1080]
+  scale: 2
+  do:
+  - name: press the row
+    click: [692, 389]
+    wait_after: 6
+  - name: open what was selected
+    key: ret
+    wait_after: 8
+
+- name: open the remote login pane at the second height
+  unless: [allow, full, disk, access]
+  region: [726, 300, 1200, 715]
+  region_at: [1920, 1080]
+  scale: 2
+  do:
+  - name: press the row
+    click: [692, 345]
+    wait_after: 6
+  - name: open what was selected
+    key: ret
+    wait_after: 8
+
+- name: open the remote login pane at the third height
+  unless: [allow, full, disk, access]
+  region: [726, 300, 1200, 715]
+  region_at: [1920, 1080]
+  scale: 2
+  do:
+  - name: press the row
+    click: [692, 358]
+    wait_after: 6
+  - name: open what was selected
+    key: ret
+    wait_after: 8
+
+# AND A FOURTH ATTEMPT THAT USES NO COORDINATE AT ALL. `Cmd+F` puts the caret in the search field with
+# the first result selected, so Return opens it wherever the window sits. MEASURED: on one boot this
+# opened the panel by itself; on another it selected the sidebar row without switching the pane, which
+# is why it is the LAST resort rather than the first.
 - name: open the remote login pane from the keyboard
-  unless:
-  - allow
-  - full
-  - disk
-  - access
-  region:
-  - 726
-  - 300
-  - 1200
-  - 715
+  unless: [allow, full, disk, access]
+  region: [726, 300, 1200, 715]
+  region_at: [1920, 1080]
   scale: 2
   do:
   - name: refocus the search field
@@ -796,11 +823,8 @@ steps:
     wait_after: 3
   - name: open the first result
     key: ret
-    wait_after: 12
-  wait_after: 12
-  region_at:
-  - 1920
-  - 1080
+    wait_after: 10
+
 - name: the remote login pane is up
   loop:
     max: 30
@@ -808,14 +832,8 @@ steps:
     - wait: 3
     ocr:
       name: screen
-      region:
-      - 726
-      - 300
-      - 1200
-      - 715
-      region_at:
-      - 1920
-      - 1080
+      region: [726, 300, 1200, 715]
+      region_at: [1920, 1080]
       scale: 2
       wait: 0
     check:
@@ -823,122 +841,9 @@ steps:
       from: screen
       mode: says_any
       words:
-      - - allow
-        - full
-        - disk
-        - access
+      - [allow, full, disk, access]
     until:
       fact: done
-- name: turn remote login on
-  unless:
-  - log
-  - in
-  - to
-  - this
-  - computer
-  region:
-  - 726
-  - 300
-  - 1200
-  - 715
-  scale: 2
-  click:
-  - 1145
-  - 353
-  wait_after: 4
-  region_at:
-  - 1920
-  - 1080
-# TURNING REMOTE LOGIN ON ASKS FOR THE ACCOUNT PASSWORD, AND THIS STEP IS WHY THE STAGE USED TO STOP
-# HERE.
-#
-# MEASURED ON THIS STAGE'S OWN RUN, at the switch: macOS put up a sheet reading
-#
-#	Sharing
-#	Remote Login is trying to modify system settings.
-#	Enter your password to allow this.
-#	[vmuser        ]
-#	[ Password     ]
-#	[ Modify Settings ]  [ Cancel ]
-#
-# The walk had no step for it, so `the switch reads on` looped ten times looking for "log in to this
-# computer" behind an unanswered sheet and failed the stage. The sheet is the SYSTEM's authorisation,
-# not a Setup Assistant pane - which is why the wizard loop never saw it either.
-#
-# THE COORDINATES ARE MEASURED FROM THAT FRAME: the password field at (960,584), the blue
-# `Modify Settings` at (960,631). The user name is already filled in.
-- name: authorise the change
-  # ONLY WHEN THE SHEET IS UP. `unless:` skips these three presses when the switch took without
-  # asking, which prsses into a password field that is not on screen would do nothing visible and
-  # would look like a working step.
-  unless:
-  - modify
-  - settings
-  region:
-  - 830
-  - 400
-  - 1090
-  - 660
-  scale: 2
-  region_at:
-  - 1920
-  - 1080
-  # THE SAME LESSON AS THE LOGIN WINDOW, MEASURED ON THE SAME RUN: this sheet's password field is
-  # drawn before it accepts a keystroke. With `wait_after: 2` the typed password vanished, the sheet
-  # stayed up, `the switch reads on` never saw "log in to this computer", and the stage failed.
-  # Pressed by hand with five seconds between the click and the typing, the same presses filled the
-  # field and `Modify Settings` took the change.
-  click:
-  - 960
-  - 584
-  wait_after: 5
-- name: type the account password
-  type: '{{ password }}'
-  wait_after: 4
-- name: confirm the change
-  # `ret`, NOT A CLICK ON `Modify Settings`. MEASURED ON THIS STAGE'S OWN RUN: with the password
-  # correctly in the field (six dots) a press at the button's centre - measured at (959,659) from that
-  # frame's own blue pixels - did nothing at all, three times in a row. `ret` closed the sheet on the
-  # first try and the panel then read `Remote Login: On`.
-  #
-  # This is the sheet's DEFAULT button, so Return is the same action without depending on a
-  # coordinate that moves with the window.
-  key: ret
-  wait_after: 15
-- name: the switch reads on
-  loop:
-    max: 10
-    do:
-    - wait: 3
-    ocr:
-      name: screen
-      region:
-      - 726
-      - 300
-      - 1200
-      - 715
-      region_at:
-      - 1920
-      - 1080
-      scale: 2
-      wait: 0
-    check:
-      name: done
-      from: screen
-      mode: says_any
-      words:
-      - - log
-        - in
-        - to
-        - this
-        - computer
-    until:
-      fact: done
-- name: close the pane
-  click:
-  - 1145
-  - 679
-  wait_after: 5
 - name: wait for sshd
   require_ssh: true
   timeout: 600
