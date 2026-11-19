@@ -78,6 +78,24 @@ walkthrough "mx - the minstall walk"
   step "the rescue menu is up, and its footer says ESC leaves it"
     loop == {check: {from: mxrescue, mode: text, name: is_rescue, rect: [560, 180, 1460, 640], rect_at: [1920, 1080], scale: 1, words: [[Boot, Rescue, Menus], [Back, to, main, menu]]}, do: [{settle: 3}], max: 20, see: {name: mxrescue}, until: {fact: is_rescue}}
   press Escape, waiting 20s, named "ESC to the main menu, where the live session is"
+  # THE HIGHLIGHT COMES BACK WHERE IT WAS - ON THE LANGUAGE ROW - NOT ON THE TOP ENTRY.
+  #
+  # MEASURED ON RUN 44527035434, whose recording ends on the real main menu:
+  #
+  #	MX-25.3 Xfce x64 (September 20, 2026) (sysvinit)
+  #	MX-25.3 Xfce x64 (September 20, 2026) (systemd)
+  #	Check integrity of the live media
+  #	Language - Keyboard - Timezone          <- highlighted
+  #	>>> Advanced Options <<<
+  #	Memory Test (64-bit UEFI)
+  #	Boot Rescue Menus
+  #
+  # The live session is the FIRST row, and the highlight is on the fourth. `up` walks the list, so
+  # three of them put it on the top row; `Return` boots it.
+  press up, waiting 1s, named "up to Check integrity"
+  press up, waiting 1s, named "up to the systemd entry"
+  press up, waiting 1s, named "up to the top row, the live session"
+  press Return, waiting 30s, named "boot the live session"
   step "wait for the live desktop"
     desktop == linux/xfce
     reference == reference/desktop.png
