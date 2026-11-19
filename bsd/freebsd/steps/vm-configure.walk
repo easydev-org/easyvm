@@ -6,7 +6,6 @@ walkthrough "freebsd 15.1 - the desktop is up"
   var hostname == {default: easyvm-freebsd, from: args.hostname}
   var locale == {default: en_US.UTF-8, from: args.locale}
   var out == {default: out/freebsd-vm-configure.qcow2, from: args.out}
-  var shutdown == {default: acpi, from: args.shutdown}
   var timezone == {default: America/Los_Angeles, from: args.timezone}
   var user == {default: vmuser, from: args.user}
   header ssh_port == 2222
@@ -64,8 +63,23 @@ walkthrough "freebsd 15.1 - the desktop is up"
   step "flush the writes before anything else"
     ssh == sudo sync
     timeout == 300
-  step "stop the machine"
-    shutdown == '{{ shutdown }}'
+  # `shutdown: acpi` IS NOT A METHOD, AND `freebsd.yml` NEVER PASSES `args.shutdown`, so this step
+  # asked for the illegal value on every run.
+  #
+  # MEASURED on run 44448146157, the vm stage, step 19 of 20:
+  #
+  #	status: failed step 19/20 "stop the machine"
+  #	error:   "acpi" is not a shutdown method; the ones this build has are `kill` and `ssh`.
+  #	         To press the power button write `acpi: power`, ...
+  #
+  # THE SAME DEFECT WAS FIXED IN `ssh.walk` AND THIS FILE WAS MISSED - it is a separate file with its
+  # own copy of the variable. The ending is now the two steps the error message recommends, the same
+  # pair the ssh stage uses.
+  step "press the power button"
+    acpi == power
+    timeout == 60
+  step "wait for the machine to stop"
+    wait_until == stopped
     timeout == 600
   step "publish the disk"
     compress == '{{ out }}'
