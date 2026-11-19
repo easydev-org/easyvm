@@ -375,6 +375,13 @@ func (b Boot) StorageArgs() []string {
 			)
 		}
 		args = append(args, "-device", "usb-tablet,bus=xhci.0")
+		// AND THE KEYBOARD THE COMMENT ABOVE SAYS THIS GUEST NEEDS. `lib/vm.py` gives this bus a
+		// `usb-tablet` AND a `usb-kbd`, "because a macOS guest has no PS/2 and every pointer or key
+		// it receives arrives over USB" - and only the tablet was ever added here. The walks have
+		// been typing into macOS over USB anyway, which is why this was not caught: qemu's HID
+		// keyboard falls back to the PS/2 port for keycodes, and the firmware's own menus are the
+		// one place that fallback does not reach.
+		args = append(args, "-device", "usb-kbd,bus=xhci.0")
 		return args
 	}
 
@@ -579,6 +586,27 @@ func (b Boot) StorageArgs() []string {
 		xhciAdded = true
 	}
 	args = append(args, "-device", "usb-tablet,bus=xhci.0")
+	// AND A KEYBOARD ON THE SAME BUS, BECAUSE SOME MENUS ONLY READ USB INPUT.
+	//
+	// MEASURED ON RUN 44484688558 (mx), whose recording is the SAME UEFI "Select Language" panel for
+	// its whole 80 minutes:
+	//
+	//	=== that menu is the language submenu this medium opens on     (the check PASSED - it read
+	//	                                                                Language, Keyboard, Timezone)
+	//	=== leave the language submenu for the real boot menu   key esc
+	//	=== up to the first entry ... up again ... and once more  key up
+	//	=== boot it                                             key ret
+	//	=== wait for the live desktop                           80 minutes of the same frame
+	//
+	// Every key was sent and none arrived. This guest had `usb-tablet` and NO KEYBOARD AT ALL: q35
+	// gives it PS/2, and OVMF's graphical menu does not read PS/2 - it reads EFI Simple Text Input,
+	// which on this machine is USB. The menu is a device list, which is why a pointer would not have
+	// helped either.
+	//
+	// `usb-kbd` IS WHAT macOS ALREADY NEEDS and what `lib/vm.py` gives every guest on this bus. It is
+	// harmless elsewhere: a guest that already has a PS/2 keyboard just has a second one, and the
+	// keycodes the daemon sends are the same either way.
+	args = append(args, "-device", "usb-kbd,bus=xhci.0")
 	return args
 }
 
