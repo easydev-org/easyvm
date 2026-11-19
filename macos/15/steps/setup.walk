@@ -54,7 +54,7 @@ walkthrough "macos 15 setup (recovery image to setup assistant)"
   click "select reinstall macos" at 837 333, waiting 3s, named "select reinstall macos"
   click "open the installer" at 1142 586, waiting 20s, named "open the installer"
   step "wait for the installer to load"
-    loop == {check: {from: instaload, mode: text, name: loaded, words: [[agree, to, the, terms], [english, apple], [select, the, disk], [macos, sequoia]], rect: [923, 318, 1053, 376], rect_at: [1920, 1080]}, do: [{settle: 10}], max: 24, see: {name: instaload}, until: {fact: loaded}}
+    loop == {check: {from: instaload, mode: text, name: loaded, words: [[agree, to, the, terms], [english, apple], [select, the, disk], [macos, sequoia]], rect: [600, 520, 1300, 640], rect_at: [1920, 1080]}, do: [{settle: 10}], max: 24, see: {name: instaload}, until: {fact: loaded}}
   click welcome at 960 712, waiting 5s, named "welcome continue"
   step "wait for the licence pane"
     loop == {check: {from: licence, mode: text, name: licence_up, words: [[software, license, agreement], [please, read, this]], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, do: [{settle: 10}], max: 24, see: {name: licence}, until: {fact: licence_up}}
