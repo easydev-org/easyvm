@@ -62,14 +62,38 @@ walkthrough "linux-opensuse-tumbleweed - sshd"
     timeout == 120
     optional == true
   press ctrl+alt+t, waiting 5s, named "open a terminal, when there is a desktop to open one on"
+  # THE USER NAME MUST GO TO A FRESH PROMPT, AND THE RECORDING SHOWS IT DID NOT.
+  #
+  # MEASURED ON RUN 44557723577's successor, whose console reads
+  #
+  #	localhost login: Qz7vLp2w
+  #	Password:
+  #	login: timed out after 60 seconds
+  #
+  # THE PASSWORD WAS TYPED AT THE `login:` PROMPT - so the user name before it never arrived, and
+  # the password became the user name. Later lines are no better:
+  #
+  #	localhost login: ^Cvmuser            (a Ctrl-C before the name took)
+  #	localhost login: echo CONSOLE_READY
+  #	Login incorrect
+  #
+  # SO THE PROMPT IS CLEARED FIRST. Ctrl-C at a getty abandons whatever is half-typed and prints a
+  # new `login:`; two seconds later the name goes in, and each step then waits long enough for the
+  # guest to answer before the next one types.
+  # PRESS RETURN A FEW TIMES FIRST: EACH ONE MAKES GETTY PRINT A FRESH `login:` AT THE BOTTOM OF THE
+  # SCREEN, so the name is typed into a prompt that is known to be new rather than into whatever the
+  # console happened to be showing.
+  press Return, waiting 3s, named "ask getty for a fresh prompt"
+  press Return, waiting 3s, named "and one more, so the prompt is the last line on the screen"
+  press ctrl+c, waiting 3s, named "abandon anything half-typed at the console"
   step "log in on the text console"
     type == '{{ user }}'
-    settle == 3
-  press Return, waiting 3s, named "the console takes the user name"
+    settle == 5
+  press Return, waiting 6s, named "the console takes the user name"
   step "the console's password"
     type == '{{ password }}'
     settle == 3
-  press Return, waiting 8s, named "the console takes the password"
+  press Return, waiting 12s, named "the console takes the password"
   step "the console is a shell, which every command below can use"
     run == echo CONSOLE_READY
     settle == 3
