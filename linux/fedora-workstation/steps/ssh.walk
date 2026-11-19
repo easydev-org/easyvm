@@ -34,7 +34,11 @@ walkthrough "linux-fedora-workstation - sshd"
   # of this file handles with `optional: true` on every greeter step. A wait that blocks when the
   # greeter is absent turns "this medium auto-logs-in" into a failure.
   step "the greeter is drawn"
-    loop == {check: {from: greeter, mode: text, name: up, rect: [740, 470, 1340, 770], rect_at: [1920, 1080], scale: 2, words: [[password], [vmuser]]}, do: [{settle: 5}], max: 60, see: {name: greeter}, until: {fact: up}}
+    loop == {check: {from: greeter, mode: text, name: up, rect: [740, 470, 1340, 770], rect_at: [1920, 1080], scale: 2, words: [[password], [vmuser]]}, do: [{settle: 4}], max: 5, see: {name: greeter}, until: {fact: up}}
+    # FIVE ATTEMPTS, NOT SIXTY. This disk has no greeter at all - the first boot is the
+    # welcome wizard - and sixty attempts at four seconds each is what the stage spent before
+    # it ever reached the wizard's own step. MEASURED: 'the greeter is drawn' failed twelve
+    # times in a row with the wizard's words on screen, and the stage never moved on.
     optional == true
   step "greeter - wake the screen"
     key == esc
