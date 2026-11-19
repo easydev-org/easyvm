@@ -88,7 +88,7 @@ walkthrough "fedora-workstation - anaconda and the first boot"
     loop == {check: {from: part1, mode: text, name: there, rect: [618, 331, 693, 389], rect_at: [1920, 1080], scale: 1, words: [[vda1], [ext4]]}, do: [{settle: 4}], max: 20, see: {name: part1}, until: {fact: there}}
   click "open the root partition's detail page" at 460 363, waiting 6s, named "open the root partition's detail page"
   step "the detail page is up"
-    loop == {check: {from: detail, mode: text, name: up, rect: [649, 331, 759, 392], rect_at: [1920, 1080], scale: 1, words: [[UUID], [filesystem]]}, do: [{settle: 2}], max: 12, see: {name: detail}, until: {fact: up}}
+    loop == {check: {from: detail, mode: text, name: up, rect: [390, 330, 1040, 410], rect_at: [1920, 1080], scale: 1, words: [[UUID], [filesystem]]}, do: [{settle: 2}], max: 12, see: {name: detail}, until: {fact: up}}
   click "shrink it from the detail page" at 1008 267, waiting 6s, named "shrink it from the detail page"
   step "the shrink dialog is up"
     loop == {check: {from: shrink_dialog, mode: text, name: up, rect: [1023, 250, 1093, 307], rect_at: [1920, 1080], scale: 1, words: [[Shrink], [Size]]}, do: [{settle: 2}], max: 12, see: {name: shrink_dialog}, until: {fact: up}}
