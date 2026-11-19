@@ -8,7 +8,11 @@ walkthrough "linux-opensuse-tumbleweed - sshd"
   # characters is `admin`; the password on this disk is eight.
   password Qz7vLp2w
   var out == {default: out/distro.qcow2, from: args.out}
-  var user == {default: vmuser, from: args.user}
+  # `vmuservmuser` HERE TOO: agama fills the login name from the full name, so its two `type:`
+  # steps APPEND - the same fault measured on manjaro's calamares (see that file). The header
+  # `user:` is what the ssh client logs in as, and the `var` is what gets typed at the console.
+  header ssh_user == vmuservmuser
+  var user == {default: vmuservmuser, from: args.user}
   header recording_resolution == [1920, 1080]
 
   step "boot the disk"
@@ -79,7 +83,7 @@ walkthrough "linux-opensuse-tumbleweed - sshd"
   # password, presses Return, and the pass is repeated only if `vmuser@` is not yet on screen. A
   # failed login returns to `login:`, so the next pass starts clean.
   step "log in on the console, retrying until the shell answers"
-    loop == {check: {from: console, mode: text, name: logged_in, rect: [0, 100, 1920, 1000], rect_at: [1920, 1080], scale: 1, words: [[vmuser]]}, do: [{key: ret, settle: 3}, {type: "{{ user }}", type_gap: 0.10, settle: 4}, {key: ret, settle: 6}, {type: "{{ password }}", type_gap: 0.10, settle: 4}, {key: ret, settle: 12}], max: 4, see: {name: console}, until: {fact: logged_in}}
+    loop == {check: {from: console, mode: text, name: logged_in, rect: [0, 100, 1920, 1000], rect_at: [1920, 1080], scale: 1, words: [[vmuser]]}, do: [{key: ret, settle: 3}, {type: "{{ user }}", type_gap: 0.10, settle: 5}, {key: ret, settle: 8}, {type: "{{ password }}", type_gap: 0.10, settle: 5}, {key: ret, settle: 14}], max: 5, see: {name: console}, until: {fact: logged_in}}
   step "unlock sudo once for this session"
     run == printf '%s\n' {{ password }} | sudo -S -v
     settle == 4
