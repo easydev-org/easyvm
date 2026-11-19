@@ -11,11 +11,32 @@ walkthrough "linux-mint - sshd"
     # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
     memory_mb == 4096
     timeout == 900
+  # THE GREETER IS ASKED FOR BEFORE IT IS CLICKED. MEASURED ON THIS MEDIUM'S OWN RECORDING.
+  #
+  # RUN 44547606326's mint ssh stage ends with the greeter showing, in amber,
+  #
+  #	Vmuser User
+  #	Invalid password, please try again
+  #	[ Password ]
+  #
+  # so the click and the five characters DID arrive - the password was simply rejected, which is
+  # what a click that lands before the field has focus produces: the first characters go to the
+  # session chooser and the rest to the box.
+  #
+  # THE BAND IS THAT CARD: x 80..480, y 480..640, which reads 'Vmuser User' and 'Password' at scale
+  # 1 and 2 on that frame.
+  step "the greeter is drawn"
+    loop == {check: {from: greeter, mode: text, name: up, rect: [80, 480, 480, 640], rect_at: [1920, 1080], scale: 1, words: [[vmuser], [password]]}, do: [{settle: 5}], max: 60, see: {name: greeter}, until: {fact: up}}
   click "greeter - the password box" at 259 568, waiting 2s, named "greeter - the password box"
   step "greeter - log in"
     settle == 3
     type == '{{ password }}'
   press Return, waiting 12s, named "greeter - submit"
+  # THE SESSION TAKES LONGER THAN THE TWELVE SECONDS AFTER `Return`, AND A CHORD PRESSED IN THAT
+  # GAP GOES TO THE GREETER. This is the same gate the same medium's install walk uses.
+  step "wait for the desktop"
+    desktop == linux/cinnamon
+    timeout == 900
   press ctrl+alt+t, waiting 20s, named "open the terminal"
   # NO `terminal_wait:` HERE, AND THAT IS THE FIX RATHER THAN AN OMISSION.
   #
