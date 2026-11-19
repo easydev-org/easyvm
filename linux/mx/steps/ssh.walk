@@ -68,6 +68,15 @@ walkthrough "linux-mx - sshd"
   step "wait for the desktop"
     desktop == linux/xfce
     timeout == 900
+  # THE WELCOME WINDOW HOLDS FOCUS, SO IT IS CLOSED BEFORE THE CHORD IS PRESSED.
+  #
+  # MEASURED ON RUN 44583759370, whose recording at 150 s is 'MX Welcome' - its eight cards, the
+  # 'Show this dialog at start up' checkbox - and NO TERMINAL. The chord was pressed; XFCE gave it to
+  # the focused window, and the terminal never opened, so every run: after it typed into nothing.
+  #
+  # The window's own X is at 1305,163. Escape after it covers a window that is already gone.
+  click "close the welcome window, which holds focus" at 1305 163, waiting 3s, optionally, named "close the welcome window"
+  press Escape, waiting 2s, named "clear anything it left behind"
   press ctrl+alt+t, waiting 20s, named "open the terminal"
   # NO `terminal_wait:` HERE, AND THAT IS THE FIX RATHER THAN AN OMISSION.
   #
