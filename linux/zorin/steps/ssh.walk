@@ -123,6 +123,33 @@ walkthrough "linux-zorin - sshd"
   # MEASURED: "Command 'xset' not found, did you mean: command 'xset' from deb x11-xserver-utils".
   # The blanking on this desktop comes from GNOME's own idle timer, so `gsettings` is the part that
   # does the work here - and it is kept, without the `;` chain that put three failures in front of it.
+  # THE UPDATER'S POLKIT DIALOG IS MODAL AND IT APPEARS WHILE THE STAGE IS TYPING.
+  #
+  # MEASURED ON RUN 61537d1's zorin ssh, at 400 s: a centred "Authentication Required / To install or
+  # remove software, you need to authenticate" panel with 'Sorry, that didn't work. Please try again.'
+  # in red under its password box, an "Install in ..." progress window behind it, and the terminal
+  # behind THAT already showing '[sudo] pas...'. So the password meant for the terminal went into the
+  # polkit box, polkit rejected it, and every later command went nowhere: sshd was never enabled and
+  # 22 refused for ten minutes.
+  #
+  # THE PANEL IS DISMISSED BY THE KEYBOARD, IN A LOOP, BECAUSE IT COMES BACK:
+  #   - Escape closes a polkit prompt on GNOME;
+  #   - Cancel (860,700 on that frame) is the same act if Escape is not enough;
+  #   - the loop stops when its own heading is no longer on the screen.
+  #
+  # This runs BEFORE anything types into the terminal, because a single character lost to the panel
+  # is a step that silently did nothing.
+  # THE PANEL IS DISMISSED WITH A FIXED NUMBER OF KEYSTROKES, NOT A CONDITION.
+  #
+  # A `loop:` STOPS WHEN ITS FACT IS TRUE, and the fact that matters is "the panel is gone" - which
+  # `check:` cannot express: every mode it has is about words that ARE on screen. `says_without` is
+  # the nearest, and it is the INVERSE of what is needed (true while the panel is still up), so a
+  # loop on it would press Escape until the panel arrived rather than until it left.
+  #
+  # Three Escapes and two Cancel clicks are what it takes, and pressing them when the panel is
+  # already gone costs nothing: Escape on a desktop closes an overview that is not open.
+  step "dismiss the updater's authentication panel"
+    do == [{key: esc, settle: 2}, {key: esc, settle: 2}, {click: [860, 700], settle: 2}, {key: esc, settle: 2}]
   step "keep the screen on, with the tool this guest actually has"
     run == gsettings set org.gnome.desktop.session idle-delay 0
     settle == 4
@@ -133,17 +160,25 @@ walkthrough "linux-zorin - sshd"
   # Software Updater sits over the window. '>' means zsh is waiting for a quote to close, and the
   # fragments are what is left of commands whose characters went to the dialog instead.
   #
-  # `pkill` on the updater needs no sudo and no policy, so it is the first thing typed; the typing
-  # is slower too, because this guest loses characters at the default rate on lines this long.
-  step "stop the updater without asking the policy"
-    run == pkill -f update-notifier; pkill -f gnome-software; pkill -f packagekitd
-    settle == 4
-    type_gap == 0.06
-    terminal_wait == 0
+  # `sudo` IS UNLOCKED FIRST, BECAUSE `pkill` AS THE USER CANNOT KILL A ROOT-OWNED UPDATER.
+  #
+  # MEASURED: "pkill: killing pid 1022 failed: Operation not permitted" - the updater runs as root,
+  # so the unprivileged pkill this file used did nothing and the panel kept coming back. Authenticate
+  # once, then kill it with the authority to do so.
   step "unlock sudo once for this session"
     run == printf '%s\n' {{ password }} | sudo -S -v
     settle == 5
     type_gap == 0.06
+  step "stop the updater that keeps raising the panel"
+    run == sudo pkill -f update-notifier
+    settle == 3
+    type_gap == 0.06
+    terminal_wait == 0
+  step "stop the software centre"
+    run == sudo pkill -f gnome-software
+    settle == 3
+    type_gap == 0.06
+    terminal_wait == 0
   # `apt-get update` FIRST: this disk's index can point at a version the archive has replaced,
   # which answers 404 and reads like a network problem (measured on popos, same family).
   # THE SOFTWARE UPDATER RAISES POLKIT'S 'Authentication Required' OVER THE TERMINAL, UNPROMPTED.
