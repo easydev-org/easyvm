@@ -121,7 +121,34 @@ steps:
     test "$(scutil --get HostName)" = "{{ hostname }}" && echo HOSTNAME_OK'
   timeout: 60
 
-# --- 3. the login agent ----------------------------------------------------------------------
+# --- 3. the host share ------------------------------------------------------------------------
+#
+# THE LAUNCHER BELOW FETCHES ITS SCRIPT OVER HTTP FROM THIS SHARE, so the share has to be up and
+# PROVEN before the login agent is installed - otherwise the agent installs and its first run fails
+# for a reason three steps away.
+#
+# THE TRANSPORT IS THE DAEMON'S OWN HTTP LISTENER, not SMB. `mount_smbfs` refuses a non-root client
+# against this server and needed a LaunchDaemon to re-mount at every boot; a plain `curl` needs no
+# root, no mount and no daemon. That is why this file asks for `share_family: macos` and then reads
+# the answer with the guest's own client.
+- name: serve the host share
+  share_serve: true
+  timeout: 60
+- name: prove the guest can fetch from the host share
+  share_mount: true
+  share_family: macos
+  requires:
+  - share
+  timeout: 180
+- name: show what the guest sees at the share
+  # THE SHARE IS HTTP, SO THE GUEST'S OWN CLIENT IS THE PROOF. `share_mount:` fetches a sentinel the
+  # host wrote and compares the bytes; this step is the readable version of the same answer, printed
+  # so a person can see what happened rather than only whether it passed.
+  ssh: >-
+    sh -c 'curl -fsS --max-time 20 http://172.30.0.1:8080/shared/ 2>&1 | head -20; echo "fetch exit = $?"'
+  timeout: 120
+
+# --- 4. the login agent ----------------------------------------------------------------------
 - name: write the launcher
   write: launcher
   family: macos
@@ -159,7 +186,7 @@ steps:
   ssh: sh -c '/bin/sh ~/bootstrap-launcher.sh 2>&1 | head -5; echo "--- log ---"; tail -8 ~/bootstrap.log 2>/dev/null || echo "(no log)"'
   timeout: 180
 
-# --- 4. automatic login ----------------------------------------------------------------------
+# --- 5. automatic login ----------------------------------------------------------------------
 #
 # macOS HAS NO `autologin-user` FILE. Auto login is a 12-byte-multiple file at `/etc/kcpassword`
 # holding the password XOR'd against Apple's fixed key, plus one key in the loginwindow preferences -
@@ -193,7 +220,7 @@ steps:
   ssh: 'sh -c ''stat -f "%z bytes" /etc/kcpassword; stat -f "%Sp %Su" /etc/kcpassword; printf "%s\n" "{{ password }}" | sudo -S -p "" defaults read /Library/Preferences/com.apple.loginwindow autoLoginUser; printf "%s\n" "{{ password }}" | sudo -S -p "" defaults read /Library/Preferences/com.apple.loginwindow autoLoginUserScreenLocked'''
   timeout: 120
 
-# --- 5. do not sleep -------------------------------------------------------------------------
+# --- 6. do not sleep -------------------------------------------------------------------------
 #
 # `pmset` NEEDS SUDO AND HAS NO UNPRIVILEGED FORM. The screen saver's idle time is a SEPARATE domain -
 # `com.apple.screensaver idleTime` - and setting only `pmset` leaves a guest whose display stays on and
