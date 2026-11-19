@@ -758,7 +758,19 @@ steps:
 # itself: each attempt is followed by the same `unless: allow full disk access` test, so a press that
 # lands on nothing costs one attempt and the next height is tried. That is why the retry step exists at
 # all - it is not a nicety, it is the mechanism that makes a remembered window position survivable.
-- name: open the remote login pane again
+# THE RESULT ROW HAS BEEN MEASURED AT y=336, y=343 AND y=387 ON THREE DIFFERENT BOOTS, so no single
+# coordinate is right. The two presses above try two of those heights; this third step is the one that
+# does not depend on geometry at all.
+#
+# MEASURED ON THE CI RUN THAT FAILED HERE (210b0c9): `the remote login result is on screen` PASSED - the
+# search itself worked and the words were on the screen - and then `the remote login pane is up` looped
+# thirty times on the GENERAL page, because the press at (672,387) had landed on nothing. So the search
+# is not the fragile part; aiming at its result is.
+#
+# A PRESS ON THE SIDE BAR'S OWN ROW IS THE SAME KIND OF GUESS, so this step types instead: `Cmd+F` puts
+# the caret in the field and the FIRST RESULT IS ALREADY SELECTED, which makes Return open it. No
+# coordinate, and it works wherever the window sits.
+- name: open the remote login pane from the keyboard
   unless:
   - allow
   - full
@@ -770,9 +782,13 @@ steps:
   - 1200
   - 715
   scale: 2
-  click:
-  - 672
-  - 343
+  do:
+  - name: refocus the search field
+    key: meta_l+f
+    wait_after: 3
+  - name: open the first result
+    key: ret
+    wait_after: 12
   wait_after: 12
   region_at:
   - 1920
