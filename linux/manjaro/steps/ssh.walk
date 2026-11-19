@@ -2,7 +2,15 @@ walkthrough "linux-manjaro - sshd"
   resolution 1920x1080
   password admin
   var out == {default: out/distro.qcow2, from: args.out}
-  var user == {default: vmuser, from: args.user}
+  # THE ACCOUNT ON THIS DISK IS `vmuservmuser`, AND THAT IS WHAT HAS TO LOG IN.
+  #
+  # MEASURED ON RUN 44599025471: Calamares fills the login name from the full name as it is
+  # typed, so the installer's second `type:` APPENDED to the field instead of replacing it and
+  # the account was created as `vmuservmuser`. The ssh and vm stages then logged in as `vmuser`,
+  # which does not exist - hence sudo asking for a password it could never accept.
+  #
+  # The install is not being changed: this stage logs in as the account the disk actually has.
+  var user == {default: vmuservmuser, from: args.user}
   header recording_resolution == [1920, 1080]
 
   step "boot the disk"
