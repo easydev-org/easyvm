@@ -43,13 +43,33 @@ walkthrough "mx - the minstall walk"
   #
   # MEASURED ON RUN 44520492586, whose recording is this panel for its whole 18 minutes - that run
   # was cancelled while the walk waited on a screen it never left.
+  # THIS MEDIUM'S BOOT MENU IS THREE PANELS DEEP, AND ONLY THE LAST BUT ONE HAS THE LIVE SESSION.
+  #
+  # MEASURED ACROSS THREE RUNS, EACH RECORDING SHOWING THE PANEL IT WAS STUCK ON:
+  #
+  #   44520492586   "Welcome to MX-25.3_Xfce (Infinity)!"  Language / Keyboard / Timezone /
+  #                 Reset / "<== Back to main menu"
+  #   44524178444   after choosing "Back to main menu":  "===> Boot Rescue Menus <=== (version
+  #                 22.12.28)"  GRUB-EFI bootloader / GRUB menus / Frugal menus / Windows
+  #                 bootloader / Reboot / Power Off / Reboot into BIOS/UEFI Setup /
+  #                 "<=== Back to main menu (or press ESC)"
+  #
+  # So `Back to main menu` from the LANGUAGE panel does not reach the main menu - it reaches the
+  # RESCUE menu, which is one more level down. Its own footer says how to leave: "Back to main menu
+  # (or press ESC)". ESC is the shorter route and is what this file uses.
+  #
+  # THE LANGUAGE PANEL'S FOOTER IS "Use up and down, Hit ENTER to select/deselect", so `up` walks the
+  # list and `Return` opens the highlighted row. Four downs from `Language` is `Back to main menu`.
   step "that menu is this medium's own language panel"
     check == {from: mxmenu, mode: text, name: is_mx_menu, rect: [560, 180, 1460, 580], rect_at: [1920, 1080], scale: 1, words: [[Language], [Keyboard], [Timezone], [Back, to, main, menu]]}
   press down, waiting 1s, named "down to Keyboard"
   press down, waiting 1s, named "down to Timezone"
   press down, waiting 1s, named "down to Reset"
   press down, waiting 1s, named "down to Back to main menu"
-  press Return, waiting 25s, named "open the main menu, where the live session is"
+  press Return, waiting 20s, named "enter the rescue menu, which is what that row opens"
+  step "the rescue menu is up, and its footer says ESC leaves it"
+    check == {from: mxrescue, mode: text, name: is_rescue, rect: [560, 180, 1460, 640], rect_at: [1920, 1080], scale: 1, words: [[Boot, Rescue, Menus], [Back, to, main, menu]]}
+  press Escape, waiting 20s, named "ESC to the main menu, where the live session is"
   step "wait for the live desktop"
     desktop == linux/xfce
     reference == reference/desktop.png
