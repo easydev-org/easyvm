@@ -49,6 +49,35 @@ walkthrough "windows 11 - install to a desktop"
   # SO THE BUDGET IS THE THING THAT WAS WRONG, not the predicate. Two hours is the same order as the
   # install above it (`timeout: 1800` for the boot, then this), and a leg whose guest is slow loses
   # the whole run to a number chosen before one had been measured on this runner.
+  # THE OOBE STOPS DEAD ON ITS OWN REBOOT NOTICE UNLESS SOMETHING TOUCHES THE KEYBOARD.
+  #
+  # MEASURED TWICE. Run 44377939172 spent its whole 1h30m and run 44410380340 its whole 2h on the
+  # same frame:
+  #
+  #	Please keep your computer on.
+  #	Your computer may restart a few times.
+  #
+  # with a `Select C:\WINDOWS\SYSTEM32\netsh.exe` window over it. The measurements the predicate
+  # uses are on that frame - ratio=0.1x and sat=+0.07, both under what a desktop needs - so
+  # `desktop: windows` was RIGHT every time it refused, for two hours.
+  #
+  # `desktop:` IS A PASSIVE POLL: it takes a frame and decides, and nothing in it presses a key. The
+  # OOBE waits for one. So the keys come first, in a loop that is bounded and ends when the screen is
+  # no longer the notice - `until: {fact: ...}` is not usable here (no mode reports it), so the loop
+  # is a fixed number of nudges and `desktop:` still has the real timeout.
+  # A FIXED RUN OF NUDGES RATHER THAN A LOOP: `loop:` needs a `check:` and an `until:`, and
+  # nothing measures "the OOBE is still on its notice". A dozen presses twenty seconds apart is
+  # four minutes, which is the budget the restart needs and a small share of the wait below.
+  press Return, waiting 20s, named "nudge the OOBE restart along, because it waits for a key"
+  press Return, waiting 20s, named "nudge 1, because the OOBE waits for a key"
+  press Return, waiting 20s, named "nudge 2, because the OOBE waits for a key"
+  press Return, waiting 20s, named "nudge 3, because the OOBE waits for a key"
+  press Return, waiting 20s, named "nudge 4, because the OOBE waits for a key"
+  press Return, waiting 20s, named "nudge 5, because the OOBE waits for a key"
+  press Return, waiting 20s, named "nudge 6, because the OOBE waits for a key"
+  press Return, waiting 20s, named "nudge 7, because the OOBE waits for a key"
+  press Return, waiting 20s, named "nudge 8, because the OOBE waits for a key"
+  press Return, waiting 20s, named "nudge 9, because the OOBE waits for a key"
   step "wait for the desktop"
     desktop == windows
     timeout == 7200

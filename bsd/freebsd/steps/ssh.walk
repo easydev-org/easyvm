@@ -20,6 +20,28 @@ walkthrough "freebsd 15.1 - sshd, XFCE, and a desktop"
     ssh == uname -a
   step "prove the account over ssh"
     ssh == id -un
+  # A BOOTED SYSTEM HAS NO RESOLVER AND NO PACKAGE REPOSITORY; THE INSTALL STAGE'S COPIES DID NOT
+  # SURVIVE THE BOOT.
+  #
+  # THE INSTALL WALK WRITES BOTH INTO THE CHROOT IT IS INSTALLING, so that its own pkgbase step can
+  # run. The guest then shuts down and this stage boots the disk, where `/etc/resolv.conf` is EMPTY
+  # again and the repo file was never part of the image.
+  #
+  # MEASURED:
+  #
+  #	status: failed step 5/16 "install xfce and the display manager"
+  #	error:   install xfce and the display manager: the command exited 1
+  #	ssh: sudo env ASSUME_ALWAYS_YES=yes pkg install -y xorg xfce lightdm lightdm-gtk-greeter -> 1
+  #
+  # `pkg` exits 1 when it cannot resolve or reach a mirror, which is what a booted FreeBSD with an
+  # empty resolv.conf does. The bytes are the same ones the install step uses, carried as base64 so
+  # the quoting of a FreeBSD repo file does not have to survive three layers of shell.
+  step "give the booted system a resolver"
+    ssh == echo cHJpbnRmICclc1xuJyAnbmFtZXNlcnZlciAxNzIuMzAuMC4xJyA+IC9ldGMvcmVzb2x2LmNvbmY= | base64 -d | sudo sh
+    timeout == 60
+  step "point pkg at the network repository"
+    ssh == echo cHJpbnRmICclc1xuJyAnRnJlZUJTRDogeycgJyAgdXJsOiAicGtnK2h0dHBzOi8vcGtnLkZyZWVCU0Qub3JnLyR7QUJJfS9xdWFydGVybHkiLCcgJyAgbWlycm9yX3R5cGU6ICJzcnYiLCcgJyAgZW5hYmxlZDogeWVzJyAnfScgPiAvdXNyL2xvY2FsL2V0Yy9wa2cvcmVwb3MvRnJlZUJTRC5jb25m | base64 -d | sudo sh
+    timeout == 60
   step "install xfce and the display manager"
     ssh == sudo env ASSUME_ALWAYS_YES=yes pkg install -y xorg xfce lightdm lightdm-gtk-greeter
     timeout == 5400
