@@ -70,7 +70,18 @@ walkthrough "linux-fedora-workstation - sshd"
   step "the setup wizard is up"
     loop == {check: {from: wizard, mode: text, name: up, rect: [450, 620, 1470, 900], rect_at: [1920, 1080], scale: 1, words: [[welcome, to, fedora], [setup, will, guide]]}, do: [{settle: 5}], max: 40, see: {name: wizard}, until: {fact: up}}
     optional == true
-  click "start the setup wizard" at 960 844, waiting 12s, optionally, named "start the setup wizard"
+  # THE CLICK AT THE BUTTON'S OWN CENTRE DID NOT TAKE, SO THE BUTTON IS REACHED BY KEYBOARD.
+  #
+  # MEASURED ON RUN 44557723577's successor: 'start the setup wizard [clicked (960, 844)]' in the
+  # log, and the recording's frame at 200 s is the SAME welcome page - the button highlighted, the
+  # wizard not started.
+  #
+  # `Start Setup` is the only focusable control on that page, so Tab reaches it and Return presses
+  # it. A click that lands a few pixels off is a click that does nothing; a keyboard focus ring is
+  # not ambiguous.
+  press Tab, waiting 2s, named "focus the wizard's only button"
+  press Return, waiting 15s, named "start the setup wizard, by keyboard"
+
   click "desktop - give the shell focus" at 960 700, waiting 2s, named "desktop - give the shell focus"
   press meta_l, waiting 4s, named "open the overview"
   step "search for the terminal"
