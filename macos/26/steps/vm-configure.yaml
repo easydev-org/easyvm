@@ -21,10 +21,21 @@
 #	/Library/LaunchDaemons/    no third-party entries, so the agent slot is free
 #	/dev/cu.serial1            PRESENT, crw-rw-rw-   <- the port mac-guest-agent probes for
 #
-# THE ONE UNKNOWN IS THE GUEST AGENT. `mav2287/mac-guest-agent` was built for older macOS; the serial
-# port it wants exists on 26 with world read/write, but whether the binary still loads is a fact only a
-# run can produce. Its steps below are therefore WRITTEN AS THE 15 FILE WRITES THEM and left to prove
-# themselves - if it fails, the failure is the answer, not a fault in this file.
+# THE GUEST AGENT WAS THE ONE UNKNOWN AND IT IS NO LONGER: run 44522178799 on this file, all 26 steps,
+# `completed success`, and its daemon.log carries the answer from inside the guest -
+#
+#	390 /usr/local/bin/mac-guest-agent --daemonize
+#	2026-11-19 04:20:14 [INFO] Detected serial device: /dev/cu.serial1
+#	2026-11-19 04:20:14 [INFO] Opened device: /dev/cu.serial1 (fd=4)
+#
+# - the binary built for older macOS loads on 26.7.3 and opens the port. The same run proved the other
+# two things this file exists for:
+#
+#	HostName = easyvm-macos26   LocalHostName = easyvm-macos26   ComputerName = easyvm-macos26
+#	HOSTNAME_OK
+#	/etc/kcpassword  12 bytes  -rw------- root
+#	autoLoginUser = vmuser     autoLoginUserScreenLocked = 0        AUTOLOGIN_CONFIGURED
+#	displaysleep 0                                                  SLEEP_DISABLED
 name: macos 26 - configure the vm (guest agent, names, login agent, auto login)
 resolution:
 - 1920
