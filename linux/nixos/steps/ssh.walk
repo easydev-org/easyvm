@@ -107,29 +107,38 @@ walkthrough "linux-nixos - sshd"
     settle == 5
     terminal_wait == 0
     type_gap == 0.15
+  # THE CONFIG EDIT IS INSERTED BEFORE THE CLOSING BRACE AND THEN PRINTED BACK.
+  #
+  # THE OLD LINE DELETED THE LAST LINE AND APPENDED A NEW BLOCK, which cannot be seen in a
+  # recording: whatever it did to that file, the stage's next output was a rebuild. MEASURED ON RUN
+  # 44611943331's nixos predecessor: the machine rebooted (SDDM at 300 s) and came back WITHOUT
+  # sshd, and nothing in the log says whether configuration.nix ever named it.
+  #
+  # `/^}/i` inserts before the FIRST line that is just `}`, which is the attribute set's closing
+  # brace in the file nix ships. `grep -n openssh` after it prints the three new lines with their
+  # numbers, so the recording answers the question rather than leaving it to the rebuild.
   step "declare openssh in configuration.nix"
-    run == "sudo sh -c 'sed -i \"$ d\" /etc/nixos/configuration.nix; printf \"  services.openssh.enable = true;\\n  services.openssh.settings.PasswordAuthentication = true;\\n  networking.firewall.enable = false;\\n}\\n\" >> /etc/nixos/configuration.nix'\n"
-    settle == 6
+    run == sudo sed -i "/^}/i\\  services.openssh.enable = true;\\n  services.openssh.settings.PasswordAuthentication = true;\\n  networking.firewall.enable = false;" /etc/nixos/configuration.nix; grep -n "openssh\|firewall" /etc/nixos/configuration.nix; sudo nixos-rebuild dry-build 2>&1 | tail -3
+    settle == 30
     terminal_wait == 0
     type_gap == 0.15
-  # `nixos-rebuild boot` + `reboot`, IN ONE LINE, BECAUSE `switch` SIGNS THE SESSION OUT AND THE
-  # STAGE THEN HAS NO TERMINAL LEFT TO TYPE IN.
+  # `nixos-rebuild switch` HERE, BECAUSE IT IS THE ONE THAT STARTS SSHD WITHOUT A REBOOT.
   #
-  # MEASURED ON RUN 44600196595: `nixos-rebuild switch` restarted the display manager, so the desktop
-  # that owned the terminal went away - the recording at 900 s is SDDM with 'vmuser' and an EMPTY
-  # password field - and every later command was typed into a login screen. `wait for sshd` then spent
-  # its fifteen minutes on 'i/o timeout' against a guest whose own forward was gone with the session.
+  # THE EARLIER LINE WAS `nixos-rebuild boot; sudo reboot` - chosen because `switch` restarts the
+  # display manager and the terminal it was typed into goes away. That is true, and it does not
+  # matter: the thing this stage needs afterwards is the PORT, and `wait for sshd` dials it from the
+  # host. What does matter is that `boot` only writes the profile for the next start, so a machine
+  # that reboots into a profile that was never built has no sshd - MEASURED ON THE RUN BEFORE THIS
+  # ONE: SDDM came back at 300 s and 22 answered nothing for fifteen minutes.
   #
-  # `boot` writes the new profile for the NEXT boot and does not touch the running one, and `reboot`
-  # follows it in the same line, so the machine comes back with `services.openssh.enable` and the
-  # stage needs no session at all afterwards - only the port, which `wait for sshd` dials from the
-  # host.
-  step "build the new profile and reboot into it"
-    run == sudo nixos-rebuild boot; sudo reboot
-    settle == 60
+  # `switch` builds, activates, starts the unit, and THEN the session dies. Nothing more is typed,
+  # so nothing is typed into a login screen.
+  step "build and activate the new profile"
+    run == sudo nixos-rebuild switch
+    settle == 420
     terminal_wait == 0
     type_gap == 0.15
-  # NOTHING IS TYPED AFTER THE REBOOT, BECAUSE THERE IS NO SESSION TO TYPE INTO.
+  # NOTHING IS TYPED AFTER THE SWITCH, BECAUSE THE SESSION IT WAS TYPED INTO GOES AWAY.
   #
   # MEASURED ON RUN 44600196595, whose recording at 900 s is SDDM ITSELF - 'vmuser' in the middle of
   # the screen with an EMPTY 'Password' field - while this stage was still on its later steps. The
@@ -138,8 +147,8 @@ walkthrough "linux-nixos - sshd"
   #
   # SO THE PORT IS THE ONLY THING ASKED FOR FROM HERE. `wait for sshd` dials 2222 on the HOST - it
   # needs no key, no terminal and no session - and the port is what the next stage actually uses.
-  # The `systemctl is-active sshd` step is gone with this: a report from a shell that no longer exists
-  # can only fail a stage that is otherwise finished.
+  # An `is-active` report is NOT asked for: a report from a shell that no longer exists can only
+  # fail a stage that is otherwise finished.
   step "wait for sshd"
     require_ssh == true
     timeout == 900
