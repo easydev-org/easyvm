@@ -66,7 +66,7 @@ walkthrough "fedora-workstation - anaconda and the first boot"
     loop == {check: {from: the_free_space_menu_is_open, mode: text, name: up, rect: [1000, 380, 1360, 460], rect_at: [1920, 1080], scale: 1, words: [[Create], [Format], [Delete]]}, do: [{settle: 2}], max: 12, see: {name: the_free_space_menu_is_open}, until: {fact: up}}
   click "create the root partition" at 1132 405, waiting 8s, named "create the root partition"
   step "the root dialog is up"
-    loop == {check: {from: the_root_dialog_is_up, mode: text, name: up, rect: [945, 417, 1051, 537], rect_at: [1920, 1080], scale: 1, words: [[Create], [Type], [Mount]]}, do: [{settle: 2}], max: 12, see: {name: the_root_dialog_is_up}, until: {fact: up}}
+    loop == {check: {from: the_root_dialog_is_up, mode: text, name: up, rect: [380, 320, 1100, 650], rect_at: [1920, 1080], scale: 1, words: [[Create], [Type], [Mount]]}, do: [{settle: 2}], max: 12, see: {name: the_root_dialog_is_up}, until: {fact: up}}
   step "name it root"
     click == [882, 271]
     settle == 2
