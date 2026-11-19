@@ -104,7 +104,11 @@ jobs:
     # `all` IS THE NORMAL RUN AND `setup` REBUILDS ONLY THE INSTALLER. `ssh` SKIPS THIS JOB, so the
     # ssh stage can be re-run against the disk that is already published as `macos26` without paying
     # for the two-and-a-half-hour install again - which is the whole reason these are two jobs.
-    if: inputs.stage == 'all' || inputs.stage == 'setup'
+    # A DISPATCH INPUT IS EMPTY ON EVERY OTHER EVENT, so the event name is tested first - this
+    # repository's `TestNoConditionDependsOnAnAbsentDispatchInput` refuses a bare `inputs.` check, and
+    # it is right: a `workflow_call` or a `push` would have `inputs.stage` empty and the comparison
+    # false, silently skipping the job while the workflow reports success.
+    if: github.event_name != 'workflow_dispatch' || inputs.stage == 'all' || inputs.stage == 'setup'
     uses: ./.github/workflows/stage.yml
     secrets: inherit
     with:
@@ -145,8 +149,11 @@ jobs:
     # three wasted hours. A FAILED setup is still refused, because then `macos26` points at the
     # previous release's disk and an ssh stage that ran anyway would prove something about a disk
     # nobody asked it about.
+    # THE SAME RULE AS `setup`: `inputs.` is empty off a dispatch, so the event is named first and a
+    # non-dispatch run is treated as `all` - which is what it means.
     if: |
       always() && !cancelled() && (
+        github.event_name != 'workflow_dispatch' ||
         inputs.stage == 'ssh' ||
         inputs.stage == 'all' && needs.setup.result == 'success'
       )
