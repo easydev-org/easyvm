@@ -76,7 +76,25 @@ walkthrough "endeavouros - install to ext4, then the power button"
     settle == 2
     type == '{{ password }}'
   step "reuse the user password for root"
-    loop == {check: {from: root_section, mode: text, name: gone, rect: [570, 225, 1340, 745], rect_at: [1920, 1080], scale: 2, without: [Repeat], words: [Password]}, do: [{click: [587, 649], settle: 3}], max: 6, see: {name: root_section}, until: {fact: gone}}
+    # THE BOX IS AT (610, 630), NOT (587, 649), AND THE MISS IS VISIBLE IN THE FRAME.
+    #
+    # MEASURED on run 4444's frame: the "Reuse user password as root password" checkbox is a 16x43 px
+    # pale square whose centre is (610, 630). The click at (587, 649) lands 23 px left and 19 px
+    # below it - on the panel background - so the box stayed UNCHECKED and "Repeat root password"
+    # stayed on the page. The loop then re-clicked the same wrong point six times, gave up, and the
+    # walk went on to press Next on a Users form Calamares would not accept: which is why the next
+    # check waited for a summary page that never came, and why the disk stayed at 0 MiB.
+    # THE CLICK GOES ON THE LABEL, NOT THE BOX, AND THE BOX'S OWN FRAME SAYS WHY THAT IS SAFER.
+    #
+    # MEASURED from run 4444's frame: the checkbox is a 14x15 px outline at (577..591, 641..656), so
+    # its centre is (584, 648) - and the old click at (587, 649) WAS inside it. The click was
+    # therefore not missing: six of them left the box unchecked and "Repeat root password" on the
+    # page, so Calamares never enabled Next and the walk pressed a dead button.
+    #
+    # A 14 px target is one repaint away from being missed, and Qt checkboxes toggle from their LABEL
+    # as well as their box. The label line is 300 px wide at the same height, which cannot be missed
+    # by a coordinate that was measured from a screenshot.
+    loop == {check: {from: root_section, mode: text, name: gone, rect: [570, 225, 1340, 745], rect_at: [1920, 1080], scale: 2, without: [Repeat], words: [Password]}, do: [{click: [700, 648]}, {settle: 3}], max: 6, see: {name: root_section}, until: {fact: gone}}
   click "log in automatically" at 587 755, waiting 3s, named "log in automatically"
   step "the users page is filled in"
     see == name: filled
