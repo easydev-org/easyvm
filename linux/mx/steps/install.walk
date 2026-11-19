@@ -50,8 +50,24 @@ walkthrough "mx - the minstall walk"
     rect == [0, 540, 300, 740]
     rect_at == [1920, 1080]
     timeout == 5400
+  # ONE CLICK, NOT TWO. THE SECOND ONE ASKS THE INSTALLER TO START WHILE IT IS ALREADY STARTING.
+  #
+  # MEASURED ON RUN 44507018955, whose recording ends on this dialog over the whole screen:
+  #
+  #	[ MX Linux Installer ]  !  The installer appears to be running already.
+  #	                          Please close it if possible, or run 'pkill minstall' in terminal.
+  #	                          [ OK ]
+  #
+  # The two clicks were meant as "double-click, because a single one may be missed". What they
+  # actually do is launch the installer twice, and the second launch is refused by the first - so
+  # the modal sits over the welcome page and every later step reads the wrong screen. `wait for the
+  # terms page` then spent its whole budget on `sword: den`, a fragment of the installer's own name
+  # behind the dialog.
+  #
+  # ONE CLICK AND A SETTLE, and the `wait for the terms page` below is the retry: it is already a
+  # loop, and a page that has not arrived is what a loop is for.
   step "desktop - installer"
-    do == [{click: [81, 259], settle: 3}, {click: [81, 259], settle: 3}]
+    do == [{click: [81, 259], settle: 6}]
     settle == 28
   step "wait for the terms page"
     loop == {check: {from: screen, mode: text, name: done, rect: [842, 276, 914, 372], rect_at: [1920, 1080], words: [terms, of, use]}, do: [{settle: 6}], max: 30, see: {name: screen}, until: {fact: done}}
