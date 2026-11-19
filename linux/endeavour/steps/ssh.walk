@@ -27,8 +27,20 @@ walkthrough "linux-endeavour - sshd"
   #      Plasma to start, and a chord pressed during that gap goes to the greeter.
   #
   # The band and scale are the ones cachyos reads 'Password vmuser' from on the same SDDM.
+  # ESCAPE IS PART OF THE WAIT, NOT A STEP AFTER IT.
+  #
+  # MEASURED ON RUN 44556277158, whose ssh recording's last frame is SDDM's CLOCK-ONLY SCREEN - the
+  # wall paper, '11:09 AM', 'Thursday, November 19, 2026', 'Desktop Session: Plasma (Wayland)' - and
+  # no login box at all. The stage read '— t a ely —' from the password band sixty times.
+  #
+  # THAT SCREEN IS SDDM'S SCREEN SAVER, and Escape is what dismisses it - which is what cachyos's
+  # file does first, and what this one had in a different order: a wait that cannot succeed until
+  # the screen is woken, followed by the wake. A wait whose action does nothing is a wait that
+  # expires.
+  #
+  # The action is `key: esc` now, so the loop wakes the screen and looks again, up to sixty times.
   step "the greeter is drawn"
-    loop == {check: {from: greeter, mode: text, name: up, rect: [740, 470, 1340, 770], rect_at: [1920, 1080], scale: 2, words: [[password], [vmuser]]}, do: [{settle: 5}], max: 60, see: {name: greeter}, until: {fact: up}}
+    loop == {check: {from: greeter, mode: text, name: up, rect: [740, 470, 1340, 770], rect_at: [1920, 1080], scale: 2, words: [[password], [vmuser]]}, do: [{key: esc, settle: 3}], max: 60, see: {name: greeter}, until: {fact: up}}
   click "greeter - the password box" at 936 628, waiting 3s, named "greeter - the password box"
   step "greeter - log in"
     settle == 3

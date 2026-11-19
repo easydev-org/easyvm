@@ -26,7 +26,7 @@ walkthrough "linux-mint - sshd"
   # THE BAND IS THAT CARD: x 80..480, y 480..640, which reads 'Vmuser User' and 'Password' at scale
   # 1 and 2 on that frame.
   step "the greeter is drawn"
-    loop == {check: {from: greeter, mode: text, name: up, rect: [80, 480, 480, 640], rect_at: [1920, 1080], scale: 1, words: [[vmuser], [password]]}, do: [{settle: 5}], max: 60, see: {name: greeter}, until: {fact: up}}
+    loop == {check: {from: greeter, mode: text, name: up, rect: [80, 480, 480, 640], rect_at: [1920, 1080], scale: 1, words: [[vmuser], [password]]}, do: [{key: esc, settle: 3}], max: 60, see: {name: greeter}, until: {fact: up}}
   click "greeter - the password box" at 259 568, waiting 2s, named "greeter - the password box"
   step "greeter - log in"
     settle == 3
