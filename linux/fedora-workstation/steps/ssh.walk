@@ -22,8 +22,20 @@ walkthrough "linux-fedora-workstation - sshd"
   # THE BAND IS THE GREETER'S OWN MIDDLE: the user tile and the password field, x 740..1340 and
   # y 470..770. Read back from that recording at scale 2 it yields "Password vmuser"; at scale 1 it
   # yields nothing, which is why the scale is 2 and not the default.
+  #
+  # AND IT IS *OPTIONAL*, BECAUSE THIS MEDIUM'S DISK AUTO-LOGS-IN AND NEVER SHOWS A GREETER.
+  #
+  # MEASURED ON RUN 44552110478, which failed here at step 2 of 23 with
+  #
+  #	see: 22 word(s): ... come to Fedora Linux 45 (Workstation Edition)!
+  #	the greeter is drawn [check]: up = false (none of "password" or "vmuser" in ...)
+  #
+  # That screen is the FIRST-LOGIN WELCOME, i.e. the session is already up - exactly what the rest
+  # of this file handles with `optional: true` on every greeter step. A wait that blocks when the
+  # greeter is absent turns "this medium auto-logs-in" into a failure.
   step "the greeter is drawn"
     loop == {check: {from: greeter, mode: text, name: up, rect: [740, 470, 1340, 770], rect_at: [1920, 1080], scale: 2, words: [[password], [vmuser]]}, do: [{settle: 5}], max: 60, see: {name: greeter}, until: {fact: up}}
+    optional == true
   step "greeter - wake the screen"
     key == esc
     optional == true
