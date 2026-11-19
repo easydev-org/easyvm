@@ -306,6 +306,41 @@ jobs:
             ls -l "$dest"
           done
 
+      - name: the guest's memory has to fit in the runner's
+        # A GUEST BIGGER THAN THE RUNNER IS KILLED BY THE OOM KILLER A FEW MINUTES IN, AND NOTHING IN
+        # THE LOGS SAYS SO. MEASURED, from the macos26 stage that first asked 16384:
+        #
+        #	the guest was killed and disk.qcow2 was left at 194 KiB
+        #
+        # with no error in any log - the machine simply stopped being there. This stage now asks for
+        # 12288 on windows and macos 15, and a standard `ubuntu-24.04` runner has sixteen.
+        #
+        # THE NUMBER COMES FROM THE FILE THIS LEG RUNS, so raising it there is caught here rather
+        # than turning into a broken pipe nobody can attribute.
+        #
+        # `{print $NF}` READS BOTH SPELLINGS: a `.walk` writes `memory_mb == 12288` and a `.yaml`
+        # writes `memory_mb: 12288`; the number is the last word either way.
+        run: |
+          set -eu
+          file="${{ matrix.file }}"
+          need_mib=$(grep -m1 'memory_mb' "$file" | awk '{print $NF}' | tr -cd '0-9')
+          if [ -z "$need_mib" ]; then
+            echo "the guest size is the engine's default; $file names none"
+            exit 0
+          fi
+          need_gib=$(( need_mib / 1024 ))
+          total_kib=$(awk '/^MemTotal:/{print $2}' /proc/meminfo)
+          total_gib=$(( total_kib / 1024 / 1024 ))
+          # TWO GIBABYTES OF MARGIN: qemu's own RSS on top of the guest was measured at 12.01 GiB for
+          # a 12 GiB guest, so the guest is essentially all of it and the margin is for the daemon.
+          if [ "$(( need_gib + 2 ))" -gt "$total_gib" ]; then
+            echo "::error::$file asks for ${need_gib} GiB and this runner has ${total_gib} GiB."
+            echo "::error::The OOM killer would take the guest a few minutes in, leaving an almost"
+            echo "::error::empty disk and no error in any log. Lower memory_mb or use a larger runner."
+            exit 1
+          fi
+          echo "runner: ${total_gib} GiB, guest: ${need_gib} GiB (from $file)"
+
       - name: start the daemon
         # ONE PROCESS OWNS THE MACHINE FOR THE WHOLE STAGE. It runs in the background because
         # `easyvm run` is a CLIENT: it sends a request and returns, and the daemon drives the file.
