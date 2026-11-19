@@ -98,20 +98,20 @@ walkthrough "linux-fedora-workstation - sshd"
   #
   # The loop presses Next until the wizard's own heading is gone. `max: 12` is the number of pages
   # this wizard has plus slack; a page that does not advance costs one press, not the whole stage.
-  # THE LOOP STOPPED ON ITS FIRST PASS, BECAUSE ITS FACT WAS "THE WIZARD IS UP".
+  # CLICKS DO NOT TAKE IN THIS WIZARD; THE KEYBOARD DOES.
   #
-  # MEASURED ON RUN a8a0c0d's fedora ssh: the recording at 200 s is STILL the Privacy page - its
-  # Previous button top-left, Next top-right, 'Location Services' in the middle - and the stage had
-  # already passed this step and gone on to click at 960,700 (which is that page, not a desktop).
+  # MEASURED ON TWO RUNS. FIRST (Start Setup): a click at the button's own centre logged
+  # "clicked (960, 844)" and the recording at 200 s was the same page, button highlighted - a Tab and
+  # a Return then started the wizard. SECOND (this loop): eight clicks at (1420,193), which is inside
+  # the Next button on every page, and the recording at 500 s is STILL the Privacy page with Next
+  # drawn in exactly the place that was clicked.
   #
-  # `until: {fact: still_open}` means "STOP WHEN still_open IS TRUE", and `still_open` is exactly
-  # what a page that has NOT advanced looks like. The loop therefore ended the moment it began.
-  #
-  # A FIXED SEQUENCE OF CLICKS INSTEAD. Each wizard page has Next at 1420,193; pages advance one per
-  # press and the wizard closes on the last. Eight is this wizard's page count plus slack, and a
-  # click on a desktop at that position opens a context menu that Escape then dismisses.
+  # So the wizard is driven by keys. TAB moves the focus to the next control - on these pages that is
+  # either a toggle (harmless: Location Services) or the Next button - and RETURN presses whatever
+  # has focus. Eight pairs is this wizard's page count plus slack, and past the last page the keys
+  # land on a desktop, where Tab does nothing and Return opens nothing that Escape cannot close.
   step "walk the setup wizard to its end"
-    do == [{click: [1420, 193], settle: 6}, {click: [1420, 193], settle: 6}, {click: [1420, 193], settle: 6}, {click: [1420, 193], settle: 6}, {click: [1420, 193], settle: 6}, {click: [1420, 193], settle: 6}, {click: [1420, 193], settle: 6}, {click: [1420, 193], settle: 8}]
+    do == [{key: tab, settle: 1}, {key: ret, settle: 6}, {key: tab, settle: 1}, {key: ret, settle: 6}, {key: tab, settle: 1}, {key: ret, settle: 6}, {key: tab, settle: 1}, {key: ret, settle: 6}, {key: tab, settle: 1}, {key: ret, settle: 6}, {key: tab, settle: 1}, {key: ret, settle: 6}, {key: tab, settle: 1}, {key: ret, settle: 6}, {key: tab, settle: 1}, {key: ret, settle: 8}]
   press Escape, waiting 2s, named "clear a context menu if the wizard had already closed"
 
   click "desktop - give the shell focus" at 960 700, waiting 2s, named "desktop - give the shell focus"
