@@ -18,25 +18,35 @@ walkthrough "mx - the minstall walk"
     timeout == 1800
   step "the medium's boot menu is up"
     see == name: mxmenu
-  step "that menu is the language submenu this medium opens on"
-    check == {from: mxmenu, mode: text, name: is_mx_menu, rect: [664, 328, 949, 408], rect_at: [1920, 1080], scale: 1, words: [[Language], [Keyboard], [Timezone]]}
-  press Escape, waiting 4s, named "leave the language submenu for the real boot menu"
-  press up, waiting 1s, named "up to the first entry, which is the live session"
-  press up, waiting 1s, named "up again"
-  press up, waiting 1s, named "and once more"
-  # THE FIRMWARE'S BOOT-DEVICE MENU ALSO SITS THERE, AND ONE RETURN WAS MEASURED NOT TO MOVE IT.
+  # THIS IS OVMF'S OWN LANGUAGE PANEL, NOT A GRUB MENU, AND IT WANTS `Continue`.
   #
-  # RUN 44471069613's recording is the same "Please select boot device" panel for 2973 seconds, with
-  # UEFI QEMU DVD-ROM still highlighted. The three `up` presses before it are for the LANGUAGE
-  # SUBMENU this medium opens on, so if that submenu is not up they move the highlight somewhere
-  # else and the Return lands on an entry that does nothing.
+  # MEASURED ON RUN 44520500564, whose recording is this panel for its whole 80 minutes, and whose
+  # log shows the check that was supposed to recognise it FAILING:
   #
-  # SO THE SELECTION IS RE-ASSERTED: the DVD entry is the first line, so `up` three times is safe
-  # whatever the panel was showing, and the Return is repeated.
-  press up, waiting 1s, named "back to the DVD entry, whatever the panel was showing"
-  press up, waiting 1s, named "up again"
-  press up, waiting 1s, named "and once more, which is the top of the list"
-  press Return, waiting 25s, named "boot it"
+  #	see: 0 word(s):
+  #	that menu is the language submenu ... is_mx_menu = false (none of "Language" ... in "")
+  #
+  # The screen says "Select Language   [Standard English]   Continue / Reset" with `Device Manager`,
+  # `Boot Manager`, `Boot Maintenance Manager` under it. The check looked at [664,328,949,408] -
+  # the MIDDLE of the screen, where nothing is drawn - and read nothing.
+  #
+  # WORSE, THE KEYS THAT FOLLOWED WERE FOR A MENU THAT WAS NOT THERE. `press Escape` was meant to
+  # leave a GRUB language submenu; here Escape is OVMF's "exit this page", and the six `up` presses
+  # and the `Return` after it went to whatever Escape left behind.
+  #
+  # THE PANEL'S OWN ANSWER IS `Continue`: one Return, and the firmware boots the DVD. The check now
+  # reads the left column where the words actually are, and the keys are one Return.
+  step "that menu is OVMF's language panel"
+    check == {from: mxmenu, mode: text, name: is_mx_menu, rect: [0, 100, 500, 220], rect_at: [1920, 1080], scale: 1, words: [[Language], [Continue], [Reset]]}
+  press Return, waiting 30s, named "Continue, which is the panel's own answer"
+  # THE SIX `up` PRESSES AND THE SECOND `Return` THAT USED TO BE HERE WERE FOR A DIFFERENT PANEL.
+  #
+  # They were written for "Please select boot device" - run 44471069613's screen, which is a DEVICE
+  # LIST. The panel this medium actually opens on is OVMF's LANGUAGE page, whose entries are
+  # `Continue` and `Reset`; `up` there moves between those two, so six of them landed on `Reset` and
+  # the Return after them asked the machine to reboot. That is the opposite of booting the DVD.
+  #
+  # One Return on this panel is the whole job, and it is above.
   step "wait for the live desktop"
     desktop == linux/xfce
     reference == reference/desktop.png
