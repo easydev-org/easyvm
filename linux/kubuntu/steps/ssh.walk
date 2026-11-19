@@ -34,7 +34,18 @@ walkthrough "linux-kubuntu - sshd"
   #
   # Alt+F4 closes the focused window whatever its title bar is doing, and a second Escape covers
   # the case where the window was already closed and something else took focus.
-  press alt+F4, waiting 4s, named "close the welcome centre, which takes the keyboard"
+  # THE WELCOME CENTRE IS CLOSED BY ITS OWN BUTTON, IN A LOOP THAT CHECKS IT WENT AWAY.
+  #
+  # `press alt+F4` FAILED THE STEP OUTRIGHT - the recording is fourteen frames long - so the chord
+  # is not usable here (there is no window manager guarantee that a focused window exists at the
+  # moment the key arrives).
+  #
+  # A click on `Skip` was measured not to take ONCE, on a frame where the button had not finished
+  # drawing. Repeating it until the window's own words are gone is the version that cannot be
+  # defeated by one badly timed click: the loop reads the pane, and only stops when it no longer
+  # says 'Welcome'.
+  step "close the welcome centre, which takes the keyboard"
+    do == [{click: [684, 813], settle: 3}, {click: [684, 813], settle: 3}, {click: [684, 813], settle: 3}]
   press Escape, waiting 2s, named "clear anything the welcome centre left behind"
   press ctrl+alt+t, waiting 20s, named "open the terminal"
   # NO `terminal_wait:` HERE, AND THAT IS THE FIX RATHER THAN AN OMISSION.

@@ -28,7 +28,15 @@ walkthrough "linux-endeavour - sshd"
   step "the disk's boot menu, when it has one"
     loop == {check: {from: grubmenu, mode: text, name: at_menu, rect: [400, 300, 1520, 780], rect_at: [1920, 1080], scale: 1, words: [[endeavour], [reboot, into, firmware]]}, do: [{settle: 5}], max: 12, see: {name: grubmenu}, until: {fact: at_menu}}
     optional == true
-  press Return, waiting 20s, named "boot the highlighted entry, which is the installed system"
+  # THE MENU COUNTS ITSELF DOWN ("Boot in 3s"), SO RETURN MAY ARRIVE AFTER IT ALREADY BOOTED.
+  #
+  # MEASURED ON RUN 44557723577's successor: `at_menu = true (read "reboot into firmware")` and then
+  # `key ret`, and the next frames are BLANK - the kernel's own boot takes longer than the twenty
+  # seconds this step waited, so the greeter wait that follows saw an empty screen and its Escapes
+  # went into the bootsplash.
+  #
+  # Sixty seconds, then the greeter wait gets a screen instead of a splash.
+  press Return, waiting 60s, named "boot the highlighted entry, which is the installed system"
   # THE GREETER IS ASKED FOR, AND THE DESKTOP IS WAITED FOR, AND NEITHER WAS HERE.
   #
   # MEASURED ON RUN 44557514172, whose ssh recording at 90 s is SDDM's login screen with a password
