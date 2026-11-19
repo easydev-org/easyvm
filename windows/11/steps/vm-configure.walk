@@ -93,8 +93,22 @@ walkthrough "windows 11 - configure the vm (share, logon hook)"
   step "prove all four winlogon values are what an unattended boot needs"
     ssh == "powershell -NoProfile -Command \"$k = 'HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon'; $w = Get-ItemProperty -Path $k; Write-Output ('AutoAdminLogon    = ' + $w.AutoAdminLogon); Write-Output ('DefaultUserName   = ' + $w.DefaultUserName); Write-Output ('DefaultDomainName = ' + $w.DefaultDomainName); if ($w.DefaultPassword) { Write-Output 'DefaultPassword   = present'; Write-Output PASSWORD_PRESENT } else { Write-Output 'DefaultPassword   = MISSING'; Write-Output PASSWORD_MISSING; exit 1 }\"\n"
     timeout == 120
+  # `sudo ... poweroff` IS LINUX AND THIS GUEST IS WINDOWS, SO IT CANNOT WORK.
+  #
+  # MEASURED ON RUN 44492250642, this stage, just after the winlogon proof:
+  #
+  #	ssh: printf '%s\n' 'admin' | sudo -S -p '' poweroff -> 255
+  #	  'printf' is not recognized as an internal or external command,
+  #	  operable program or batch file.
+  #
+  # The line was copied from the Linux vm-configure files, where it is right. Here cmd.exe ran it
+  # and nothing was shut down.
+  #
+  # THE GUEST AGENT IS ALREADY PROVEN EARLIER IN THIS SAME FILE ("prove the guest agent answers"),
+  # and `shutdown: guest_agent` asks it to power down - the one shutdown route that means the same
+  # thing on every OS this repository drives.
   step "ask the guest to power off"
-    ssh == printf '%s\n' '{{ password }}' | sudo -S -p '' poweroff
+    shutdown == guest_agent
     timeout == 300
   step "wait for the machine to stop"
     wait_until == stopped
