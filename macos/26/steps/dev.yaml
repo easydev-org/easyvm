@@ -1,0 +1,156 @@
+# MACOS 26 GETS XCODE 26.6, AND THE TWO MACOS CHAINS DELIBERATELY USE DIFFERENT VERSIONS.
+#
+# MEASURED FROM APPLE'S OWN REQUIREMENTS TABLE:
+#
+#	Xcode 26.3   macOS Sequoia 15.6 - Tahoe 26.x     <- the newest SEQUOIA can run, so 15 keeps it
+#	Xcode 26.4.1 macOS Tahoe 26.2 - 26.x
+#	Xcode 26.5   macOS Tahoe 26.2 - 26.x
+#	Xcode 26.6   macOS Tahoe 26.2 - 26.x             <- the newest 26.x, and the newest for INTEL
+#	Xcode 27     macOS Tahoe 26.6+, APPLE SILICON ONLY
+#
+# Xcode 27 IS NOT AN OPTION HERE AND THAT IS NOT A JUDGEMENT CALL. Its release notes say "Xcode 27
+# will only install and run on Apple silicon Macs", and Apple's September 2026 post says "macOS 26 is
+# the final release supporting Intel Mac computers". A guest on this chain is x86_64, so 26.6 is the
+# end of the line.
+#
+# `Universal` RATHER THAN `Apple_silicon`: both are published for every 26.x release, and the Apple
+# silicon one does not install on an Intel Mac (xcodes issue #456 is that exact confusion).
+#
+# THE REST OF THIS FILE IS macos/15/steps/dev.yaml WITH THE VERSION CHANGED, because none of these
+# steps touches the GUI - every one is `ssh:`, `scp:` or `script:`. The coordinates that cost the ssh
+# stage eighteen fixes do not exist here.
+name: macos 26 - developer toolchain
+resolution:
+- 1920
+- 1080
+vars:
+  user:
+    from: args.user
+    default: vmuser
+  password:
+    from: args.password
+    default: admin
+  shutdown:
+    from: args.shutdown
+    default: ssh
+  out:
+    from: args.out
+    default: out/distro.qcow2
+ssh_user: vmuser
+ssh_port: 2222
+boot_disk: from_caller
+steps:
+- name: the media this stage boots from is already on disk
+  # FIRST STEP, BECAUSE A MISSING INPUT MUST FAIL IN THE FIRST SECOND INSTEAD OF
+  # forty minutes into a run. Every one of these files is declared by this leg's
+  # `assets:` in its workflow and placed here by `pull-artifact.sh` before
+  # `easyvm run` is called; nothing in this file downloads.
+  require:
+  - boot.img
+  - macos.rom
+  - macos.vars
+  - Xcode_26.6_Universal.xip
+  - node.pkg
+  - python.pkg
+- name: start recording
+  record: macos26-dev.mp4
+- name: boot the disk
+  boot: true
+  os: macos
+  timeout: 900
+- name: wait for sshd
+  require_ssh: true
+  timeout: 900
+- name: copy xcode into the guest
+  # THE .xip IS A PREPARED INPUT, PULLED BY THE WORKFLOW BEFORE THIS FILE RUNS. It used to be a
+  # `fetch:` step here, which meant a 1.5 GiB download inside a stage whose job has a wall clock -
+  # the same fault that cost run 43847000071 eighteen minutes before its first boot.
+  scp:
+  - Xcode_26.6_Universal.xip
+  - /tmp/Xcode.xip
+- name: expand and select xcode
+  script: "#!/bin/bash\nset -euo pipefail\n\n# THE PASSWORD IS AN ARGUMENT BECAUSE SUDO OVER SSH HAS NO TTY: `sudo` on this channel answers\n# \"a password is required\" and has nowhere to read it from.\nPASSWORD='{{ password }}'\nXIP=/tmp/Xcode.xip\n\
+    DEST=/Applications\nWORK=/Users/{{ user }}/xcode-expand\n\n# `xip -x` WRITES THE EXPANDED BUNDLE BESIDE A DIRECTORY, so the working directory decides\n# where 15 GiB lands. It goes in the user's home, not /tmp, whose volume is small on macOS.\nrm -rf\
+    \ \"$WORK\"\nmkdir -p \"$WORK\"\ncd \"$WORK\"\necho \"expanding $XIP (this prints nothing for about twenty minutes)\"\nxip -x \"$XIP\"\necho \"expanded\"\n\nAPP=\"$(/usr/bin/find \"$WORK\" -maxdepth 2 -name 'Xcode*.app' -type d | head -1)\"\nif [ -z\
+    \ \"$APP\" ]; then\n  echo \"NO Xcode.app in $WORK after xip -x\" >&2\n  ls -la \"$WORK\" >&2\n  exit 1\nfi\necho \"found $APP\"\n\n# MOVED WITH `ditto`, which preserves the code signature and the extended attributes that a\n# plain `mv` across volumes\
+    \ can drop.\nrm -rf \"$DEST/Xcode.app\"\n/usr/bin/ditto \"$APP\" \"$DEST/Xcode.app\"\n\n# THE LICENCE FIRST, BECAUSE EVERYTHING ELSE ASKS XCODE A QUESTION.\nif [ -x /usr/bin/sudo ]; then\n  printf '%s\\n' \"$PASSWORD\" | sudo -S -p '' /usr/bin/xcode-select\
+    \ -s \"$DEST/Xcode.app/Contents/Developer\"\n  printf '%s\\n' \"$PASSWORD\" | sudo -S -p '' /usr/bin/xcodebuild -license accept\n  printf '%s\\n' \"$PASSWORD\" | sudo -S -p '' /usr/bin/xcodebuild -runFirstLaunch\nelse\n  /usr/bin/xcode-select -s \"\
+    $DEST/Xcode.app/Contents/Developer\"\n  /usr/bin/xcodebuild -license accept\n  /usr/bin/xcodebuild -runFirstLaunch\nfi\necho \"selected: $(/usr/bin/xcode-select -p)\"\n\n# AND THE DISK IT WAS EXPANDED INTO IS REMOVED, because it is 15 GiB and nothing\
+    \ reads it again.\nrm -rf \"$WORK\"\n"
+  script_shell: sh
+  script_name: run-xcode-install.sh
+  timeout: 7200
+- name: remove the xip
+  ssh: rm -f /Users/{{ user }}/Xcode.xip && df -h / | tail -1
+  timeout: 300
+- name: fetch the packages on the host
+  # `packages`, NOT `dev_packages`: the asset layer's kinds are a fixed list and this name is not in it.
+  # MEASURED ON CI, run 43599374064's dev job:
+  #
+  #	fetch the packages on the host: "dev_packages" is not an asset this build knows; the kinds are
+  #	  guest_agent_windows, guest_agent_macos, xcode, packages, virtio_win, answer_iso, windows_iso,
+  #	  recovery_macos, opencore, linux_iso
+  #
+  # - and the error names the right one in the same sentence.
+- name: copy the packages into the guest
+  # TWO FILES, NOT A TARBALL, AND THE NAME `packages.tar` WAS NEVER A FILE THIS REPOSITORY PRODUCED.
+  #
+  # `fetchDevPackages` pulls `dev-node-pkg` and `dev-python-pkg` and writes `node.pkg` and
+  # `python.pkg` - while this step copied `packages.tar`, which nothing has ever created, and the two
+  # steps below then looked for `/tmp/node.pkg` and `/tmp/python.pkg`, which were never copied. The
+  # stage could not have worked, and its failure was masked for as long as it was: the dev leg is the
+  # fourth stage and nothing before it reads what it produces.
+  #
+  # THE NAMES ON THE RIGHT ARE THE ONES THE INSTALLERS READ, and the ones on the left are what the
+  # workflow's `assets:` places. Both ends are now spelled the same way on purpose.
+  scp:
+  - node.pkg
+  - /tmp/node.pkg
+- name: copy the python package into the guest
+  # `scp:` COPIES ONE FILE PER STEP, so the second package needs its own.
+  scp:
+  - python.pkg
+  - /tmp/python.pkg
+- name: install node
+  script: "#!/bin/bash\n# NODE FROM nodejs.org, x64 .pkg. The official installer puts it in\n# /usr/local/bin and links node/npm/npx there, which is on the default PATH.\nset -uo pipefail\nif command -v node >/dev/null 2>&1; then\n  echo \"node is already\
+    \ installed: $(node --version)\"\n  exit 0\nfi\nPKG=/tmp/node.pkg\nif [ ! -f \"$PKG\" ]; then\n  echo \"=== NO NODE PACKAGE AT $PKG ===\"\n  exit 1\nfi\nexport PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin\nprintf '%s\\n' '{{ password }}' | sudo\
+    \ -S -p '' installer -pkg \"$PKG\" -target / 2>&1 | tail -5\nrm -f \"$PKG\"\nhash -r 2>/dev/null || true\ncommand -v node && node --version && npm --version\n"
+  script_shell: sh
+  script_name: install-node.sh
+  timeout: 1800
+- name: install python
+  script: "#!/bin/bash\n# PYTHON FROM python.org, macos11 .pkg - the Intel-capable build. It installs into\n# /Library/Frameworks/Python.framework and links python3 into /usr/local/bin.\nset -uo pipefail\nif /usr/local/bin/python3 -c 'import sys; print(sys.version)'\
+    \ >/dev/null 2>&1; then\n  echo \"python3 is already installed: $(/usr/local/bin/python3 --version)\"\n  exit 0\nfi\nPKG=/tmp/python.pkg\nif [ ! -f \"$PKG\" ]; then\n  echo \"=== NO PYTHON PACKAGE AT $PKG ===\"\n  exit 1\nfi\nexport PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin\n\
+    printf '%s\\n' '{{ password }}' | sudo -S -p '' installer -pkg \"$PKG\" -target / 2>&1 | tail -5\nrm -f \"$PKG\"\nhash -r 2>/dev/null || true\n/usr/local/bin/python3 --version && /usr/local/bin/pip3 --version\n"
+  script_shell: sh
+  script_name: install-python.sh
+  timeout: 1800
+- name: prove the toolchain
+  script: "#!/bin/bash\n# THE CHECK IS THE PATH, NOT THE VERSION.\n#\n# /usr/bin/python3 exists on every macOS and answers --version perfectly - it is the one\n# Xcode's command line tools install, and its pip refuses to write. A check that only\n# read\
+    \ a version would pass on a disk whose python cannot install anything.\n#\n# WITH HOMEBREW OUT, THE EXPECTED PREFIX IS DIFFERENT: node and python come from\n# publishers' .pkg files and land in /usr/local, while git and the compilers come from\n# Xcode\
+    \ and live under /Applications/Xcode.app or /usr/bin.\nset -uo pipefail\nexport PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin\nbad=0\n\n# FROM THE PUBLISHERS' PACKAGES: /usr/local.\nfor t in node npm python3 pip3; do\n  path=$(command -v \"$t\"\
+    \ 2>/dev/null || true)\n  if [ -z \"$path\" ]; then\n    echo \"MISSING  $t\"\n    bad=1\n    continue\n  fi\n  case \"$path\" in\n    /usr/local/*) echo \"ok       $t -> $path\" ;;\n    *) echo \"WRONG    $t -> $path (not from /usr/local)\"; bad=1\
+    \ ;;\n  esac\ndone\n\n# FROM XCODE'S COMMAND LINE TOOLS: /usr/bin, but only after the dev dir is selected.\nfor t in git clang swift; do\n  path=$(command -v \"$t\" 2>/dev/null || true)\n  if [ -z \"$path\" ]; then\n    echo \"MISSING  $t\"\n    bad=1\n\
+    \  else\n    echo \"ok       $t -> $path\"\n  fi\ndone\n\nif [ \"$bad\" -ne 0 ]; then\n  echo \"=== THE TOOLCHAIN IS NOT COMPLETE ===\"\n  exit 1\nfi\nnode --version\npython3 --version\ngit --version\necho \"TOOLCHAIN_OK\"\n"
+  script_shell: sh
+  script_name: prove-toolchain.sh
+  timeout: 300
+- name: prove xcode is selected
+  ssh: xcode-select -p && xcodebuild -version
+  timeout: 300
+- name: prove swift compiles
+  script: "#!/bin/bash\nset -uo pipefail\nwork=$(mktemp -d)\ncat > \"$work/hello.swift\" <<'SWIFT'\nprint(\"hello-from-swift\")\nSWIFT\nif ! swiftc \"$work/hello.swift\" -o \"$work/hello\"; then\n  echo \"SWIFT_COMPILE_FAILED\"\n  exit 1\nfi\n\"$work/hello\"\
+    \ || exit 1\necho \"SWIFT_OK\"\nrm -rf \"$work\"\n"
+  script_shell: sh
+  script_name: swift-check.sh
+  timeout: 1800
+- name: note what is present
+  ssh: export PATH=/usr/local/bin:$PATH; echo "node=$(node --version)"; echo "python=$(python3 --version)"; echo "git=$(git --version)"; echo "swift=$(swift --version 2>&1 | head -1)"; echo "xcode=$(xcodebuild -version | head -1)"
+  timeout: 300
+- name: stop the machine
+  shutdown: '{{ shutdown }}'
+  timeout: 300
+- name: publish the disk
+  compress: '{{ out }}'
+- name: stop recording
+  record: false

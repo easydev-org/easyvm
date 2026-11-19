@@ -23,9 +23,9 @@ on:
         description: "the ghcr repository that holds the assets"
         default: "easydev-org/easyvm"
       stage:
-        description: "which stage to run: all, setup, or ssh"
+        description: "which stage to run: all, setup, ssh, dev, or vm-configure"
         type: choice
-        options: [all, setup, ssh]
+        options: [all, setup, ssh, dev, vm-configure]
         default: all
 
 concurrency:
@@ -155,7 +155,8 @@ jobs:
       always() && !cancelled() && (
         github.event_name != 'workflow_dispatch' ||
         inputs.stage == 'ssh' ||
-        inputs.stage == 'all' && needs.setup.result == 'success'
+        inputs.stage == 'all' && needs.setup.result == 'success' ||
+        inputs.stage == 'dev' && needs.setup.result == 'success'
       )
     uses: ./.github/workflows/stage.yml
     secrets: inherit
@@ -172,5 +173,86 @@ jobs:
             "out": "macos26-ssh.qcow2",
             "publish": "macos26-ssh",
             "timeout": 200
+          }
+        ]
+
+  # THE VM-CONFIGURE STAGE: the guest agent, the three names, the login agent and auto login.
+  #
+  # IT IS NOT A COPY OF macos/15/steps/vm-configure.yaml. A probe against the disk the ssh stage
+  # publishes answered for 26 - time zone already America/Los_Angeles, locale already en_US, FileVault
+  # already Off, LocalHostName already `vmuser` - so the time zone, locale and FileVault steps are
+  # GONE, and what is left is what the probe found missing: HostName, ComputerName,
+  # ~/Library/LaunchAgents (which does not exist), /etc/kcpassword, and `displaysleep 10`.
+  #
+  # ITS OWN HOUR. `xcode` is not here - that is the dev job - but the agent install plus the launcher
+  # proof plus two reboots' worth of ssh is still the longest of the configure stages.
+  vm-configure:
+    needs: [room, ssh]
+    if: |
+      always() && !cancelled() && (
+        github.event_name != 'workflow_dispatch' ||
+        inputs.stage == 'vm-configure' ||
+        inputs.stage == 'all' && needs.ssh.result == 'success' ||
+        inputs.stage == 'dev' && needs.ssh.result == 'success'
+      )
+    uses: ./.github/workflows/stage.yml
+    secrets: inherit
+    with:
+      group: macos26
+      disks_repository: ${{ inputs.disks_repository }}
+      stages: |
+        [
+          {
+            "name": "macos26-vm-configure",
+            "file": "macos/26/steps/vm-configure.yaml",
+            "pull": "macos26-ssh",
+            "assets": ["macos-asset-boot-26:boot.img", "macos-asset-rom-26:macos.rom", "macos-asset-vars-26:macos.vars", "macos-asset-mac-guest-agent:mac-guest-agent"],
+            "out": "macos26-vm-configure.qcow2",
+            "publish": "macos26-vm-configure",
+            "timeout": 90
+          }
+        ]
+
+  # THE DEVELOPER TOOLCHAIN, WHICH IS THE FOURTH STAGE OF THE 15 CHAIN AND THE THIRD HERE.
+  #
+  # IT IS XCODE 26.6 RATHER THAN THE 26.3 macos15 USES, and the difference is measured rather than
+  # chosen. Apple's requirements table gives 26.3 as "macOS Sequoia 15.6 - Tahoe 26.x" and 26.6 as
+  # "macOS Tahoe 26.2 - 26.x": 26.3 is the newest SEQUOIA can run, 26.6 is the newest TAHOE - and the
+  # newest for INTEL at all, because Xcode 27's release notes say it "will only install and run on
+  # Apple silicon Macs". This guest is x86_64.
+  #
+  # `Universal`, NOT `Apple_silicon`: both are published for every 26.x release and only Universal
+  # installs on an Intel Mac.
+  #
+  # THE ASSETS ARE THE REASON THIS JOB EXISTS RATHER THAN A ROW SOMEWHERE. `TestEverySCPSourceIsProduced`
+  # refuses a walk whose `scp:` names a file no earlier step writes, so `Xcode_26.6_Universal.xip`,
+  # `node.pkg` and `python.pkg` have to be declared here for `pull-artifact.sh` to place them.
+  #
+  # NINETY MINUTES, THE SAME AS macos.yml'S dev JOB: expanding a .xip prints nothing for about twenty
+  # minutes and `xcodebuild -runFirstLaunch` is another long silence, so the stage's own clock is
+  # mostly waiting.
+  dev:
+    needs: [room, vm-configure]
+    if: |
+      always() && !cancelled() && (
+        github.event_name != 'workflow_dispatch' ||
+        inputs.stage == 'dev' ||
+        inputs.stage == 'all' && needs.vm-configure.result == 'success'
+      )
+    uses: ./.github/workflows/stage.yml
+    secrets: inherit
+    with:
+      group: macos26
+      disks_repository: ${{ inputs.disks_repository }}
+      stages: |
+        [
+          {
+            "name": "macos26-dev",
+            "file": "macos/26/steps/dev.yaml",
+            "pull": "macos26-vm-configure",
+            "assets": ["macos-asset-boot-26:boot.img", "macos-asset-rom-26:macos.rom", "macos-asset-vars-26:macos.vars", "macos-asset-xcode-26.6:Xcode_26.6_Universal.xip", "dev-node-pkg:node.pkg", "dev-python-pkg:python.pkg"],
+            "out": "macos26-dev.qcow2",
+            "publish": "macos26-dev",
+            "timeout": 90
           }
         ]
