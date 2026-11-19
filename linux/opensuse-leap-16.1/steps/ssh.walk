@@ -56,6 +56,13 @@ walkthrough "linux-opensuse-tumbleweed - sshd"
     run == echo CONSOLE_READY
     settle == 3
     terminal_wait == 0
+  # AND SUDO IS UNLOCKED ONCE HERE, FOR THE SAME REASON AS THE OTHER DISTRIBUTIONS: a password that
+  # travels inside a command line is lost when that command's Return is lost. `sudo -v` stores a
+  # timestamp, and every later `sudo` is plain.
+  step "unlock sudo once for this session"
+    run == printf '%s\n' {{ password }} | sudo -S -v
+    settle == 4
+    terminal_wait == 0
   # NO `terminal_wait:` HERE, AND THAT IS THE FIX RATHER THAN AN OMISSION.
   #
   # `terminal_wait:` OPENS A TERMINAL (ctrl+alt+t) AND THEN TYPES. The step above has already
@@ -72,19 +79,19 @@ walkthrough "linux-opensuse-tumbleweed - sshd"
   # command went to the OTHER window. And the `xset -dpms` failure - "server does not have extension
   # for -dpms option" - is harmless; the screen is still kept awake by `s off` and `s noblank`.
   step "install openssh"
-    run == echo {{ password }} | sudo -S zypper --non-interactive --no-gpg-checks install openssh 2>&1 | tail -5
+    run == sudo zypper --non-interactive --no-gpg-checks install openssh 2>&1 | tail -5
     settle == 60
     terminal_wait == 0
   step "allow password authentication"
-    run == echo {{ password }} | sudo -S -p '' sh -c 'mkdir -p /etc/ssh/sshd_config.d; printf "PasswordAuthentication yes\n" > /etc/ssh/sshd_config.d/99-vm.conf; sed -i "s/^#\?\s*PasswordAuthentication.*/PasswordAuthentication yes/" /etc/ssh/sshd_config; grep -q "^PasswordAuthentication yes" /etc/ssh/sshd_config || printf "PasswordAuthentication yes\n" >> /etc/ssh/sshd_config' 2>&1 | tail -3
+    run == sudo sh -c 'mkdir -p /etc/ssh/sshd_config.d; printf "PasswordAuthentication yes\n" > /etc/ssh/sshd_config.d/99-vm.conf; sed -i "s/^#\?\s*PasswordAuthentication.*/PasswordAuthentication yes/" /etc/ssh/sshd_config; grep -q "^PasswordAuthentication yes" /etc/ssh/sshd_config || printf "PasswordAuthentication yes\n" >> /etc/ssh/sshd_config' 2>&1 | tail -3
     settle == 3
     terminal_wait == 0
   step "enable sshd at boot"
-    run == echo {{ password }} | sudo -S systemctl enable sshd 2>&1 | tail -3
+    run == sudo systemctl enable sshd 2>&1 | tail -3
     settle == 8
     terminal_wait == 0
   step "start sshd"
-    run == echo {{ password }} | sudo -S systemctl restart sshd 2>&1 | tail -3
+    run == sudo systemctl restart sshd 2>&1 | tail -3
     settle == 10
     terminal_wait == 0
   step "prove sshd is active"
@@ -92,7 +99,7 @@ walkthrough "linux-opensuse-tumbleweed - sshd"
     settle == 5
     terminal_wait == 0
   step "open the firewall for ssh"
-    run == echo {{ password }} | sudo -S sh -c "firewall-cmd --add-service=ssh --permanent; firewall-cmd --reload; firewall-cmd --list-services" 2>&1 | tail -5
+    run == sudo sh -c "firewall-cmd --add-service=ssh --permanent; firewall-cmd --reload; firewall-cmd --list-services" 2>&1 | tail -5
     settle == 8
     terminal_wait == 0
   step "wait for sshd"
