@@ -98,27 +98,44 @@ walkthrough "windows 11 - install to a desktop"
   # the budget ran out. The nudge was written for an OOBE that waits on "press any key", and NOTHING
   # IN IT COULD TELL THAT SCREEN FROM AN INSTALL THAT IS 54% DONE.
   #
-  # SO THE KEY IS GATED ON THE WORDS THAT ASK FOR IT. `when_not: [complete]` reads the progress
-  # page's own line - "54% complete" - and skips the key while it is there, which is the whole
-  # difference between nudging a stalled OOBE and cancelling a working install. The band is the
-  # progress line itself: x 200..700, y 190..230, where every progress page this installer draws
-  # puts it.
-  step "nudge the first boot along, once"
-    key == Escape
-    rect == [190, 190, 760, 235]
-    rect_at == [1920, 1080]
-    # SCALE 1 IS THE ONE THAT READS THIS LINE AS IT IS DRAWN. Read back from that recording:
-    # scale 1 gives "54% complete", scale 2 gives "24% complete" - either way `complete` is
-    # there, but the smaller enlargement is the one that does not invent digits.
-    scale == 1
-    settle == 30
-    when_not == [complete]
-  # ESCAPE AND NOT RETURN, for the second half of the same lesson. On an install that is 54% done the
-  # focused control is `Cancel`; Escape dismisses the "press any key" notice just as well and does
-  # NOT activate a focused button. It is the key that means "no".
+  # AND THE ANSWER IS GATED ON THE DIALOG ITSELF, NOT ON THE PROGRESS LINE.
+  #
+  # THE FIRST ATTEMPT AT THIS GATE WAS `when_not: [complete]` AND IT FAILED FOR A REASON THAT IS IN
+  # THE ENGINE: `doUnless` treats an unreadable screen as an ERROR, because "the words are absent"
+  # and "nobody looked" are different facts. MEASURED ON RUN 44490615000, which died at step 10:
+  #
+  #	nudge the first boot along, once - unless: 0 word(s):
+  #	status: failed step 10/22 "nudge the first boot along, once"
+  #
+  # The band was the progress line and the screen at that moment was "We're getting a few things
+  # ready", which has none. So the gate refused, and a guard against cancelling an install became a
+  # way to lose one.
+  #
+  # `when:` READS, AND A MISSING READING IS A SKIP. That is the behaviour this needs: press the key
+  # ONLY when the quit dialog is on screen, and do nothing at all on every other frame.
+  #
+  # WHY THE DIALOG AND NOT "press any key": MEASURED on the 2h07m recording, where the progress line
+  # reads 28% at 200 s, 54% at 600 s, and 54% again at 1200, 1800, 2400 and 3000 - the install had
+  # stopped, and the quit dialog is up from about 520 s. The dialog is what has to be answered.
   step "answer a quit dialog, if one is up"
     key == Escape
-    settle == 10
+    rect == [820, 460, 1520, 660]
+    rect_at == [1920, 1080]
+    # SCALE 2, BECAUSE SCALE 1 DOES NOT READ THE WORD THIS GATE NEEDS. Read back from the recording:
+    # scale 1 gives "yeusureyouwantto au?" - no "quit" in it, so the gate would never open - and
+    # scale 2 gives "Are you sure you want to quit?". Escape is not Enter: on this page the focused
+    # control is `Cancel`, and Escape does not activate a focused button.
+    scale == 2
+    settle == 15
+    when == [quit]
+  # THE SAME ANSWER ONCE MORE, because a dialog that has been dismissed can come back: the first
+  # one appeared only because a stray Return had pressed Cancel, and no Return is sent any more.
+  step "answer it again, if it came back"
+    key == Escape
+    rect == [820, 460, 1520, 660]
+    rect_at == [1920, 1080]
+    scale == 2
+    settle == 15
     when == [quit]
   # THE DESKTOP IS DECIDED BY THE REFERENCE IMAGE, NOT BY THREE BRIGHTNESS THRESHOLDS.
   #
