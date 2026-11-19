@@ -4,7 +4,6 @@ walkthrough "macos 15 ssh - the setup assistant, remote login, and a graceful sh
   user vmuser
   password admin
   var out == {default: out/macos15-ssh.qcow2, from: args.out}
-  var shutdown == {default: acpi, from: args.shutdown}
   var user == {default: vmuser, from: args.user}
   header boot_disk == from_caller
   header ssh_port == 2222

@@ -4,7 +4,6 @@ walkthrough "freebsd 15.1 - sshd, XFCE, and a desktop"
   user vmuser
   password admin
   var out == {default: out/freebsd-ssh.qcow2, from: args.out}
-  var shutdown == {default: acpi, from: args.shutdown}
   var user == {default: vmuser, from: args.user}
   header ssh_port == 2222
 
@@ -71,8 +70,24 @@ walkthrough "freebsd 15.1 - sshd, XFCE, and a desktop"
   step "flush the writes before the machine stops"
     ssh == sudo sync
     timeout == 300
-  step "stop the machine"
-    shutdown == '{{ shutdown }}'
+  # `shutdown: acpi` WAS A VALUE THIS VOCABULARY DOES NOT HAVE, AND IT SURVIVED UNTIL THE STEP
+  # BEFORE THE LAST ONE ON A REAL RUN.
+  #
+  # MEASURED on the run after the resolver fix let `pkg install xfce` succeed - step 17 of 18:
+  #
+  #	status: failed step 17/18 "stop the machine"
+  #	error:   "acpi" is not a shutdown method; the ones this build has are `kill` and `ssh`.
+  #	         To press the power button write `acpi: power`, to ask the guest agent write
+  #	         `qga: shutdown`, ...
+  #
+  # So `shutdown:` is a method NAME (`kill`, `ssh`) and asking for the power button is the `acpi:`
+  # ACTION. The `var shutdown` default was the old spelling and `freebsd.yml` never overrides it,
+  # which is why nothing caught it: the value never appeared in a workflow.
+  step "press the power button"
+    acpi == power
+    timeout == 60
+  step "wait for the machine to stop"
+    wait_until == stopped
     timeout == 600
   step "publish the disk"
     compress == '{{ out }}'
