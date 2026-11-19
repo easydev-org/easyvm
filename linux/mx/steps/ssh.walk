@@ -11,23 +11,18 @@ walkthrough "linux-mx - sshd"
     # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
     memory_mb == 4096
     timeout == 900
-  # THE GREETER IS ASKED FOR BEFORE IT IS CLICKED. MEASURED ON THIS MEDIUM'S OWN RECORDING.
+  # THE GREETER IS ASKED FOR BEFORE IT IS CLICKED, AND THE BAND IS THIS MEDIUM'S OWN.
   #
-  # RUN 44547606326's mint ssh stage ends with the greeter showing, in amber,
+  # THIS FILE HAD MINT'S BAND ([80,480,480,640] - LightDM's small card) BECAUSE THE TWO WALKS WERE
+  # EDITED TOGETHER, AND MX DOES NOT DRAW THAT: it runs SDDM, whose user tile and password field sit
+  # in the middle of the screen, which is the band cachyos, endeavour and manjaro use.
   #
-  #	Vmuser User
-  #	Invalid password, please try again
-  #	[ Password ]
-  #
-  # so the click and the five characters DID arrive - the password was simply rejected, which is
-  # what a click that lands before the field has focus produces: the first characters go to the
-  # session chooser and the rest to the box.
-  #
-  # THE BAND IS THAT CARD: x 80..480, y 480..640, which reads 'Vmuser User' and 'Password' at scale
-  # 1 and 2 on that frame.
+  # The click below is at 259,568 - LightDM's position - so it is moved to SDDM's field as well.
+  # MEASURED on this medium's own install recording, whose greeter is the same SDDM.
   step "the greeter is drawn"
-    loop == {check: {from: greeter, mode: text, name: up, rect: [80, 480, 480, 640], rect_at: [1920, 1080], scale: 1, words: [[vmuser], [password]]}, do: [{settle: 5}], max: 60, see: {name: greeter}, until: {fact: up}}
-  click "greeter - the password box" at 259 568, waiting 2s, optionally, named "greeter - the password box"
+    loop == {check: {from: greeter, mode: text, name: up, rect: [740, 470, 1340, 770], rect_at: [1920, 1080], scale: 2, words: [[password], [vmuser]]}, do: [{key: esc, settle: 3}], max: 60, see: {name: greeter}, until: {fact: up}}
+  click "greeter - the password box" at 936 628, waiting 2s, optionally, named "greeter - the password box"
+
   step "greeter - log in"
     optional == true
     settle == 3
