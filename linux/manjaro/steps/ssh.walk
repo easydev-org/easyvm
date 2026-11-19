@@ -97,6 +97,19 @@ walkthrough "linux-manjaro - sshd"
     run == systemctl is-active sshd
     settle == 5
     terminal_wait == 0
+  # sshd IS ACTIVE AND THE PORT STILL REFUSES - THIS MEDIUM'S FIREWALL IS THE REASON.
+  #
+  # MEASURED ON RUN 44599025471's successor: 'systemctl is-active sshd' prints ACTIVE and the stage
+  # then spends ten minutes on 'connection refused'. Refused, not timeout, means the packet reaches
+  # the guest and nothing answers on 2222 - which is what firewalld does when the service is not
+  # allowed.
+  #
+  # cachyos's stage has had an equivalent step ('ufw allow 22/tcp') all along; this file never had
+  # one. Both firewalld and ufw are tried, since this medium ships firewalld.
+  step "open the firewall for ssh"
+    run == sudo firewall-cmd --permanent --add-service=ssh; sudo firewall-cmd --reload; sudo firewall-cmd --list-services
+    settle == 8
+    terminal_wait == 0
   step "wait for sshd"
     require_ssh == true
     timeout == 600
