@@ -121,8 +121,19 @@ walkthrough "macos 15 - configure the vm (share, login hook, guest agent)"
   step "prove the machine will not go to sleep"
     ssh == "pmset -g custom | grep -iE \"displaysleep|sleep\" | head -4; defaults -currentHost read com.apple.screensaver idleTime\n"
     timeout == 120
-  step "ask the guest to power off"
-    ssh == printf '%s\n' '{{ password }}' | sudo -S -p '' poweroff
+  # `shutdown: ssh`, FOR THE REASON macos/15/steps/ssh.walk ALREADY RECORDS.
+  #
+  # MEASURED AGAIN ON RUN 44474459141, this stage, step 22:
+  #
+  #	ssh: printf '%s\n' 'admin' | sudo -S -p '' poweroff -> 1
+  #	  sudo: poweroff: command not found
+  #
+  # `/sbin` is not on sudo's secure_path here, so the binary was never found - a different failure
+  # from ssh.walk's EOF, and the same cure. `shutdown:` is the executor's own method: it sends the
+  # command by a route that does not need the binary on PATH and tolerates the connection ending,
+  # which a working shutdown always does. The `wait_until: stopped` after it is what confirms.
+  step "stop the machine"
+    shutdown == ssh
     timeout == 300
   step "wait for the machine to stop"
     wait_until == stopped
