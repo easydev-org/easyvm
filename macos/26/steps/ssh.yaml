@@ -748,6 +748,16 @@ steps:
   - 672
   - 387
   wait_after: 12
+# THE RESULT ROW MOVES BETWEEN BOOTS, SO THIS FILE TRIES THE THREE HEIGHTS IT HAS BEEN MEASURED AT.
+#
+# MEASURED ACROSS THREE RUNS OF THIS STAGE: `Sharing / Remote login` sat at y=336, then y=387, then
+# y=343. The settings window's origin is remembered by macOS from the previous session, so the row's
+# absolute height is not a property of macOS 26 - it is a property of the last window position.
+#
+# THREE PRESSES AT THE THREE MEASURED HEIGHTS IS WHAT THIS IS, and the sensor between them is the pane
+# itself: each attempt is followed by the same `unless: allow full disk access` test, so a press that
+# lands on nothing costs one attempt and the next height is tried. That is why the retry step exists at
+# all - it is not a nicety, it is the mechanism that makes a remembered window position survivable.
 - name: open the remote login pane again
   unless:
   - allow
@@ -762,7 +772,7 @@ steps:
   scale: 2
   click:
   - 672
-  - 387
+  - 343
   wait_after: 12
   region_at:
   - 1920
