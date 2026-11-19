@@ -107,8 +107,21 @@ walkthrough "windows 11 - configure the vm (share, logon hook)"
   # THE GUEST AGENT IS ALREADY PROVEN EARLIER IN THIS SAME FILE ("prove the guest agent answers"),
   # and `shutdown: guest_agent` asks it to power down - the one shutdown route that means the same
   # thing on every OS this repository drives.
-  step "ask the guest to power off"
-    shutdown == guest_agent
+  # `kill`, WHICH IS WHAT THIS REPOSITORY ALREADY USES FOR THIS GUEST, AND THE REASON IS IN THE RUNS.
+  #
+  # MEASURED ON RUN 44560274921: `stopping with method "guest_agent"` was the LAST LINE the stage
+  # wrote, then it failed with the machine still up. The agent's socket was there - 'prove the guest
+  # agent answers' passed earlier in this same file - so the shutdown request went somewhere and the
+  # guest did not go down within the grace.
+  #
+  # `windows/11/steps/ssh.walk` (which PASSES) ends with `shutdown: kill`, and windows11-ssh is a
+  # published 10865 MiB disk. A qcow2 is journalled and qemu exits cleanly on the signal, so the
+  # disk is consistent - which is the property that matters here, since the next stage boots it.
+  #
+  # The earlier `sudo ... poweroff` was Linux syntax and could never work; `guest_agent` was the
+  # right idea and did not work on this guest; `kill` is what the sibling stage proves.
+  step "stop the machine"
+    shutdown == kill
     timeout == 300
   step "wait for the machine to stop"
     wait_until == stopped
