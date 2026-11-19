@@ -81,6 +81,22 @@ walkthrough "linux-fedora-workstation - sshd"
   # not ambiguous.
   press Tab, waiting 2s, named "focus the wizard's only button"
   press Return, waiting 15s, named "start the setup wizard, by keyboard"
+  # THE WIZARD HAS MANY PAGES AND ONE BUTTON THAT MOVES FORWARD.
+  #
+  # MEASURED ON RUN 44557723577's successor: after Start Setup the wizard walks itself to
+  #
+  #	[ Previous ]   Privacy   [ Next ]
+  #	Location Services   (off)
+  #	Privacy controls can be changed at any time from the Settings app.
+  #
+  # and stops there, because nothing presses Next. Its Next is at 1420,193 on every page of this
+  # wizard (the frame above shows it there), and the wizard closes when the last one is taken.
+  #
+  # The loop presses Next until the wizard's own heading is gone. `max: 12` is the number of pages
+  # this wizard has plus slack; a page that does not advance costs one press, not the whole stage.
+  step "walk the setup wizard to its end"
+    loop == {check: {from: wizard_page, mode: text, name: still_open, rect: [400, 165, 1000, 225], rect_at: [1920, 1080], scale: 1, words: [[previous]]}, do: [{click: [1420, 193], settle: 6}], max: 12, see: {name: wizard_page}, until: {fact: still_open}}
+    optional == true
 
   click "desktop - give the shell focus" at 960 700, waiting 2s, named "desktop - give the shell focus"
   press meta_l, waiting 4s, named "open the overview"
