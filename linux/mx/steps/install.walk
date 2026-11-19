@@ -132,7 +132,7 @@ walkthrough "mx - the minstall walk"
     loop == {check: {from: screen, mode: text, name: done, rect: [690, 195, 1040, 255], rect_at: [1920, 1080], words: [terms, of, use]}, do: [{settle: 6}], max: 30, see: {name: screen}, until: {fact: done}}
   click "terms of use" at 1482 889, waiting 14s, named "terms of use"
   step "wait for the installation type page"
-    loop == {check: {from: screen, mode: text, name: done, rect: [842, 276, 914, 372], rect_at: [1920, 1080], words: [select, type, of, installation]}, do: [{settle: 6}], max: 30, see: {name: screen}, until: {fact: done}}
+    loop == {check: {from: screen, mode: text, name: done, rect: [660, 210, 1360, 270], rect_at: [1920, 1080], words: [select, type, of, installation]}, do: [{settle: 6}], max: 30, see: {name: screen}, until: {fact: done}}
   click installation at 1482 889, waiting 16s, named "installation type"
   step "wait for the confirmation page"
     loop == {check: {from: screen, mode: text, name: done, rect: [457, 284, 547, 340], rect_at: [1920, 1080], words: [final, review]}, do: [{settle: 6}], max: 30, see: {name: screen}, until: {fact: done}}
