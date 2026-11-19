@@ -41,8 +41,21 @@ walkthrough "linux-nixos - sshd"
   settle 240s, named "let the session finish starting"
   click "skip the welcome dialog" at 858 748, waiting 5s, named "skip the welcome dialog"
   press Escape, waiting 2s, named "clear anything left over"
-  step "the desktop is up"
-    loop == {check: {from: screen, mode: text, name: done, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], words: [[Dashboard], [Activities]]}, do: [{click: [420, 300], settle: 10}], max: 12, see: {name: screen}, until: {fact: done}}
+  # NO WORD AND NO PICTURE DECIDES THIS DESKTOP, SO THE SHELL DOES.
+  #
+  # MEASURED TWICE ON RUNS 44548647796 AND 44554888731:
+  #
+  #	the desktop is up [check]: done = false (none of "Dashboard" or "Activities" in "iS")
+  #
+  # while the recording ends on a COMPLETE nixos desktop - blue wall paper, top bar, clock. This
+  # GNOME draws neither string. A reference image was tried next and scored 0.6968, because install's
+  # desktop.png has an installer window on it and this one does not; and the desk top itself is bare
+  # wall paper, so there is no panel or dock to key on either.
+  #
+  # SO THE PROOF IS THE THING THE STAGE ACTUALLY NEEDS: a shell. The greeter has already been
+  # answered above, so the session is starting; `run:` needs a window to type into, and it gets one
+  # from ctrl+alt+t. `settle` gives Plasma/GNOME the time the words could not be measured against.
+  settle 60s, named "let the session finish starting, which no band can confirm"
   click "desktop - give the shell focus" at 960 700, waiting 2s, named "desktop - give the shell focus"
   press meta_l, waiting 4s, named "open the overview"
   step "search for the terminal"
