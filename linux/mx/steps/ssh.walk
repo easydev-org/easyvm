@@ -30,9 +30,17 @@ walkthrough "linux-mx - sshd"
   step "leave the shell for the menu"
     when == [grub]
     type == normal
-    settle == 3
+  # THE MAIN MENU COMES UP WITH THE LANGUAGE ROW HIGHLIGHTED, AND THREE `up` PRESSES DO NOT MOVE IT.
+  #
+  # MEASURED ON RUN 44583759370's successor, whose recording at 160 s is the live menu with
+  # 'Language - Keyboard - Timezone' STILL highlighted after this stage's presses. `home` is what
+  # grub treats as "the first entry" whatever the highlight is doing, and Return boots it.
+  step "the boot menu, when it is not already booting"
+    loop == {check: {from: bootmenu, mode: text, name: at_menu, rect: [660, 200, 1620, 520], rect_at: [1920, 1080], scale: 1, words: [[mx-25], [boot, rescue, menus]]}, do: [{settle: 4}], max: 10, see: {name: bootmenu}, until: {fact: at_menu}}
+    optional == true
   press Return, waiting 5s, named "enter the normal module, which loads the menu"
-  press Return, waiting 25s, named "boot the highlighted entry, which is the installed system"
+  press home, waiting 2s, named "jump to the first entry, whatever the highlight was on"
+  press Return, waiting 60s, named "boot the highlighted entry, which is the installed system"
   # THE GREETER IS ASKED FOR BEFORE IT IS CLICKED, AND THE BAND IS THIS MEDIUM'S OWN.
   #
   # THIS FILE HAD MINT'S BAND ([80,480,480,640] - LightDM's small card) BECAUSE THE TWO WALKS WERE
