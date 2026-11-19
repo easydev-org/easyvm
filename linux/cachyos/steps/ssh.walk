@@ -39,8 +39,20 @@ walkthrough "linux-cachyos - sshd"
     key == ret
     optional == true
     settle == 12
+  # `desktop: linux/kde` AND NOT `desktop: linux`: THE BARE FAMILY TESTS FOR A PANEL THAT IS AT LEAST
+  # 40 ROWS TALL, AND THIS ENVIRONMENT'S PANEL IS 8.
+  #
+  # MEASURED ON RUN 44490850319's LEFT-OVER RECORDING AND AGAIN ON THIS STAGE'S OWN FRAME, same two
+  # images, both tests:
+  #
+  #	IsLinuxDesktop   false   drop=0.0   ratio=0.00
+  #	IsKDEDesktop     true    drop=10.8  ratio=1072.00
+  #
+  # The desktop was up the whole time the stage was waiting - the recording's last 15 minutes are a
+  # finished CachyOS desktop with its welcome window and its panel. `desktop:` spent them asking a
+  # question this DE answers false to.
   step "wait for the desktop"
-    desktop == linux
+    desktop == linux/kde
     timeout == 900
   press ctrl+alt+t, waiting 20s, named "open the terminal"
   step "install openssh"
