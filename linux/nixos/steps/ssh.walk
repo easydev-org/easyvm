@@ -82,13 +82,24 @@ walkthrough "linux-nixos - sshd"
   step "keep the screen on, because a blanked screen takes no keys"
     run == xset s off; xset s noblank; echo SCREEN_KEPT_ON
     settle == 5
+  # UBUNTU'S SHAPE: unlock sudo ONCE, then plain sudo - the password stops travelling in commands.
+  #
+  # MEASURED: this stage's `nixos-rebuild switch` ran with the password inside its command line and
+  # `wait for sshd` then spent ten minutes on 'connection refused' - the same fault as every other
+  # distribution in this session, in the file that had the longest commands and so the most to lose
+  # from a dropped keystroke.
+  step "unlock sudo once for this session"
+    run == printf '%s\n' {{ password }} | sudo -S -v
+    settle == 5
+    terminal_wait == 0
+    type_gap == 0.15
   step "declare openssh in configuration.nix"
-    run == "echo {{ password }} | sudo -S sh -c 'sed -i \"$ d\" /etc/nixos/configuration.nix; printf \"  services.openssh.enable = true;\\n  services.openssh.settings.PasswordAuthentication = true;\\n  networking.firewall.enable = false;\\n}\\n\" >> /etc/nixos/configuration.nix'\n"
+    run == "sudo sh -c 'sed -i \"$ d\" /etc/nixos/configuration.nix; printf \"  services.openssh.enable = true;\\n  services.openssh.settings.PasswordAuthentication = true;\\n  networking.firewall.enable = false;\\n}\\n\" >> /etc/nixos/configuration.nix'\n"
     settle == 6
     terminal_wait == 0
     type_gap == 0.15
   step "rebuild the system"
-    run == echo {{ password }} | sudo -S nixos-rebuild switch 2>&1 | tail -8
+    run == sudo nixos-rebuild switch 2>&1 | tail -8
     settle == 300
     terminal_wait == 0
     type_gap == 0.15
