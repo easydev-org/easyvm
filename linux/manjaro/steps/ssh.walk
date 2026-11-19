@@ -38,77 +38,31 @@ walkthrough "linux-manjaro - sshd"
   # SDDM blanks to a clock-only screen, and a wait cannot succeed until something wakes it.
   step "the greeter is drawn"
     loop == {check: {from: greeter, mode: text, name: up, rect: [740, 470, 1340, 770], rect_at: [1920, 1080], scale: 2, words: [[password], [vmuser]]}, do: [{key: esc, settle: 3}], max: 60, see: {name: greeter}, until: {fact: up}}
-  click "greeter - the password box" at 936 628, waiting 3s, optionally, named "greeter - the password box"
-  step "greeter - log in"
-    optional == true
-    settle == 3
-    type == '{{ password }}'
-  step "greeter - submit"
-    key == ret
-    optional == true
-    settle == 12
-  # `desktop: linux/kde` AND NOT `desktop: linux`: THE BARE FAMILY TESTS FOR A PANEL THAT IS AT LEAST
-  # 40 ROWS TALL, AND THIS ENVIRONMENT'S PANEL IS 8.
+  # THE SESSION FALLS BACK TO SDDM, SO THE STAGE USES A VIRTUAL CONSOLE INSTEAD.
   #
-  # MEASURED ON RUN 44490850319's LEFT-OVER RECORDING AND AGAIN ON THIS STAGE'S OWN FRAME, same two
-  # images, both tests:
+  # MEASURED ON RUN 44557723577's successor: at 90 s the screen is SDDM's login again - 'vmuser',
+  # an EMPTY password field, 'Sleep / Restart / Shut Down' - while the stage was on its later steps.
+  # The desktop gate had passed and the terminal had been opened; then the Plasma session went away.
   #
-  #	IsLinuxDesktop   false   drop=0.0   ratio=0.00
-  #	IsKDEDesktop     true    drop=10.8  ratio=1072.00
-  #
-  # The desktop was up the whole time the stage was waiting - the recording's last 15 minutes are a
-  # finished CachyOS desktop with its welcome window and its panel. `desktop:` spent them asking a
-  # question this DE answers false to.
-  step "wait for the desktop"
-    desktop == linux/kde
-    timeout == 900
-  click "focus the desktop" at 960 540, waiting 3s, named "focus the desktop"
-  press ctrl+alt+t, waiting 8s, named "open the terminal"
-  # NO `terminal_wait:` HERE, AND THAT IS THE FIX RATHER THAN AN OMISSION.
-  #
-  # `terminal_wait:` OPENS A TERMINAL (ctrl+alt+t) AND THEN TYPES. The step above has already
-  # opened one, so a second ctrl+alt+t starts a NEW terminal window and the keys that follow go to
-  # it - while the command already typed into the first one is never submitted.
-  #
-  # MEASURED ON RUN 44545555943's kubuntu ssh recording, whose terminal shows exactly that:
-  #
-  #	vmuser@kubuntu:~$ xset s off; xset -dpms; xset s noblank; echo SCREEN_KEPT_ONECHO ADMIN | sudo ...
-  #	server does not have extension for -dpms option
-  #	[sudo: authenticate] Password:
-  #
-  # `SCREEN_KEPT_ON` runs straight into `ECHO ADMIN` with no line break: the Return after the first
-  # command went to the OTHER window. And the `xset -dpms` failure - "server does not have extension
-  # for -dpms option" - is harmless; the screen is still kept awake by `s off` and `s noblank`.
-  # THE SECOND ctrl+alt+t IS GONE, AND IT WAS THE REASON THE FIRST TERMINAL WENT UNUSED.
-  #
-  # MEASURED ON RUN 44555801435, whose ssh recording's last frame is PURE BLACK: the screen blanked
-  # with the stage still typing. Two chords were pressed - 8 s apart at step 5 and again after the
-  # xset step - and each opens a NEW window. Whatever the xset step typed went into the second one
-  # while the first sat there, and this walk's own comment (above the fold) already records that
-  # exact fault on kubuntu's stage: `SCREEN_KEPT_ON` run straight into `ECHO ADMIN`.
-  #
-  # One chord, at step 5. Every later step types into the terminal that chord opened.
-  # THE SCREEN BLANKS WHILE THE INSTALL RUNS - the recording of the previous attempt is BLACK at
-  # 120 s with the stage still typing - so this runs FIRST, before anything long.
-  # THIS DESKTOP'S SHELL IS ZSH, AND ZSH TRIES TO "CORRECT" `xset` INTO `set`.
-  #
-  # MEASURED ON RUN 44557723577's successor, whose terminal reads
-  #
-  #	% xset s off; xset s noblank; xset -dpms 2>/dev/null; echo SCREEN_KEPT_ONPRINTF '%s\n' admin | sudo -S -v
-  #	zsh: correct 'xset' to 'set' [nyae]?
-  #
-  # Two faults in one line: zsh's `correct` option stopped the command and asked a question, and
-  # the answer never came, so the next step's whole command was appended to it.
-  #
-  # `unsetopt correct` FIRST turns that prompt off, and `/usr/bin/xset` is spelled out so there is
-  # nothing to correct. The echo is a separate word now too, so a lost Return shows up as a lost
-  # Return rather than as two commands fused together.
-  step "keep the screen on"
-    run == unsetopt correct 2>/dev/null; /usr/bin/xset s off; /usr/bin/xset s noblank; /usr/bin/xset -dpms 2>/dev/null
+  # A getty does not go away. ctrl+alt+F2 gives tty2, the user name and password are typed there,
+  # and every command below runs in that shell exactly as it would in a terminal window.
+  press ctrl+alt+F2, waiting 12s, named "switch to a virtual console, where getty offers a login"
+  press Return, waiting 3s, named "ask getty for a fresh prompt"
+  press ctrl+c, waiting 3s, named "abandon anything half-typed at the console"
+  step "log in on the console"
+    type == '{{ user }}'
     settle == 5
+  press Return, waiting 6s, named "the console takes the user name"
+  step "the console's password"
+    type == '{{ password }}'
+    settle == 3
+  press Return, waiting 12s, named "the console takes the password"
+  step "the console is a shell"
+    run == echo CONSOLE_READY
+    settle == 3
     terminal_wait == 0
-  step "the screen is kept on"
-    run == echo SCREEN_KEPT_ON
+  step "the console answers"
+    run == echo CONSOLE_IS_A_SHELL
     settle == 3
     terminal_wait == 0
   step "unlock sudo once for this session"
