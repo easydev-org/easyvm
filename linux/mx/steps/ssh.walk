@@ -84,6 +84,17 @@ walkthrough "linux-mx - sshd"
   # `SCREEN_KEPT_ON` runs straight into `ECHO ADMIN` with no line break: the Return after the first
   # command went to the OTHER window. And the `xset -dpms` failure - "server does not have extension
   # for -dpms option" - is harmless; the screen is still kept awake by `s off` and `s noblank`.
+  # THE SCREEN BLANKS WHILE THE STAGE TYPES, AND XFCE'S OWN SAVER IS WHAT DOES IT.
+  #
+  # MEASURED: this stage's recording ends on a PURE BLACK frame with sshd never started, which is
+  # the same fault mint and manjaro showed - a screen that has blanked takes no keys.
+  #
+  # XFCE has a screensaver daemon of its own on top of X's dpms, so both are turned off, and the
+  # xfce4-screensaver binary is killed if this build runs it.
+  step "keep the screen on"
+    run == xset s off; xset s noblank; xset -dpms 2>/dev/null; pkill -f xfce4-screensaver 2>/dev/null; xfconf-query -c xfce4-screensaver -p /saver/enabled -s false 2>/dev/null; echo SCREEN_KEPT_ON
+    settle == 5
+    terminal_wait == 0
   step "install openssh-server"
     run == xset s off; xset s noblank; echo {{ password }} | sudo -S sh -c "export DEBIAN_FRONTEND=noninteractive; apt-get update -o DPkg::Lock::Timeout=600 && apt-get install -y -o DPkg::Lock::Timeout=600 openssh-server" 2>&1 | tail -6
     settle == 90
