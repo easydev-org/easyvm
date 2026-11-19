@@ -55,39 +55,39 @@ walkthrough "linux-zorin - sshd"
   # `SCREEN_KEPT_ON` runs straight into `ECHO ADMIN` with no line break: the Return after the first
   # command went to the OTHER window. And the `xset -dpms` failure - "server does not have extension
   # for -dpms option" - is harmless; the screen is still kept awake by `s off` and `s noblank`.
-  step "keep the screen on, because a blanked screen takes no keys"
-    run == xset s off; xset s noblank; echo SCREEN_KEPT_ON
-    settle == 5
-  press Escape, waiting 3s, named "dismiss the software updater, if it is up - with Escape, not a click"
-  step "stop the updater that puts a dialog over the terminal"
-    run == echo {{ password }} | sudo -S sh -c "systemctl stop packagekit 2>/dev/null; systemctl stop unattended-upgrades 2>/dev/null; systemctl stop apt-daily.service 2>/dev/null; systemctl stop apt-daily-upgrade.service 2>/dev/null; true" 2>&1 | tail -3
-    settle == 15
-    terminal_wait == 0
-  press Escape, waiting 3s, named "dismiss the software updater again - with Escape, not a click"
+  # UBUNTU'S SHAPE, WHICH IS THE ONE THAT PASSES: unlock sudo ONCE, then plain sudo.
+  #
+  # MEASURED ON RUN 44556944097, whose zorin ssh recording shows the terminal with
+  #
+  #	$ CHO ADMIN | sudo -S sh -c "systemctl stop packagekit ...
+  #	CHO: command not found
+  #	[sudo] password for vmuser:
+  #	sudo: no password was provided
+  #	sudo: a password is required
+  #	Command 'apt-get' not found ...
+  #
+  # TWO FAULTS AT ONCE: the 'echo' lost its first two characters (the previous command's Return
+  # had not been delivered, so 'echo admin' was appended to it), and sudo therefore never got a
+  # password. Nothing was installed and sshd never started.
+  #
+  # `printf ... | sudo -S -v` IS THE CURE ubuntu's stage has used all along: it authenticates ONCE
+  # and stores the timestamp, after which every `sudo` needs no password at all - so a command that
+  # loses its first characters cannot lose the password with them.
+  step "keep the screen on"
+    run == xset s off; xset s noblank
+    settle == 3
+  step "unlock sudo once for this session"
+    run == printf '%s\n' {{ password }} | sudo -S -v
+    settle == 4
   step "install openssh-server"
-    run == echo {{ password }} | sudo -S sh -c "export DEBIAN_FRONTEND=noninteractive; apt-get update -o DPkg::Lock::Timeout=600 && apt-get install -y -o DPkg::Lock::Timeout=600 openssh-server" 2>&1 | tail -6
-    settle == 90
-    terminal_wait == 0
+    run == sudo apt-get install -y openssh-server
+    settle == 60
   step "allow password authentication"
-    run == echo {{ password }} | sudo -S -p '' sh -c 'mkdir -p /etc/ssh/sshd_config.d; printf "PasswordAuthentication yes\n" > /etc/ssh/sshd_config.d/99-vm.conf; sed -i "s/^#\?\s*PasswordAuthentication.*/PasswordAuthentication yes/" /etc/ssh/sshd_config; grep -q "^PasswordAuthentication yes" /etc/ssh/sshd_config || printf "PasswordAuthentication yes\n" >> /etc/ssh/sshd_config' 2>&1 | tail -3
+    run == sudo sed -i "s/^#\?\s*PasswordAuthentication.*/PasswordAuthentication yes/" /etc/ssh/sshd_config; sudo grep -i "^PasswordAuthentication" /etc/ssh/sshd_config
     settle == 3
-    terminal_wait == 0
   step "enable ssh at boot"
-    run == echo {{ password }} | sudo -S systemctl enable ssh 2>&1 | tail -3
+    run == sudo systemctl enable --now ssh
     settle == 8
-    terminal_wait == 0
-  step "prove the setting took"
-    run == echo {{ password }} | sudo -S sh -c 'sshd -T 2>/dev/null | grep -i "^passwordauthentication" || echo PASSWORDAUTH-UNREADABLE' 2>&1 | tail -3
-    settle == 3
-    terminal_wait == 0
-  step "start ssh"
-    run == echo {{ password }} | sudo -S systemctl restart ssh 2>&1 | tail -3
-    settle == 10
-    terminal_wait == 0
-  step "prove ssh is active"
-    run == systemctl is-active ssh
-    settle == 5
-    terminal_wait == 0
   step "wait for sshd"
     require_ssh == true
     timeout == 600
