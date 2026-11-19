@@ -134,15 +134,20 @@ walkthrough "linux-opensuse-tumbleweed - sshd"
     # THE VENDOR FILE IS /usr/etc/ssh/sshd_config ON THIS DISTRIBUTION (usr-merge with the packaged
     # file left in place). Both paths are written, and the file that sshd actually reads is proved by
     # `sshd -T` printing the value back.
-    run == sudo sh -c 'mkdir -p /etc/ssh/sshd_config.d; for f in /etc/ssh/sshd_config /usr/etc/ssh/sshd_config; do [ -f $f ] || touch $f; sed -i "s/^#\?\s*PasswordAuthentication.*/PasswordAuthentication yes/" $f; grep -q "^PasswordAuthentication yes" $f || printf "PasswordAuthentication yes\n" >> $f; done; printf "PasswordAuthentication yes\n" > /etc/ssh/sshd_config.d/99-vm.conf; printf "PasswordAuthentication yes\n" > /usr/etc/ssh/sshd_config.d/99-vm.conf 2>/dev/null || true; sudo sshd -T 2>&1 | grep -i "^passwordauthentication" || grep -i "^passwordauthentication" /usr/etc/ssh/sshd_config
+    run == sudo sh -c 'mkdir -p /etc/ssh/sshd_config.d /run/sshd; for f in /etc/ssh/sshd_config /usr/etc/ssh/sshd_config; do [ -f $f ] || touch $f; sed -i "s/^#\?\s*PasswordAuthentication.*/PasswordAuthentication yes/" $f; grep -q "^PasswordAuthentication yes" $f || printf "PasswordAuthentication yes\n" >> $f; done; printf "PasswordAuthentication yes\n" > /etc/ssh/sshd_config.d/99-vm.conf; printf "PasswordAuthentication yes\n" > /usr/etc/ssh/sshd_config.d/99-vm.conf 2>/dev/null || true; sudo sshd -T 2>&1 | grep -i "^passwordauthentication" || grep -i "^passwordauthentication" /usr/etc/ssh/sshd_config
     settle == 3
     terminal_wait == 0
   step "enable sshd at boot"
     run == sudo systemctl enable sshd 2>&1 | tail -3
     settle == 8
     terminal_wait == 0
+  # `/run/sshd` IS sshd's OWN PRIVILEGE SEPARATION DIRECTORY AND THIS IMAGE DOES NOT CREATE IT.
+  #
+  # MEASURED: `sshd -T` printed "Missing privilege separation directory: /run/sshd" - sshd needs that
+  # directory to exist before it will start at all, and on this distribution the unit does not create
+  # it. That is the other half of why the port never answered.
   step "start sshd"
-    run == sudo systemctl restart sshd 2>&1 | tail -3
+    run == sudo mkdir -p /run/sshd; sudo systemctl restart sshd 2>&1 | tail -3
     settle == 10
     terminal_wait == 0
   step "prove sshd is active"
