@@ -51,6 +51,26 @@ walkthrough "linux-fedora-workstation - sshd"
     key == ret
     optional == true
     settle == 12
+  # THIS DISK HAS NO USER, SO THE FIRST BOOT IS GNOME INITIAL SETUP - NOT A GREETER.
+  #
+  # MEASURED ON RUN 44557858241, whose ssh recording ends on the Setup window and stays there:
+  #
+  #	[ Setup ]
+  #	Welcome to Fedora Linux 45 (Workstation Edition)!
+  #	Setup will guide you through making an account and enabling some features.
+  #	[ Start Setup ]
+  #
+  # AND THAT IS WHY THIS DISK HAS NO USER: fedora's install walk never visits anaconda's root
+  # password or user page - it goes from 'next from the installation method' straight to
+  # `shutdown: kill`. So the account this stage needs does not exist yet, and it has to be made
+  # HERE, on the first boot, in the wizard the installer left behind.
+  #
+  # The other Linux media create `vmuser` inside their installer, which is why their ssh stages meet
+  # a greeter. This one does not, and the greeter steps above are optional for exactly that reason.
+  step "the setup wizard is up"
+    loop == {check: {from: wizard, mode: text, name: up, rect: [450, 620, 1470, 900], rect_at: [1920, 1080], scale: 1, words: [[welcome, to, fedora], [setup, will, guide]]}, do: [{settle: 5}], max: 40, see: {name: wizard}, until: {fact: up}}
+    optional == true
+  click "start the setup wizard" at 960 844, waiting 12s, optionally, named "start the setup wizard"
   click "desktop - give the shell focus" at 960 700, waiting 2s, named "desktop - give the shell focus"
   press meta_l, waiting 4s, named "open the overview"
   step "search for the terminal"
