@@ -11,6 +11,25 @@ walkthrough "linux-opensuse-tumbleweed - sshd"
     # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
     memory_mb == 4096
     timeout == 900
+  # THIS MEDIUM BOOTS TO A TEXT CONSOLE, NOT TO A DESKTOP - AND IT ALWAYS DID.
+  #
+  # MEASURED ON RUN 44554888493, whose ssh recording ends on
+  #
+  #	Welcome to openSUSE Leap 16.1 - Kernel 6.12.0-160100.8-default (tty1).
+  #	localhost login:
+  #
+  # a getty prompt, twice, with the machine idle. There is no greeter, no panel, no desktop: the
+  # media this stage boots does not install one. `wait for the desktop` was therefore waiting for
+  # something the disk has never had, for fifteen minutes, and the whole graphical path after it -
+  # ctrl+alt+t, xset, a terminal - was written for a session that does not exist.
+  #
+  # SO THE CONSOLE IS WHERE THE COMMANDS GO. `run:` types into whatever has focus, and on this
+  # guest that is tty1's login prompt: type the user, Return, type the password, Return, and the
+  # shell is as usable as a terminal window for everything this stage does.
+  #
+  # THE GRAPHICAL STEPS BELOW ARE KEPT AND MADE OPTIONAL, because a disk that DOES carry a desktop
+  # must not be broken by this: if a greeter answers, the walk logs in and opens a terminal exactly
+  # as before, and the console login then finds no prompt and does nothing.
   click "greeter - the password box" at 960 640, waiting 2s, optionally, named "greeter - the password box"
   step "greeter - log in"
     optional == true
@@ -20,10 +39,23 @@ walkthrough "linux-opensuse-tumbleweed - sshd"
     key == ret
     optional == true
     settle == 12
-  step "wait for the desktop"
+  step "wait for the desktop, when this disk has one"
     desktop == linux
-    timeout == 900
-  press ctrl+alt+t, waiting 20s, named "open the terminal"
+    timeout == 120
+    optional == true
+  press ctrl+alt+t, waiting 5s, named "open a terminal, when there is a desktop to open one on"
+  step "log in on the text console"
+    type == '{{ user }}'
+    settle == 3
+  press Return, waiting 3s, named "the console takes the user name"
+  step "the console's password"
+    type == '{{ password }}'
+    settle == 3
+  press Return, waiting 8s, named "the console takes the password"
+  step "the console is a shell, which every command below can use"
+    run == echo CONSOLE_READY
+    settle == 3
+    terminal_wait == 0
   # NO `terminal_wait:` HERE, AND THAT IS THE FIX RATHER THAN AN OMISSION.
   #
   # `terminal_wait:` OPENS A TERMINAL (ctrl+alt+t) AND THEN TYPES. The step above has already
@@ -40,7 +72,7 @@ walkthrough "linux-opensuse-tumbleweed - sshd"
   # command went to the OTHER window. And the `xset -dpms` failure - "server does not have extension
   # for -dpms option" - is harmless; the screen is still kept awake by `s off` and `s noblank`.
   step "install openssh"
-    run == xset s off; xset s noblank; echo {{ password }} | sudo -S zypper --non-interactive --no-gpg-checks install openssh 2>&1 | tail -5
+    run == echo {{ password }} | sudo -S zypper --non-interactive --no-gpg-checks install openssh 2>&1 | tail -5
     settle == 60
     terminal_wait == 0
   step "allow password authentication"
