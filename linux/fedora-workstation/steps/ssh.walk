@@ -45,6 +45,10 @@ walkthrough "linux-fedora-workstation - sshd"
     settle == 4
     type == terminal
   click "open the terminal" at 960 178, waiting 20s, named "open the terminal"
+  step "keep the screen on, because a blanked screen takes no keys"
+    run == xset s off; xset -dpms; xset s noblank; echo SCREEN_KEPT_ON
+    settle == 5
+    terminal_wait == 20
   step "install openssh-server"
     run == echo {{ password }} | sudo -S dnf install -y openssh-server 2>&1 | tail -5
     settle == 45

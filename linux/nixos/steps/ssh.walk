@@ -32,6 +32,10 @@ walkthrough "linux-nixos - sshd"
   step "wait for the Console result"
     loop == {check: {from: screen, mode: text, name: done, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], words: [[Console]]}, do: [{click: [420, 300], settle: 5}], max: 18, see: {name: screen}, until: {fact: done}}
   click "open the terminal" at 960 160, waiting 20s, named "open the terminal"
+  step "keep the screen on, because a blanked screen takes no keys"
+    run == xset s off; xset -dpms; xset s noblank; echo SCREEN_KEPT_ON
+    settle == 5
+    terminal_wait == 20
   step "declare openssh in configuration.nix"
     run == "echo {{ password }} | sudo -S sh -c 'sed -i \"$ d\" /etc/nixos/configuration.nix; printf \"  services.openssh.enable = true;\\n  services.openssh.settings.PasswordAuthentication = true;\\n  networking.firewall.enable = false;\\n}\\n\" >> /etc/nixos/configuration.nix'\n"
     settle == 6

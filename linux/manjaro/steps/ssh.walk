@@ -37,6 +37,10 @@ walkthrough "linux-manjaro - sshd"
     timeout == 900
   click "focus the desktop" at 960 540, waiting 3s, named "focus the desktop"
   press ctrl+alt+t, waiting 8s, named "open the terminal"
+  step "keep the screen on, because a blanked screen takes no keys"
+    run == xset s off; xset -dpms; xset s noblank; echo SCREEN_KEPT_ON
+    settle == 5
+    terminal_wait == 20
   press ctrl+alt+t, waiting 8s, named "open the terminal again, in case the first chord was dropped"
   step "install openssh"
     run == echo {{ password }} | sudo -S pacman -Sy --noconfirm --needed openssh 2>&1 | tail -5

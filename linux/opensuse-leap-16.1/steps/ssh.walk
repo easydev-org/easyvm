@@ -24,6 +24,10 @@ walkthrough "linux-opensuse-tumbleweed - sshd"
     desktop == linux
     timeout == 900
   press ctrl+alt+t, waiting 20s, named "open the terminal"
+  step "keep the screen on, because a blanked screen takes no keys"
+    run == xset s off; xset -dpms; xset s noblank; echo SCREEN_KEPT_ON
+    settle == 5
+    terminal_wait == 20
   step "install openssh"
     run == echo {{ password }} | sudo -S zypper --non-interactive --no-gpg-checks install openssh 2>&1 | tail -5
     settle == 60

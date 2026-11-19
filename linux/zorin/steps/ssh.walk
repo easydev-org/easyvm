@@ -40,6 +40,10 @@ walkthrough "linux-zorin - sshd"
     optional == true
     settle == 12
   press ctrl+alt+t, waiting 20s, named "open the terminal"
+  step "keep the screen on, because a blanked screen takes no keys"
+    run == xset s off; xset -dpms; xset s noblank; echo SCREEN_KEPT_ON
+    settle == 5
+    terminal_wait == 20
   click "dismiss the software updater, if it is up" at 968 594, waiting 3s, optionally, named "dismiss the software updater, if it is up"
   step "stop the updater that puts a dialog over the terminal"
     run == echo {{ password }} | sudo -S sh -c "systemctl stop packagekit 2>/dev/null; systemctl stop unattended-upgrades 2>/dev/null; systemctl stop apt-daily.service 2>/dev/null; systemctl stop apt-daily-upgrade.service 2>/dev/null; true" 2>&1 | tail -3

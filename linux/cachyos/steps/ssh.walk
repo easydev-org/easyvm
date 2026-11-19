@@ -54,7 +54,29 @@ walkthrough "linux-cachyos - sshd"
   step "wait for the desktop"
     desktop == linux/kde
     timeout == 900
+  # THE SCREEN GOES BLACK BEFORE THE FIRST COMMAND, AND A BLACK SCREEN TAKES NO KEYS.
+  #
+  # MEASURED ON RUN 44509536049, whose ssh recording ends on a PURE BLACK last frame and whose
+  # daemon log shows every command after `open the terminal` doing nothing at all:
+  #
+  #	=== open the terminal      key ctrl+alt+t
+  #	=== install openssh        (no output)
+  #	=== prove sshd is active   (no output)
+  #	=== wait for sshd          10 minutes of "connection refused"
+  #
+  # THIS GUEST BLANKS ITS OWN DISPLAY, which is the same DPMS behaviour mint showed as a uniform
+  # 0.29-of-brightness dim. The install walk turns it off; the ssh walk never did.
+  #
+  # ubuntu's ssh walk is the ONE that turns it off - `xset s off; xset -dpms; xset s noblank` - and
+  # it is the one that passes. Every other Linux ssh walk, this one included, was missing the step.
+  #
+  # IT IS RUN FIRST, BEFORE THE TERMINAL IS NEEDED FOR ANYTHING, so the commands below have a live
+  # screen to be typed into.
   press ctrl+alt+t, waiting 20s, named "open the terminal"
+  step "keep the screen on, because a blanked screen takes no keys"
+    run == xset s off; xset -dpms; xset s noblank; echo SCREEN_KEPT_ON
+    settle == 5
+    terminal_wait == 20
   step "install openssh"
     run == echo {{ password }} | sudo -S pacman -Sy --noconfirm --needed openssh 2>&1 | tail -5
     settle == 45

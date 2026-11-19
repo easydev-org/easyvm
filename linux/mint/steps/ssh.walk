@@ -17,6 +17,10 @@ walkthrough "linux-mint - sshd"
     type == '{{ password }}'
   press Return, waiting 12s, named "greeter - submit"
   press ctrl+alt+t, waiting 20s, named "open the terminal"
+  step "keep the screen on, because a blanked screen takes no keys"
+    run == xset s off; xset -dpms; xset s noblank; echo SCREEN_KEPT_ON
+    settle == 5
+    terminal_wait == 20
   step "install openssh-server"
     run == echo {{ password }} | sudo -S sh -c "export DEBIAN_FRONTEND=noninteractive; apt-get update -o DPkg::Lock::Timeout=600 && apt-get install -y -o DPkg::Lock::Timeout=600 openssh-server" 2>&1 | tail -6
     settle == 90
