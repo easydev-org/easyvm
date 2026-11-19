@@ -735,18 +735,26 @@ steps:
         - access
     until:
       fact: done
-# (672,387) IS THE RESULT ROW, MEASURED ON THIS STAGE'S OWN RUN, AND (703,336) IS NOT.
+# (692,388) IS THE RESULT'S TEXT, AND x WAS THE PART THAT WAS WRONG.
 #
-# MEASURED: the search results sat with `Sharing / Remote login` at y=387 in that frame - the window had
-# come up lower than the run the old coordinate came from - so presses at (703,336) landed on the
-# window's own title area and the panel never opened. The loop that follows then waited thirty times
-# for "allow full disk access" behind a panel that was never shown.
+# MEASURED FROM THIS STAGE'S OWN FRAME, ROW BY ROW:
 #
-# A press at (672,387) opened it on the first try, and the panel read `Remote Login: Off`.
+#	y=316..322   Sharing            <- the GROUP HEADING, not an item
+#	y=341..361   Remote login       <- THE ITEM; its text runs x=650..726
+#	y=387..393   General            <- first row of the main list
+#
+# The presses this file has used were (703,336) - in the gap above the group heading - and (672,387),
+# which is the GENERAL row. That second one is exactly what the CI log showed:
+#
+#	the remote login pane is up ... done = false ... in "General Manage your overall setup ..." x30
+#
+# The stage was never failing to find the result; it was pressing the row directly beneath it. A press
+# at (692,388) on the item's own text opened the panel on the first try, and it then read
+# `Remote Login: Off`.
 - name: open the remote login pane
   click:
-  - 672
-  - 387
+  - 692
+  - 388
   wait_after: 12
 # THE RESULT ROW MOVES BETWEEN BOOTS, SO THIS FILE TRIES THE THREE HEIGHTS IT HAS BEEN MEASURED AT.
 #
