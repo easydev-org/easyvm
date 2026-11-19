@@ -95,58 +95,39 @@ walkthrough "linux-zorin - sshd"
     settle == 4
   # `apt-get update` FIRST: this disk's index can point at a version the archive has replaced,
   # which answers 404 and reads like a network problem (measured on popos, same family).
-  # THIS DESKTOP'S POLKIT KEEPS TAKING THE KEYBOARD, SO THE STAGE MOVES TO A VIRTUAL CONSOLE.
+  # THE SOFTWARE UPDATER RAISES POLKIT'S 'Authentication Required' OVER THE TERMINAL, UNPROMPTED.
   #
-  # MEASURED TWICE, in run 44557723577's successor and again after the notifier was stopped: the
-  # screen is 'Authentication Required / To install or remove software, you need to authenticate',
-  # and on the second attempt it adds 'Sorry, that didn't work. Please try again' - because the
-  # commands meant for the terminal were being typed INTO THAT DIALOG, whose password field is what
-  # they hit first.
+  # MEASURED ON RUN 44557723577's successor: at 150 s the screen is that dialog - "To install or
+  # remove software, you need to authenticate" - with the terminal visible behind it and these
+  # lines on it:
   #
-  # Stopping packagekit does not help: `systemctl stop packagekit` is itself an action the policy
-  # wants authenticated, so it raises the same dialog.
+  #	xset s off; xset s noblank; xset -dpms ...
+  #	-S -v
+  #	sudo apt ...
   #
-  # A GETTY ON tty2 HAS NO POLKIT. ctrl+alt+f2 reaches it, Return asks for a fresh prompt, Ctrl-C
-  # abandons anything half-typed, then the name and password.
-  press ctrl+alt+f2, waiting 12s, named "switch to a virtual console, where getty offers a login"
-  # THE PROMPT IS CONFIRMED BY READING IT. MEASURED ON opensuse's console: 'localhost login:
-  # Qz7vLp2w' - the password landed in the user-name slot because the fresh prompt had not printed
-  # when the name was typed. The same wait applies wherever a getty is used.
-  step "the console is at a login prompt"
-    loop == {check: {from: console_tail, mode: text, name: at_prompt, rect: [0, 960, 1200, 1080], rect_at: [1920, 1080], scale: 1, words: [[login]]}, do: [{key: ret, settle: 3}], max: 20, see: {name: console_tail}, until: {fact: at_prompt}}
-  press ctrl+c, waiting 2s, named "abandon anything half-typed at the console"
-  step "log in on the console"
-    type == '{{ user }}'
-    settle == 5
-  press Return, waiting 6s, named "the console takes the user name"
-  step "the console's password"
-    type == '{{ password }}'
-    settle == 3
-  press Return, waiting 12s, named "the console takes the password"
-  step "the console is a shell"
-    run == echo CONSOLE_READY
-    settle == 3
-    terminal_wait == 0
-  step "unlock sudo once for this session"
-    run == printf '%s\n' {{ password }} | sudo -S -v
-    settle == 5
-    terminal_wait == 0
+  # The dialog is not from a click: this desktop's update notifier puts it up on its own when the
+  # package index changes, and it takes the keyboard. Nothing typed after it arrives.
+  #
+  # SO THE NOTIFIER IS STOPPED BEFORE THE INDEX IS TOUCHED. `apt-daily` and PackageKit are what
+  # raise it; both are stopped here (they were the subject of a step this file used to have, whose
+  # CLICK on the updater was the thing pressing Install).
+  step "stop the update notifier before it raises polkit"
+    run == sudo systemctl stop packagekit unattended-upgrades apt-daily.service apt-daily-upgrade.service; sudo systemctl disable --now packagekit; pkill -f update-notifier; echo NOTIFIER_STOPPED
+    settle == 6
   step "refresh the package index"
     run == sudo apt-get update
-    settle == 60
-    terminal_wait == 0
+    settle == 45
   step "install openssh-server"
     run == sudo apt-get install -y openssh-server
-    settle == 90
-    terminal_wait == 0
+    settle == 60
   step "allow password authentication"
     run == sudo sed -i "s/^#\?\s*PasswordAuthentication.*/PasswordAuthentication yes/" /etc/ssh/sshd_config; sudo grep -i "^PasswordAuthentication" /etc/ssh/sshd_config
     settle == 3
-    terminal_wait == 0
+  # `policy-rc.d returned 101` MEANS THE PACKAGE INSTALL WAS TOLD NOT TO START THE SERVICE, so the
+  # enable is not decoration - it is the step that makes sshd run at all.
   step "enable and start ssh"
-    run == sudo systemctl enable --now ssh.socket; sudo systemctl enable --now ssh; systemctl is-active ssh
-    settle == 12
-    terminal_wait == 0
+    run == sudo systemctl enable --now ssh.socket; sudo systemctl enable --now ssh; systemctl is-active ssh || systemctl is-active ssh.socket
+    settle == 10
   step "wait for sshd"
     require_ssh == true
     timeout == 600
