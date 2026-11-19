@@ -85,9 +85,14 @@ walkthrough "linux-endeavour - sshd"
   # to tty2, where getty is running and offers a login prompt - the same surface opensuse's stage
   # uses - and every command below works there exactly as it would in a terminal window.
   press ctrl+alt+f2, waiting 12s, named "switch to a virtual console, where getty offers a login"
+  # THE PROMPT IS CONFIRMED BY READING IT. MEASURED ON opensuse's console: the password landed in
+  # the user-name slot because the fresh prompt had not printed when the name was typed.
+  step "the console is at a login prompt"
+    loop == {check: {from: console_tail, mode: text, name: at_prompt, rect: [0, 960, 1200, 1080], rect_at: [1920, 1080], scale: 1, words: [[login]]}, do: [{key: ret, settle: 3}], max: 20, see: {name: console_tail}, until: {fact: at_prompt}}
+  press ctrl+c, waiting 2s, named "abandon anything half-typed at the console"
   step "log in on the console"
     type == '{{ user }}'
-    settle == 3
+    settle == 5
   press Return, waiting 3s, named "the console takes the user name"
   step "the console's password"
     type == '{{ password }}'
