@@ -11,6 +11,28 @@ walkthrough "linux-mx - sshd"
     # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
     memory_mb == 4096
     timeout == 900
+  # THIS DISK COMES UP IN A GRUB SHELL, AND `normal` IS WHAT LEAVES IT.
+  #
+  # MEASURED ON RUN 44557862904's mx successor, whose ssh recording is
+  #
+  #	Welcome to MX-Linux!
+  #	grub> grub> grub> grub> ...   (forty of them, cursor at the last)
+  #
+  # A bare `grub>` prompt means grub.efi ran but its own menu was not found or failed - not the same
+  # as the menu that endeavour and manjaro stop at. `normal` asks grub to load its normal module and
+  # its menu; on a disk whose /boot/grub/grub.cfg exists this lands on the menu, and the Return after
+  # it boots the first entry.
+  #
+  # The words are the shell's own prompt, so a disk that boots straight through is unaffected.
+  step "grub shell, when the disk drops into one"
+    loop == {check: {from: shell, mode: text, name: at_shell, rect: [450, 170, 1470, 900], rect_at: [1920, 1080], scale: 1, words: [[grub]]}, do: [{settle: 4}], max: 6, see: {name: shell}, until: {fact: at_shell}}
+    optional == true
+  step "leave the shell for the menu"
+    when == [grub]
+    type == normal
+    settle == 3
+  press Return, waiting 5s, named "enter the normal module, which loads the menu"
+  press Return, waiting 25s, named "boot the highlighted entry, which is the installed system"
   # THE GREETER IS ASKED FOR BEFORE IT IS CLICKED, AND THE BAND IS THIS MEDIUM'S OWN.
   #
   # THIS FILE HAD MINT'S BAND ([80,480,480,640] - LightDM's small card) BECAUSE THE TWO WALKS WERE
