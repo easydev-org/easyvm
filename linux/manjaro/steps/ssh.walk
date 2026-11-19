@@ -90,9 +90,26 @@ walkthrough "linux-manjaro - sshd"
   # One chord, at step 5. Every later step types into the terminal that chord opened.
   # THE SCREEN BLANKS WHILE THE INSTALL RUNS - the recording of the previous attempt is BLACK at
   # 120 s with the stage still typing - so this runs FIRST, before anything long.
+  # THIS DESKTOP'S SHELL IS ZSH, AND ZSH TRIES TO "CORRECT" `xset` INTO `set`.
+  #
+  # MEASURED ON RUN 44557723577's successor, whose terminal reads
+  #
+  #	% xset s off; xset s noblank; xset -dpms 2>/dev/null; echo SCREEN_KEPT_ONPRINTF '%s\n' admin | sudo -S -v
+  #	zsh: correct 'xset' to 'set' [nyae]?
+  #
+  # Two faults in one line: zsh's `correct` option stopped the command and asked a question, and
+  # the answer never came, so the next step's whole command was appended to it.
+  #
+  # `unsetopt correct` FIRST turns that prompt off, and `/usr/bin/xset` is spelled out so there is
+  # nothing to correct. The echo is a separate word now too, so a lost Return shows up as a lost
+  # Return rather than as two commands fused together.
   step "keep the screen on"
-    run == xset s off; xset s noblank; xset -dpms 2>/dev/null; echo SCREEN_KEPT_ON
-    settle == 4
+    run == unsetopt correct 2>/dev/null; /usr/bin/xset s off; /usr/bin/xset s noblank; /usr/bin/xset -dpms 2>/dev/null
+    settle == 5
+    terminal_wait == 0
+  step "the screen is kept on"
+    run == echo SCREEN_KEPT_ON
+    settle == 3
     terminal_wait == 0
   step "unlock sudo once for this session"
     run == printf '%s\n' {{ password }} | sudo -S -v
