@@ -55,6 +55,21 @@ walkthrough "linux-zorin - sshd"
     key == ret
     optional == true
     settle == 12
+  # ZORIN'S FIRST-RUN "Start Tour" PANEL IS A MODAL THAT TAKES THE KEYBOARD, AND IT MUST GO FIRST.
+  #
+  # MEASURED ON RUN 58323ec's zorin ssh: the recording shows the terminal with only FOUR commands in
+  # it - xset, pkill, the sudo unlock, and 'sudo systemctl stop packagekit' - and then a bare
+  # 'vmuservmuser@...:~$' prompt with NOTHING after it, while the stage's log says it went on to type
+  # seven more commands. Behind the terminal, 'No Thanks / Start Tour' is sitting in a panel in the
+  # middle of the screen.
+  #
+  # `xset` ALSO DOES NOT EXIST HERE ('Command xset not found, did you mean...'), so the screen-awake
+  # step is a no-op on this guest and is replaced by nothing: the panel is what takes the input, not
+  # a blanked screen.
+  #
+  # `No Thanks` is at 873,797. Escape follows for a panel that is already dismissed.
+  click "dismiss the first-run tour panel, which takes the keyboard" at 873 797, waiting 3s, optionally, named "dismiss the first-run tour panel"
+  press Escape, waiting 2s, named "clear anything the panel left behind"
   press ctrl+alt+t, waiting 20s, named "open the terminal"
   # NO `terminal_wait:` HERE, AND THAT IS THE FIX RATHER THAN AN OMISSION.
   #
@@ -103,8 +118,13 @@ walkthrough "linux-zorin - sshd"
   #
   # `xset s off` is not enough on its own for this desktop: the blanking policy here also involves
   # the screensaver daemon, so both are set, and the power settings are set through them.
-  step "keep the screen on, all three ways"
-    run == xset s off; xset s noblank; xset -dpms; gsettings set org.gnome.desktop.session idle-delay 0 2>/dev/null; echo screen_kept_on
+  # `xset` IS NOT INSTALLED ON THIS GUEST, AND THE STEP THAT CALLED IT STILL RAN THE REST.
+  #
+  # MEASURED: "Command 'xset' not found, did you mean: command 'xset' from deb x11-xserver-utils".
+  # The blanking on this desktop comes from GNOME's own idle timer, so `gsettings` is the part that
+  # does the work here - and it is kept, without the `;` chain that put three failures in front of it.
+  step "keep the screen on, with the tool this guest actually has"
+    run == gsettings set org.gnome.desktop.session idle-delay 0
     settle == 4
   # THE SOFTWARE UPDATER STEALS FOCUS AND THE LONG COMMANDS ARRIVE IN PIECES.
   #
