@@ -184,3 +184,63 @@ func TestADesktopReferenceCanBeScopedToTheWallpaper(t *testing.T) {
 		t.Fatalf("a window over the wallpaper failed a comparison scoped to the wallpaper: %v", err)
 	}
 }
+
+// A GUEST AT ANOTHER SIZE HAS THE SAME WALLPAPER, AND A `desktop:` TEST MUST SEE IT.
+//
+// MEASURED ON RUN 44471094050 (popos) AND 44471102369 (zorin), step 4 of 28:
+//
+//	wait for the live desktop: the frame is 1920x1080 and the reference is 800x600
+//
+// The reference was right - taken from that medium's recording at 1920x1080 - and the FRAME was a
+// 800x600 guest that had not switched modes yet. `screen.Compare` refuses unequal sizes on purpose,
+// because a `check:` assertion over the corner they share would be a wrong answer that looks right.
+//
+// A `desktop:` TEST ASKS A DIFFERENT QUESTION: does this screen show this system's wallpaper. The
+// same picture at another size is still that picture, so both sides are scaled to the same size.
+func TestADesktopReferenceToleratesAGuestAtAnotherSize(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "steps"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// The reference at 1920x1080: a distinct top band.
+	ref := image.NewRGBA(image.Rect(0, 0, 1920, 1080))
+	for y := 0; y < 1080; y++ {
+		for x := 0; x < 1920; x++ {
+			if y < 120 {
+				ref.Set(x, y, color.RGBA{0x20, 0x60, 0xa0, 0xff})
+			} else {
+				ref.Set(x, y, color.RGBA{0x90, 0x30, 0x50, 0xff})
+			}
+		}
+	}
+	refPath := filepath.Join(dir, "steps", "desktop.png")
+	writePNG(t, refPath, ref)
+
+	// The same picture at 800x600 - a guest that has not switched modes.
+	small := image.NewRGBA(image.Rect(0, 0, 800, 600))
+	for y := 0; y < 600; y++ {
+		for x := 0; x < 800; x++ {
+			if y < 67 { // 120/1080 of 600
+				small.Set(x, y, color.RGBA{0x20, 0x60, 0xa0, 0xff})
+			} else {
+				small.Set(x, y, color.RGBA{0x90, 0x30, 0x50, 0xff})
+			}
+		}
+	}
+	smallPath := filepath.Join(dir, "small.png")
+	writePNG(t, smallPath, small)
+
+	d := &oneFrameDriver{path: smallPath}
+	ex, _ := newExec(d, map[string]any{"name": "x"})
+	ex.Work = dir
+	ex.File = &walk.File{Path: filepath.Join(dir, "steps", "install.walk")}
+	err := ex.doDesktop(walk.Step{Index: 1, Name: "wait for the desktop", Spec: map[string]any{
+		"name": "wait for the desktop", "desktop": "linux/gnome",
+		"reference": refPath, "range": []any{0.90, 1.0},
+		"rect": []any{0, 0, 1920, 120}, "rect_at": []any{1920, 1080},
+		"timeout": float64(2),
+	}})
+	if err != nil {
+		t.Fatalf("the same wallpaper at 800x600 failed against a 1920x1080 reference: %v", err)
+	}
+}

@@ -2,6 +2,7 @@ package run
 
 import (
 	"fmt"
+	"image"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -505,13 +506,30 @@ func (e *Executor) doDesktop(s walk.Step) error {
 			//	the desktop with a window over it               1.0000
 			//
 			// The clock in the corner sits below that band, which is why the band is 120 and not 200.
+			// THE FRAME AND THE REFERENCE MAY BE DIFFERENT SIZES, AND THAT IS NOT AN ERROR HERE.
+			//
+			// MEASURED ON RUN 44471094050 (popos) AND 44471102369 (zorin), step 4 of 28:
+			//
+			//	wait for the live desktop: the frame is 1920x1080 and the reference is 800x600
+			//
+			// The REFERENCE is right - it was taken from that medium's own recording at 1920x1080 -
+			// and the FRAME is a 800x600 guest that has not switched modes yet. `screen.Compare`
+			// refuses unequal sizes on purpose, because for a `check:` assertion comparing the corner
+			// they share would be a wrong answer that looks like a right one.
+			//
+			// A `desktop:` TEST IS A DIFFERENT QUESTION: "does this screen show the wallpaper of this
+			// system". The same picture at another size is still that wallpaper, so both sides are
+			// scaled to the same small size and compared - and the band is a FRACTION of the frame
+			// rather than a pixel rect, so it means the same place at either size.
 			rc, fc := reference, img
 			if r, ok := rectOfDesktop(s); ok {
-				if a, err := screen.Crop(reference, r, 1); err == nil {
-					if b, err := screen.Crop(img, r, 1); err == nil {
-						rc, fc = a, b
-					}
+				a, b, err := cropBoth(reference, img, r)
+				if err == nil {
+					rc, fc = a, b
 				}
+			}
+			if rc.Bounds().Dx() != fc.Bounds().Dx() || rc.Bounds().Dy() != fc.Bounds().Dy() {
+				rc, fc = normalisePair(rc, fc)
 			}
 			d, err := screen.Compare(rc, fc, 8)
 			if err != nil {
@@ -1397,4 +1415,82 @@ func rectOfDesktop(s walk.Step) ([4]int, bool) {
 		return r, true
 	}
 	return [4]int{}, false
+}
+
+// cropBoth crops the SAME PROPORTION of two pictures that may be different sizes.
+//
+// A pixel rect is written against a frame the file measured - `rect: [0, 0, 1920, 120]` - and a guest
+// that is still at 800x600 has the same band at 800x50. Scaling the rect by each picture's own width
+// is what makes that the same place rather than the corner they share.
+func cropBoth(reference, frame image.Image, r [4]int) (image.Image, image.Image, error) {
+	crop := func(img image.Image, w, h int) (image.Image, error) {
+		b := img.Bounds()
+		fw, fh := b.Dx(), b.Dy()
+		if w <= 0 {
+			w = fw
+		}
+		if h <= 0 {
+			h = fh
+		}
+		x0 := r[0] * fw / w
+		y0 := r[1] * fh / h
+		x1 := r[2] * fw / w
+		y1 := r[3] * fh / h
+		if x1 <= x0 {
+			x1 = x0 + 1
+		}
+		if y1 <= y0 {
+			y1 = y0 + 1
+		}
+		return screen.Crop(img, [4]int{x0, y0, x1, y1}, 1)
+	}
+	// The reference's own size is the rect's coordinate space, so it is the one whose numbers do not
+	// move; the frame's band is the same proportion of whatever it arrived at.
+	rb := reference.Bounds()
+	a, err := crop(reference, rb.Dx(), rb.Dy())
+	if err != nil {
+		return nil, nil, err
+	}
+	b, err := crop(frame, rb.Dx(), rb.Dy())
+	if err != nil {
+		return nil, nil, err
+	}
+	return a, b, nil
+}
+
+// normalisePair scales two pictures to the smaller of their sizes, so a comparison can run at all.
+//
+// NEAREST NEIGHBOUR, and only down: this runs once per poll on a picture that is about to be reduced
+// to a fraction of changed pixels, so an interpolated edge would add grey that no threshold asked for.
+func normalisePair(a, b image.Image) (image.Image, image.Image) {
+	aw, ah := a.Bounds().Dx(), a.Bounds().Dy()
+	bw, bh := b.Bounds().Dx(), b.Bounds().Dy()
+	w, h := aw, ah
+	if bw < w {
+		w = bw
+	}
+	if bh < h {
+		h = bh
+	}
+	scale := func(img image.Image) image.Image {
+		out := image.NewRGBA(image.Rect(0, 0, w, h))
+		ib := img.Bounds()
+		if ib.Dx() == w && ib.Dy() == h {
+			for y := 0; y < h; y++ {
+				for x := 0; x < w; x++ {
+					out.Set(x, y, img.At(ib.Min.X+x, ib.Min.Y+y))
+				}
+			}
+			return out
+		}
+		for y := 0; y < h; y++ {
+			sy := ib.Min.Y + y*ib.Dy()/h
+			for x := 0; x < w; x++ {
+				sx := ib.Min.X + x*ib.Dx()/w
+				out.Set(x, y, img.At(sx, sy))
+			}
+		}
+		return out
+	}
+	return scale(a), scale(b)
 }
