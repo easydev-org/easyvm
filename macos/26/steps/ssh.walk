@@ -1,7 +1,12 @@
 walkthrough "macos 26 ssh - the setup assistant, remote login, and a graceful shutdown"
   resolution 1920x1080
   user vmuser
-  password vmuser
+  # `vmuser` IS THE USER NAME, NOT A PASSWORD, AND IT WAS IN THIS SLOT AS BOTH.
+  #
+  # `{{ password }}` is typed into the account's password field (line ~18's `account password text`)
+  # and into the login window, so a value equal to the account name would be typed as its own
+  # password. macos/15's ssh walk, which RUNS AND PASSES, uses `admin`.
+  password admin
   var out == {default: out/macos26-ssh.qcow2, from: args.out}
   var user == {default: vmuser, from: args.user}
   header boot_disk == from_caller
