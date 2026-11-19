@@ -76,7 +76,7 @@ walkthrough "opensuse-leap-16.1 - Agama, the storage editor, and ext4"
     poll == 20
     timeout == 3600
   step "the install finishes"
-    loop == {check: {from: done, mode: text, name: finished, rect: [311, 225, 397, 283], rect_at: [1920, 1080], scale: 1, words: [[complete], [reboot]]}, do: [{settle: 15}], max: 120, see: {name: done}, until: {fact: finished}}
+    loop == {check: {from: done, mode: text, name: finished, rect: [600, 500, 1300, 620], rect_at: [1920, 1080], scale: 1, words: [[complete], [reboot]]}, do: [{settle: 15}], max: 120, see: {name: done}, until: {fact: finished}}
   step "stop the machine"
     shutdown == kill
     timeout == 600
