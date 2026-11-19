@@ -1,6 +1,12 @@
 walkthrough "linux-opensuse-tumbleweed - sshd"
   resolution 1920x1080
-  password admin
+  # THE PASSWORD THIS DISK WAS BUILT WITH. `install.walk` sets it to Qz7vLp2w, and this file said
+  # `admin` - a value that never existed on the guest.
+  #
+  # MEASURED ON RUN 44557723577's successor: the console login typed six characters for the user and
+  # five for a password, and returned to `localhost login:` because the password was wrong. Five
+  # characters is `admin`; the password on this disk is eight.
+  password Qz7vLp2w
   var out == {default: out/distro.qcow2, from: args.out}
   var user == {default: vmuser, from: args.user}
   header recording_resolution == [1920, 1080]
