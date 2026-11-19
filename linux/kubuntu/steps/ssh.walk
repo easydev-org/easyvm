@@ -29,11 +29,8 @@ walkthrough "linux-kubuntu - sshd"
   # `SCREEN_KEPT_ON` runs straight into `ECHO ADMIN` with no line break: the Return after the first
   # command went to the OTHER window. And the `xset -dpms` failure - "server does not have extension
   # for -dpms option" - is harmless; the screen is still kept awake by `s off` and `s noblank`.
-  step "keep the screen on, because a blanked screen takes no keys"
-    run == xset s off; xset s noblank; echo SCREEN_KEPT_ON
-    settle == 5
   step "install openssh-server"
-    run == echo {{ password }} | sudo -S sh -c "export DEBIAN_FRONTEND=noninteractive; apt-get update -o DPkg::Lock::Timeout=600 && apt-get install -y -o DPkg::Lock::Timeout=600 openssh-server" 2>&1 | tail -6
+    run == xset s off; xset s noblank; echo {{ password }} | sudo -S sh -c "export DEBIAN_FRONTEND=noninteractive; apt-get update -o DPkg::Lock::Timeout=600 && apt-get install -y -o DPkg::Lock::Timeout=600 openssh-server" 2>&1 | tail -6
     settle == 90
     terminal_wait == 0
   step "allow password authentication"
