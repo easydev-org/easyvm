@@ -63,7 +63,7 @@ walkthrough "fedora-workstation - anaconda and the first boot"
   click "initialize it as GPT, which is the default" at 474 381, waiting 8s, named "initialize it as GPT, which is the default"
   click "the free space's menu" at 1185 363, waiting 4s, named "the free space's menu"
   step "the free space menu is open"
-    loop == {check: {from: the_free_space_menu_is_open, mode: text, name: up, rect: [893, 417, 1051, 537], rect_at: [1920, 1080], scale: 1, words: [[Create], [Format], [Delete]]}, do: [{settle: 2}], max: 12, see: {name: the_free_space_menu_is_open}, until: {fact: up}}
+    loop == {check: {from: the_free_space_menu_is_open, mode: text, name: up, rect: [1000, 380, 1360, 460], rect_at: [1920, 1080], scale: 1, words: [[Create], [Format], [Delete]]}, do: [{settle: 2}], max: 12, see: {name: the_free_space_menu_is_open}, until: {fact: up}}
   click "create the root partition" at 1132 405, waiting 8s, named "create the root partition"
   step "the root dialog is up"
     loop == {check: {from: the_root_dialog_is_up, mode: text, name: up, rect: [945, 417, 1051, 537], rect_at: [1920, 1080], scale: 1, words: [[Create], [Type], [Mount]]}, do: [{settle: 2}], max: 12, see: {name: the_root_dialog_is_up}, until: {fact: up}}
