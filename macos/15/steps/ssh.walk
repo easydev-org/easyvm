@@ -89,8 +89,22 @@ walkthrough "macos 15 ssh - the setup assistant, remote login, and a graceful sh
     ssh == printf '%s\n' "{{ password }}" | sudo -S scutil --set LocalHostName {{ user }}
   step "note what is absent"
     ssh == command -v brew || true
-  step "ask the guest to power off"
-    ssh == printf '%s\n' '{{ password }}' | sudo -S -p '' poweroff
+  # `shutdown: ssh` RATHER THAN A HAND-WRITTEN `poweroff`, BECAUSE THE HAND-WRITTEN ONE CANNOT WIN.
+  #
+  # MEASURED ON RUN 44450353655, step 29 of 31 - the step before the last:
+  #
+  #	status: failed step 29/31 "ask the guest to power off"
+  #	error:   ask the guest to power off: the command exited 1
+  #
+  # AND THE LOG ENDS AT `Password:`: `poweroff` closed the connection the command was being read
+  # over, so ssh saw EOF and reported 1 for the shutdown that had just worked. There is no exit code
+  # a successful `poweroff` over ssh can return - the session dies with the machine.
+  #
+  # `macos/26/steps/ssh.walk` HAD THIS RIGHT ALL ALONG with `shutdown: ssh`, which is the method that
+  # sends the command AND tolerates the connection ending. This file now uses it too, and the
+  # `wait_until: stopped` after it is what actually confirms the machine went down.
+  step "stop the machine"
+    shutdown == ssh
     timeout == 300
   step "wait for the machine to stop"
     wait_until == stopped
