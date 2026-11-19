@@ -967,6 +967,21 @@ func stepNeedsAGuest(s walk.Step) bool {
 	// which is a true sentence about the step before the one that starts a machine.
 	case s.Has("boot"), s.Has("boot_from"):
 		return false
+	// AND `wait_until:` IS THE OTHER ONE, FOR THE SAME REASON IN THE OTHER DIRECTION.
+	//
+	// `step "stop the machine"` is followed by `step "wait for the machine to stop"` with
+	// `wait_until: stopped` - and the FIRST of those succeeds, so the guest is gone when the second
+	// begins. THE GUARD SAW A DEAD GUEST AND REFUSED THE STEP THAT WAS WAITING FOR IT TO DIE:
+	//
+	//	status: failed step 29/31 "stop the machine"
+	//	error:   wait for the machine to stop: the guest is no longer running, so this step cannot
+	//	         be done. The machine exited during the step before it
+	//
+	// measured on macos 15 ssh, run 44461859215, on the step whose whole purpose is to confirm the
+	// shutdown that had just worked. `wait_until:` asks ABOUT the machine rather than asking it
+	// something, so it must be allowed to run when the answer is "gone".
+	case s.Has("wait_until"):
+		return false
 	// AND ANYTHING THAT EDITS A DISK RATHER THAN ASKS A GUEST. `esp_fallback:` opens the qcow2 with
 	// qemu-io and rewrites FAT structures at byte offsets; the machine it belongs to has usually
 	// just been shut down, which is the point - qemu holds the write lock while it runs.

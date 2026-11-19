@@ -81,3 +81,35 @@ func TestADifferentGuestOnARunningMachineIsRefused(t *testing.T) {
 	}
 	_ = time.Second
 }
+
+// A WALK THAT STOPS A MACHINE MUST BE ABLE TO ASK WHETHER IT WENT DOWN.
+//
+// MEASURED ON RUN 44461859215, macos 15 ssh, step 29 of 31:
+//
+//	status: failed step 29/31 "stop the machine"
+//	error:   wait for the machine to stop: the guest is no longer running, so this step cannot be
+//	         done. The machine exited during the step before it
+//
+// THE SHUTDOWN HAD WORKED. `shutdown: ssh` sent the request, the guest went down, and the next step -
+// `wait_until: stopped` - is the one that confirms it. The guard against running steps on a dead guest
+// refused the step whose ENTIRE PURPOSE is to observe that death.
+//
+// `stepNeedsAGuest` answers "does this step need a machine to be there". `wait_until:` asks ABOUT the
+// machine, so the answer is no - the same reasoning that put `boot:` in the list for the opposite
+// direction.
+func TestAWalkCanWaitForTheMachineItJustStopped(t *testing.T) {
+	d := &fakeDriver{}
+	ex, steps := newExec(d,
+		map[string]any{"name": "boot", "boot": true, "os": "linux", "iso": "x.iso"},
+		map[string]any{"name": "stop it", "shutdown": "kill", "timeout": float64(60)},
+		map[string]any{"name": "wait for the machine to stop", "wait_until": "stopped",
+			"timeout": float64(5), "poll": float64(1)},
+	)
+	ex.Work = t.TempDir()
+	if _, err := ex.Run(steps); err != nil {
+		t.Fatalf("a walk that stops its machine and then waits for it: %v", err)
+	}
+	if len(d.stopped) != 1 || d.stopped[0] != "kill" {
+		t.Fatalf("stops = %v, want one kill", d.stopped)
+	}
+}

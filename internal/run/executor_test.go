@@ -80,6 +80,21 @@ func (f *fakeDriver) Machine() Machine {
 }
 func (f *fakeDriver) Log(msg string) { f.log = append(f.log, msg) }
 
+// Facts is what a `wait_until:` reads, and a fake without it answers the question with an error:
+//
+//	wait for the machine to stop: this driver cannot report the facts a `wait_until:` waits on
+//
+// so a test that stops a machine and waits for it was testing that error rather than the wait.
+func (f *fakeDriver) Facts() (map[string]string, error) {
+	running := f.started > 0 && !f.halted
+	return map[string]string{
+		"qemu_running": fmt.Sprintf("%t", running),
+		"ssh_ready":    "false",
+		"qga_ready":    "false",
+		"guest_phase":  "",
+	}, nil
+}
+
 type stubFrame struct{}
 
 // Path is a REAL PNG, because a `check:` that measures the captured frame has to be able to load it.
