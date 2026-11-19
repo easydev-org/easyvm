@@ -12,6 +12,32 @@ walkthrough "linux-popos - sshd"
     # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
     memory_mb == 4096
     timeout == 900
+  # THIS DISK COMES UP ON A FULL-DISK-ENCRYPTION PROMPT, AND THE WALK HAS TO ANSWER IT.
+  #
+  # MEASURED ON RUN 44550974321, whose ssh recording at 120 s is
+  #
+  #	cryptsetup: ERROR: cryptdata: cryptsetup failed, bad password or options?
+  #	[lock]  Please unlock disk cryptdata
+  #
+  # plymouth's unlock screen, with nothing typing into it. The stage then spent ten minutes on
+  # 'connection refused' against a guest that had never finished booting.
+  #
+  # THE INSTALL WALK DOES CLICK 'drive encryption - don't encrypt', so this is not what it asked
+  # for - but the install is not being changed, and the disk that was published is encrypted. The
+  # stage therefore unlocks what it was given.
+  #
+  # THE PASSPHRASE IS THE ACCOUNT PASSWORD: pop's installer asks for one passphrase and uses it for
+  # both. It is typed blind into plymouth - there is no field to click - and Return submits it.
+  # `optional` is NOT used here: a disk that needs no unlock must not hang, so the type is guarded
+  # by the prompt's own words.
+  step "the disk asks for its passphrase, when it is encrypted"
+    loop == {check: {from: unlock, mode: text, name: locked, rect: [600, 480, 1320, 600], rect_at: [1920, 1080], scale: 1, words: [[unlock, disk], [cryptsetup]]}, do: [{settle: 5}], max: 40, see: {name: unlock}, until: {fact: locked}}
+    optional == true
+  step "answer the passphrase prompt"
+    when == [unlock]
+    settle == 2
+    type == '{{ password }}'
+  press Return, waiting 20s, named "submit the passphrase"
   click "greeter - the password box" at 1120 283, waiting 2s, optionally, named "greeter - the password box"
   step "greeter - log in"
     optional == true
