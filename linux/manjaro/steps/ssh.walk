@@ -46,7 +46,7 @@ walkthrough "linux-manjaro - sshd"
   #
   # A getty does not go away. ctrl+alt+F2 gives tty2, the user name and password are typed there,
   # and every command below runs in that shell exactly as it would in a terminal window.
-  press ctrl+alt+F2, waiting 12s, named "switch to a virtual console, where getty offers a login"
+  press ctrl+alt+f2, waiting 12s, named "switch to a virtual console, where getty offers a login"
   press Return, waiting 3s, named "ask getty for a fresh prompt"
   press ctrl+c, waiting 3s, named "abandon anything half-typed at the console"
   step "log in on the console"

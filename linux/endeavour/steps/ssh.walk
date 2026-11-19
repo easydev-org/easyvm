@@ -84,7 +84,7 @@ walkthrough "linux-endeavour - sshd"
   # SO THE STAGE STOPS ASKING THAT SCREEN AND USES A VIRTUAL CONSOLE INSTEAD. ctrl+alt+F2 switches
   # to tty2, where getty is running and offers a login prompt - the same surface opensuse's stage
   # uses - and every command below works there exactly as it would in a terminal window.
-  press ctrl+alt+F2, waiting 12s, named "switch to a virtual console, where getty offers a login"
+  press ctrl+alt+f2, waiting 12s, named "switch to a virtual console, where getty offers a login"
   step "log in on the console"
     type == '{{ user }}'
     settle == 3
