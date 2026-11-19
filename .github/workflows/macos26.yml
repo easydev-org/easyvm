@@ -22,6 +22,11 @@ on:
       disks_repository:
         description: "the ghcr repository that holds the assets"
         default: "easydev-org/easyvm"
+      stage:
+        description: "which stage to run: all, setup, or ssh"
+        type: choice
+        options: [all, setup, ssh]
+        default: all
 
 concurrency:
   group: macos26
@@ -96,6 +101,10 @@ jobs:
 
   setup:
     needs: room
+    # `all` IS THE NORMAL RUN AND `setup` REBUILDS ONLY THE INSTALLER. `ssh` SKIPS THIS JOB, so the
+    # ssh stage can be re-run against the disk that is already published as `macos26` without paying
+    # for the two-and-a-half-hour install again - which is the whole reason these are two jobs.
+    if: inputs.stage == 'all' || inputs.stage == 'setup'
     uses: ./.github/workflows/stage.yml
     secrets: inherit
     with:
@@ -128,11 +137,19 @@ jobs:
   # CI runner is slower (the install there is ~40 minutes against ~25), and the update pane's
   # reset-then-wait-then-log-in sequence alone spends two and a half minutes.
   ssh:
-    needs: [setup]
-    # ONLY WHEN THE SETUP STAGE PUBLISHED A DISK. `always()` would run this against whatever `macos26`
-    # already pointed at - which, after a failed setup, is the PREVIOUS release's disk, and the ssh
-    # stage would then spend its hour proving something about a disk nobody asked it about.
-    if: needs.setup.result == 'success'
+    needs: [room, setup]
+    # ONLY WHEN THE SETUP STAGE PUBLISHED A DISK, OR WHEN THE CALLER SKIPPED SETUP ON PURPOSE.
+    #
+    # `needs.setup.result` IS `skipped` WHEN `stage: ssh`, and that is the case this exists for: the
+    # disk is already published as `macos26`, and re-installing it to get to a one-hour wizard is
+    # three wasted hours. A FAILED setup is still refused, because then `macos26` points at the
+    # previous release's disk and an ssh stage that ran anyway would prove something about a disk
+    # nobody asked it about.
+    if: |
+      always() && !cancelled() && (
+        inputs.stage == 'ssh' ||
+        inputs.stage == 'all' && needs.setup.result == 'success'
+      )
     uses: ./.github/workflows/stage.yml
     secrets: inherit
     with:
