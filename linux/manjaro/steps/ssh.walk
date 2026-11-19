@@ -51,7 +51,13 @@ walkthrough "linux-manjaro - sshd"
   step "greeter - log in"
     settle == 3
     type == '{{ password }}'
-  press Return, waiting 20s, named "greeter - submit"
+  # THE PASSWORD IS IN THE FIELD AND RETURN MUST BE PRESSED MORE THAN ONCE.
+  #
+  # MEASURED ON RUN 44594136209, whose ssh recording at 120 s is SDDM with FIVE DOTS IN THE PASSWORD
+  # FIELD - the characters arrived - and no session. One Return a second after the last character
+  # is not enough for SDDM to accept it.
+  press Return, waiting 8s, named "greeter - submit"
+  press Return, waiting 20s, named "greeter - submit again, because SDDM can miss the first"
   step "the desktop is up after the login"
     desktop == linux/kde
     timeout == 600
