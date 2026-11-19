@@ -6,7 +6,11 @@ walkthrough "linux-zorin - configure the vm (name, share, guest agent)"
   var host == {default: "172.30.0.1", from: args.host}
   var hostname == {default: easyvm-vm, from: args.hostname}
   var out == {default: out/vm-configure.qcow2, from: args.out}
-  var user == {default: vmuser, from: args.user}
+  # THE ACCOUNT THIS DISK HAS IS `vmuservmuser` - see the manjaro header for the measurement.
+  #
+  # ubiquity fills the username from the full name as it is typed, so its two `type:` steps
+  # APPEND and the account is created with the value twice.
+  var user == {default: vmuservmuser, from: args.user}
   header recording_resolution == [1920, 1080]
   header ssh_port == 2222
 

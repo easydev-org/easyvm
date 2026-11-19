@@ -2,7 +2,11 @@ walkthrough "linux-zorin - sshd"
   resolution 1920x1080
   password admin
   var out == {default: out/distro.qcow2, from: args.out}
-  var user == {default: vmuser, from: args.user}
+  # THE ACCOUNT THIS DISK HAS IS `vmuservmuser` - see the manjaro header for the measurement.
+  #
+  # ubiquity fills the username from the full name as it is typed, so its two `type:` steps
+  # APPEND and the account is created with the value twice.
+  var user == {default: vmuservmuser, from: args.user}
   header recording_resolution == [1920, 1080]
 
   step "boot the disk"
