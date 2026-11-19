@@ -33,7 +33,7 @@ walkthrough "manjaro - the Calamares walk"
   step "open the installer - what is on screen"
     see == name: open_the_installer
   step "open the installer - the screen says so"
-    check == {from: open_the_installer, mode: text, name: asserted, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], words: [[welcome], [location]]}
+    check == {from: open_the_installer, mode: text, name: asserted, rect: [438, 296, 963, 385], rect_at: [1920, 1080], words: [[welcome], [location]]}
   step "open the installer (once more, if it did not)"
     double == [960, 760]
     settle == 40

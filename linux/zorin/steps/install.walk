@@ -60,22 +60,22 @@ walkthrough "zorin - the ubiquity walk"
     settle == 18
     when_not_any == [[installation, type]]
   step "the updates pane is done"
-    loop == {check: {from: screen, mode: text, name: done, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], words: [[installation, type]]}, do: [{settle: 3}], max: 60, see: {name: screen}, until: {fact: done}}
+    loop == {check: {from: screen, mode: text, name: done, rect: [488, 285, 707, 355], rect_at: [1920, 1080], words: [[installation, type]]}, do: [{settle: 3}], max: 60, see: {name: screen}, until: {fact: done}}
   step "the keyboard pane is done"
-    loop == {check: {from: screen, mode: text, name: done, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], words: [[installation, type], [updates, and, other, software]]}, do: [{settle: 3}], max: 80, see: {name: screen}, until: {fact: done}}
+    loop == {check: {from: screen, mode: text, name: done, rect: [488, 285, 707, 355], rect_at: [1920, 1080], words: [[installation, type], [updates, and, other, software]]}, do: [{settle: 3}], max: 80, see: {name: screen}, until: {fact: done}}
   click "installation type - install now" at 1361 764, waiting 18s, named "installation type - install now"
   step "the disk warning is up"
-    loop == {check: {from: screen, mode: text, name: done, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], words: [[write, the, changes, to, disks], [partition, tables]]}, do: [{settle: 2}], max: 60, see: {name: screen}, until: {fact: done}}
+    loop == {check: {from: screen, mode: text, name: done, rect: [585, 421, 1073, 580], rect_at: [1920, 1080], words: [[write, the, changes, to, disks], [partition, tables]]}, do: [{settle: 2}], max: 60, see: {name: screen}, until: {fact: done}}
   step "the dialog names the filesystem it will create"
     see == name: format
   step "the root partition will be ext4"
     check == {from: format, mode: text, name: ext4, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], words: [ext4]}
   click "write the changes to disks" at 1293 673, waiting 20s, named "write the changes to disks"
   step "the disk warning is answered"
-    loop == {check: {from: screen, mode: text, name: done, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], words: [[where, are, you], [time, zone]]}, do: [{settle: 3}], max: 60, see: {name: screen}, until: {fact: done}}
+    loop == {check: {from: screen, mode: text, name: done, rect: [487, 285, 702, 355], rect_at: [1920, 1080], words: [[where, are, you], [time, zone]]}, do: [{settle: 3}], max: 60, see: {name: screen}, until: {fact: done}}
   click "where are you" at 1361 764, waiting 18s, named "where are you"
   step "the time zone pane is done"
-    loop == {check: {from: screen, mode: text, name: done, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], words: [[who, are, you], [your, name]]}, do: [{settle: 3}], max: 60, see: {name: screen}, until: {fact: done}}
+    loop == {check: {from: screen, mode: text, name: done, rect: [487, 285, 803, 416], rect_at: [1920, 1080], words: [[who, are, you], [your, name]]}, do: [{settle: 3}], max: 60, see: {name: screen}, until: {fact: done}}
   step "who are you - your name"
     click == [975, 386]
     settle == 2
