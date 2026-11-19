@@ -65,8 +65,19 @@ walkthrough "linux-endeavour - sshd"
   # expires.
   #
   # The action is `key: esc` now, so the loop wakes the screen and looks again, up to sixty times.
+  # THE GREETER IS WOKEN FIRST, THEN WAITED FOR - AND THE ORDER IS THE FIX.
+  #
+  # MEASURED ON RUN 44557723577's successor: at 200 s the screen is SDDM's SCREEN SAVER - the wall
+  # paper, '12:19 PM', 'Desktop Session: Plasma (Wayland)', no login box - and from 200 s to the end
+  # it is BLACK. A wait that begins on a blanked screen cannot succeed, and this one had no wake in
+  # it at all (the Escape was removed when mx needed the opposite).
+  #
+  # Escape ONCE before the wait, and once inside it, covers both the saver and the full blank:
+  #   - the pre-Escape wakes a screen saver;
+  #   - the in-loop Escape repeats it, since SDDM re-blanks on its own timer.
+  press Escape, waiting 3s, named "wake the greeter's screen"
   step "the greeter is drawn"
-    loop == {check: {from: greeter, mode: text, name: up, rect: [740, 470, 1340, 770], rect_at: [1920, 1080], scale: 2, words: [[password], [vmuser]]}, do: [{key: esc, settle: 3}], max: 60, see: {name: greeter}, until: {fact: up}}
+    loop == {check: {from: greeter, mode: text, name: up, rect: [740, 470, 1340, 770], rect_at: [1920, 1080], scale: 2, words: [[password], [vmuser]]}, do: [{key: esc, settle: 4}], max: 30, see: {name: greeter}, until: {fact: up}}
   click "greeter - the password box" at 936 628, waiting 3s, named "greeter - the password box"
   step "greeter - log in"
     settle == 3
