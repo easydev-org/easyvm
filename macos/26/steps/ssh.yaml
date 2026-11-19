@@ -715,15 +715,22 @@ steps:
   - 199
   - 89
   color_tolerance: 30
-  # THE TOP STRIP ONLY. The green also appears in the menu-bar battery icon and in a few pane icons, and
-  # the traffic lights are always in a window's first 40 pixels - so a screen-wide search could take the
-  # battery. MEASURED: the button sat at (669,223) with the window at x=611, and at (620,218) with the
-  # window at x=560; both are inside this strip.
+  # THE TOP OF THE WINDOW, AND THE BOTTOM EDGE OF THIS STRIP WAS MEASURED WRONG ONCE ALREADY.
+  #
+  # MEASURED ON THIS STAGE'S OWN RUN: `color_region: [0, 40, 1920, 260]` found NOTHING - no pixel within
+  # tolerance on the whole screen - because the traffic lights sat at y=262..275 on that run and the
+  # strip ended at 260, two pixels above them. The step then failed thirty times saying the control "is
+  # not drawn", which reads as a wrong colour and was a wrong rectangle.
+  #
+  # 420 IS THE WHOLE TITLE AREA OF A WINDOW THAT CAN SIT ANYWHERE IN THE TOP HALF. The green also appears
+  # in the menu bar's battery icon at y≈0..20 and in some pane icons, both ABOVE 420 and both inside the
+  # window's own body - and the traffic lights are the largest green blob in this strip by an order of
+  # magnitude, which is what `screen.FindColor` returns.
   color_region:
   - 0
   - 40
   - 1920
-  - 260
+  - 420
   wait_after: 6
 # A FULL-SCREEN WINDOW HAS NO TRAFFIC LIGHTS, SO THE NEXT RUN'S SEARCH STILL HAS TO WORK. `Cmd+F` is
 # kept for the search field because a full-screen window has focus by construction - that was the whole
@@ -775,6 +782,22 @@ steps:
   clear: true
   modifier: meta_l
   wait_after: 10
+# AFTER THE WINDOW IS FULL SCREEN, EVERY COORDINATE BELOW WAS MEASURED ONCE AND HOLDS.
+#
+# THESE ARE NOT THE NUMBERS THIS FILE USED TO CARRY, AND THE DIFFERENCE IS THE POINT. A maximised
+# System Settings on macOS 26 puts the search field at y=104 and the `Remote login` result at
+# (635,162) - where the windowed form had them at y=285..345 and y=336..389, differently on every
+# boot. The full-screen step above is what makes these constants instead of guesses.
+#
+# MEASURED ON THIS STAGE'S OWN GUEST, dragged through by hand first and then written down:
+#
+#	search field        (668, 104)
+#	Remote login row    (635, 162)
+#	the switch          (1138, 348)
+#	the sheet's user    (959, 543)     already filled with `vmuser`
+#	the sheet's password(959, 584)
+#	Modify Settings     (959, 632)     the button's centre, from its blue pixels
+#	Done                (1140, 675)
 - name: the remote login result is on screen
   loop:
     max: 45
@@ -784,9 +807,9 @@ steps:
       name: screen
       region:
       - 480
-      - 240
-      - 760
-      - 420
+      - 60
+      - 900
+      - 260
       region_at:
       - 1920
       - 1080
@@ -799,102 +822,15 @@ steps:
       words:
       - - sharing
         - remote
-      - - allow
-        - full
-        - disk
-        - access
+      - - remote
+        - login
     until:
       fact: done
-# (692,388) IS THE RESULT'S TEXT, AND x WAS THE PART THAT WAS WRONG.
-#
-# MEASURED FROM THIS STAGE'S OWN FRAME, ROW BY ROW:
-#
-#	y=316..322   Sharing            <- the GROUP HEADING, not an item
-#	y=341..361   Remote login       <- THE ITEM; its text runs x=650..726
-#	y=387..393   General            <- first row of the main list
-#
-# The presses this file has used were (703,336) - in the gap above the group heading - and (672,387),
-# which is the GENERAL row. That second one is exactly what the CI log showed:
-#
-#	the remote login pane is up ... done = false ... in "General Manage your overall setup ..." x30
-#
-# The stage was never failing to find the result; it was pressing the row directly beneath it. A press
-# at (692,388) on the item's own text opened the panel on the first try, and it then read
-# `Remote Login: Off`.
-# THE RESULT ROW HAS NO FIXED HEIGHT, SO THIS TRIES EVERY ONE IT HAS BEEN MEASURED AT.
-#
-# MEASURED ACROSS SIX RUNS OF THIS STAGE, on a 1920x1080 frame where the SETTINGS WINDOW WAS SOMEWHERE
-# DIFFERENT EACH TIME:
-#
-#	y=336   y=343   y=355   y=358   y=387   y=389   y=345
-#
-# macOS REMEMBERS THE WINDOW'S ORIGIN from the previous session, so the row's height is a property of
-# the last window position and not of macOS 26. No single number can be right, and that is why this
-# used to fail on a coordinate that had worked on an earlier boot - (703,336) worked, then (672,387)
-# worked, then (692,388) worked, and each one stopped working on the next run.
-#
-# THE SENSOR BETWEEN ATTEMPTS IS THE PANE ITSELF: every press is followed by the same
-# `unless: allow full disk access`, so a press that lands on nothing costs one attempt. This is not a
-# nicety - it is the mechanism that makes a remembered window position survivable.
-#
-# `ret` AFTER EACH PRESS, because a press that LANDS ON THE ROW SELECTS IT and a second `ret` opens it;
-# a press that lands on nothing is harmless. The pair is repeated at each height.
-- name: open the remote login pane at the first height
-  unless: [allow, full, disk, access]
-  region: [726, 300, 1200, 715]
-  region_at: [1920, 1080]
-  scale: 2
-  do:
-  - name: press the row
-    click: [692, 389]
-    wait_after: 6
-  - name: open what was selected
-    key: ret
-    wait_after: 8
-
-- name: open the remote login pane at the second height
-  unless: [allow, full, disk, access]
-  region: [726, 300, 1200, 715]
-  region_at: [1920, 1080]
-  scale: 2
-  do:
-  - name: press the row
-    click: [692, 345]
-    wait_after: 6
-  - name: open what was selected
-    key: ret
-    wait_after: 8
-
-- name: open the remote login pane at the third height
-  unless: [allow, full, disk, access]
-  region: [726, 300, 1200, 715]
-  region_at: [1920, 1080]
-  scale: 2
-  do:
-  - name: press the row
-    click: [692, 358]
-    wait_after: 6
-  - name: open what was selected
-    key: ret
-    wait_after: 8
-
-# AND A FOURTH ATTEMPT THAT USES NO COORDINATE AT ALL. `Cmd+F` puts the caret in the search field with
-# the first result selected, so Return opens it wherever the window sits. MEASURED: on one boot this
-# opened the panel by itself; on another it selected the sidebar row without switching the pane, which
-# is why it is the LAST resort rather than the first.
-- name: open the remote login pane from the keyboard
-  unless: [allow, full, disk, access]
-  region: [726, 300, 1200, 715]
-  region_at: [1920, 1080]
-  scale: 2
-  do:
-  - name: refocus the search field
-    key: meta_l+f
-    wait_after: 3
-  - name: open the first result
-    key: ret
-    wait_after: 10
-
+- name: open the remote login pane
+  click:
+  - 635
+  - 162
+  wait_after: 14
 - name: the remote login pane is up
   loop:
     max: 30
@@ -902,7 +838,70 @@ steps:
     - wait: 3
     ocr:
       name: screen
-      region: [726, 300, 1200, 715]
+      region:
+      - 820
+      - 250
+      - 1250
+      - 480
+      region_at:
+      - 1920
+      - 1080
+      scale: 2
+      wait: 0
+    check:
+      name: done
+      from: screen
+      mode: says_any
+      words:
+      - - allow
+        - full
+        - disk
+        - access
+    until:
+      fact: done
+# THE SWITCH ASKS FOR THE ACCOUNT PASSWORD, AND THE SHEET'S OWN BUTTON IGNORES A CLICK.
+#
+# MEASURED BY HAND ON THIS GUEST, PRESS BY PRESS:
+#
+#	(959, 584)  put the password in the field   - the field is drawn before it accepts a keystroke, so
+#	                                              the press is followed by FOUR SECONDS, and a press
+#	                                              that types sooner leaves the field empty
+#	(959, 632)  Modify Settings                 - a press here did nothing three times until the
+#	                                              coordinate was the button's own CENTRE; 607 is
+#	                                              twenty-five pixels high, between the field and it
+#
+# The user name field is already filled with `vmuser` by the system, and it is the ACCOUNT that matters
+# here - the password is this stage's `{{ password }}`, which is `admin`.
+- name: turn remote login on
+  unless: [log, in, to, this, computer]
+  region: [820, 250, 1250, 480]
+  region_at: [1920, 1080]
+  scale: 2
+  click:
+  - 1138
+  - 348
+  wait_after: 6
+- name: press the sheet's password field
+  click:
+  - 959
+  - 584
+  wait_after: 5
+- name: type the account password into the sheet
+  type: '{{ password }}'
+  wait_after: 4
+- name: confirm the change
+  click:
+  - 959
+  - 632
+  wait_after: 18
+- name: the switch reads on
+  loop:
+    max: 12
+    do:
+    - wait: 3
+    ocr:
+      name: screen
+      region: [820, 250, 1250, 480]
       region_at: [1920, 1080]
       scale: 2
       wait: 0
@@ -911,9 +910,18 @@ steps:
       from: screen
       mode: says_any
       words:
-      - [allow, full, disk, access]
+      - - log
+        - in
+        - to
+        - this
+        - computer
     until:
       fact: done
+- name: close the pane
+  click:
+  - 1140
+  - 675
+  wait_after: 5
 - name: wait for sshd
   require_ssh: true
   timeout: 600
