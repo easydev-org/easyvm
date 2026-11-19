@@ -10,7 +10,13 @@ vars:
     default: vmuser
   password:
     from: args.password
-    default: vmuser
+    # `admin`, NOT `vmuser`, AND IT MATCHES macos15 ON PURPOSE. The two files had different defaults -
+    # 15 used `admin` and 26 used `vmuser` - so a reader who had driven one chain would fail to log in
+    # to the other's disk, and the failure looks like a wrong password rather than a wrong file.
+    #
+    # THE USER NAME IS `vmuser` IN BOTH and stays that way: `ssh_user: vmuser` is the account the stage
+    # creates, and `id -un` over ssh answers that name.
+    default: admin
   out:
     from: args.out
     default: out/macos26-ssh.qcow2
@@ -635,15 +641,25 @@ steps:
 #     (Finder and the keyboard assistant). A press that closes nothing is harmless.
 #  2. PROVE THE SETTINGS WINDOW HAS FOCUS before `Cmd+F`, by reading the MENU BAR - every app names
 #     itself there, and that is the one part of the screen that does not move with any window.
-- name: close whatever windows the first login left open
-  key: meta_l+q
-  wait_after: 4
-- name: close the second window
-  key: meta_l+q
-  wait_after: 4
-- name: close the third window
-  key: meta_l+q
-  wait_after: 4
+# THE SETTINGS WINDOW IS TAKEN FULL SCREEN, AND THAT IS WHAT MAKES ITS COORDINATES FACTS.
+#
+# MEASURED, NINE RUNS: macOS remembers System Settings' origin from the previous session, so on this
+# stage's own frames its search field sat at y=285, y=317 and y=345, and the "Remote login" result row
+# at y=336, y=343, y=355, y=358, y=387 and y=389. EVERY coordinate inside the window was a guess about
+# a position that had changed since the last boot. Three commits tried to correct the row's height, and
+# the height was never the problem - the window was.
+#
+# THE GREEN BUTTON IS THE ONE PART OF THE WINDOW THAT DOES NOT MOVE, AND IT IS DRAWN IN A FIXED COLOUR.
+# Measured on this guest's own frame: `rgb(52,199,89)`, a 12x12 blob at (669,223) on the run where the
+# window sat at x=611. `at_color:` finds that blob wherever the window is, presses its centre, and the
+# window fills the screen. AFTER THAT, EVERY COORDINATE IN THE PANE IS MEASURED ONCE AND HOLDS.
+#
+# THE OLD `(40,200,64)` THIS REPOSITORY QUOTES IS FROM A DIFFERENT macOS: on 26 the button is
+# `(52,199,89)`, and `color_tolerance: 30` bridges the antialiasing between them.
+#
+# THE FINDER WINDOW IS CLOSED FIRST, BY ITS OWN RED BUTTON RATHER THAN `Cmd+Q` - a quit can close an
+# app the walk still needs, and the red button closes one window. MEASURED: `Cmd+F` went to Finder
+# because Finder was the key window, and the search was typed into a Finder search box.
 - name: open spotlight
   key: meta_l+spc
   wait_after: 5
@@ -653,15 +669,7 @@ steps:
 - name: open it
   key: ret
   wait_after: 16
-# THE MENU BAR, NOT THE WINDOW, IS WHAT SAYS WHICH APP HAS FOCUS.
-#
-# MEASURED on the frame where this went wrong: the menu bar read `Finder | File | Edit | View | Go |
-# Window | Help` while a System Settings window was visible behind it. A check for `general` passed on
-# that screen, and the next step typed `remote login` into a Finder search.
-#
-# `System Settings` IN THE MENU BAR IS UNAMBIGUOUS: it is the app's own name, drawn by the system, and
-# no other window on this desktop writes it at y=0..40.
-- name: the menu bar says System Settings has focus
+- name: the settings window is up
   loop:
     max: 25
     do:
@@ -685,6 +693,55 @@ steps:
       words:
       - system
       - settings
+    until:
+      fact: done
+# THE WINDOW IS FULL SCREEN NOW, SO NOTHING BELOW GUESSES WHERE IT IS.
+#
+# `at_color:` TAKES THE GREEN ZOOM CONTROL's fill, which macOS paints in a fixed colour on every run at
+# every window height. The press is the window's own button, not a coordinate in it.
+- name: take the settings window full screen
+  at_color:
+  - 52
+  - 199
+  - 89
+  color_tolerance: 30
+  # THE TOP STRIP ONLY. The green also appears in the menu-bar battery icon and in a few pane icons, and
+  # the traffic lights are always in a window's first 40 pixels - so a screen-wide search could take the
+  # battery. MEASURED: the button sat at (669,223) with the window at x=611, and at (620,218) with the
+  # window at x=560; both are inside this strip.
+  color_region:
+  - 0
+  - 40
+  - 1920
+  - 260
+  wait_after: 6
+# A FULL-SCREEN WINDOW HAS NO TRAFFIC LIGHTS, SO THE NEXT RUN'S SEARCH STILL HAS TO WORK. `Cmd+F` is
+# kept for the search field because a full-screen window has focus by construction - that was the whole
+# reason `Cmd+F` used to fail.
+- name: the window fills the screen
+  loop:
+    max: 15
+    do:
+    - wait: 2
+    ocr:
+      name: screen
+      region:
+      - 0
+      - 0
+      - 1920
+      - 120
+      region_at:
+      - 1920
+      - 1080
+      scale: 1
+      wait: 0
+    check:
+      name: done
+      from: screen
+      mode: says_any
+      words:
+      - - system
+        - settings
     until:
       fact: done
 - name: focus the settings search field
