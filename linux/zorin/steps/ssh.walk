@@ -90,9 +90,24 @@ walkthrough "linux-zorin - sshd"
   step "keep the screen on, all three ways"
     run == xset s off; xset s noblank; xset -dpms; gsettings set org.gnome.desktop.session idle-delay 0 2>/dev/null; echo SCREEN_KEPT_ON
     settle == 4
+  # THE SOFTWARE UPDATER STEALS FOCUS AND THE LONG COMMANDS ARRIVE IN PIECES.
+  #
+  # MEASURED ON RUN 44588531483, whose terminal at 150 s reads fragments - 'echo SCRE', 'SCREEN_KEP',
+  # 'sudo sys', '-upgrade.s', 'SUDO AT_' - with a '>' continuation prompt under them, while the
+  # Software Updater sits over the window. '>' means zsh is waiting for a quote to close, and the
+  # fragments are what is left of commands whose characters went to the dialog instead.
+  #
+  # `pkill` on the updater needs no sudo and no policy, so it is the first thing typed; the typing
+  # is slower too, because this guest loses characters at the default rate on lines this long.
+  step "stop the updater without asking the policy"
+    run == pkill -f update-notifier; pkill -f gnome-software; pkill -f packagekitd
+    settle == 4
+    type_gap == 0.06
+    terminal_wait == 0
   step "unlock sudo once for this session"
     run == printf '%s\n' {{ password }} | sudo -S -v
-    settle == 4
+    settle == 5
+    type_gap == 0.06
   # `apt-get update` FIRST: this disk's index can point at a version the archive has replaced,
   # which answers 404 and reads like a network problem (measured on popos, same family).
   # THE SOFTWARE UPDATER RAISES POLKIT'S 'Authentication Required' OVER THE TERMINAL, UNPROMPTED.
@@ -116,10 +131,12 @@ walkthrough "linux-zorin - sshd"
     settle == 6
   step "refresh the package index"
     run == sudo apt-get update
-    settle == 45
+    settle == 60
+    type_gap == 0.06
   step "install openssh-server"
     run == sudo apt-get install -y openssh-server
-    settle == 60
+    settle == 90
+    type_gap == 0.06
   step "allow password authentication"
     run == sudo sed -i "s/^#\?\s*PasswordAuthentication.*/PasswordAuthentication yes/" /etc/ssh/sshd_config; sudo grep -i "^PasswordAuthentication" /etc/ssh/sshd_config
     settle == 3
