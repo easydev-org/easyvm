@@ -439,6 +439,9 @@ func (e *Executor) doDesktop(s walk.Step) error {
 	start := time.Now()
 	deadline := start.Add(timeout)
 	var lastStats screen.Stats
+	// refVerdict carries the last reference comparison's numbers out of the loop, for the log line
+	// that says what the step was waiting for when it gave up.
+	refVerdict := ""
 	for time.Now().Before(deadline) {
 		f, err := e.Driver.Frame()
 		if err != nil {
@@ -453,107 +456,166 @@ func (e *Executor) doDesktop(s walk.Step) error {
 			time.Sleep(poll)
 			continue
 		}
+		// A REFERENCE IMAGE ANSWERS THE SAME QUESTION WITH A MEASUREMENT THAT DOES NOT DRIFT.
+		//
+		// `desktop:` CURRENTLY DECIDES ON SIX FAMILY-WIDE THRESHOLDS, and every one of them was
+		// chosen against a particular renderer at a particular size. MEASURED on one ubuntu
+		// recording, comparing each frame with the desktop reference the file already ships:
+		//
+		//	 30s   similarity 0.0004   the boot splash
+		//	 90s   similarity 0.0041   still splashing
+		//	120s   similarity 0.9909   the desktop
+		//	1600s  similarity 0.9767   the desktop, an hour later
+		//
+		// THE GAP IS TWO ORDERS OF MAGNITUDE - 0.0043 at the widest for "not a desktop" against
+		// 0.9669 at the tightest for "a desktop" - where the brightness thresholds that windows
+		// fails on are three numbers within a few percent of each other.
+		//
+		// SO A STEP MAY NAME `reference:` AND THE FRAME IS COMPARED WITH IT. The thresholds stay for
+		// every file that does not, so nothing changes for them.
 		var ok bool
-		switch family {
-		case "windows":
-			ok, lastStats = screen.IsWindowsDesktop(img)
-		case "macos":
-			// A MACOS DESKTOP IS DECIDED BY THE DOCK AND THE BODY, not by words: there is no text
-			// on it to read. `internal/screen.IsMacOSDesktop` has been implemented and tested since
-			// the port began; the dispatcher simply had no branch for it, so `desktop: macos` in
-			// macos/15/steps/ssh.yaml would have failed on the first frame.
-			var mac screen.MacOSStats
-			ok, mac = screen.IsMacOSDesktop(img)
-			lastStats = mac.Stats()
-		case "linux":
-			// A LINUX DESKTOP IS A PANEL: a strip of colour along an edge that the installer under
-			// it does not draw. The same measurement serves every distribution here because they all
-			// run a panel - GNOME, KDE, XFCE, MATE, Cinnamon - and the installers they boot do not.
-			ok, lastStats = screen.IsLinuxDesktop(img)
+		if ref := s.Get("reference"); ref != "" {
+			// THE REFERENCE IS BESIDE THE WALK, the same way `check: {mode: like}` resolves one -
+			// not relative to the work directory, which is where the media land.
+			path := ref
+			if !filepath.IsAbs(path) && e.File != nil {
+				beside := filepath.Join(filepath.Dir(e.File.Path), ref)
+				if fileExists(beside) {
+					path = beside
+				}
+			}
+			reference, err := screen.Load(path)
+			if err != nil {
+				return fail(s.Name, "`desktop: %s` with `reference: %s`: %v", family, ref, err)
+			}
+			d, err := screen.Compare(reference, img, 8)
+			if err != nil {
+				return fail(s.Name, "comparing with `%s`: %v", ref, err)
+			}
+			sim := 1 - d.Changed
+			lo, hi := 0.90, 1.0
+			if v, err := s.Float("range", -1); err == nil && v >= 0 {
+				lo = v
+				if r2, ok := s.Spec["range"].([]any); ok && len(r2) == 2 {
+					if h, ok := toFloat(r2[1]); ok {
+						hi = h
+					}
+				}
+			}
+			ok = sim >= lo && sim <= hi
+			// A DESKTOP AT THE WRONG SIZE IS THE SAME PROBLEM A THRESHOLD TEST WOULD SEE, so the
+			// frame's own dimensions are carried through and the size gate below still applies.
+			w, h := img.Bounds().Dx(), img.Bounds().Dy()
+			lastStats = screen.Stats{Width: w, Height: h}
+			refVerdict = fmt.Sprintf("similarity %.4f (want %.2f..%.2f)", sim, lo, hi)
+			e.Driver.Log(fmt.Sprintf("  reference %s: similarity %.4f (want %.2f..%.2f)",
+				filepath.Base(ref), sim, lo, hi))
+			if !ok {
+				time.Sleep(poll)
+				continue
+			}
+		} else {
+			switch family {
+			case "windows":
+				ok, lastStats = screen.IsWindowsDesktop(img)
+			case "macos":
+				// A MACOS DESKTOP IS DECIDED BY THE DOCK AND THE BODY, not by words: there is no text
+				// on it to read. `internal/screen.IsMacOSDesktop` has been implemented and tested since
+				// the port began; the dispatcher simply had no branch for it, so `desktop: macos` in
+				// macos/15/steps/ssh.yaml would have failed on the first frame.
+				var mac screen.MacOSStats
+				ok, mac = screen.IsMacOSDesktop(img)
+				lastStats = mac.Stats()
+			case "linux":
+				// A LINUX DESKTOP IS A PANEL: a strip of colour along an edge that the installer under
+				// it does not draw. The same measurement serves every distribution here because they all
+				// run a panel - GNOME, KDE, XFCE, MATE, Cinnamon - and the installers they boot do not.
+				ok, lastStats = screen.IsLinuxDesktop(img)
 
-		// THE DISTRIBUTION'S OWN TEST, NAMED `linux/<name>`, FOR A MEDIUM WHOSE FIRST SCREEN IS NOT
-		// A DESKTOP.
-		//
-		// Kubuntu 26.04 boots to a KDE launcher drawn on a full-bleed gradient: no panel, so
-		// `IsLinuxDesktop` answers false with `Drop=0.0`, and a `desktop: linux` step would spend its
-		// fifteen minutes on a machine that is sitting on its installer. MEASURED on that image:
-		//
-		//	the launcher                 sat=96.9
-		//	every Calamares page         sat= 4.1 .. 6.2
-		//
-		// `screen.IsKubuntuLauncher` is that measurement, and naming it in the file as
-		// `desktop: linux/kubuntu` is what makes the choice visible where the walk is read rather
-		// than implicit in a family-wide threshold.
-		// THE DESKTOP ENVIRONMENT IS THE UNIT, NOT THE DISTRIBUTION.
-		//
-		// Two media that run the same environment draw the same desktop, and one measurement serves
-		// both; two media that run different environments do not, and a single `linux` threshold
-		// answers for neither. So the key names the ENVIRONMENT - `linux/kde`, `linux/gnome`,
-		// `linux/cinnamon`, `linux/xfce` - and the distribution reaches it by the desktop its ISO
-		// carries:
-		//
-		//	kde        kubuntu, cachyos, endeavouros, manjaro, opensuse-leap-16.1
-		//	gnome      ubuntu, popos, fedora-workstation, nixos, zorin
-		//	cinnamon   mint
-		//	xfce       mx
-		//
-		// `linux/kubuntu` REMAINS, because that medium's first screen is not a desktop at all - it is
-		// a launcher on a full-bleed gradient, and it has its own measurement. The name is kept
-		// rather than renamed because the file that uses it says which medium it is about.
-		case "linux/kubuntu":
-			ok, lastStats = screen.IsKubuntuLauncher(img)
+			// THE DISTRIBUTION'S OWN TEST, NAMED `linux/<name>`, FOR A MEDIUM WHOSE FIRST SCREEN IS NOT
+			// A DESKTOP.
+			//
+			// Kubuntu 26.04 boots to a KDE launcher drawn on a full-bleed gradient: no panel, so
+			// `IsLinuxDesktop` answers false with `Drop=0.0`, and a `desktop: linux` step would spend its
+			// fifteen minutes on a machine that is sitting on its installer. MEASURED on that image:
+			//
+			//	the launcher                 sat=96.9
+			//	every Calamares page         sat= 4.1 .. 6.2
+			//
+			// `screen.IsKubuntuLauncher` is that measurement, and naming it in the file as
+			// `desktop: linux/kubuntu` is what makes the choice visible where the walk is read rather
+			// than implicit in a family-wide threshold.
+			// THE DESKTOP ENVIRONMENT IS THE UNIT, NOT THE DISTRIBUTION.
+			//
+			// Two media that run the same environment draw the same desktop, and one measurement serves
+			// both; two media that run different environments do not, and a single `linux` threshold
+			// answers for neither. So the key names the ENVIRONMENT - `linux/kde`, `linux/gnome`,
+			// `linux/cinnamon`, `linux/xfce` - and the distribution reaches it by the desktop its ISO
+			// carries:
+			//
+			//	kde        kubuntu, cachyos, endeavouros, manjaro, opensuse-leap-16.1
+			//	gnome      ubuntu, popos, fedora-workstation, nixos, zorin
+			//	cinnamon   mint
+			//	xfce       mx
+			//
+			// `linux/kubuntu` REMAINS, because that medium's first screen is not a desktop at all - it is
+			// a launcher on a full-bleed gradient, and it has its own measurement. The name is kept
+			// rather than renamed because the file that uses it says which medium it is about.
+			case "linux/kubuntu":
+				ok, lastStats = screen.IsKubuntuLauncher(img)
 
-		// KDE, WHOSE PANEL IS NOT ONE HEIGHT. MEASURED on two live media:
-		//
-		//	manjaro   panel 48 rows   IsLinuxDesktop=true   drop=128.4
-		//	cachyos   panel  8 rows   IsLinuxDesktop=false  drop=  0.0   edge=16.9
-		//
-		// `IsKDEDesktop` tries the band average first and the row-step second, so one branch answers
-		// for both without either file depending on the other's panel height.
-		case "linux/kde":
-			ok, lastStats = screen.IsKDEDesktop(img)
+			// KDE, WHOSE PANEL IS NOT ONE HEIGHT. MEASURED on two live media:
+			//
+			//	manjaro   panel 48 rows   IsLinuxDesktop=true   drop=128.4
+			//	cachyos   panel  8 rows   IsLinuxDesktop=false  drop=  0.0   edge=16.9
+			//
+			// `IsKDEDesktop` tries the band average first and the row-step second, so one branch answers
+			// for both without either file depending on the other's panel height.
+			case "linux/kde":
+				ok, lastStats = screen.IsKDEDesktop(img)
 
-		case "linux/gnome":
-			ok, lastStats = screen.IsGNOMEDesktop(img)
+			case "linux/gnome":
+				ok, lastStats = screen.IsGNOMEDesktop(img)
 
-		case "linux/cinnamon":
-			ok, lastStats = screen.IsCinnamonDesktop(img)
+			case "linux/cinnamon":
+				ok, lastStats = screen.IsCinnamonDesktop(img)
 
-		case "linux/xfce":
-			ok, lastStats = screen.IsXFCEDesktop(img)
+			case "linux/xfce":
+				ok, lastStats = screen.IsXFCEDesktop(img)
 
-		case "android":
-			// ANDROID IS NOT A PANEL TEST, AND SAYING SO IS MORE USEFUL THAN A DETECTOR THAT ALMOST
-			// WORKS.
-			//
-			// `IsLinuxDesktop` ANSWERS FALSE ON ANDROID'S DESKTOP, and that is correct of it: it
-			// wants `margin > 40 && spread < 42` in the lowest 4.5%, and Taskbar is a 40 px
-			// translucent bar over a dark wallpaper - contrast 9, spread 121, saturation 0.
-			//
-			// A DETECTOR WAS WRITTEN FOR ANDROID'S SHAPE AND IT WAS WITHDRAWN, BECAUSE IT DEPENDS ON
-			// THE FRAMEBUFFER'S SIZE. Measured on one frame, at two sizes:
-			//
-			//	1920x1080   desktop step 1.17 -> true    splash step 0.61 -> false
-			//	 640x360    desktop step 2.36 -> true    splash step 1.71 -> TRUE   <- wrong
-			//
-			// A verdict that changes when the same picture is scaled is not a verdict, and both
-			// thresholds that were tried moved the failure rather than removing it.
-			//
-			// THE QUESTION HAS A BETTER ANSWER. adbd reports what the window manager thinks is in
-			// front, which is the fact a person reading the frame is trying to infer:
-			//
-			//	adb: dumpsys window | grep mCurrentFocus | grep com.farmerbb.taskbar
-			//
-			// and `android/blissos16/steps/vm-configure.yaml` asks it three ways - `mCurrentFocus`,
-			// `ResumedActivity`, and a window count - each of which a boot splash, the home-app
-			// chooser and a lock screen all fail.
-			return fail(s.Name, "`desktop: android` is not implemented, and the pixel test it used "+
-				"to run was withdrawn because its verdict changed with the framebuffer's size. Ask "+
-				"the system instead: `adb: dumpsys window | grep mCurrentFocus | grep "+
-				"com.farmerbb.taskbar`, or `dumpsys activity activities | grep ResumedActivity`")
-		default:
-			return fail(s.Name, "the %q desktop test is not implemented in this build; the four "+
-				"are windows, macos, linux and android", family)
+			case "android":
+				// ANDROID IS NOT A PANEL TEST, AND SAYING SO IS MORE USEFUL THAN A DETECTOR THAT ALMOST
+				// WORKS.
+				//
+				// `IsLinuxDesktop` ANSWERS FALSE ON ANDROID'S DESKTOP, and that is correct of it: it
+				// wants `margin > 40 && spread < 42` in the lowest 4.5%, and Taskbar is a 40 px
+				// translucent bar over a dark wallpaper - contrast 9, spread 121, saturation 0.
+				//
+				// A DETECTOR WAS WRITTEN FOR ANDROID'S SHAPE AND IT WAS WITHDRAWN, BECAUSE IT DEPENDS ON
+				// THE FRAMEBUFFER'S SIZE. Measured on one frame, at two sizes:
+				//
+				//	1920x1080   desktop step 1.17 -> true    splash step 0.61 -> false
+				//	 640x360    desktop step 2.36 -> true    splash step 1.71 -> TRUE   <- wrong
+				//
+				// A verdict that changes when the same picture is scaled is not a verdict, and both
+				// thresholds that were tried moved the failure rather than removing it.
+				//
+				// THE QUESTION HAS A BETTER ANSWER. adbd reports what the window manager thinks is in
+				// front, which is the fact a person reading the frame is trying to infer:
+				//
+				//	adb: dumpsys window | grep mCurrentFocus | grep com.farmerbb.taskbar
+				//
+				// and `android/blissos16/steps/vm-configure.yaml` asks it three ways - `mCurrentFocus`,
+				// `ResumedActivity`, and a window count - each of which a boot splash, the home-app
+				// chooser and a lock screen all fail.
+				return fail(s.Name, "`desktop: android` is not implemented, and the pixel test it used "+
+					"to run was withdrawn because its verdict changed with the framebuffer's size. Ask "+
+					"the system instead: `adb: dumpsys window | grep mCurrentFocus | grep "+
+					"com.farmerbb.taskbar`, or `dumpsys activity activities | grep ResumedActivity`")
+			default:
+				return fail(s.Name, "the %q desktop test is not implemented in this build; the four "+
+					"are windows, macos, linux and android", family)
+			}
 		}
 		if ok {
 			// A DESKTOP AT THE WRONG SIZE IS NOT A DESKTOP, BECAUSE EVERY COORDINATE IN THE FILE WAS
@@ -606,8 +668,12 @@ func (e *Executor) doDesktop(s walk.Step) error {
 				time.Sleep(poll)
 				continue
 			}
+			what := lastStats.Explain()
+			if refVerdict != "" {
+				what = refVerdict
+			}
 			e.Driver.Log(fmt.Sprintf("  a desktop is on screen (%s); %s",
-				time.Since(start).Round(time.Second), lastStats.Explain()))
+				time.Since(start).Round(time.Second), what))
 			return nil
 		}
 		// A GUEST THAT BLANKS ITS OWN SCREEN WAKES ON INPUT, and a blank screen during a boot is
@@ -618,7 +684,12 @@ func (e *Executor) doDesktop(s walk.Step) error {
 		time.Sleep(poll)
 	}
 	return failWithScreen(s.Name, e.Driver,
-		"no %s desktop within %s; %s", family, timeout, lastStats.Explain())
+		"no %s desktop within %s; %s", family, timeout, func() string {
+			if refVerdict != "" {
+				return refVerdict
+			}
+			return lastStats.Explain()
+		}())
 }
 
 // --- host commands --------------------------------------------------------------------

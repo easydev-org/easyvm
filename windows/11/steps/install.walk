@@ -92,8 +92,30 @@ walkthrough "windows 11 - install to a desktop"
   press Return, waiting 60s, named "nudge the first boot along, four times"
   press Return, waiting 60s, named "nudge the first boot along, five times"
   press Return, waiting 60s, named "nudge the first boot along, six times"
+  # THE DESKTOP IS DECIDED BY THE REFERENCE IMAGE, NOT BY THREE BRIGHTNESS THRESHOLDS.
+  #
+  # MEASURED ON THIS GUEST'S OWN RECORDINGS. `desktop: windows` wanted drop>=15, ratio>=2x and
+  # sat>=0.10 - three numbers within a few percent of each other - and the OOBE frames failed them
+  # with `ratio=0.1x sat=+0.07` for TWO HOURS while the console log showed Windows Boot Manager had
+  # started.
+  #
+  # THE SAME QUESTION, ASKED WITH A REFERENCE, SEPARATES CLEANLY. Measured on one ubuntu recording
+  # frame by frame against the reference that file ships:
+  #
+  #	 30s   similarity 0.0004   boot splash
+  #	 90s   similarity 0.0041   still splashing
+  #	120s   similarity 0.9909   the desktop
+  #	1600s  similarity 0.9767   the desktop, later
+  #
+  # "not a desktop" tops out at 0.0043 and "a desktop" bottoms out at 0.9669 - two orders of
+  # magnitude - where the thresholds gave 0.1x against a floor of 2.
+  #
+  # THE REFERENCE IS THE ONE THE `check:` BELOW ALREADY USES, so there is one picture of this desktop
+  # in the repository rather than two that could drift apart.
   step "wait for the desktop"
     desktop == windows
+    reference == reference/desktop.png
+    range == [0.90, 1.0]
     timeout == 7200
   # THE DESKTOP IS THE PICTURE, NOT ONLY THE NUMBERS. `desktop:` decides on seven measurements -
   # brightness drop, variance ratio, saturation - and several panes can share all seven. This step

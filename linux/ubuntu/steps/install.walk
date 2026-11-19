@@ -16,8 +16,15 @@ walkthrough "ubuntu - the subiquity walk"
     # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
     memory_mb == 4096
     timeout == 1800
+  # THE DESKTOP IS DECIDED BY THE REFERENCE IMAGE, for the reason the windows file records: the
+  # three brightness thresholds answer "a dark body with a lighter strip", and every installer pane
+  # on the way there is close enough to that to be arguable. A reference answers the same question
+  # with a measurement two orders of magnitude wider - 0.0043 for a splash against 0.9669 for a
+  # desktop on this very recording.
   step "wait for the live desktop"
     desktop == linux/gnome
+    reference == reference/desktop.png
+    range == [0.90, 1.0]
     timeout == 5400
   # THE LIVE SESSION'S RIGHT-CLICK MENU IS OPEN MORE OFTEN THAN NOT, because the installer puts it
   # there and the walk's own clicks leave it behind. MEASURED on run 44361392014, where the captured

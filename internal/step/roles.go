@@ -268,7 +268,7 @@ var Consumes = map[string][]string{
 	"compress":   {"disk_min_mb"},
 	"see":        {"rect", "rect_at", "of", "scale", "reference"},
 	"check":      {"mode", "words", "without", "range", "text", "pattern", "as", "from"},
-	"desktop":    {"os", "timeout"},
+	"desktop":    {"os", "timeout", "reference", "range"},
 	"adb":        {"adb_serial"},
 	"until":      {"from", "blind_after", "poll", "as", "rect", "rect_at", "scale"},
 	"until_any":  {"from", "blind_after", "poll", "as", "rect", "rect_at", "scale"},

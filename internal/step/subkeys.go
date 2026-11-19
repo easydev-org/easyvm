@@ -36,8 +36,9 @@ var Subkeys = map[string]Key{
 		Summary: "with the retired `see:`: which numbers to bind - mean, spread, sat, flat_rows, " +
 			"contrast, min, max, or text. A question is a `check:` now"},
 	"reference": {Name: "reference", Kind: KindString,
-		Summary: "with a `check:` of `mode: like`: the image to compare the region against, " +
-			"relative to the walkthrough"},
+		Summary: "the image to compare against, relative to the walkthrough: with a `check:` of " +
+			"`mode: like`, the region; with `desktop:`, the whole frame - which replaces six " +
+			"brightness thresholds with one measurement"},
 	"mode": {Name: "mode", Kind: KindString,
 		Summary: "with `check:`: HOW the frame is questioned - like, mean_between, sat_between, " +
 			"spread_between, text"},
