@@ -112,25 +112,34 @@ walkthrough "linux-nixos - sshd"
     settle == 6
     terminal_wait == 0
     type_gap == 0.15
-  step "rebuild the system"
-    run == sudo nixos-rebuild switch
-    settle == 420
+  # `nixos-rebuild boot` + `reboot`, IN ONE LINE, BECAUSE `switch` SIGNS THE SESSION OUT AND THE
+  # STAGE THEN HAS NO TERMINAL LEFT TO TYPE IN.
+  #
+  # MEASURED ON RUN 44600196595: `nixos-rebuild switch` restarted the display manager, so the desktop
+  # that owned the terminal went away - the recording at 900 s is SDDM with 'vmuser' and an EMPTY
+  # password field - and every later command was typed into a login screen. `wait for sshd` then spent
+  # its fifteen minutes on 'i/o timeout' against a guest whose own forward was gone with the session.
+  #
+  # `boot` writes the new profile for the NEXT boot and does not touch the running one, and `reboot`
+  # follows it in the same line, so the machine comes back with `services.openssh.enable` and the
+  # stage needs no session at all afterwards - only the port, which `wait for sshd` dials from the
+  # host.
+  step "build the new profile and reboot into it"
+    run == sudo nixos-rebuild boot; sudo reboot
+    settle == 60
     terminal_wait == 0
     type_gap == 0.15
-  # THE REBUILD RESTARTS THE DISPLAY MANAGER, SO THE SCREEN GOES BLACK - BUT THIS DOES NOT NEED IT.
+  # NOTHING IS TYPED AFTER THE REBOOT, BECAUSE THERE IS NO SESSION TO TYPE INTO.
   #
-  # MEASURED: after `nixos-rebuild switch` the recording is PURE BLACK for the rest of the stage,
-  # which is what switching the system profile does to the running session. Everything after it is
-  # sshd, and sshd does not care what the screen shows.
+  # MEASURED ON RUN 44600196595, whose recording at 900 s is SDDM ITSELF - 'vmuser' in the middle of
+  # the screen with an EMPTY 'Password' field - while this stage was still on its later steps. The
+  # rebuild restarts the display manager, so the desktop that owned the terminal goes away and any
+  # command after it is typed into a login screen's password box.
   #
-  # The wait for the port is what matters, so it is given its full ten minutes and the `is-active`
-  # line is a report rather than a gate - a systemd unit that is still starting at the moment of the
-  # read must not end the stage.
-  step "prove sshd is active"
-    run == systemctl is-active sshd; systemctl is-enabled sshd
-    settle == 5
-    terminal_wait == 0
-    type_gap == 0.15
+  # SO THE PORT IS THE ONLY THING ASKED FOR FROM HERE. `wait for sshd` dials 2222 on the HOST - it
+  # needs no key, no terminal and no session - and the port is what the next stage actually uses.
+  # The `systemctl is-active sshd` step is gone with this: a report from a shell that no longer exists
+  # can only fail a stage that is otherwise finished.
   step "wait for sshd"
     require_ssh == true
     timeout == 900
