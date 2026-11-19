@@ -39,7 +39,25 @@ walkthrough "linux-mx - sshd"
     loop == {check: {from: bootmenu, mode: text, name: at_menu, rect: [660, 200, 1620, 520], rect_at: [1920, 1080], scale: 1, words: [[mx-25], [boot, rescue, menus]]}, do: [{settle: 4}], max: 10, see: {name: bootmenu}, until: {fact: at_menu}}
     optional == true
   press Return, waiting 5s, named "enter the normal module, which loads the menu"
-  press home, waiting 2s, named "jump to the first entry, whatever the highlight was on"
+  # THE HIGHLIGHT IS ON "Language - Keyboard - Timezone", AND `home` MOVES IT TO THE MENU TITLE.
+  #
+  # MEASURED ON RUN a8a0c0d's mx ssh, at 40 s: the menu is
+  #
+  #	  MX-25.3 Xfce x64 (September 20, 2026) (sysvinit)      <- entry 1, the installed system
+  #	  MX-25.3 Xfce x64 (September 20, 2026) (systemd)       <- entry 2
+  #	  Check integrity of the live media
+  #	> Language - Keyboard - Timezone                       <- where the highlight actually is
+  #	  >>> Advanced Options <<<
+  #
+  # and after `home` + Return the stage booted "=== Boot Rescue Menus ===" (a frame at 20 s) and by
+  # 60 s was at 'start init' with no desktop - a rescue shell, not the system.
+  #
+  # `home` in grub is handled by the THEME, and this theme's first selectable row is the submenu
+  # header. THREE `up` PRESSES from the Language row land on entry 1, which is the installed system
+  # and the same row the install walk's own menu picks.
+  press up, waiting 1s, named "up from the language row"
+  press up, waiting 1s, named "up past the integrity check"
+  press up, waiting 1s, named "up past the systemd entry, onto the installed system"
   press Return, waiting 60s, named "boot the highlighted entry, which is the installed system"
   # THE GREETER IS ASKED FOR BEFORE IT IS CLICKED, AND THE BAND IS THIS MEDIUM'S OWN.
   #

@@ -98,9 +98,21 @@ walkthrough "linux-fedora-workstation - sshd"
   #
   # The loop presses Next until the wizard's own heading is gone. `max: 12` is the number of pages
   # this wizard has plus slack; a page that does not advance costs one press, not the whole stage.
+  # THE LOOP STOPPED ON ITS FIRST PASS, BECAUSE ITS FACT WAS "THE WIZARD IS UP".
+  #
+  # MEASURED ON RUN a8a0c0d's fedora ssh: the recording at 200 s is STILL the Privacy page - its
+  # Previous button top-left, Next top-right, 'Location Services' in the middle - and the stage had
+  # already passed this step and gone on to click at 960,700 (which is that page, not a desktop).
+  #
+  # `until: {fact: still_open}` means "STOP WHEN still_open IS TRUE", and `still_open` is exactly
+  # what a page that has NOT advanced looks like. The loop therefore ended the moment it began.
+  #
+  # A FIXED SEQUENCE OF CLICKS INSTEAD. Each wizard page has Next at 1420,193; pages advance one per
+  # press and the wizard closes on the last. Eight is this wizard's page count plus slack, and a
+  # click on a desktop at that position opens a context menu that Escape then dismisses.
   step "walk the setup wizard to its end"
-    loop == {check: {from: wizard_page, mode: text, name: still_open, rect: [400, 165, 1000, 225], rect_at: [1920, 1080], scale: 1, words: [[previous]]}, do: [{click: [1420, 193], settle: 6}], max: 12, see: {name: wizard_page}, until: {fact: still_open}}
-    optional == true
+    do == [{click: [1420, 193], settle: 6}, {click: [1420, 193], settle: 6}, {click: [1420, 193], settle: 6}, {click: [1420, 193], settle: 6}, {click: [1420, 193], settle: 6}, {click: [1420, 193], settle: 6}, {click: [1420, 193], settle: 6}, {click: [1420, 193], settle: 8}]
+  press Escape, waiting 2s, named "clear a context menu if the wizard had already closed"
 
   click "desktop - give the shell focus" at 960 700, waiting 2s, named "desktop - give the shell focus"
   press meta_l, waiting 4s, named "open the overview"
@@ -142,6 +154,20 @@ walkthrough "linux-fedora-workstation - sshd"
   step "enable ssh at boot"
     run == sudo systemctl enable --now sshd
     settle == 8
+  # FEDORA SHIPS firewalld ENABLED, AND IT DROPS 22 UNTIL THE SERVICE IS ALLOWED.
+  #
+  # This medium is the one distribution in this tree that starts with its firewall on by default,
+  # which is why every other ssh walk could get away without a line like this. `--add-service=ssh`
+  # is the standard rule and it is what the default zone publishes.
+  step "open the firewall for ssh"
+    run == sudo firewall-cmd --permanent --add-service=ssh
+    settle == 4
+  step "reload the firewall"
+    run == sudo firewall-cmd --reload
+    settle == 5
+  step "show the zone's services"
+    run == sudo firewall-cmd --list-services
+    settle == 3
   step "wait for sshd"
     require_ssh == true
     timeout == 600
