@@ -92,21 +92,27 @@ walkthrough "linux-opensuse-tumbleweed - sshd"
   #
   # So the last line of the console is read, and the name is typed only once 'login:' is on it.
   # The band is the bottom two lines at this resolution, which is where a fresh prompt appears.
-  step "the console is at a login prompt"
-    loop == {check: {from: console_tail, mode: text, name: at_prompt, rect: [0, 200, 1920, 800], rect_at: [1920, 1080], scale: 2, words: [[login]]}, do: [{key: ret, settle: 3}], max: 20, see: {name: console_tail}, until: {fact: at_prompt}}
-  press ctrl+c, waiting 2s, named "abandon anything half-typed at the console"
-  press Return, waiting 4s, named "one more Return, so the prompt is the last line"
-  step "log in on the text console"
+  # THE LOGIN IS TYPED SLOWLY, AND THE PROMPT IS GIVEN TIME TO PRINT.
+  #
+  # MEASURED THREE TIMES, each the same shape:
+  #
+  #	localhost login: Qz7vLp2w          <- the PASSWORD, in the user-name slot
+  #	Password: login: timed out after 60 seconds
+  #
+  # The name is typed into a console that has not finished printing its prompt. type_gap is raised
+  # and every Return is followed by a longer settle, so the guest has time to answer between the
+  # three things it is being told.
+  press Return, waiting 5s, named "ask getty for a prompt"
+  step "the user name"
     type == '{{ user }}'
-    settle == 5
-  press Return, waiting 6s, named "the console takes the user name"
-  step "the console's password"
+    type_gap == 0.12
+    settle == 6
+  press Return, waiting 8s, named "the console takes the user name"
+  step "the password"
     type == '{{ password }}'
-    settle == 3
-  press Return, waiting 12s, named "the console takes the password"
-  # AND SUDO IS UNLOCKED ONCE HERE, FOR THE SAME REASON AS THE OTHER DISTRIBUTIONS: a password that
-  # travels inside a command line is lost when that command's Return is lost. `sudo -v` stores a
-  # timestamp, and every later `sudo` is plain.
+    type_gap == 0.12
+    settle == 6
+  press Return, waiting 15s, named "the console takes the password"
   step "unlock sudo once for this session"
     run == printf '%s\n' {{ password }} | sudo -S -v
     settle == 4
