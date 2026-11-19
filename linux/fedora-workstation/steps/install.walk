@@ -91,7 +91,7 @@ walkthrough "fedora-workstation - anaconda and the first boot"
     loop == {check: {from: detail, mode: text, name: up, rect: [390, 330, 1040, 410], rect_at: [1920, 1080], scale: 1, words: [[UUID], [filesystem]]}, do: [{settle: 2}], max: 12, see: {name: detail}, until: {fact: up}}
   click "shrink it from the detail page" at 1008 267, waiting 6s, named "shrink it from the detail page"
   step "the shrink dialog is up"
-    loop == {check: {from: shrink_dialog, mode: text, name: up, rect: [1023, 250, 1093, 307], rect_at: [1920, 1080], scale: 1, words: [[Shrink], [Size]]}, do: [{settle: 2}], max: 12, see: {name: shrink_dialog}, until: {fact: up}}
+    loop == {check: {from: shrink_dialog, mode: text, name: up, rect: [400, 200, 950, 350], rect_at: [1920, 1080], scale: 1, words: [[Shrink], [Size]]}, do: [{settle: 2}], max: 12, see: {name: shrink_dialog}, until: {fact: up}}
   click shrink at 1029 562, waiting 6s, named "shrink it"
   click "to 136 GB, leaving room for the ESP" at 1041 275, waiting 1s, named "to 136 GB, leaving room for the ESP"
   press ctrl+a, waiting 1s, named "replace the size"
