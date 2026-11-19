@@ -614,79 +614,79 @@ steps:
       - later
     until:
       fact: ready
-- name: dismiss anything over the desktop
-  key: esc
-  wait_after: 2
-# THE KEYBOARD SETUP ASSISTANT COMES UP WITH THE FIRST DESKTOP SESSION AND IT IS BIGGER THAN THE
-# WINDOW THAT LANDS ON TOP OF IT.
+# THE DESKTOP HAS THREE WINDOWS ON IT AFTER THE FIRST LOGIN, AND NOTHING THIS FILE TRIED CLOSED
+# THE ONE THAT MATTERED.
 #
-# MEASURED ON THIS STAGE'S OWN RUN: the walk reached System Settings and its search step pressed
-# (714,285), and the frame showed the settings window with an EMPTY search field while the sheet
-# reading `Keyboard Setup Assistant` was still visible BEHIND it. The assistant's Quit at (1133,816)
-# was under the settings window's own content, so every press aimed at Quit landed on System
-# Settings instead - and `the remote login result is on screen` then waited forty-five times for a
-# search that had never been typed.
+# MEASURED ON THIS STAGE'S OWN RUN, at the frame where `Cmd+F` was supposed to focus the settings
+# search field: the screen held
 #
-# `Cmd+Q` IS THE DISMISSAL THAT DOES NOT DEPEND ON WHICH WINDOW IS ON TOP: it closed System Settings
-# in the same run, which exposed the assistant, and the press at (1133,816) then took Quit and left a
-# clean desktop. So quit first, then press Quit, then let Spotlight open the settings app again.
-- name: quit the window that is covering the keyboard assistant
+#	Finder   "Searching This Mac" - a Finder SEARCH WINDOW, opened by `Cmd+F` itself
+#	Keyboard Setup Assistant
+#	System Settings, on General
+#
+# `Cmd+F` HAD GONE TO FINDER, not to Settings, because Finder was the key window. Its check had said
+# the settings window was up - `says_any: [general] / [wi-fi]` matches the Finder sidebar's own
+# `Applications`, `Desktop`, `Downloads` and a Settings window that was merely BEHIND - so the step
+# believed it had a settings window and typed into a Finder search.
+#
+# THE FIX IS IN TWO PARTS, AND BOTH ARE NEEDED:
+#
+#  1. CLOSE EVERYTHING FIRST. `Cmd+Q` repeated, because each press closes one app and there are two
+#     (Finder and the keyboard assistant). A press that closes nothing is harmless.
+#  2. PROVE THE SETTINGS WINDOW HAS FOCUS before `Cmd+F`, by reading the MENU BAR - every app names
+#     itself there, and that is the one part of the screen that does not move with any window.
+- name: close whatever windows the first login left open
   key: meta_l+q
-  wait_after: 5
-- name: quit the keyboard assistant itself
-  click:
-  - 1133
-  - 816
-  wait_after: 8
+  wait_after: 4
+- name: close the next one
+  key: meta_l+q
+  wait_after: 4
+- name: close the next one
+  key: meta_l+q
+  wait_after: 4
 - name: open spotlight
   key: meta_l+spc
-  wait_after: 4
+  wait_after: 5
 - name: type the settings app name
   type: system settings
-  wait_after: 7
+  wait_after: 6
 - name: open it
   key: ret
-  wait_after: 14
-- name: the settings window is up
+  wait_after: 16
+# THE MENU BAR, NOT THE WINDOW, IS WHAT SAYS WHICH APP HAS FOCUS.
+#
+# MEASURED on the frame where this went wrong: the menu bar read `Finder | File | Edit | View | Go |
+# Window | Help` while a System Settings window was visible behind it. A check for `general` passed on
+# that screen, and the next step typed `remote login` into a Finder search.
+#
+# `System Settings` IN THE MENU BAR IS UNAMBIGUOUS: it is the app's own name, drawn by the system, and
+# no other window on this desktop writes it at y=0..40.
+- name: the menu bar says System Settings has focus
   loop:
-    max: 30
+    max: 25
     do:
     - wait: 3
     ocr:
-      name: screen
+      name: menubar
       region:
       - 0
       - 0
-      - 1920
-      - 1080
+      - 700
+      - 40
       region_at:
       - 1920
       - 1080
-      scale: 1
+      scale: 2
       wait: 0
     check:
       name: done
-      from: screen
-      mode: says_any
+      from: menubar
+      mode: says
       words:
-      - - system
-        - settings
-      - - general
-      - - wi-fi
+      - system
+      - settings
     until:
       fact: done
-# THE SEARCH FIELD HAS TO BE FOCUSED BEFORE ANYTHING IS TYPED, AND IT WAS NOT.
-#
-# MEASURED ON THIS STAGE'S OWN RUN: the walk clicked (715,267) and typed in one step, and the screen
-# afterwards showed System Settings sitting on GAME CENTER with an EMPTY search field - the typing had
-# gone nowhere, and `the remote login result is on screen` then waited forty-five times for a result
-# that was never searched for.
-#
-# (714,285) IS THE FIELD, measured on that frame: the search box spans x=612..818 at y=274..296. The
-# old (715,267) was nine pixels above it, inside the title bar.
-#
-# THE PRESS IS ITS OWN STEP so the field has settled before the text arrives - the same lesson as the
-# two password fields, and the third time this file has learned it.
 - name: focus the settings search field
   # `Cmd+F` IS THE SYSTEM SETTINGS SEARCH SHORTCUT, AND IT IS USED HERE BECAUSE THE FIELD MOVES.
   #
