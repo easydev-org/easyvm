@@ -13,6 +13,20 @@ walkthrough "linux-kubuntu - sshd"
     timeout == 900
   step "the session is up, which is what autologin is for"
     loop == {check: {from: desk, mode: text, name: up, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], words: [[applications], [welcome], [kubuntu]]}, do: [{settle: 10}], max: 40, see: {name: desk}, until: {fact: up}}
+  # THE WELCOME CENTRE IS UP ON THIS DESKTOP AND IT EATS ctrl+alt+t.
+  #
+  # MEASURED ON RUN 44548179034, whose ssh recording at 90 s is "Welcome Center" with its Skip
+  # button and NOTHING ELSE - no terminal, no shell prompt. Every command of the stage then went
+  # into a window that was not there, and `wait for sshd` spent its ten minutes on a guest where
+  # openssh had never been installed.
+  #
+  # The same run's NEXT frames show the terminal never appearing, and the daemon log has no output
+  # under any of the `run:` steps - which is what a stage typing into the desktop looks like.
+  #
+  # SO THE WINDOW IS DISMISSED FIRST. `Skip` is at 684,813 on that frame, and the step is optional
+  # because a desktop that has already been dismissed (or never showed it) must not fail here.
+  click "dismiss the welcome centre, which takes the keyboard" at 684 813, waiting 4s, optionally, named "dismiss the welcome centre, which takes the keyboard"
+  press Escape, waiting 2s, named "clear anything the welcome centre left behind"
   press ctrl+alt+t, waiting 20s, named "open the terminal"
   # NO `terminal_wait:` HERE, AND THAT IS THE FIX RATHER THAN AN OMISSION.
   #
