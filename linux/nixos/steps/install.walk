@@ -20,10 +20,10 @@ walkthrough "nixos - the Calamares walk"
     desktop == linux/gnome
     reference == reference/desktop.png
     range == [0.90, 1.0]
-    # THE TOP 120 ROWS ARE WALLPAPER AND A MENU BAR: a boot splash scores 0.0002
-    # there and every desktop frame 1.0000, including the ones with an installer
-    # window over the middle. The clock sits below this band, which is why 120.
-    rect == [0, 0, 1920, 120]
+    # THE BAND IS TOP-RIGHT WALLPAPER: the clock is at the top centre and the search bar
+    # sits under it, and an installer window covers the middle from y=295 down. Measured on this
+    # medium's own recording: the boot splash scores 0.0000 here and every desktop frame 1.0000.
+    rect == [1500, 120, 1900, 280]
     rect_at == [1920, 1080]
     poll == 5
     timeout == 5400

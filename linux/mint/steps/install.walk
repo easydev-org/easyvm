@@ -21,7 +21,20 @@ walkthrough "mint - the ubiquity walk"
     see == name: grub
   step "that menu names mint"
     check == {from: grub, mode: text, name: is_mint, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1, words: [[start, linux, mint], [linux, mint]]}
-  press Return, waiting 20s, named "answer the menu, which does not count down"
+  # THE MENU TAKES THE KEY AND THEN SITS THERE, SO THE KEY IS SENT MORE THAN ONCE.
+  #
+  # MEASURED ON RUN 44471061649, whose recording is the SAME FRAME from 20 seconds to the end -
+  # 2979 seconds of "Press enter to boot the selected OS" with the highlight still on the first
+  # entry. One Return, twenty seconds, and nothing moved: unlike every later step in this file,
+  # which is a click the guest has to answer, this one is a keystroke into a firmware menu that may
+  # not have finished drawing when `see:` captured it.
+  #
+  # THREE, FIVE SECONDS APART, is what the file already does elsewhere for a screen that appears more
+  # than once - and a second Return on a menu that has already gone is harmless, because the live
+  # session ignores it.
+  press Return, waiting 5s, named "answer the menu, which does not count down"
+  press Return, waiting 5s, named "answer it again, because a firmware menu can miss the first key"
+  press Return, waiting 20s, named "and once more, then let the kernel start"
   step "wait for the live desktop"
     desktop == linux/cinnamon
     reference == reference/desktop.png

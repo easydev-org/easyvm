@@ -24,6 +24,18 @@ walkthrough "mx - the minstall walk"
   press up, waiting 1s, named "up to the first entry, which is the live session"
   press up, waiting 1s, named "up again"
   press up, waiting 1s, named "and once more"
+  # THE FIRMWARE'S BOOT-DEVICE MENU ALSO SITS THERE, AND ONE RETURN WAS MEASURED NOT TO MOVE IT.
+  #
+  # RUN 44471069613's recording is the same "Please select boot device" panel for 2973 seconds, with
+  # UEFI QEMU DVD-ROM still highlighted. The three `up` presses before it are for the LANGUAGE
+  # SUBMENU this medium opens on, so if that submenu is not up they move the highlight somewhere
+  # else and the Return lands on an entry that does nothing.
+  #
+  # SO THE SELECTION IS RE-ASSERTED: the DVD entry is the first line, so `up` three times is safe
+  # whatever the panel was showing, and the Return is repeated.
+  press up, waiting 1s, named "back to the DVD entry, whatever the panel was showing"
+  press up, waiting 1s, named "up again"
+  press up, waiting 1s, named "and once more, which is the top of the list"
   press Return, waiting 25s, named "boot it"
   step "wait for the live desktop"
     desktop == linux/xfce
