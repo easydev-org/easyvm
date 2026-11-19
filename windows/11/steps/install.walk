@@ -86,12 +86,40 @@ walkthrough "windows 11 - install to a desktop"
   # SO THEY ARE A GENTLE PERIODIC NUDGE - a minute apart, six of them - for the case where the OOBE
   # really is waiting on the "press any key" line, and the memory above is the actual fix for the
   # stall that was measured.
-  press Return, waiting 60s, named "nudge the first boot along, once"
-  press Return, waiting 60s, named "nudge the first boot along, twice"
-  press Return, waiting 60s, named "nudge the first boot along, three times"
-  press Return, waiting 60s, named "nudge the first boot along, four times"
-  press Return, waiting 60s, named "nudge the first boot along, five times"
-  press Return, waiting 60s, named "nudge the first boot along, six times"
+  #
+  # AND SIX RETURNS INTO A RUNNING INSTALL IS SIX CHANCES TO PRESS SOMETHING THAT IS NOT A NUDGE.
+  # MEASURED ON RUN 44468093359, whose recording ends on this exact frame after 2h07m:
+  #
+  #	Installing Windows 11        54% complete
+  #	[ Windows 11 Setup ]  Are you sure you want to quit?   [Yes]  [No]
+  #
+  # The installer had reached 54% and was working, and the sixth Return landed on its `Cancel`
+  # button, which carries the FOCUS on that page. The "are you sure" dialog then sat there until
+  # the budget ran out. The nudge was written for an OOBE that waits on "press any key", and NOTHING
+  # IN IT COULD TELL THAT SCREEN FROM AN INSTALL THAT IS 54% DONE.
+  #
+  # SO THE KEY IS GATED ON THE WORDS THAT ASK FOR IT. `when_not: [complete]` reads the progress
+  # page's own line - "54% complete" - and skips the key while it is there, which is the whole
+  # difference between nudging a stalled OOBE and cancelling a working install. The band is the
+  # progress line itself: x 200..700, y 190..230, where every progress page this installer draws
+  # puts it.
+  step "nudge the first boot along, once"
+    key == Escape
+    rect == [190, 190, 760, 235]
+    rect_at == [1920, 1080]
+    # SCALE 1 IS THE ONE THAT READS THIS LINE AS IT IS DRAWN. Read back from that recording:
+    # scale 1 gives "54% complete", scale 2 gives "24% complete" - either way `complete` is
+    # there, but the smaller enlargement is the one that does not invent digits.
+    scale == 1
+    settle == 30
+    when_not == [complete]
+  # ESCAPE AND NOT RETURN, for the second half of the same lesson. On an install that is 54% done the
+  # focused control is `Cancel`; Escape dismisses the "press any key" notice just as well and does
+  # NOT activate a focused button. It is the key that means "no".
+  step "answer a quit dialog, if one is up"
+    key == Escape
+    settle == 10
+    when == [quit]
   # THE DESKTOP IS DECIDED BY THE REFERENCE IMAGE, NOT BY THREE BRIGHTNESS THRESHOLDS.
   #
   # MEASURED ON THIS GUEST'S OWN RECORDINGS. `desktop: windows` wanted drop>=15, ratio>=2x and
