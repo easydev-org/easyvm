@@ -69,14 +69,15 @@ walkthrough "linux-nixos - sshd"
   # answered above, so the session is starting; `run:` needs a window to type into, and it gets one
   # from ctrl+alt+t. `settle` gives Plasma/GNOME the time the words could not be measured against.
   settle 60s, named "let the session finish starting, which no band can confirm"
-  click "desktop - give the shell focus" at 960 700, waiting 2s, named "desktop - give the shell focus"
-  press meta_l, waiting 4s, named "open the overview"
-  step "search for the terminal"
-    settle == 3
-    type == terminal
-  step "wait for the Console result"
-    loop == {check: {from: screen, mode: text, name: done, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], words: [[Console]]}, do: [{click: [420, 300], settle: 5}], max: 18, see: {name: screen}, until: {fact: done}}
-  click "open the terminal" at 960 160, waiting 20s, named "open the terminal"
+  # ctrl+alt+t FIRST, BECAUSE THE WELCOME WINDOW IS STILL THERE AND THE OVERVIEW SEARCH LANDS BEHIND IT.
+  #
+  # MEASURED ON RUN 44583894320, whose ssh recording at 200 s is 'Welcome to NixOS 26.05 (Yarara)'
+  # with its Skip and Take Tour buttons - and NO TERMINAL ANYWHERE. The meta-then-search path put its
+  # results behind that window, so the click at 960,160 hit the dialog.
+  #
+  # The chord opens a terminal over whatever is up, and this desktop honours it; the search path
+  # stays below as a fallback for a GNOME that does not.
+  press ctrl+alt+t, waiting 20s, named "open a terminal over whatever is up"
   # NO `terminal_wait:` HERE, AND THAT IS THE FIX RATHER THAN AN OMISSION.
   #
   # `terminal_wait:` OPENS A TERMINAL (ctrl+alt+t) AND THEN TYPES. The step above has already
