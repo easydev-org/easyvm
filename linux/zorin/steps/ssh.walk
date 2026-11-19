@@ -95,6 +95,25 @@ walkthrough "linux-zorin - sshd"
     settle == 4
   # `apt-get update` FIRST: this disk's index can point at a version the archive has replaced,
   # which answers 404 and reads like a network problem (measured on popos, same family).
+  # THE SOFTWARE UPDATER RAISES POLKIT'S 'Authentication Required' OVER THE TERMINAL, UNPROMPTED.
+  #
+  # MEASURED ON RUN 44557723577's successor: at 150 s the screen is that dialog - "To install or
+  # remove software, you need to authenticate" - with the terminal visible behind it and these
+  # lines on it:
+  #
+  #	xset s off; xset s noblank; xset -dpms ...
+  #	-S -v
+  #	sudo apt ...
+  #
+  # The dialog is not from a click: this desktop's update notifier puts it up on its own when the
+  # package index changes, and it takes the keyboard. Nothing typed after it arrives.
+  #
+  # SO THE NOTIFIER IS STOPPED BEFORE THE INDEX IS TOUCHED. `apt-daily` and PackageKit are what
+  # raise it; both are stopped here (they were the subject of a step this file used to have, whose
+  # CLICK on the updater was the thing pressing Install).
+  step "stop the update notifier before it raises polkit"
+    run == sudo systemctl stop packagekit unattended-upgrades apt-daily.service apt-daily-upgrade.service 2>/dev/null; sudo systemctl disable --now packagekit 2>/dev/null; pkill -f update-notifier 2>/dev/null; echo NOTIFIER_STOPPED
+    settle == 6
   step "refresh the package index"
     run == sudo apt-get update 2>&1 | tail -3
     settle == 45
