@@ -39,8 +39,21 @@ walkthrough "macos 15 ssh - the setup assistant, remote login, and a graceful sh
     modifier == meta_l
     settle == 10
     type == remote login
+  # THE STEP IS CALLED "the remote login RESULT", AND IT WAS WAITING FOR THE PANEL'S CONTENTS.
+  #
+  # MEASURED ON RUN 44346450614, which failed after 45 attempts at step 16 of 31:
+  #
+  #	status: failed step 16/31 "the remote login result is on screen"
+  #	error:  the loop ran 45 attempt(s) and the condition never held
+  #
+  # THE FRAME IS THE SEARCH RESULT, NOT THE PANE: System Settings with `remote login` typed in the
+  # search field and a `Remote login` row under Sharing in the sidebar. The words the check wanted -
+  # "allow full disk access", which only the PANE shows - appear after the NEXT step clicks that row,
+  # and the next step was never reached because this one never passed.
+  #
+  # SO IT WAITS FOR THE ROW IT ACTUALLY NEEDS, which is the thing the click after it aims at.
   step "the remote login result is on screen"
-    loop == {check: {from: screen, mode: text, name: done, words: [[sharing, remote], [allow, full, disk, access]], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, do: [{settle: 2}], max: 45, see: {name: screen}, until: {fact: done}}
+    loop == {check: {from: screen, mode: text, name: done, words: [[remote, login]], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 2}, do: [{settle: 2}], max: 45, see: {name: screen}, until: {fact: done}}
   click "open the remote login pane" at 703 336, waiting 12s, named "open the remote login pane"
   step "open the remote login pane again"
     click == [703, 336]
