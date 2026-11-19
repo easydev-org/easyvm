@@ -83,15 +83,6 @@ steps:
 - name: remove the xip
   ssh: rm -f /Users/{{ user }}/Xcode.xip && df -h / | tail -1
   timeout: 300
-- name: fetch the packages on the host
-  # `packages`, NOT `dev_packages`: the asset layer's kinds are a fixed list and this name is not in it.
-  # MEASURED ON CI, run 43599374064's dev job:
-  #
-  #	fetch the packages on the host: "dev_packages" is not an asset this build knows; the kinds are
-  #	  guest_agent_windows, guest_agent_macos, xcode, packages, virtio_win, answer_iso, windows_iso,
-  #	  recovery_macos, opencore, linux_iso
-  #
-  # - and the error names the right one in the same sentence.
 - name: copy the packages into the guest
   # TWO FILES, NOT A TARBALL, AND THE NAME `packages.tar` WAS NEVER A FILE THIS REPOSITORY PRODUCED.
   #
