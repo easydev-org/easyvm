@@ -77,7 +77,7 @@ walkthrough "linux-kubuntu - sshd"
     settle == 60
     terminal_wait == 0
   step "allow password authentication"
-    run == sudo sed -i "s/^#\?\s*PasswordAuthentication.*/PasswordAuthentication yes/" /etc/ssh/sshd_config; sudo grep -i "^PasswordAuthentication" /etc/ssh/sshd_config
+    run == sudo sed -i "s/^#\?\s*PasswordAuthentication.*/PasswordAuthentication yes/" /etc/ssh/sshd_config ; sudo grep -i "^PasswordAuthentication" /etc/ssh/sshd_config
     settle == 3
     terminal_wait == 0
   step "enable ssh at boot"

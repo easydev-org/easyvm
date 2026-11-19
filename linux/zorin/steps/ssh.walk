@@ -142,7 +142,7 @@ walkthrough "linux-zorin - sshd"
     settle == 90
     type_gap == 0.06
   step "allow password authentication"
-    run == sudo sed -i "s/^#\?\s*PasswordAuthentication.*/PasswordAuthentication yes/" /etc/ssh/sshd_config; sudo grep -i "^PasswordAuthentication" /etc/ssh/sshd_config
+    run == sudo sed -i "s/^#\?\s*PasswordAuthentication.*/PasswordAuthentication yes/" /etc/ssh/sshd_config ; sudo grep -i "^PasswordAuthentication" /etc/ssh/sshd_config
     settle == 3
   # `policy-rc.d returned 101` MEANS THE PACKAGE INSTALL WAS TOLD NOT TO START THE SERVICE, so the
   # enable is not decoration - it is the step that makes sshd run at all.

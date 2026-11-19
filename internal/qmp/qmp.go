@@ -859,6 +859,47 @@ func (c *Conn) Stroke(modifiers []string, key string) error {
 	return nil
 }
 
+// ReleaseModifiers sends a bare "down: false" for each of the four modifier keys, one after another.
+//
+// A GUEST CAN MISS A MODIFIER'S OWN UP-EVENT, and the symptom is the whole next line in capitals.
+//
+// MEASURED ON `linux/zorin-ssh`: the terminal reads
+//
+//	$ xset s off; ...; echo SCREEN_KEPT_ON
+//	$ PKILL _F UPDATE_NOTIFIER; PKILL _F GNOME_SOFTWARE; PKILL _F PACKAGEKITD
+//	$ SUDO APT_GET UPDATE
+//	> SUDO APT_GET UPDATE
+//
+// - every character of the NEXT command in its shifted form, and `-` arriving as `_` (which is
+// shift+minus). `SCREEN_KEPT_ON` ends in an uppercase letter, so the last stroke before the Return
+// was shift+o, and the guest never saw that shift released.
+//
+// THE EVENT LIST ALREADY ENDS WITH THE UP-EVENT (`Stroke` sends modifiers down, key down, key up,
+// modifiers up, in ONE `input-send-event`), so this is not a missing event on this side - it is a
+// guest that drops one. Sending the ups AGAIN costs four events that set a key to a state it is
+// already in, which is harmless, and it is the only lever this side has over a guest's own driver.
+//
+// IT IS CALLED BETWEEN TYPED STRINGS, NOT BETWEEN CHARACTERS: an extra modifier event in the middle
+// of someone's text is a way to lose a character, and this bug is about the seam between two lines.
+func (c *Conn) ReleaseModifiers() error {
+	events := make([]raw.InputEvent, 0, 4)
+	for _, name := range []string{"shift", "ctrl", "alt", "meta_l"} {
+		code, err := qcodeByName(name)
+		if err != nil {
+			return err
+		}
+		events = append(events, raw.InputEventKey(raw.InputKeyEvent{
+			Down: false, Key: raw.KeyValueQcode(code),
+		}))
+	}
+	if err := c.withRaw(func(m *raw.Monitor) error {
+		return m.InputSendEvent(nil, nil, events)
+	}); err != nil {
+		return fmt.Errorf("release modifiers: %w", err)
+	}
+	return nil
+}
+
 // qcodeByName resolves a qcode string through the library's generated enum.
 //
 // THE ENUM IS THE ONLY AUTHORITY. Hand-writing a name table would be a second copy of 200 keys, and

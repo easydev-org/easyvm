@@ -373,7 +373,16 @@ func (d *Driver) sendStrokes(conn *qmp.Conn, strokes []keys.Stroke, perChar time
 			time.Sleep(perChar)
 		}
 	}
-	return nil
+	// THE SHIFT THAT THE LAST CHARACTER NEEDED IS RELEASED AGAIN, BY NAME.
+	//
+	// A guest can drop a modifier's up-event, and the symptom is the whole NEXT line in capitals:
+	// `echo SCREEN_KEPT_ON` ends in an uppercase letter, and zorin's next command arrived as
+	// `PKILL _F UPDATE_NOTIFIER` / `SUDO APT_GET UPDATE`. See
+	// `qmp.Conn.ReleaseModifiers` for the recording.
+	//
+	// It runs ONCE PER TYPED STRING rather than per character: an extra modifier event in the middle
+	// of text is a way to lose a character, and the fault is at the seam between two lines.
+	return conn.ReleaseModifiers()
 }
 
 // The guest's screen, and the default is FHD because every coordinate in this repository was

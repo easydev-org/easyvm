@@ -67,7 +67,7 @@ walkthrough "linux-mint - sshd"
     run == sudo apt-get install -y openssh-server
     settle == 60
   step "allow password authentication"
-    run == sudo sed -i "s/^#\?\s*PasswordAuthentication.*/PasswordAuthentication yes/" /etc/ssh/sshd_config; sudo grep -i "^PasswordAuthentication" /etc/ssh/sshd_config
+    run == sudo sed -i "s/^#\?\s*PasswordAuthentication.*/PasswordAuthentication yes/" /etc/ssh/sshd_config ; sudo grep -i "^PasswordAuthentication" /etc/ssh/sshd_config
     settle == 3
   step "enable ssh at boot"
     run == sudo systemctl enable --now ssh

@@ -97,20 +97,27 @@ walkthrough "linux-manjaro - sshd"
     run == systemctl is-active sshd
     settle == 5
     terminal_wait == 0
-  # sshd IS ACTIVE AND THE PORT STILL REFUSES - THIS MEDIUM'S FIREWALL IS THE REASON.
+  # sshd IS ACTIVE AND PORT 22 STILL ANSWERS WITH A RESET - AND THIS MEDIUM HAS NO FIREWALL AT ALL.
   #
-  # MEASURED ON RUN 44599025471's successor: 'systemctl is-active sshd' prints ACTIVE and the stage
-  # then spends ten minutes on 'connection refused'. Refused, not timeout, means the packet reaches
-  # the guest and nothing answers on 2222 - which is what firewalld does when the service is not
-  # allowed.
+  # MEASURED ON RUN 44594136209's successor, whose terminal reads, in full:
   #
-  # cachyos's stage has had an equivalent step ('ufw allow 22/tcp') all along; this file never had
-  # one. Both firewalld and ufw are tried, since this medium ships firewalld.
-  step "open the firewall for ssh"
-    run == sudo firewall-cmd --permanent --add-service=ssh; sudo firewall-cmd --reload; sudo firewall-cmd --list-services
-    settle == 8
+  #	$ sudo systemctl is-active sshd
+  #	active
+  #	$ sudo firewall-cmd --permanent --add-service=ssh; ...
+  #	firewall-cmd: command not found
+  #	firewall-cmd: command not found
+  #	firewall-cmd: command not found
+  #
+  # So the earlier guess - "firewalld refuses the port" - is wrong: firewalld is not even installed
+  # here. `active` plus a REFUSED connection means sshd is listening somewhere that is not 22, or
+  # not listening on the forwarded address. The next line asks the guest instead of guessing: it
+  # pins `Port 22` and `ListenAddress 0.0.0.0` in the drop-in, restarts, and prints the listening
+  # sockets and the unit's own state so the answer is in the recording either way.
+  step "pin port 22 and show what the guest is actually listening on"
+    run == sudo sh -c 'printf "Port 22\nListenAddress 0.0.0.0\n" > /etc/ssh/sshd_config.d/98-port.conf'; sudo systemctl restart sshd; sleep 3; sudo ss -ltnp; sudo systemctl is-active sshd; sudo sshd -T 2>/dev/null | grep -iE "^(port|listenaddress)"
+    settle == 12
     terminal_wait == 0
-  step "wait for sshd"
+  step "wait for sshd"  step "wait for sshd"
     require_ssh == true
     timeout == 600
   step "prove the kernel over ssh"
