@@ -656,44 +656,6 @@ func (c *Conn) Click(x, y int) error {
 	return c.button(raw.InputButtonLeft, false)
 }
 
-// Drag presses at one point, moves while the button is held, and releases at another.
-//
-// THE BUTTON IS HELD ACROSS THE MOVE, WHICH IS THE WHOLE DIFFERENCE FROM TWO CLICKS. A release between
-// the two points is a click at the first one, and macOS then treats the move as a pointer slide with
-// nothing pressed - which on a window's title bar does nothing at all.
-//
-// THE MOVE IS SENT IN STEPS RATHER THAN ONE JUMP. A single absolute report from the start to the
-// destination is one event, and a guest that tracks a drag by accumulating deltas sees no motion at
-// all; macOS's window drag is one of those. Twelve interpolated points are enough for a 700-pixel
-// trip and cost twelve requests.
-func (c *Conn) Drag(x0, y0, x1, y1 int) error {
-	if err := c.moveTo(x0, y0); err != nil {
-		return err
-	}
-	if err := c.button(raw.InputButtonLeft, true); err != nil {
-		return fmt.Errorf("drag: press at (%d, %d): %w", x0, y0, err)
-	}
-	// A WIDGET THAT POLLS HAS TO SEE THE BUTTON DOWN for at least one poll before the pointer moves.
-	time.Sleep(200 * time.Millisecond)
-	const steps = 12
-	for i := 1; i <= steps; i++ {
-		x := x0 + (x1-x0)*i/steps
-		y := y0 + (y1-y0)*i/steps
-		if err := c.moveTo(x, y); err != nil {
-			_ = c.button(raw.InputButtonLeft, false)
-			return fmt.Errorf("drag: move to (%d, %d): %w", x, y, err)
-		}
-		time.Sleep(30 * time.Millisecond)
-	}
-	// THE SETTLE BEFORE THE RELEASE IS NOT PADDING: a window that is still animating its move reads the
-	// button-up at the position it had when the release arrived, and macOS drops the window back.
-	time.Sleep(250 * time.Millisecond)
-	if err := c.button(raw.InputButtonLeft, false); err != nil {
-		return fmt.Errorf("drag: release at (%d, %d): %w", x1, y1, err)
-	}
-	return nil
-}
-
 // DoubleClick moves once and presses twice. Moving between the presses would make it two clicks in
 // two places, which is the bug the separate `double:` key exists to avoid.
 func (c *Conn) DoubleClick(x, y int) error {

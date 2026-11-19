@@ -234,7 +234,6 @@ func (m fakeOSMachine) OS() string              { return m.os }
 func (d *fakeOSDriver) Frame() (run.Frame, error)                  { return nil, errors.New("fake") }
 func (d *fakeOSDriver) Click(int, int) error                       { return errors.New("fake") }
 func (d *fakeOSDriver) DoubleClick(int, int) error                 { return errors.New("fake") }
-func (d *fakeOSDriver) Drag(int, int, int, int) error               { return errors.New("fake") }
 func (d *fakeOSDriver) Key(string) error                           { return errors.New("fake") }
 func (d *fakeOSDriver) Stroke([]string, string) error              { return errors.New("fake") }
 func (d *fakeOSDriver) Type(string, time.Duration) ([]rune, error) { return nil, errors.New("fake") }

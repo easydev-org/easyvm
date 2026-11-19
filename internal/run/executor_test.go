@@ -18,7 +18,6 @@ type fakeDriver struct {
 	log      []string
 	clicks   [][2]int
 	doubles  [][2]int
-	drags    [][4]int
 	keys     []string
 	strokes  [][2]string
 	typed    []string
@@ -41,10 +40,6 @@ func (f *fakeDriver) Click(x, y int) error {
 }
 func (f *fakeDriver) DoubleClick(x, y int) error {
 	f.doubles = append(f.doubles, [2]int{x, y})
-	return nil
-}
-func (f *fakeDriver) Drag(x0, y0, x1, y1 int) error {
-	f.drags = append(f.drags, [4]int{x0, y0, x1, y1})
 	return nil
 }
 func (f *fakeDriver) Key(q string) error {
