@@ -75,31 +75,26 @@ walkthrough "linux-endeavour - sshd"
   # Escape ONCE before the wait, and once inside it, covers both the saver and the full blank:
   #   - the pre-Escape wakes a screen saver;
   #   - the in-loop Escape repeats it, since SDDM re-blanks on its own timer.
-  # THIS SDDM NEVER SHOWS A LOGIN BOX AT ALL, AND THREE GESTURES HAVE NOW FAILED TO ASK FOR ONE.
+  # THE GREETER IS LOGGED IN WHERE IT STANDS. THE VIRTUAL CONSOLE DOES NOT SWITCH ON THIS GUEST.
   #
-  # MEASURED ACROSS FOUR RUNS: the screen is the wall paper, '12:42 PM',
-  # 'Desktop Session: Plasma (Wayland)' - and no user tile, no password field, ever. Escape did not
-  # bring it; a click in the middle did not bring it; the in-loop repeats did not bring it.
+  # MEASURED ON RUN 44585827654: after 'ctrl+alt+f2' the console-tail read ZERO WORDS - a black
+  # screen, not a getty. The chord does not reach a virtual console here, and manjaro's run showed
+  # the same thing with SDDM's 'Virtual Keyboard' still on screen.
   #
-  # SO THE STAGE STOPS ASKING THAT SCREEN AND USES A VIRTUAL CONSOLE INSTEAD. ctrl+alt+F2 switches
-  # to tty2, where getty is running and offers a login prompt - the same surface opensuse's stage
-  # uses - and every command below works there exactly as it would in a terminal window.
-  press ctrl+alt+f2, waiting 12s, named "switch to a virtual console, where getty offers a login"
-  # THE PROMPT IS CONFIRMED BY READING IT. MEASURED ON opensuse's console: the password landed in
-  # the user-name slot because the fresh prompt had not printed when the name was typed.
-  step "the console is at a login prompt"
-    loop == {check: {from: console_tail, mode: text, name: at_prompt, rect: [0, 960, 1200, 1080], rect_at: [1920, 1080], scale: 1, words: [[login]]}, do: [{key: ret, settle: 3}], max: 20, see: {name: console_tail}, until: {fact: at_prompt}}
-  press ctrl+c, waiting 2s, named "abandon anything half-typed at the console"
-  step "log in on the console"
-    type == '{{ user }}'
-    settle == 5
-  press Return, waiting 3s, named "the console takes the user name"
-  step "the console's password"
-    type == '{{ password }}'
+  # The greeter this file already waited for IS a usable login - 'vmuser' with a password field -
+  # so the click, the password and Return are what this stage does, and the desktop gate confirms
+  # the session started before anything is typed.
+  click "greeter - the password box" at 936 628, waiting 3s, named "greeter - the password box"
+  step "greeter - log in"
     settle == 3
-  press Return, waiting 8s, named "the console takes the password"
-  step "the console is a shell"
-    run == echo CONSOLE_READY
+    type == '{{ password }}'
+  press Return, waiting 20s, named "greeter - submit"
+  step "the desktop is up after the login"
+    desktop == linux/kde
+    timeout == 600
+  press ctrl+alt+t, waiting 20s, named "open the terminal"
+  step "the terminal answers"
+    run == echo TERMINAL_READY
     settle == 3
     terminal_wait == 0
   # NO `terminal_wait:` HERE, AND THAT IS THE FIX RATHER THAN AN OMISSION.
