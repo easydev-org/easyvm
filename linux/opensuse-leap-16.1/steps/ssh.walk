@@ -36,6 +36,18 @@ walkthrough "linux-opensuse-tumbleweed - sshd"
   # THE GRAPHICAL STEPS BELOW ARE KEPT AND MADE OPTIONAL, because a disk that DOES carry a desktop
   # must not be broken by this: if a greeter answers, the walk logs in and opens a terminal exactly
   # as before, and the console login then finds no prompt and does nothing.
+  # THE DISK COMES UP ON GRUB, AS THREE OTHER MEDIA HERE DO.
+  #
+  # MEASURED ON RUN 44557723577's successor: at 100 s the screen is openSUSE's GRUB menu with
+  # 'openSUSE Leap 16.1, with Linux 6.12.0-160100.8-default' highlighted and
+  # 'C: Command Line   E: Edit Entry' along the bottom. The stage's first action was a click where
+  # a greeter's password box would be, which is not on this screen.
+  #
+  # The first entry is already highlighted; Return boots it.
+  step "the disk's boot menu, when it has one"
+    loop == {check: {from: grubmenu, mode: text, name: at_menu, rect: [150, 330, 1720, 460], rect_at: [1920, 1080], scale: 1, words: [[opensuse, leap], [recovery, mode]]}, do: [{settle: 5}], max: 12, see: {name: grubmenu}, until: {fact: at_menu}}
+    optional == true
+  press Return, waiting 60s, named "boot the highlighted entry, which is the installed system"
   click "greeter - the password box" at 960 640, waiting 2s, optionally, named "greeter - the password box"
   step "greeter - log in"
     optional == true
