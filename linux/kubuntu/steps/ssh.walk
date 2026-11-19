@@ -12,7 +12,7 @@ walkthrough "linux-kubuntu - sshd"
     memory_mb == 4096
     timeout == 900
   step "the session is up, which is what autologin is for"
-    loop == {check: {from: desk, mode: text, name: up, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], words: [[applications], [welcome], [kubuntu]]}, do: [{settle: 10}], max: 40, see: {name: desk}, until: {fact: up}}
+    loop == {check: {from: desk, mode: text, name: up, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], words: [[applications], [kubuntu]]}, do: [{settle: 10}], max: 40, see: {name: desk}, until: {fact: up}}
   # THE WELCOME CENTRE IS UP ON THIS DESKTOP AND IT EATS ctrl+alt+t.
   #
   # MEASURED ON RUN 44548179034, whose ssh recording at 90 s is "Welcome Center" with its Skip
@@ -25,7 +25,16 @@ walkthrough "linux-kubuntu - sshd"
   #
   # SO THE WINDOW IS DISMISSED FIRST. `Skip` is at 684,813 on that frame, and the step is optional
   # because a desktop that has already been dismissed (or never showed it) must not fail here.
-  click "dismiss the welcome centre, which takes the keyboard" at 684 813, waiting 4s, optionally, named "dismiss the welcome centre, which takes the keyboard"
+  # THE CLICK ON `Skip` WAS MEASURED NOT TO TAKE, SO THE WINDOW IS CLOSED WITH THE KEYBOARD.
+  #
+  # RUN 44557862904's recording is the Welcome Centre for its whole length, sitting OVER the
+  # terminal that ctrl+alt+t had already opened (the shell prompt `vmuser@kubuntu:` is visible in
+  # the strip of terminal at the left). A click at Skip's own coordinates - 684,813, read off that
+  # frame - left it there, and every `run:` after it went to the window holding focus.
+  #
+  # Alt+F4 closes the focused window whatever its title bar is doing, and a second Escape covers
+  # the case where the window was already closed and something else took focus.
+  press alt+F4, waiting 4s, named "close the welcome centre, which takes the keyboard"
   press Escape, waiting 2s, named "clear anything the welcome centre left behind"
   press ctrl+alt+t, waiting 20s, named "open the terminal"
   # NO `terminal_wait:` HERE, AND THAT IS THE FIX RATHER THAN AN OMISSION.
