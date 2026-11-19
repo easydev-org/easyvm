@@ -8,11 +8,22 @@ walkthrough "linux-opensuse-tumbleweed - sshd"
   # characters is `admin`; the password on this disk is eight.
   password Qz7vLp2w
   var out == {default: out/distro.qcow2, from: args.out}
-  # `vmuservmuser` HERE TOO: agama fills the login name from the full name, so its two `type:`
-  # steps APPEND - the same fault measured on manjaro's calamares (see that file). The header
-  # `user:` is what the ssh client logs in as, and the `var` is what gets typed at the console.
-  header ssh_user == vmuservmuser
-  var user == {default: vmuservmuser, from: args.user}
+  # THE ACCOUNT ON THIS DISK IS `vmuser` - AGAMA DOES NOT APPEND THE WAY CALAMARES DID.
+  #
+  # MEASURED ON RUN 12997be's console, whose whole login history is on the screen:
+  #
+  #	localhost login: vmuser
+  #	Password:
+  #	Login incorrect
+  #
+  # - and the same for `vmuservmuser`. So `vmuser` is the right NAME and the failure there was the
+  # PASSWORD's timing, not the name: every earlier attempt shows
+  #
+  #	localhost login: Qz7vLp2w        <- the password, in the user-name slot
+  #
+  # The `vmuservmuser` guess came from manjaro's calamares and does not apply to this installer.
+  header ssh_user == vmuser
+  var user == {default: vmuser, from: args.user}
   header recording_resolution == [1920, 1080]
 
   step "boot the disk"

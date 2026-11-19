@@ -1,7 +1,7 @@
 walkthrough "linux-opensuse-tumbleweed - configure the vm (name, share, guest agent)"
   resolution 1920x1080
-  # THE ACCOUNT THIS DISK HAS IS vmuservmuser - see ssh.walk.
-  user vmuservmuser
+  # THE ACCOUNT THIS DISK HAS IS vmuser - see ssh.walk.
+  user vmuser
   # THE PASSWORD THIS DISK WAS BUILT WITH. install.walk sets Qz7vLp2w; this file said `admin`, the
   # same wrong value ssh.walk had - and a vm-configure that cannot authenticate cannot prove
   # anything it is there to prove.
