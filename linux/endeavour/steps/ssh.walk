@@ -75,29 +75,28 @@ walkthrough "linux-endeavour - sshd"
   # Escape ONCE before the wait, and once inside it, covers both the saver and the full blank:
   #   - the pre-Escape wakes a screen saver;
   #   - the in-loop Escape repeats it, since SDDM re-blanks on its own timer.
-  # THIS SDDM IS SHOWING ITS CLOCK-ONLY SAVER, AND A CLICK IS WHAT BRINGS THE LOGIN BOX BACK.
+  # THIS SDDM NEVER SHOWS A LOGIN BOX AT ALL, AND THREE GESTURES HAVE NOW FAILED TO ASK FOR ONE.
   #
-  # MEASURED TWICE: run 44557723577's successor and the run before it both END on that screen -
-  # wall paper, '12:31 PM', 'Desktop Session: Plasma (Wayland)', and no user tile or password field
-  # anywhere. Escape alone did not change it.
+  # MEASURED ACROSS FOUR RUNS: the screen is the wall paper, '12:42 PM',
+  # 'Desktop Session: Plasma (Wayland)' - and no user tile, no password field, ever. Escape did not
+  # bring it; a click in the middle did not bring it; the in-loop repeats did not bring it.
   #
-  # A click in the middle of that screen is the gesture SDDM treats as "a person is here"; Escape
-  # is kept after it for the case where the login box appears but its field is not focused.
-  click "wake the greeter with a click, which is what SDDM listens for" at 960 540, waiting 3s, named "wake the greeter with a click"
-  press Escape, waiting 2s, named "wake the greeter's screen"
-  step "the greeter is drawn"
-    loop == {check: {from: greeter, mode: text, name: up, rect: [740, 470, 1340, 770], rect_at: [1920, 1080], scale: 2, words: [[password], [vmuser]]}, do: [{click: [960, 540], settle: 4}], max: 30, see: {name: greeter}, until: {fact: up}}
-  click "greeter - the password box" at 936 628, waiting 3s, named "greeter - the password box"
-  step "greeter - log in"
+  # SO THE STAGE STOPS ASKING THAT SCREEN AND USES A VIRTUAL CONSOLE INSTEAD. ctrl+alt+F2 switches
+  # to tty2, where getty is running and offers a login prompt - the same surface opensuse's stage
+  # uses - and every command below works there exactly as it would in a terminal window.
+  press ctrl+alt+F2, waiting 12s, named "switch to a virtual console, where getty offers a login"
+  step "log in on the console"
+    type == '{{ user }}'
     settle == 3
+  press Return, waiting 3s, named "the console takes the user name"
+  step "the console's password"
     type == '{{ password }}'
-  press Return, waiting 12s, named "greeter - submit"
-  # THE SESSION TAKES LONGER THAN THE TWELVE SECONDS ABOVE. `desktop: linux/kde` is the same gate
-  # cachyos uses, and it answers in 0 s once the panel is drawn.
-  step "wait for the desktop"
-    desktop == linux/kde
-    timeout == 900
-  press ctrl+alt+t, waiting 20s, named "open the terminal"
+    settle == 3
+  press Return, waiting 8s, named "the console takes the password"
+  step "the console is a shell"
+    run == echo CONSOLE_READY
+    settle == 3
+    terminal_wait == 0
   # NO `terminal_wait:` HERE, AND THAT IS THE FIX RATHER THAN AN OMISSION.
   #
   # `terminal_wait:` OPENS A TERMINAL (ctrl+alt+t) AND THEN TYPES. The step above has already
