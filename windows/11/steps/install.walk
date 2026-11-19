@@ -23,6 +23,19 @@ walkthrough "windows 11 - install to a desktop"
     driver_cd == virtio-win.iso
     iso == windows.iso
     os == windows
+    # FOUR GIBABYTES IS THE ENGINE'S DEFAULT AND IT IS NOT ENOUGH FOR WHAT WINDOWS DOES AFTER THE
+    # INSTALL. MEASURED across two runs that both sat on the same frame for the whole budget:
+    #
+    #	Please keep your computer on. Your computer may restart a few times.
+    #
+    # with `Select C:\WINDOWS\SYSTEM32\netsh.exe` over it, `ratio=0.1x` and `sat=+0.07` - a screen
+    # that never changed for 90 and then 120 minutes. The console log shows the boot loader handing
+    # over to Windows Boot Manager and nothing after it, so the guest is running and its first-boot
+    # work is not finishing.
+    #
+    # EIGHT IS WHAT THIS GUEST'S OWN STAGES ASK FOR: `ssh` and `vm-configure` both boot with the
+    # default and only need sshd, while the install is the one that runs the OOBE.
+    memory_mb == 8192
     timeout == 1800
   step "wait for the firmware to offer the DVD"
     blind_after == 60
@@ -65,19 +78,20 @@ walkthrough "windows 11 - install to a desktop"
   # OOBE waits for one. So the keys come first, in a loop that is bounded and ends when the screen is
   # no longer the notice - `until: {fact: ...}` is not usable here (no mode reports it), so the loop
   # is a fixed number of nudges and `desktop:` still has the real timeout.
-  # A FIXED RUN OF NUDGES RATHER THAN A LOOP: `loop:` needs a `check:` and an `until:`, and
-  # nothing measures "the OOBE is still on its notice". A dozen presses twenty seconds apart is
-  # four minutes, which is the budget the restart needs and a small share of the wait below.
-  press Return, waiting 20s, named "nudge the OOBE restart along, because it waits for a key"
-  press Return, waiting 20s, named "nudge 1, because the OOBE waits for a key"
-  press Return, waiting 20s, named "nudge 2, because the OOBE waits for a key"
-  press Return, waiting 20s, named "nudge 3, because the OOBE waits for a key"
-  press Return, waiting 20s, named "nudge 4, because the OOBE waits for a key"
-  press Return, waiting 20s, named "nudge 5, because the OOBE waits for a key"
-  press Return, waiting 20s, named "nudge 6, because the OOBE waits for a key"
-  press Return, waiting 20s, named "nudge 7, because the OOBE waits for a key"
-  press Return, waiting 20s, named "nudge 8, because the OOBE waits for a key"
-  press Return, waiting 20s, named "nudge 9, because the OOBE waits for a key"
+  # THE PRESSES ARE FURTHER APART AND THERE ARE FEWER OF THEM, BECAUSE THE FIRST SET MEASURED NO
+  # EFFECT. Ten Returns twenty seconds apart, then two hours of the same frame: `netsh.exe` is
+  # sysprep's own window and it does not read the keyboard. A key pressed into a busy sysprep is at
+  # best ignored and at worst queued into whatever runs next.
+  #
+  # SO THEY ARE A GENTLE PERIODIC NUDGE - a minute apart, six of them - for the case where the OOBE
+  # really is waiting on the "press any key" line, and the memory above is the actual fix for the
+  # stall that was measured.
+  press Return, waiting 60s, named "nudge the first boot along, once"
+  press Return, waiting 60s, named "nudge the first boot along, twice"
+  press Return, waiting 60s, named "nudge the first boot along, three times"
+  press Return, waiting 60s, named "nudge the first boot along, four times"
+  press Return, waiting 60s, named "nudge the first boot along, five times"
+  press Return, waiting 60s, named "nudge the first boot along, six times"
   step "wait for the desktop"
     desktop == windows
     timeout == 7200
