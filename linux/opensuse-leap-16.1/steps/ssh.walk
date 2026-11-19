@@ -62,57 +62,24 @@ walkthrough "linux-opensuse-tumbleweed - sshd"
     timeout == 120
     optional == true
   press ctrl+alt+t, waiting 5s, named "open a terminal, when there is a desktop to open one on"
-  # THE USER NAME MUST GO TO A FRESH PROMPT, AND THE RECORDING SHOWS IT DID NOT.
+  # THE CONSOLE LOGIN IS ONE RETRIED SEQUENCE, BECAUSE TYPING IT IN PIECES KEEPS GETTING OUT OF STEP.
   #
-  # MEASURED ON RUN 44557723577's successor, whose console reads
+  # MEASURED ON THIS RUN, whose recording at 240 s reads
   #
   #	localhost login: Qz7vLp2w
-  #	Password:
-  #	login: timed out after 60 seconds
+  #	Password: _
   #
-  # THE PASSWORD WAS TYPED AT THE `login:` PROMPT - so the user name before it never arrived, and
-  # the password became the user name. Later lines are no better:
+  # - THE PASSWORD IN THE USER-NAME SLOT, and getty now asking for the password of a user called
+  # "Qz7vLp2w". That is what every attempt here has looked like: the name typed after a Return does
+  # not arrive, the password does. Splitting it into "wait, type name, Return, type password" gave
+  # four chances to be out of step and they were taken every time.
   #
-  #	localhost login: ^Cvmuser            (a Ctrl-C before the name took)
-  #	localhost login: echo CONSOLE_READY
-  #	Login incorrect
-  #
-  # SO THE PROMPT IS CLEARED FIRST. Ctrl-C at a getty abandons whatever is half-typed and prints a
-  # new `login:`; two seconds later the name goes in, and each step then waits long enough for the
-  # guest to answer before the next one types.
-  # PRESS RETURN A FEW TIMES FIRST: EACH ONE MAKES GETTY PRINT A FRESH `login:` AT THE BOTTOM OF THE
-  # SCREEN, so the name is typed into a prompt that is known to be new rather than into whatever the
-  # console happened to be showing.
-  # THE PROMPT IS CONFIRMED BY READING IT, NOT BY ASSUMING A RETURN WAS ENOUGH.
-  #
-  # MEASURED: 'localhost login: Qz7vLp2w' - THE PASSWORD LANDED IN THE USER-NAME SLOT. A Return
-  # makes getty print a fresh 'login:' but the printing takes a moment, and the name was typed into
-  # the gap. Two Returns and a Ctrl-C were not enough either: a later attempt shows
-  # 'localhost login: PRINTF ...' - a whole command in the name slot.
-  #
-  # So the last line of the console is read, and the name is typed only once 'login:' is on it.
-  # The band is the bottom two lines at this resolution, which is where a fresh prompt appears.
-  # THE LOGIN IS TYPED SLOWLY, AND THE PROMPT IS GIVEN TIME TO PRINT.
-  #
-  # MEASURED THREE TIMES, each the same shape:
-  #
-  #	localhost login: Qz7vLp2w          <- the PASSWORD, in the user-name slot
-  #	Password: login: timed out after 60 seconds
-  #
-  # The name is typed into a console that has not finished printing its prompt. type_gap is raised
-  # and every Return is followed by a longer settle, so the guest has time to answer between the
-  # three things it is being told.
-  press Return, waiting 5s, named "ask getty for a prompt"
-  step "the user name"
-    type == '{{ user }}'
-    type_gap == 0.12
-    settle == 6
-  press Return, waiting 8s, named "the console takes the user name"
-  step "the password"
-    type == '{{ password }}'
-    type_gap == 0.12
-    settle == 6
-  press Return, waiting 15s, named "the console takes the password"
+  # SO THE WHOLE SEQUENCE IS REPEATED UNTIL THE SHELL PROMPT IS ON THE SCREEN. Each pass presses
+  # Return (abandoning whatever the console holds), types the name, presses Return, types the
+  # password, presses Return, and the pass is repeated only if `vmuser@` is not yet on screen. A
+  # failed login returns to `login:`, so the next pass starts clean.
+  step "log in on the console, retrying until the shell answers"
+    loop == {check: {from: console, mode: text, name: logged_in, rect: [0, 100, 1920, 1000], rect_at: [1920, 1080], scale: 1, words: [[vmuser]]}, do: [{key: ret, settle: 3}, {type: "{{ user }}", type_gap: 0.10, settle: 4}, {key: ret, settle: 6}, {type: "{{ password }}", type_gap: 0.10, settle: 4}, {key: ret, settle: 12}], max: 4, see: {name: console}, until: {fact: logged_in}}
   step "unlock sudo once for this session"
     run == printf '%s\n' {{ password }} | sudo -S -v
     settle == 4
