@@ -35,6 +35,25 @@ walkthrough "freebsd 15.1 - sshd, XFCE, and a desktop"
   # `pkg` exits 1 when it cannot resolve or reach a mirror, which is what a booted FreeBSD with an
   # empty resolv.conf does. The bytes are the same ones the install step uses, carried as base64 so
   # the quoting of a FreeBSD repo file does not have to survive three layers of shell.
+  # THE GUEST HAS NO ROUTE, BECAUSE THE INSTALL STAGE'S NETWORK CONFIGURATION IS NOT IN THE IMAGE.
+  #
+  # MEASURED on the run that first got past the resolver:
+  #
+  #	pkg: https://pkgmir.geo.freebsd.org/FreeBSD:15:amd64/quarterly/meta.txz: No route to host
+  #	Error updating repositories!
+  #	ssh: sudo env ASSUME_ALWAYS_YES=yes pkg install -y xorg xfce lightdm lightdm-gtk-greeter -> 3
+  #
+  # `No route to host` IS NOT A DNS FAILURE - the resolver fixed that, and the message would have been
+  # "unable to resolve". This is the kernel saying there is no route, which means no interface with a
+  # lease. bsdinstall's network menu configured `vtnet0` for the INSTALLER's environment; the booted
+  # system does not inherit it, because the setting lives in the installer's runtime and not in
+  # `/etc/rc.conf` of the disk it wrote.
+  #
+  # SO THE INTERFACE IS BROUGHT UP HERE, before anything needs it.
+  # FIRST, SHOW WHAT THE INTERFACES ACTUALLY ARE - a fix written against a guessed name is a guess.
+  step "report the network interfaces the booted system has"
+    ssh == echo aWZjb25maWcgLWE= | base64 -d | sh
+    timeout == 60
   step "give the booted system a resolver"
     ssh == echo cHJpbnRmICclc1xuJyAnbmFtZXNlcnZlciAxNzIuMzAuMC4xJyA+IC9ldGMvcmVzb2x2LmNvbmY= | base64 -d | sudo sh
     timeout == 60
