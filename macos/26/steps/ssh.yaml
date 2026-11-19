@@ -838,8 +838,19 @@ steps:
     - wait: 3
     ocr:
       name: screen
+      # THE LEFT EDGE IS THE POINT, AND 820 WAS TWENTY PIXELS TOO FAR RIGHT.
+      #
+      # MEASURED ON THIS STAGE'S OWN RUN, in the live panel: the reading was
+      #
+      #	ote Login: Off ... isk access for remote users
+      #
+      # - `Remote Login` and `Disk access` both missing their first letters, because the sheet starts at
+      # x≈750 and this crop started at 820. The check then found no "allow full disk access" in a panel
+      # that said it plainly, for thirty attempts.
+      #
+      # 720 IS THE SHEET'S OWN LEFT EDGE minus a margin, and 1250 is past its right.
       region:
-      - 820
+      - 720
       - 250
       - 1250
       - 480
@@ -872,28 +883,73 @@ steps:
 #
 # The user name field is already filled with `vmuser` by the system, and it is the ACCOUNT that matters
 # here - the password is this stage's `{{ password }}`, which is `admin`.
-- name: turn remote login on
+# THE SHEET MOVES TOO, SO THE SWITCH IS PRESSED AT EACH HEIGHT IT HAS BEEN MEASURED AT.
+#
+# MEASURED ON TWO RUNS WITH THE WINDOW FULL SCREEN BOTH TIMES: the sheet's top edge was at y=305 on
+# one and y=356 on the next, so its switch was at y=348 and then y=389 and its password field at 584
+# and then 625. The sheet hangs in the window's body, and the body's height depends on how much of
+# the title area the previous pane left - so the offset is not a constant either.
+#
+# THREE ATTEMPTS AT THE THREE MEASURED OFFSETS, with the same sensor between them: the sheet itself.
+# `unless: [log, in, to, this, computer]` is false until the switch has taken, so a press that lands on
+# nothing costs one attempt.
+- name: turn remote login on - first offset
   unless: [log, in, to, this, computer]
-  region: [820, 250, 1250, 480]
+  region: [720, 250, 1250, 560]
   region_at: [1920, 1080]
   scale: 2
-  click:
-  - 1138
-  - 348
-  wait_after: 6
-- name: press the sheet's password field
-  click:
-  - 959
-  - 584
-  wait_after: 5
-- name: type the account password into the sheet
-  type: '{{ password }}'
-  wait_after: 4
-- name: confirm the change
-  click:
-  - 959
-  - 632
-  wait_after: 18
+  do:
+  - name: press the switch (first)
+    click: [1145, 348]
+    wait_after: 5
+  - name: authorise the change (first)
+    click: [959, 584]
+    wait_after: 5
+  - name: type the password
+    type: '{{ password }}'
+    wait_after: 4
+  - name: confirm
+    click: [959, 632]
+    wait_after: 15
+
+- name: turn remote login on - second offset
+  unless: [log, in, to, this, computer]
+  region: [720, 250, 1250, 560]
+  region_at: [1920, 1080]
+  scale: 2
+  do:
+  - name: press the switch (second)
+    click: [1145, 389]
+    wait_after: 5
+  - name: authorise the change (second)
+    click: [959, 625]
+    wait_after: 5
+  - name: type the password
+    type: '{{ password }}'
+    wait_after: 4
+  - name: confirm
+    click: [959, 673]
+    wait_after: 15
+
+- name: turn remote login on - third offset
+  unless: [log, in, to, this, computer]
+  region: [720, 250, 1250, 560]
+  region_at: [1920, 1080]
+  scale: 2
+  do:
+  - name: press the switch (third)
+    click: [1145, 420]
+    wait_after: 5
+  - name: authorise the change (third)
+    click: [959, 656]
+    wait_after: 5
+  - name: type the password
+    type: '{{ password }}'
+    wait_after: 4
+  - name: confirm
+    click: [959, 704]
+    wait_after: 15
+
 - name: the switch reads on
   loop:
     max: 12
@@ -901,7 +957,7 @@ steps:
     - wait: 3
     ocr:
       name: screen
-      region: [820, 250, 1250, 480]
+      region: [720, 250, 1250, 560]
       region_at: [1920, 1080]
       scale: 2
       wait: 0
