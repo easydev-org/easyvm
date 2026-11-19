@@ -11,6 +11,25 @@ walkthrough "linux-nixos - sshd"
     # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
     memory_mb == 4096
     timeout == 900
+  # THE GREETER IS ASKED FOR BEFORE ANYTHING IS CLICKED, BECAUSE IT IS NOT THERE YET.
+  #
+  # MEASURED ON RUN 44550525354, whose ssh stage logged every greeter step and then sat on
+  # "Not listed?" - the user chooser - for the whole budget:
+  #
+  #	=== greeter - the user tile
+  #	=== greeter - the password box      typed 5 character(s)
+  #	=== greeter - submit                key ret
+  #	=== skip the welcome dialog
+  #	=== the desktop is up               done = false (none of "Dashboard" or "Activities" in
+  #	                                    "Nov 19 10:49 m= 4) (c) Not listed?")
+  #
+  # The typed password went nowhere because the click and the type: landed while GDM was still
+  # drawing. Same fault as cachyos's, same cure: wait for the greeter's own words first.
+  #
+  # THE BAND IS THE GREETER'S MIDDLE - the user tile and the password field. cachyos reads
+  # "Password vmuser" here at scale 2; nixos draws the same GDM, so the same band applies.
+  step "the greeter is drawn"
+    loop == {check: {from: greeter, mode: text, name: up, rect: [740, 470, 1340, 770], rect_at: [1920, 1080], scale: 2, words: [[password], [vmuser]]}, do: [{settle: 5}], max: 60, see: {name: greeter}, until: {fact: up}}
   press Escape, waiting 5s, named "greeter - wake the screen"
   click "greeter - the user tile" at 960 488, waiting 4s, named "greeter - the user tile"
   step "greeter - the password box"
