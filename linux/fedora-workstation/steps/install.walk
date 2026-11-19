@@ -20,10 +20,17 @@ walkthrough "fedora-workstation - anaconda and the first boot"
     desktop == linux/gnome
     reference == reference/desktop.png
     range == [0.90, 1.0]
-    # THE TOP 120 ROWS ARE WALLPAPER AND A MENU BAR: a boot splash scores 0.0002
-    # there and every desktop frame 1.0000, including the ones with an installer
-    # window over the middle. The clock sits below this band, which is why 120.
-    rect == [0, 0, 1920, 120]
+    # THE BAND IS WALLPAPER, NOT THE MENU BAR, AND THAT IS THE WHOLE POINT.
+    #
+    # MEASURED ON THIS MEDIUM'S OWN RECORDING, which is why the previous band is gone. The top 120
+    # rows hold the CENTRE CLOCK - "Nov 18 4:08 AM" - and a reference taken at another minute scores
+    # 0.2608 against every frame of a desktop that is plainly up. That is what run 44484636885 did
+    # for 47 minutes: `wait for the live desktop`, never satisfied, on a screen that was fine.
+    #
+    # THE LEFT 300 PIXELS OF THE WALLPAPER, rows 300..500, are the same in every frame from 60 s on:
+    # 1.0000 across 17 samples. Boot and splash frames score 0.0000 there. The installer window does
+    # not reach this far left, so the gate does not depend on where the installer happens to be.
+    rect == [0, 300, 300, 500]
     rect_at == [1920, 1080]
     poll == 5
     timeout == 5400

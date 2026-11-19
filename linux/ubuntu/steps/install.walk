@@ -119,7 +119,7 @@ walkthrough "ubuntu - the subiquity walk"
   click time at 1355 848, waiting 14s, named "time zone"
   click "ready to install - the green install button" at 1355 848, waiting 30s, named "ready to install - the green install button"
   step "the installer finishes"
-    loop == {check: {from: screen, mode: text, name: done, words: [[installed, and, ready, to, use], [restart, to, complete, the, installation], [restart, now]], rect: [918, 631, 1237, 703], rect_at: [1920, 1080]}, do: [{click: [420, 300], settle: 20}], max: 270, see: {name: screen}, until: {fact: done}}
+    loop == {check: {from: screen, mode: text, name: done, words: [[installed, and, ready, to, use], [restart, to, complete, the, installation], [restart, now]], rect: [690, 630, 1270, 730], rect_at: [1920, 1080]}, do: [{click: [420, 300], settle: 20}], max: 270, see: {name: screen}, until: {fact: done}}
   settle 20s, named "give the installer its last few seconds, because \"ready to use\" is not \"flushed\""
   step "stop the machine"
     shutdown == kill

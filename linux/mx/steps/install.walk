@@ -41,10 +41,13 @@ walkthrough "mx - the minstall walk"
     desktop == linux/xfce
     reference == reference/desktop.png
     range == [0.90, 1.0]
-    # THE TOP 120 ROWS ARE WALLPAPER AND A MENU BAR: a boot splash scores 0.0002
-    # there and every desktop frame 1.0000, including the ones with an installer
-    # window over the middle. The clock sits below this band, which is why 120.
-    rect == [0, 0, 1920, 120]
+    # THE BAND IS WALLPAPER, NOT THE MENU BAR, FOR THE SAME REASON AS fedora-workstation.
+    #
+    # MEASURED ON THIS MEDIUM'S OWN RECORDING: the left 300 pixels, rows 540..740, are the same in
+    # every desktop frame (0.9988 minimum across 17 samples), and the top-of-screen band carries a
+    # clock and a menu that a reference taken at another minute cannot match. An XFCE panel is at the
+    # BOTTOM here, so rows 540..740 are wallpaper above it and below the menu.
+    rect == [0, 540, 300, 740]
     rect_at == [1920, 1080]
     timeout == 5400
   step "desktop - installer"
