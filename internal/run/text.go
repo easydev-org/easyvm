@@ -1,6 +1,7 @@
 package run
 
 import (
+	"errors"
 	"fmt"
 	"image"
 	"io"
@@ -331,12 +332,33 @@ func (e *Executor) doUnless(s walk.Step) error {
 	}
 	if already {
 		e.Driver.Log(fmt.Sprintf("  skipped: the screen already shows %q", hit))
-		return nil
+		// THE CALLER MUST BE ABLE TO TELL "SKIPPED" FROM "GO AHEAD", AND IT COULD NOT.
+		//
+		// MEASURED ON THE macOS 26 ssh STAGE, and it cost that stage its whole run. This function
+		// returned nil for both outcomes, and `dispatchRest` ran the step's action on either - so
+		//
+		//	- name: open the remote login pane from the keyboard
+		//	  unless: [allow, full, disk, access]
+		//	  do: [Cmd+F, Return]
+		//
+		// printed `skipped: the screen already shows "allow full disk access"` and THEN pressed
+		// Cmd+F and Return, which closed the panel it was supposed to leave alone. The next step's
+		// reading was 0 words - a blank screen - and the stage failed there.
+		//
+		// `errUnlessAlready` IS NOT AN ERROR. It is the third outcome `unless` always had and could
+		// never say: the gate is shut. The dispatcher turns it into a plain return.
+		return errUnlessAlready
 	}
 	// THE STEP CONTINUES. `unless` is a gate on the rest of the same step, and the dispatcher ran
 	// this first.
 	return nil
 }
+
+// errUnlessAlready is `unless` saying "the words were there, do not run the action".
+//
+// IT IS A SENTINEL RATHER THAN A BOOLEAN RETURN because `doUnless` already has an error return and a
+// second one would have to be checked at every call site. `errors.Is` is how the dispatcher reads it.
+var errUnlessAlready = errors.New("unless: the screen already shows the words")
 
 // --- small helpers ---------------------------------------------------------------------
 

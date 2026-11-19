@@ -287,6 +287,14 @@ func (e *Executor) runOne(s walk.Step) error {
 		return e.doRepeatUntil(s)
 	case s.Has("unless"), s.Has("unless_any"):
 		if err := e.doUnless(s); err != nil {
+			// THE GATE IS SHUT - THE WORDS WERE ON THE SCREEN - SO THE ACTION IS NOT RUN.
+			//
+			// WITHOUT THIS THE `unless` WAS A LOG LINE AND NOTHING ELSE: measured on the macOS 26
+			// ssh stage, a step that said `skipped: the screen already shows "allow full disk
+			// access"` then pressed Cmd+F and Return anyway and closed the panel.
+			if errors.Is(err, errUnlessAlready) {
+				return nil
+			}
 			return err
 		}
 		return e.dispatchRest(s)
