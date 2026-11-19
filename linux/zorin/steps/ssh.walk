@@ -6,6 +6,18 @@ walkthrough "linux-zorin - sshd"
   #
   # ubiquity fills the username from the full name as it is typed, so its two `type:` steps
   # APPEND and the account is created with the value twice.
+  # `ssh_user` IS THE HEADER KEY THE SSH CLIENT READS - `var user` IS NOT.
+  #
+  # MEASURED ON RUN 44611943331 (manjaro), whose failure was NOT a refused port but
+  #
+  #	wait for sshd: the port is open but no shell answers: ssh: handshake failed: ssh: unable to
+  #	authenticate, attempted methods [none password], no supported methods remain
+  #
+  # - the daemon reached the guest and offered the WRONG NAME. `require_ssh:` and every `ssh ==`
+  # step authenticate as `File.SSHUser`, which is parsed from a top-level `ssh_user:` key
+  # (internal/walk/walk.go) and defaults to `vmuser`. Setting `var user` changes what gets TYPED on
+  # the console; it does not change who the client logs in as.
+  header ssh_user == vmuservmuser
   var user == {default: vmuservmuser, from: args.user}
   header recording_resolution == [1920, 1080]
 
