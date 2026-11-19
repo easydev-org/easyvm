@@ -638,10 +638,10 @@ steps:
 - name: close whatever windows the first login left open
   key: meta_l+q
   wait_after: 4
-- name: close the next one
+- name: close the second window
   key: meta_l+q
   wait_after: 4
-- name: close the next one
+- name: close the third window
   key: meta_l+q
   wait_after: 4
 - name: open spotlight
