@@ -11,6 +11,16 @@ walkthrough "linux-manjaro - sshd"
     # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
     memory_mb == 4096
     timeout == 900
+  # THE GREETER IS ASKED FOR BEFORE IT IS CLICKED, AND THE WAIT WAKES THE SCREEN.
+  #
+  # MEASURED ON RUN 44557318104, whose ssh recording at 150 s is SDDM's login screen with the
+  # password field still showing its 'Password' PLACEHOLDER - the click and the five characters had
+  # not reached it - and the stage then spent ten minutes on 'connection refused'.
+  #
+  # The Escape is inside the loop for the reason the same wait needed it on endeavour and mint:
+  # SDDM blanks to a clock-only screen, and a wait cannot succeed until something wakes it.
+  step "the greeter is drawn"
+    loop == {check: {from: greeter, mode: text, name: up, rect: [740, 470, 1340, 770], rect_at: [1920, 1080], scale: 2, words: [[password], [vmuser]]}, do: [{key: esc, settle: 3}], max: 60, see: {name: greeter}, until: {fact: up}}
   click "greeter - the password box" at 936 628, waiting 3s, optionally, named "greeter - the password box"
   step "greeter - log in"
     optional == true
@@ -61,20 +71,24 @@ walkthrough "linux-manjaro - sshd"
   # exact fault on kubuntu's stage: `SCREEN_KEPT_ON` run straight into `ECHO ADMIN`.
   #
   # One chord, at step 5. Every later step types into the terminal that chord opened.
+  step "unlock sudo once for this session"
+    run == printf '%s\n' {{ password }} | sudo -S -v
+    settle == 4
+    terminal_wait == 0
   step "install openssh"
-    run == xset s off; xset s noblank; echo {{ password }} | sudo -S pacman -Sy --noconfirm --needed openssh 2>&1 | tail -5
-    settle == 45
+    run == sudo pacman -Sy --noconfirm --needed openssh 2>&1 | tail -5
+    settle == 60
     terminal_wait == 0
   step "allow password authentication"
-    run == echo {{ password }} | sudo -S -p '' sh -c 'mkdir -p /etc/ssh/sshd_config.d; printf "PasswordAuthentication yes\n" > /etc/ssh/sshd_config.d/99-vm.conf; sed -i "s/^#\?\s*PasswordAuthentication.*/PasswordAuthentication yes/" /etc/ssh/sshd_config; grep -q "^PasswordAuthentication yes" /etc/ssh/sshd_config || printf "PasswordAuthentication yes\n" >> /etc/ssh/sshd_config' 2>&1 | tail -3
+    run == sudo sh -c 'mkdir -p /etc/ssh/sshd_config.d; printf "PasswordAuthentication yes\n" > /etc/ssh/sshd_config.d/99-vm.conf; sed -i "s/^#\?\s*PasswordAuthentication.*/PasswordAuthentication yes/" /etc/ssh/sshd_config; grep -q "^PasswordAuthentication yes" /etc/ssh/sshd_config || printf "PasswordAuthentication yes\n" >> /etc/ssh/sshd_config' 2>&1 | tail -3
     settle == 3
     terminal_wait == 0
   step "enable sshd at boot"
-    run == echo {{ password }} | sudo -S systemctl enable sshd 2>&1 | tail -3
+    run == sudo systemctl enable sshd 2>&1 | tail -3
     settle == 8
     terminal_wait == 0
   step "start sshd"
-    run == echo {{ password }} | sudo -S systemctl restart sshd 2>&1 | tail -3
+    run == sudo systemctl restart sshd 2>&1 | tail -3
     settle == 10
     terminal_wait == 0
   step "prove sshd is active"
