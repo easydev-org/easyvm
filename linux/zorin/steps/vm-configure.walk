@@ -1,6 +1,8 @@
 walkthrough "linux-zorin - configure the vm (name, share, guest agent)"
   resolution 1920x1080
-  user vmuser
+  # THE ACCOUNT THIS DISK HAS IS vmuservmuser - see ssh.walk. `user:` IS THE HEADER KEY THE SSH
+  # CLIENT READS (internal/walk/walkfile.go:193 -> ssh_user), so it is the one that has to name it.
+  user vmuservmuser
   password admin
   var boot_timeout == {default: "1800", from: args.boot_timeout}
   var host == {default: "172.30.0.1", from: args.host}
