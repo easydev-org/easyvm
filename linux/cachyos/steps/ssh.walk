@@ -11,6 +11,19 @@ walkthrough "linux-cachyos - sshd"
     # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
     memory_mb == 4096
     timeout == 900
+  # THE GREETER IS ASKED FOR BEFORE ANYTHING IS CLICKED, BECAUSE IT IS NOT THERE YET.
+  #
+  # MEASURED ON RUN 44472625613, whose recording is BLACK at 15 seconds and shows the greeter at
+  # 22: the clicks and the `type:` that followed all landed on nothing, so the password field kept
+  # its "Password" placeholder and `wait for the desktop` expired after 15 minutes. Every step below
+  # carries `optional: true`, which is what let the miss through silently - an optional step that
+  # misses is indistinguishable from one that was not needed.
+  #
+  # THE BAND IS THE GREETER'S OWN MIDDLE: the user tile and the password field, x 740..1340 and
+  # y 470..770. Read back from that recording at scale 2 it yields "Password vmuser"; at scale 1 it
+  # yields nothing, which is why the scale is 2 and not the default.
+  step "the greeter is drawn"
+    loop == {check: {from: greeter, mode: text, name: up, rect: [740, 470, 1340, 770], rect_at: [1920, 1080], scale: 2, words: [[password], [vmuser]]}, do: [{settle: 5}], max: 60, see: {name: greeter}, until: {fact: up}}
   step "greeter - wake the screen"
     key == esc
     optional == true
