@@ -61,14 +61,22 @@ walkthrough "mx - the minstall walk"
   # THE LANGUAGE PANEL'S FOOTER IS "Use up and down, Hit ENTER to select/deselect", so `up` walks the
   # list and `Return` opens the highlighted row. Four downs from `Language` is `Back to main menu`.
   step "that menu is this medium's own language panel"
-    check == {from: mxmenu, mode: text, name: is_mx_menu, rect: [560, 180, 1460, 580], rect_at: [1920, 1080], scale: 1, words: [[Language], [Keyboard], [Timezone], [Back, to, main, menu]]}
+    loop == {check: {from: mxmenu, mode: text, name: is_mx_menu, rect: [560, 180, 1460, 580], rect_at: [1920, 1080], scale: 1, words: [[Language], [Keyboard], [Timezone], [Back, to, main, menu]]}, do: [{settle: 3}], max: 20, see: {name: mxmenu}, until: {fact: is_mx_menu}}
   press down, waiting 1s, named "down to Keyboard"
   press down, waiting 1s, named "down to Timezone"
   press down, waiting 1s, named "down to Reset"
   press down, waiting 1s, named "down to Back to main menu"
   press Return, waiting 20s, named "enter the rescue menu, which is what that row opens"
+  # A SINGLE `check:` ON A PANEL THAT IS STILL PAINTING READS NOTHING, AND THAT IS WHAT HAPPENED.
+  #
+  # MEASURED ON RUN 44531638796, whose language-panel check logged `see: 0 word(s)` and whose walk
+  # then pressed four downs and a Return into a panel it had not confirmed. The recording's last
+  # frame IS the rescue menu, so the panel arrived - a moment after the one frame the `check:` took.
+  #
+  # A `loop:` IS THE RETRY. It reads once every few seconds until the words are there, which is what
+  # a menu that appears asynchronously needs. Both panels get one.
   step "the rescue menu is up, and its footer says ESC leaves it"
-    check == {from: mxrescue, mode: text, name: is_rescue, rect: [560, 180, 1460, 640], rect_at: [1920, 1080], scale: 1, words: [[Boot, Rescue, Menus], [Back, to, main, menu]]}
+    loop == {check: {from: mxrescue, mode: text, name: is_rescue, rect: [560, 180, 1460, 640], rect_at: [1920, 1080], scale: 1, words: [[Boot, Rescue, Menus], [Back, to, main, menu]]}, do: [{settle: 3}], max: 20, see: {name: mxrescue}, until: {fact: is_rescue}}
   press Escape, waiting 20s, named "ESC to the main menu, where the live session is"
   step "wait for the live desktop"
     desktop == linux/xfce
