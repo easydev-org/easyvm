@@ -117,7 +117,7 @@ walkthrough "linux-manjaro - sshd"
     run == sudo sh -c 'printf "Port 22\nListenAddress 0.0.0.0\n" > /etc/ssh/sshd_config.d/98-port.conf'; sudo systemctl restart sshd; sleep 3; sudo ss -ltnp; sudo systemctl is-active sshd; sudo sshd -T 2>/dev/null | grep -iE "^(port|listenaddress)"
     settle == 12
     terminal_wait == 0
-  step "wait for sshd"  step "wait for sshd"
+  step "wait for sshd"
     require_ssh == true
     timeout == 600
   step "prove the kernel over ssh"
