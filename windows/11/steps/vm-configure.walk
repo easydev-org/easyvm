@@ -48,8 +48,25 @@ walkthrough "windows 11 - configure the vm (share, logon hook)"
   step "install the guest agent"
     ssh == "cmd /c \"msiexec /i C:\\Users\\{{ user }}\\qemu-ga-x86_64.msi /qn /norestart /l*v C:\\Users\\{{ user }}\\qemu-ga-install.log & echo MSIEXEC_EXIT=%ERRORLEVEL%\"\n"
     timeout == 600
+  # THIS CHECK USED TO PRINT AND NEVER FAIL, AND THAT IS WHY A DEAD AGENT LOOKED HEALTHY.
+  #
+  # MEASURED ON RUN 44560274921, whose log is this step's own output:
+  #
+  #	=== prove the guest agent answers
+  #	  service: Running / Automatic
+  #	  device: NO virtio-serial port
+  #
+  # The service was running; THE CHANNEL TO QEMU WAS NOT THERE. `Get-Service` can only see the
+  # service, and the "NO virtio-serial port" branch only wrote a line - so the step "passed", the
+  # stage went on to `shutdown: guest_agent`, and the request went to an agent with no pipe to
+  # receive it. The machine stayed up, `stopping with method "guest_agent"` was the last line the
+  # stage wrote, and the failure looked like a shutdown problem when it was a MISSING CHANNEL.
+  #
+  # SO THE DEVICE IS NOW AN ASSERTION: exit 1 when the port is absent, or when any matching device
+  # is not `OK`. The vioser driver is installed a few steps above, and if the device has not bound
+  # to the virtio-serial port the agent cannot answer - which is the fact this step exists to state.
   step "prove the guest agent answers"
-    ssh == "powershell -NoProfile -ExecutionPolicy Bypass -Command \"$s = Get-Service QEMU-GA -ErrorAction SilentlyContinue; if ($s) { Write-Output ('service: ' + $s.Status + ' / ' + $s.StartType) } else { Write-Output 'service: ABSENT' }; $d = Get-PnpDevice -Class Ports -ErrorAction SilentlyContinue | Where-Object { $_.FriendlyName -match 'Guest Agent|virtio' }; if ($d) { $d | ForEach-Object { Write-Output ('device: ' + $_.FriendlyName + ' / ' + $_.Status) } } else { Write-Output 'device: NO virtio-serial port' }\"\n"
+    ssh == "powershell -NoProfile -Command \"$s = Get-Service QEMU-GA -ErrorAction SilentlyContinue; if ($s) { Write-Output ('service: ' + $s.Status + ' / ' + $s.StartType) } else { Write-Output 'service: ABSENT'; exit 1 }; $d = Get-PnpDevice -Class Ports -ErrorAction SilentlyContinue | Where-Object { $_.FriendlyName -match 'Guest Agent|virtio' }; if (-not $d) { Write-Output 'device: NO virtio-serial port'; exit 1 }; $bad = 0; $d | ForEach-Object { Write-Output ('device: ' + $_.FriendlyName + ' / ' + $_.Status); if ($_.Status -ne 'OK') { $bad = 1 } }; if ($bad) { exit 1 }\"\n"
     timeout == 120
   step "set the computer's name"
     ssh == powershell -NoProfile -Command "Rename-Computer -NewName '{{ hostname }}' -Force -ErrorAction Stop; Write-Output RENAME_SCHEDULED"
@@ -104,9 +121,6 @@ walkthrough "windows 11 - configure the vm (share, logon hook)"
   # The line was copied from the Linux vm-configure files, where it is right. Here cmd.exe ran it
   # and nothing was shut down.
   #
-  # THE GUEST AGENT IS ALREADY PROVEN EARLIER IN THIS SAME FILE ("prove the guest agent answers"),
-  # and `shutdown: guest_agent` asks it to power down - the one shutdown route that means the same
-  # thing on every OS this repository drives.
   # `kill`, WHICH IS WHAT THIS REPOSITORY ALREADY USES FOR THIS GUEST, AND THE REASON IS IN THE RUNS.
   #
   # MEASURED ON RUN 44560274921: `stopping with method "guest_agent"` was the LAST LINE the stage
