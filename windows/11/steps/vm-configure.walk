@@ -42,8 +42,22 @@ walkthrough "windows 11 - configure the vm (share, logon hook)"
   step "copy the agent installer in"
     scp == [qemu-ga-x86_64.msi, "C:/Users/{{ user }}/qemu-ga-x86_64.msi"]
     timeout == 600
+  # THE DRIVER IS INSTALLED *INTO THE DRIVER STORE*, WHICH IS NOT THE SAME AS BINDING IT TO A DEVICE.
+  #
+  # MEASURED ON RUN 44560274921: `PNPUTIL_EXIT=0`, and the very next check reported
+  #
+  #	device: NO virtio-serial port
+  #
+  # qemu's side was right - that run's command line carries `-chardev socket,id=qga0`,
+  # `-device virtio-serial` and `-device virtserialport,chardev=qga0,name=org.qemu.guest_agent.0`.
+  # What was missing is that Windows had not matched the new hardware to the driver: `/add-driver`
+  # stages the package, and the device node needs a RESCAN to appear and bind.
+  #
+  # SO THE STEP NOW RESCANS AND ASSERTS. `pnputil /scan-devices` asks the PnP manager to look again,
+  # and PNPUTIL_EXIT is checked rather than printed - a driver that did not install must not be
+  # followed by an agent that cannot answer.
   step "install the driver the agent talks on"
-    ssh == "powershell -NoProfile -ExecutionPolicy Bypass -Command \"Push-Location $env:USERPROFILE; $p = Start-Process pnputil.exe -ArgumentList @('/add-driver','vioser.inf','/install') -PassThru -Wait -NoNewWindow; Write-Output ('PNPUTIL_EXIT=' + $p.ExitCode); Pop-Location\"\n"
+    ssh == "powershell -NoProfile -Command \"Push-Location $env:USERPROFILE; $p = Start-Process pnputil.exe -ArgumentList @('/add-driver','vioser.inf','/install') -PassThru -Wait -NoNewWindow; Write-Output ('PNPUTIL_EXIT=' + $p.ExitCode); if ($p.ExitCode -ne 0) { exit $p.ExitCode }; $q = Start-Process pnputil.exe -ArgumentList @('/scan-devices') -PassThru -Wait -NoNewWindow; Write-Output ('SCAN_EXIT=' + $q.ExitCode); Start-Sleep -Seconds 10; Pop-Location\"\n"
     timeout == 600
   step "install the guest agent"
     ssh == "cmd /c \"msiexec /i C:\\Users\\{{ user }}\\qemu-ga-x86_64.msi /qn /norestart /l*v C:\\Users\\{{ user }}\\qemu-ga-install.log & echo MSIEXEC_EXIT=%ERRORLEVEL%\"\n"
