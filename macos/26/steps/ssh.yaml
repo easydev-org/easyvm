@@ -689,10 +689,20 @@ steps:
     check:
       name: done
       from: menubar
-      mode: says
+      # `says_any`, NOT `says`, BECAUSE TESSERACT READS THE NAME AS ONE WORD.
+      #
+      # MEASURED on this stage's own run: the menu bar reading was
+      #
+      #	@ SystemSettings Edit View Window Help
+      #
+      # - `SystemSettings`, no space - and a `says: [system, settings]` check then matched nothing for
+      # twenty-five attempts and failed the stage on a screen that was plainly correct. macOS draws the
+      # app name as two words and the OCR joins them, so both spellings have to be accepted.
+      mode: says_any
       words:
-      - system
-      - settings
+      - - systemsettings
+      - - system
+        - settings
     until:
       fact: done
 # THE WINDOW IS FULL SCREEN NOW, SO NOTHING BELOW GUESSES WHERE IT IS.
@@ -738,8 +748,11 @@ steps:
     check:
       name: done
       from: screen
+      # THE SAME JOINED WORD AS THE MENU BAR: measured `SystemSettings`. A full-screen window on 26
+      # shows the name in the title strip, and tesseract reads it without the space.
       mode: says_any
       words:
+      - - systemsettings
       - - system
         - settings
     until:
