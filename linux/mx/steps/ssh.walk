@@ -8,6 +8,8 @@ walkthrough "linux-mx - sshd"
   step "boot the disk"
     boot == true
     os == linux
+    # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
+    memory_mb == 4096
     timeout == 900
   click "greeter - the password box" at 259 568, waiting 2s, optionally, named "greeter - the password box"
   step "greeter - log in"

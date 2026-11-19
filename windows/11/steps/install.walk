@@ -35,7 +35,7 @@ walkthrough "windows 11 - install to a desktop"
     #
     # EIGHT IS WHAT THIS GUEST'S OWN STAGES ASK FOR: `ssh` and `vm-configure` both boot with the
     # default and only need sshd, while the install is the one that runs the OOBE.
-    memory_mb == 8192
+    memory_mb == 12288
     timeout == 1800
   step "wait for the firmware to offer the DVD"
     blind_after == 60

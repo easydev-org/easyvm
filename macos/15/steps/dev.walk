@@ -13,6 +13,8 @@ walkthrough "macos 15 - developer toolchain"
   step "boot the disk"
     boot == true
     os == macos
+    # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
+    memory_mb == 12288
     timeout == 900
   step "wait for sshd"
     require_ssh == true

@@ -13,6 +13,8 @@ walkthrough "fedora-workstation - anaconda and the first boot"
     boot == true
     iso == fedora-workstation.iso
     os == linux
+    # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
+    memory_mb == 4096
     timeout == 1800
   step "wait for the live desktop"
     desktop == linux/gnome

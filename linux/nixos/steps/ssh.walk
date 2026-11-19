@@ -8,6 +8,8 @@ walkthrough "linux-nixos - sshd"
   step "boot the disk"
     boot == true
     os == linux
+    # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
+    memory_mb == 4096
     timeout == 900
   press Escape, waiting 5s, named "greeter - wake the screen"
   click "greeter - the user tile" at 960 488, waiting 4s, named "greeter - the user tile"

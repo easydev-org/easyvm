@@ -13,6 +13,8 @@ walkthrough "kubuntu 26.04 - install to ext4, then the power button"
     boot == true
     iso == kubuntu.iso
     os == linux
+    # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
+    memory_mb == 4096
     timeout == 1800
   step "wait for the installer's launcher"
     desktop == linux/kubuntu

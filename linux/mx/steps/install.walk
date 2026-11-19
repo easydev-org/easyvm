@@ -13,6 +13,8 @@ walkthrough "mx - the minstall walk"
     boot == true
     iso == mx.iso
     os == linux
+    # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
+    memory_mb == 4096
     timeout == 1800
   step "the medium's boot menu is up"
     see == name: mxmenu

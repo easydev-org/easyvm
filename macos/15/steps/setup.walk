@@ -13,6 +13,8 @@ walkthrough "macos 15 setup (recovery image to setup assistant)"
   step "boot the recovery image"
     boot == true
     os == macos
+    # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
+    memory_mb == 12288
     recovery == recovery.dmg
     timeout == 900
   step "the recovery menu's rows"

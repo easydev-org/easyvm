@@ -17,6 +17,8 @@ walkthrough "windows 11 - configure the vm (share, logon hook)"
   step "boot the disk"
     boot == true
     os == windows
+    # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
+    memory_mb == 12288
     timeout == 900
   step "wait for the desktop"
     desktop == windows

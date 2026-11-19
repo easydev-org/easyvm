@@ -15,6 +15,8 @@ walkthrough "opensuse-leap-16.1 - Agama, the storage editor, and ext4"
     boot == true
     iso == opensuse-leap-16.1.iso
     os == linux
+    # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
+    memory_mb == 4096
     timeout == 1800
   step "wait for the installer's product chooser to draw"
     loop == {check: {from: chooser, mode: text, name: up, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1, words: [[Select], [mode]]}, do: [{settle: 6}], max: 40, see: {name: chooser}, until: {fact: up}}

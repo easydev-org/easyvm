@@ -8,6 +8,8 @@ walkthrough "linux-ubuntu - sshd"
   step "boot the disk"
     boot == true
     os == linux
+    # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
+    memory_mb == 4096
     timeout == 900
   step "wait for the greeter's X server to settle on the mode it was given"
     loop == {check: {from: greeter, mode: text, name: settled, words: [[password], [log], [complete, your, setup], [welcome, to, ubuntu]], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, do: [{settle: 5}], max: 24, see: {name: greeter}, until: {fact: settled}}

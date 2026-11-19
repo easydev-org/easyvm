@@ -8,6 +8,8 @@ walkthrough "linux-kubuntu - sshd"
   step "boot the disk"
     boot == true
     os == linux
+    # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
+    memory_mb == 4096
     timeout == 900
   step "the session is up, which is what autologin is for"
     loop == {check: {from: desk, mode: text, name: up, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], words: [[applications], [welcome], [kubuntu]]}, do: [{settle: 10}], max: 40, see: {name: desk}, until: {fact: up}}
