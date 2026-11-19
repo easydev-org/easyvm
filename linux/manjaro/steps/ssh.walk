@@ -88,6 +88,12 @@ walkthrough "linux-manjaro - sshd"
   # exact fault on kubuntu's stage: `SCREEN_KEPT_ON` run straight into `ECHO ADMIN`.
   #
   # One chord, at step 5. Every later step types into the terminal that chord opened.
+  # THE SCREEN BLANKS WHILE THE INSTALL RUNS - the recording of the previous attempt is BLACK at
+  # 120 s with the stage still typing - so this runs FIRST, before anything long.
+  step "keep the screen on"
+    run == xset s off; xset s noblank; xset -dpms 2>/dev/null; echo SCREEN_KEPT_ON
+    settle == 4
+    terminal_wait == 0
   step "unlock sudo once for this session"
     run == printf '%s\n' {{ password }} | sudo -S -v
     settle == 4
