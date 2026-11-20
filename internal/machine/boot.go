@@ -252,17 +252,22 @@ func (b Boot) Validate() error {
 	if b.OS == "" {
 		return fmt.Errorf("a boot step must name `os:`")
 	}
-	// THE NAME AND THE MACHINE MUST AGREE, AND THERE IS ONE PLACE THEY CAN DISAGREE.
+	// `os: microvm` AND `as a microvm` ARE THE SAME FACT, AND THE PARSER WRITES ONE FROM THE OTHER.
 	//
-	// `microvm` is the shape with no firmware, and `-machine microvm` is what that shape means. A
-	// boot that set `MicroVM` without the shape - or the shape without the flag - would ask for a
-	// machine type whose devices the other half did not describe, and the symptom is a qemu error
-	// naming a device nobody put in the argument list.
+	// A MICROVM IS AN OPERATING SYSTEM IN THIS VOCABULARY, not a modifier on linux: it wants no
+	// firmware at all, a `virtio-blk-device` rather than a `-pci` one, a different network device,
+	// and a kernel the host hands qemu directly. Those are a different MACHINE, and the shape file
+	// `shapes/microvm.yaml` is where they live.
+	//
+	// SO THE HALVES MUST AGREE. A boot that set `MicroVM` on a shape whose firmware is pflash would
+	// ask for `-machine microvm` and then hand qemu a firmware it cannot use; the shape without the
+	// flag would describe devices a microvm has no bus for. Both produce a qemu error naming a device
+	// nobody added, which is why this is refused here where the sentence can say which half is wrong.
 	if noFirmware := b.shape().Firmware == FirmwareNone; noFirmware != b.MicroVM {
-		return fmt.Errorf("`os: %s` resolves to a shape with `firmware.kind: %s` but this boot "+
-			"%s the microvm machine type. A machine with no firmware and a machine type that has no "+
-			"PCIe bus are the same choice, and half of it produces a qemu error naming a device "+
-			"nobody added", b.OS, b.shape().Firmware,
+		return fmt.Errorf("`os: %s` resolves to a shape with `firmware.kind: %s`, but this boot %s "+
+			"the microvm machine type. `as a microvm` names the operating system `microvm`, whose "+
+			"shape has no firmware; setting one half without the other asks qemu for a machine whose "+
+			"devices were never described", b.OS, b.shape().Firmware,
 			map[bool]string{true: "asks for", false: "does not ask for"}[b.MicroVM])
 	}
 	if b.Disk == "" {

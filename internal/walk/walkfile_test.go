@@ -384,3 +384,49 @@ func firstDifference(want, got any, path string) string {
 		return ""
 	}
 }
+
+// `as a microvm` NAMES THE OPERATING SYSTEM, SO A FILE DOES NOT WRITE `os:` BESIDE IT.
+//
+// A MICROVM IS NOT A LINUX GUEST WITH AN OPTION SET. It wants no firmware at all (nothing to read a
+// boot sector from), a `virtio-blk-device` rather than a `-pci` one, a different network device, and
+// a kernel the host hands qemu directly. Every one of those is a different MACHINE, and
+// `shapes/microvm.yaml` is where they are described.
+//
+// MEASURED, AND IT IS WHY THIS IS PARSED RATHER THAN WRITTEN: the first microvm walkthrough said
+// `os: linux` out of habit, and the engine refused it for disagreeing with itself - correctly, but a
+// file should not have to say one thing twice to be believed.
+func TestAMicrovmBootNamesItsOwnOS(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "m.walk")
+	body := `walkthrough "a microvm"
+  resolution 1024x768
+  recording_resolution 1024x768
+  needs k initrd
+  boot as a microvm from kernel "k" and initramfs "initrd" with "console=ttyS0" without a display with memory 768
+`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f, err := Load(path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var boot map[string]any
+	for _, s := range f.Steps {
+		if _, ok := s.Spec["boot"]; ok {
+			boot = s.Spec
+			break
+		}
+	}
+	if boot == nil {
+		t.Fatal("no boot step")
+	}
+	if got := boot["os"]; got != MicroVMOS {
+		t.Fatalf("the boot step's `os` is %v, want %q. A file that says `as a microvm` has named its "+
+			"operating system, and the shape it resolves to decides the firmware, the disk device and "+
+			"the network device", got, MicroVMOS)
+	}
+	if boot["microvm"] != true {
+		t.Fatal("`microvm` was not set; the machine type is what makes this a microvm at all")
+	}
+}

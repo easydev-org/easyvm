@@ -627,6 +627,14 @@ func parseMakeDisk(l line, rest string, step map[string]any) (map[string]any, er
 	return step, nil
 }
 
+// MicroVMOS is the `os:` a microvm boot writes, and the name its shape file carries.
+//
+// IT IS DECLARED HERE RATHER THAN IN `internal/machine` BECAUSE THE PARSER IS WHAT DECIDES IT: a file
+// that says `as a microvm` has named its operating system, and the vocabulary owns that name the same
+// way it owns `when:`. Importing the machine package here would be a cycle - the machine package
+// reads `walk.File` to know what to start.
+const MicroVMOS = "microvm"
+
 // parseBoot reads `boot the alpine medium "alpine.iso" as a microvm, waiting up to 300s`.
 func parseBoot(l line, rest string, step map[string]any) (map[string]any, error) {
 	step["boot"] = true
@@ -636,6 +644,24 @@ func parseBoot(l line, rest string, step map[string]any) (map[string]any, error)
 	microvm := strings.Contains(rest, "microvm")
 	if microvm {
 		step["microvm"] = true
+		// `as a microvm` IS THE OPERATING SYSTEM, NOT A MODIFIER ON ONE.
+		//
+		// A MICROVM IS A MACHINE SHAPE AND A BOOT PROTOCOL AT ONCE: no firmware to read a boot sector,
+		// no PCIe, no IDE, no USB, and a kernel the host hands qemu directly. That is a different
+		// guest from "linux", not a linux guest with an option set - the two want different firmware
+		// (none vs OVMF), a different disk device (virtio-blk-device vs -pci) and a different network
+		// device, and every one of those is a silent failure when the wrong one is used.
+		//
+		// SO THE SHAPE IS NAMED `microvm` AND A FILE DOES NOT WRITE `os:` BESIDE IT. Writing both
+		// would be two places to say one thing, and the first microvm walkthrough that did was
+		// refused by the engine for disagreeing with itself.
+		//
+		// AN EXPLICIT `os:` IN THE FILE STILL WINS, because a file may be describing something this
+		// rule has not thought of - see `parseBoot`'s caller, which applies this only when the step
+		// has no `os:` of its own yet.
+		if _, ok := step["os"]; !ok {
+			step["os"] = string(MicroVMOS)
+		}
 		if i := strings.Index(rest, "kernel "); i >= 0 {
 			if name, _, err := firstQuote(rest[i:]); err == nil {
 				step["kernel"] = name
@@ -696,9 +722,12 @@ func parseBoot(l line, rest string, step map[string]any) (map[string]any, error)
 	if i := strings.Index(rest, "as a "); i >= 0 {
 		osName := strings.Fields(rest[i+5:])[0]
 		osName = strings.Trim(osName, ",.")
-		if osName == "microvm" {
-			osName = "linux"
-		}
+		// `as a microvm` STAYS `microvm`, AND IT USED TO BE REWRITTEN TO `linux`.
+		//
+		// THAT REWRITE WAS THE OLD MODEL: a microvm was "a linux guest with the small machine type".
+		// It is not, in the way this build names machines - it resolves to a shape whose firmware is
+		// `none`, whose disk is `virtio-blk-device` rather than a `-pci` one, and whose network device
+		// differs too. Rewriting the name here meant the shape could never be looked up at all.
 		step["os"] = osName
 	}
 	if _, ok := step["os"]; !ok {
