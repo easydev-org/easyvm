@@ -66,7 +66,7 @@ spec:
   terminationGracePeriodSeconds: 5
   containers:
     - name: easyvm
-      image: ghcr.io/easydev-org/easyvm:latest
+      image: ghcr.io/easydev-org/easyvm-fork:latest
       # THE POD'S WORK DIRECTORY IS /work, NOT THE PVC: frames and the socket are per-container state
       # that must not outlive a restart. /disks holds what must - the guest disks and the ISOs.
       command: ["easyvm", "serve", "--work", "/work", "--http", ":8080"]

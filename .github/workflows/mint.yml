@@ -25,7 +25,7 @@ on:
     inputs:
       disks_repository:
         description: "the ghcr repository that holds the disks"
-        default: "easydev-org/easyvm"
+        default: "easydev-org/easyvm-fork"
       from_tag:
         description: >-
           start from a PUBLISHED disk: linux-mint or linux-mint-ssh. Empty runs the whole chain.

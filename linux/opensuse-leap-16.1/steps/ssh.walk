@@ -381,6 +381,32 @@ walkthrough "linux-opensuse-tumbleweed - sshd"
     run == sudo sh -c "firewall-cmd --add-service=ssh --permanent; firewall-cmd --reload; firewall-cmd --list-services" 2>&1 | tail -5
     settle == 8
     terminal_wait == 0
+  # WHAT THE DAEMON IS ACTUALLY LISTENING ON, PRINTED BEFORE THE WAIT.
+  #
+  # MEASURED ON RUN 44712184092, whose recording shows this guest is healthy in every way the earlier
+  # steps can check:
+  #
+  #	systemctl is-active sshd     active
+  #	/etc/pam.d/common-auth       auth required pam_unix.so try_first_pass
+  #	all pam_* modules named      found under /usr/lib64/security
+  #	passwd -S vmuser             P vmuser      not locked
+  #	chage -l vmuser              password expires Sep 03, 2300
+  #	firewall-cmd --list-services dhcpv6-client ssh
+  #
+  # AND PORT 2222 STILL REFUSED for the full ten minutes. Every one of those checks is about the
+  # daemon being CONFIGURED correctly; none of them is about it being REACHABLE, and that is the gap
+  # this step closes. `ss -ltn` is the one command that answers "on what address and port is it
+  # listening", and the answer decides which of the three remaining causes it is:
+  #
+  #	127.0.0.1:22 only     it is bound to the loopback, so the forward cannot reach it
+  #	*:22 or :::22         it is listening; the forwarding or the firewall is the problem
+  #	nothing               it is not listening, and the earlier `active` was about a different unit
+  #
+  # IT RUNS BEFORE THE WAIT, so the recording holds the answer even when the wait expires.
+  step "show what the daemon is listening on"
+    run == sudo ss -ltnp | grep -E ":22\b|sshd" ; echo "=== unit ==="; systemctl status sshd --no-pager 2>&1 | head -8
+    settle == 5
+    terminal_wait == 0
   step "wait for sshd"
     require_ssh == true
     timeout == 600

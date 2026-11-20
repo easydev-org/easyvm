@@ -30,7 +30,7 @@ spec:
   terminationGracePeriodSeconds: 5
   containers:
     - name: fetch
-      image: ghcr.io/easydev-org/easyvm:latest
+      image: ghcr.io/easydev-org/easyvm-fork:latest
       command: ["sleep", "infinity"]
       resources:
         requests:

@@ -25,7 +25,7 @@ on:
     inputs:
       disks_repository:
         description: "the ghcr repository that holds the disks"
-        default: "easydev-org/easyvm"
+        default: "easydev-org/easyvm-fork"
       from_tag:
         description: >-
           start from a PUBLISHED disk: macos15 or macos15-ssh or macos15-vm-configure or macos15-dev. Empty runs the whole chain. A fix to a later stage then costs that stage, not the entire bake.

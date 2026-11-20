@@ -30,7 +30,7 @@ on:
     inputs:
       disks_repository:
         description: "the ghcr repository that holds the assets"
-        default: "easydev-org/easyvm"
+        default: "easydev-org/easyvm-fork"
       from_tag:
         description: "start from this published disk instead of building it (macos26, macos26-ssh)"
         default: ""

@@ -50,7 +50,7 @@ on:
           the ghcr package this leg PULLS its input disk and media from. Upstream by default, because
           those packages are public and re-baking them costs hours.
         type: string
-        default: "easydev-org/easyvm"
+        default: "easydev-org/easyvm-fork"
       publish_repository:
         description: >-
           the ghcr package this leg PUSHES its disk to. This repository by default - a token can only

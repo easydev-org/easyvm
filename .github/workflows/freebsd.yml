@@ -34,7 +34,7 @@ on:
     inputs:
       disks_repository:
         description: "the ghcr repository that holds the disks"
-        default: "easydev-org/easyvm"
+        default: "easydev-org/easyvm-fork"
       from_tag:
         description: >-
           start from a PUBLISHED disk: bsd-freebsd-install or bsd-freebsd-ssh or bsd-freebsd-vm. Empty runs the whole chain. A fix to a later stage then costs that stage, not the entire bake.
