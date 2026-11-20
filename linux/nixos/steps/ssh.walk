@@ -51,9 +51,21 @@ walkthrough "linux-nixos - sshd"
   step "the welcome dialog is up, when this desktop shows one"
     loop == {check: {from: welcome, mode: text, name: showing, rect: [740, 600, 1180, 700], rect_at: [1920, 1080], scale: 1, words: [[welcome, to, nixos]]}, do: [{settle: 5}], max: 20, see: {name: welcome}, until: {fact: showing}}
     optional == true
-  step "close it"
-    do == [{click: [857, 751], settle: 3}, {click: [857, 751], settle: 3}, {click: [857, 751], settle: 3}]
-  press Escape, waiting 2s, named "clear anything left over"
+  # THE DIALOG IS DISMISSED BY KEYBOARD, AND SO IS THE TERMINAL OPENED.
+  #
+  # MEASURED ON RUN a8a0c0d's nixos ssh: three clicks at Skip's own coordinates logged "clicked
+  # (857, 751)" three times, and the recording at 260 s is STILL 'Welcome to NixOS 26.05 (Yarara)'
+  # with its Skip and Take Tour buttons - so the clicks did not take here any more than they did in
+  # fedora's wizard.
+  #
+  # AND `ctrl+alt+t` DOES NOT OPEN A TERMINAL ON THIS GNOME: after it, the recording at 400 s is the
+  # plain desktp with no window at all, and every `run:` after it typed into nothing.
+  #
+  # SO BOTH USE THE KEYBOARD THAT IS KNOWN TO WORK ON THIS DESKTOP: Escape closes the dialog (it is
+  # a GTK dialog with a close action), and the terminal comes from the overview, which is where this
+  # stage opened one successfully before - meta_l, type "terminal", Return on the result.
+  press Escape, waiting 2s, named "close the welcome dialog"
+  press Escape, waiting 2s, named "and clear anything it left behind"
   # NO WORD AND NO PICTURE DECIDES THIS DESKTOP, SO THE SHELL DOES.
   #
   # MEASURED TWICE ON RUNS 44548647796 AND 44554888731:
@@ -77,7 +89,15 @@ walkthrough "linux-nixos - sshd"
   #
   # The chord opens a terminal over whatever is up, and this desktop honours it; the search path
   # stays below as a fallback for a GNOME that does not.
-  press ctrl+alt+t, waiting 20s, named "open a terminal over whatever is up"
+  # THE TERMINAL COMES FROM THE OVERVIEW, NOT A CHORD: `ctrl+alt+t` leaves no window on this GNOME.
+  press meta_l, waiting 4s, named "open the overview"
+  step "search for the terminal"
+    settle == 3
+    type == terminal
+    type_gap == 0.08
+  step "the result list has had time to draw"
+    settle == 4
+  press Return, waiting 25s, named "open the terminal on the first result"
   # NO `terminal_wait:` HERE, AND THAT IS THE FIX RATHER THAN AN OMISSION.
   #
   # `terminal_wait:` OPENS A TERMINAL (ctrl+alt+t) AND THEN TYPES. The step above has already
