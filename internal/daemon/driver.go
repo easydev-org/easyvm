@@ -1547,41 +1547,45 @@ func (d *Driver) qmpRegistry() *qmp.Registry {
 }
 
 func (d *Driver) qmpSocket() (*qmp.Conn, error) {
+	// A CACHED CONNECTION IS NOT THE SAME AS A WORKING ONE, AND THIS IS WHERE THAT ASSUMPTION COST A
+	// RUN ITS WHOLE BUDGET.
+	//
+	// MEASURED ON A POD, `linux-fedora-workstation`'s ssh stage: every step from the third on answered
+	//
+	//	key "tab": input-send-event []+tab: the qmp connection is closed
+	//
+	// while qemu itself was healthy - 4 vCPUs blocked in `kvm_vcpu_block`, the guest's CPU ticks
+	// climbing 185 in five seconds, the QMP socket still LISTENing. `ss -xp` showed qemu's end of the
+	// channel ESTAB with NO PEER: the connection had gone and this cache still held it.
+	//
+	// So the cached connection is PROBED before it is handed out, with `query-status` - the cheapest
+	// question the protocol has, and one that cannot change anything. A dead one is dropped so the
+	// Acquire below reconnects.
+	//
+	// THE PROBE IS OUTSIDE THE LOCK. It is a round trip to qemu and must not be held while other
+	// callers - the recorder's sampler runs this every second - wait on the mutex. THE FIRST VERSION
+	// OF THIS FUNC WAS WRONG IN A LOUDER WAY: it unlocked twice on the hit path and the daemon died
+	// with `fatal error: sync: unlock of unlocked mutex` forty seconds into a boot, which from outside
+	// looked exactly like the QMP fault it was meant to fix.
 	d.mu.Lock()
-	if d.qmp != nil {
-		conn := d.qmp
-		d.mu.Unlock()
-		// A CACHED CONNECTION IS NOT THE SAME AS A WORKING ONE, AND THIS IS WHERE THAT ASSUMPTION COST
-		// A RUN ITS WHOLE BUDGET.
-		//
-		// MEASURED ON A POD, `linux-fedora-workstation`'s ssh stage: every step from the third on
-		// answered
-		//
-		//	key "tab": input-send-event []+tab: the qmp connection is closed
-		//
-		// while qemu itself was healthy - 4 vCPUs blocked in `kvm_vcpu_block`, the guest's CPU ticks
-		// climbing 185 in five seconds, the QMP socket still LISTENing. `ss -xp` showed qemu's end of
-		// the channel ESTAB with NO PEER: the connection had gone and this cache still held it.
-		//
-		// So the cached connection is PROBED before it is handed out. `Ping` is a `query-status`,
-		// which is the cheapest question the protocol has and cannot change anything.
-		//
-		// A PROBE ON EVERY CALL IS NOT A COST WORTH AVOIDING: the alternative is a stage that reports
-		// forty false failures about a machine that is running, and a reader who cannot tell them
-		// from real ones.
-		if err := conn.Ping(); err == nil {
-			return conn, nil
+	cached := d.qmp
+	d.mu.Unlock()
+
+	if cached != nil {
+		if err := cached.Ping(); err == nil {
+			return cached, nil
 		}
-		// DEAD: drop it so the Acquire below reconnects, and close it so qemu's client slot is free.
+		// DEAD: forget it, so a caller that races here cannot pick it up again, and close it so
+		// qemu's single client slot is free.
 		d.mu.Lock()
-		if d.qmp == conn {
+		if d.qmp == cached {
 			d.qmp = nil
 		}
 		d.mu.Unlock()
-		_ = conn.Close()
+		_ = cached.Close()
 	}
+
 	path := filepath.Join(d.work, "drive.sock.qmp")
-	d.mu.Unlock()
 
 	// THE HANDSHAKE HAPPENS OUTSIDE THE LOCK, because it waits up to thirty seconds for a socket that
 	// a dead qemu will never create - and every other caller of this driver would block behind it.
