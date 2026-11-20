@@ -430,3 +430,45 @@ func TestAMicrovmBootNamesItsOwnOS(t *testing.T) {
 		t.Fatal("`microvm` was not set; the machine type is what makes this a microvm at all")
 	}
 }
+
+// `with memory 768` IS PART OF THE MACHINE, AND IT WAS BEING DROPPED ON THE FLOOR.
+//
+// MEASURED ON easyvm-microvm's alpine walkthrough: the line says `with memory 768`, and the qemu
+// command line came out with `-m 512` - the engine's default - because nothing read the clause.
+//
+// A FILE WHOSE SIZE IS SILENTLY REPLACED BY A DEFAULT IS A FILE WHOSE SIZE CANNOT BE REASONED ABOUT,
+// and a microvm is exactly where the number matters: 512 MiB is enough for Alpine's initramfs and not
+// for the root filesystem it mounts, and the failure is a guest that stops on initrd's last line with
+// nothing said.
+func TestAMicrovmBootReadsItsMemory(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "m.walk")
+	body := `walkthrough "a microvm"
+  resolution 1024x768
+  recording_resolution 1024x768
+  needs k initrd
+  boot as a microvm from kernel "k" and initramfs "initrd" with "console=ttyS0" without a display with memory 768
+`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f, err := Load(path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range f.Steps {
+		if _, ok := s.Spec["boot"]; !ok {
+			continue
+		}
+		got, ok := toFloat(s.Spec["memory_mb"])
+		if !ok {
+			t.Fatalf("`memory_mb` was not parsed from `with memory 768`, so qemu gets the engine's "+
+				"default and the file's number is silently replaced: %v", s.Spec)
+		}
+		if got != 768 {
+			t.Fatalf("memory_mb = %v, want 768", got)
+		}
+		return
+	}
+	t.Fatal("no boot step")
+}

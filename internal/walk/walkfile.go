@@ -719,6 +719,33 @@ func parseBoot(l line, rest string, step map[string]any) (map[string]any, error)
 		step["timeout"] = secs
 	}
 
+	// `with memory 768` AND `with cpu 2` ARE PART OF THE MACHINE, AND THEY WERE BEING IGNORED.
+	//
+	// MEASURED ON easyvm-microvm's alpine walkthrough, whose line says `with memory 768` and whose
+	// qemu command line came out with `-m 512` - the engine's default, because nothing read the
+	// clause. The guest then had two thirds of the memory the file asked for, and a file whose size
+	// is silently replaced by a default is a file whose size cannot be reasoned about.
+	//
+	// THE PHRASE IS THE FILE'S AND THE KEY IS THE ENGINE'S, the same way `waiting up to` becomes
+	// `timeout:` two lines above.
+	for _, m := range []struct{ phrase, key string }{
+		{"with memory ", "memory_mb"},
+		{"with cpu ", "cpus"},
+	} {
+		i := strings.Index(rest, m.phrase)
+		if i < 0 {
+			continue
+		}
+		fields := strings.Fields(rest[i+len(m.phrase):])
+		if len(fields) == 0 {
+			continue
+		}
+		n := strings.Trim(fields[0], ",.")
+		if v, err := strconv.ParseFloat(n, 64); err == nil && v > 0 {
+			step[m.key] = v
+		}
+	}
+
 	if i := strings.Index(rest, "as a "); i >= 0 {
 		osName := strings.Fields(rest[i+5:])[0]
 		osName = strings.Trim(osName, ",.")
