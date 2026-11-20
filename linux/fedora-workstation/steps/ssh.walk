@@ -132,17 +132,27 @@ walkthrough "linux-fedora-workstation - sshd"
   # the Full Name field - which is the state this stage needs, not merely a page that mentions the
   # same words.
   #
-  # THE NUMBERS ARE MEASURED, not chosen. `rect: [710, 530, 1215, 655]` over that frame:
+  # THE NUMBERS ARE MEASURED WITH `tools/reflike.py`, WHICH USES THE ENGINE'S OWN RULE.
   #
-  #	1.0000  the create-account form with the cursor in Full Name     <- the state to act on
-  #	0.5072  the same dialog in enterprise-login mode
-  #	0.8890  an earlier wizard page
-  #	0.8889  the page before it
+  # `reflike.py suggest` SEARCHES for the rectangle that separates the state from everything else,
+  # rather than taking the one I drew by eye - and it found a better one:
   #
-  # A threshold of 0.95 sits in that gap with room on both sides; the engine's own comparison is
-  # "pixels within 8 levels per channel", which is what produced those four numbers.
+  #	rect [700, 300, 1100, 420]   match 1.0000   worst reject 0.7551   gap 0.2449
+  #
+  # Against the box I had chosen first, [710, 530, 1215, 655], whose gap was 0.111:
+  #
+  #	1.0000  create-account form, cursor in Full Name     <- the state to act on
+  #	0.8890  an earlier wizard page                       <- only 0.11 below
+  #
+  # The difference is what is INSIDE the box. The first one framed the two input fields, which are
+  # white on both this page and every other page of the wizard; the second frames the row of marks
+  # above them - the account silhouette, the "About You" heading and its one line of body text - which
+  # exists on this page and nowhere else.
+  #
+  # `range: [0.78, 1.00]` is the tool's suggestion: the worst reject plus a 0.02 margin, so ordinary
+  # rendering jitter cannot flip it.
   step "the create-account form is up, with the cursor in Full Name"
-    loop == {check: {from: account_form, mode: like, name: ready, rect: [710, 530, 1215, 655], rect_at: [1920, 1080], reference: reference/about-you-create-account.png, range: [0.95, 1.0]}, do: [{settle: 5}], max: 10, see: {name: account_form}, until: {fact: ready}}
+    loop == {check: {from: account_form, mode: like, name: ready, rect: [700, 300, 1100, 420], rect_at: [1920, 1080], reference: reference/about-you-create-account.png, range: [0.78, 1.0]}, do: [{settle: 5}], max: 10, see: {name: account_form}, until: {fact: ready}}
     optional == true
   # THE FIELDS ARE TYPED UNCONDITIONALLY, BECAUSE A WRONG PAGE MAKES THEM HARMLESS RATHER THAN DAMAGING.
   #
