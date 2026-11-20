@@ -374,8 +374,24 @@ walkthrough "linux-fedora-workstation - sshd"
     key == esc
     settle == 2
   press meta_l, waiting 3s, named "open the overview"
-  step "search for the terminal"
+  # THE SEARCH BOX IS CLICKED BEFORE ANYTHING IS TYPED INTO IT, AND `meta_l` ALONE IS NOT ENOUGH.
+  #
+  # MEASURED ON THE POD: `meta_l` draws the overview with its search field showing "Type to search" -
+  # and NOT focused. The eight characters typed after it went to the DESKTOP, leaving the overview up
+  # and the field empty:
+  #
+  #	=== search for the terminal
+  #	  typed 8 character(s)
+  #	=== the Terminal result has been drawn
+  #	  see: 1 word(s): a                      <- the results rectangle held a fragment of the desktop
+  #
+  # A click at (960, 59) - the field's own centre - puts the cursor in it, and the same eight
+  # characters then produced the Terminal tile immediately. The coordinate is the field's, measured
+  # from a frame of this screen, not a guess about where a search box usually sits.
+  step "put the cursor in the overview's search field"
+    click == [960, 59]
     settle == 2
+  step "search for the terminal"
     type == terminal
     type_gap == 0.08
   # THE RESULT IS WAITED FOR, THEN CLICKED, AND THE DIFFERENCE IS MEASURED.
