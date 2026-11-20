@@ -231,11 +231,27 @@ walkthrough "linux-fedora-workstation - sshd"
   #
   # with Next enabled. An earlier attempt clicked (680, 640) and got Creston, Canada - the map is a
   # world map and 40 pixels is a different city, so the coordinate is named for the city it selects.
+  # THE PAGE IS RECOGNISED BY ITS OWN WORDS, AND THE PICTURE THAT USED TO DO IT IS GONE.
+  #
+  # MEASURED ON THE POD: `reference/timezone-page.png` scores 0.6462 against a frame of the real page,
+  # and 1.0000 against ITSELF - so it is a frame of a DIFFERENT session, not of this page as this disk
+  # draws it. Its rectangle also framed the "Please search for a nearby city" card, which exists only
+  # until a city is picked: a page that has already been answered would stop being recognised as
+  # itself. A picture reference that cannot match the page it names is worse than no reference.
+  #
+  # THE WORDS ARE THE PAGE'S OWN CHROME AND ITS OWN SENTENCE:
+  #
+  #	Time Zone
+  #	The time zone will be set automatically if your location can be found.
+  #
+  # neither of which appears on any other page of this wizard.
   step "a Time Zone page, if the wizard is showing one"
-    loop == {check: {from: timezone, mode: like, name: showing, rect: [800, 700, 1200, 900], rect_at: [1920, 1080], reference: reference/timezone-page.png, range: [0.12, 1.0]}, do: [{settle: 5}], max: 6, see: {name: timezone}, until: {fact: showing}}
+    loop == {check: {from: timezone, mode: text, name: showing, rect: [380, 160, 1540, 440], rect_at: [1920, 1080], scale: 1, words: [[time, zone], [set, automatically]]}, do: [{settle: 4}], max: 6, see: {name: timezone}, until: {fact: showing}}
     optional == true
+  # THE MAP IS CLICKED WHETHER OR NOT THE CHECK ABOVE MATCHED, AND THAT IS THE SAME RULE THE ACCOUNT
+  # FIELDS FOLLOW: a click on a page that is not Time Zone lands on nothing, while a click that is
+  # skipped leaves the wizard stuck on a page whose Next stays grey.
   step "point the map at Los Angeles"
-    when == [showing]
     click == [640, 690]
     settle == 5
   # AND THE SEARCH BOX HAS THE FOCUS AFTER THAT CLICK, so Next is again one Shift+Tab away.
