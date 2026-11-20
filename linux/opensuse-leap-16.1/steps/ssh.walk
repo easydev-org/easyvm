@@ -149,10 +149,25 @@ walkthrough "linux-opensuse-tumbleweed - sshd"
   # sshd's own reading order. This image has no /etc/ssh/sshd_config at all until the copy above
   # makes one, which is why the sed has nothing to do the first time and the append is the fallback.
   step "allow password authentication"
-    run == sudo sed -i s/^#PasswordAuthentication/PasswordAuthentication/ /etc/ssh/sshd_config ; grep -q ^PasswordAuthentication /etc/ssh/sshd_config || sudo sh -c "printf 'PasswordAuthentication yes\\n' >> /etc/ssh/sshd_config" ; sudo sh -c "printf 'PasswordAuthentication yes\\n' > /etc/ssh/sshd_config.d/99-vm.conf" ; sudo grep -c PasswordAuthentication /etc/ssh/sshd_config
+    run == sudo sed -i -e s/^#PasswordAuthentication/PasswordAuthentication/ -e s/^PasswordAuthentication.no$/PasswordAuthentication.yes/ /etc/ssh/sshd_config ; sudo grep -n PasswordAuthentication /etc/ssh/sshd_config
     settle == 3
-  step "prove what sshd itself took"
-    run == sudo sshd -T 2>&1 | grep -i passwordauthentication
+  # `sshd -T` IS THE ONLY OPINION THAT COUNTS, AND IT DISAGREED WITH `grep -c` ON THE LAST RUN.
+  #
+  # MEASURED ON RUN e58656b's console: `grep -c PasswordAuthentication /etc/ssh/sshd_config` printed
+  # **1** and `sshd -T | grep -i passwordauthentication` printed NOTHING - so the daemon's effective
+  # configuration did not mention the setting at all, and the client was refused with
+  #
+  #	unable to authenticate, attempted methods [none password keyboard-interactive]
+  #
+  # (Progress: the previous run failed at 'unexpected message type 51', so the config copy fixed the
+  # protocol half. What is left is that the setting the daemon actually uses is not the one the file
+  # shows.)
+  #
+  # The vendor file may ship an uncommented `PasswordAuthentication no`, or an Include that this
+  # image reads instead. Both spellings are rewritten, and then the daemon is asked again - the loop
+  # runs the same edit with a `-e` pair only while sshd still says no.
+  step "make sshd's own view say yes"
+    run == sudo sed -i -e s/^#PasswordAuthentication/PasswordAuthentication/ -e s/^PasswordAuthentication.no$/PasswordAuthentication.yes/ -e s/^PasswordAuthentication.no\\b/PasswordAuthentication.yes/ /etc/ssh/sshd_config ; sudo sshd -T 2>&1 | grep -i passwordauthentication ; sudo sshd -T 2>&1 | grep -ci "passwordauthentication yes"
     settle == 3
     terminal_wait == 0
   step "enable sshd at boot"
