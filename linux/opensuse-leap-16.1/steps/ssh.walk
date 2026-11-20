@@ -347,6 +347,27 @@ walkthrough "linux-opensuse-tumbleweed - sshd"
   # password, `NP` for none, `L` for locked - and `chage -l` prints whether it has expired. A locked
   # or expired account is refused by pam_unix with exactly the message above, and no sshd setting
   # can change it.
+  # THE PAM STACK'S OWN CONTENT, PRINTED, BECAUSE EVERYTHING AROUND IT IS ALREADY CORRECT.
+  #
+  # MEASURED ON RUN dad5a90, and this is what "correct everywhere else" looks like:
+  #
+  #	sshd -T    usepam yes · passwordauthentication yes · kbdinteractive yes ·
+  #	           authenticationmethods any · pubkeyauthentication yes
+  #	passwd -S  vmuser P 2026-11-19 0 99999 7 -1     usable, not locked, never expires
+  #	/etc/pam.d/sshd   154 bytes, five lines, `common-auth` names pam_unix
+  #	sshd       active, host keys present
+  #
+  # and the client is STILL refused. So the question is no longer "is a setting right" - it is "what
+  # does the stack this daemon loads actually do". `common-auth` is a FILE THIS STAGE NEVER WROTE,
+  # shipped by the distribution, and it may name a module this image does not have, or require a
+  # service name sshd does not pass.
+  #
+  # THE WHOLE CHAIN IS PRINTED: the file this stage wrote, the file it includes, and whether each
+  # module it names exists on disk. That is the last thing a recording can answer.
+  step "print the PAM chain this sshd will load"
+    run == sudo cat /etc/pam.d/sshd; echo "=== common-auth ==="; sudo cat /etc/pam.d/common-auth; echo "=== modules named, and whether they exist ==="; for m in $(sudo grep -hoE "pam_[a-z0-9_]+" /etc/pam.d/sshd /etc/pam.d/common-* 2>/dev/null | sort -u); do printf "%-22s " "$m"; sudo find /lib/security /usr/lib64/security /usr/lib/security -name "$m.so" 2>/dev/null | head -1 || echo MISSING; done
+    settle == 6
+    terminal_wait == 0
   step "is the account's password usable to PAM"
     run == sudo passwd -S vmuser; sudo chage -l vmuser | head -4
     settle == 5
