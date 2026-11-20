@@ -63,22 +63,21 @@ walkthrough "linux-opensuse-tumbleweed - sshd"
     loop == {check: {from: grubmenu, mode: text, name: at_menu, rect: [150, 330, 1720, 460], rect_at: [1920, 1080], scale: 1, words: [[opensuse, leap], [recovery, mode]]}, do: [{settle: 5}], max: 12, see: {name: grubmenu}, until: {fact: at_menu}}
     optional == true
   press Return, waiting 60s, named "boot the highlighted entry, which is the installed system"
-  step "greeter - the password box"
-    when == [password, vmuser]
-    click == [960, 640]
-  step "greeter - log in"
-    when == [password, vmuser]
-    settle == 3
-    type == '{{ password }}'
-  step "greeter - submit"
-    when == [password, vmuser]
-    key == ret
-    settle == 12
-  step "wait for the desktop, when this disk has one"
-    desktop == linux
-    timeout == 120
-    optional == true
-  press ctrl+alt+t, waiting 5s, named "open a terminal, when there is a desktop to open one on"
+  # THE GREETER AND THE DESKTOP ARE GONE FROM THIS FILE, AND THAT IS THE POINT OF THE STAGE.
+  #
+  # MEASURED TWICE ON THE POD, BY INSTALLING openSUSE TWICE:
+  #
+  #	Software: No desktop selected   (the default)   ->  `localhost login:` on tty1
+  #	Software: GNOME Desktop (Wayland)               ->  GDM, then a full GNOME desktop
+  #
+  # THE MEDIUM THIS STAGE BOOTS INSTALLS NO DESKTOP, so there is no greeter to click and no terminal
+  # to open with ctrl+alt+t. What used to stand here was three `when: [password, vmuser]` steps and a
+  # `desktop:` wait - and the `when:` never bound, because no step binds a fact by those names, so
+  # the whole block was dead code dressed up as a conditional path. A `when:` on a fact nothing
+  # binds is not a guard; it is a comment that the reader cannot tell from a live branch.
+  #
+  # THE CONSOLE IS THE PATH, and it always was for this disk: tty1 gives a login prompt, and the
+  # shell behind it runs every command this stage needs. That is what the next step does.
   # THE CONSOLE LOGIN IS ONE RETRIED SEQUENCE, AND ITS SUCCESS TEST IS THE PROMPT - NOT THE NAME.
   #
   # MEASURED ON RUN 44701006147's recording, and it is the reason this step is rewritten:
@@ -319,20 +318,47 @@ walkthrough "linux-opensuse-tumbleweed - sshd"
   # for sshd's login class, and it is included because it exists here.
   #
   # THE ORDER IS PAM'S OWN: account, auth, password, session.
-  step "build /etc/pam.d/sshd, one line at a time"
-    run == echo "auth include common-auth" | sudo tee /etc/pam.d/sshd
-    settle == 3
+  # /etc/pam.d/sshd DOES NOT EXIST ON THIS IMAGE, AND THAT IS WHY SSH AUTHENTICATION FAILED.
+  #
+  # MEASURED ON THE POD, with a guest installed by this same stage, after every other check had
+  # passed:
+  #
+  #	ss -ltnp           0.0.0.0:22 and [::]:22, sshd listening       the port is open
+  #	systemctl status   active (running)                            the daemon is up
+  #	common-auth        auth required pam_unix.so try_first_pass    the module that reads shadow
+  #	passwd -S vmuser   P vmuser                                    not locked
+  #	echo Qz7vLp2w | su -c true vmuser ; echo rc=   -> rc=0        the password is right
+  #	firewall-cmd       dhcpv6-client ssh                           the port is open
+  #
+  #	cat: /etc/pam.d/sshd: No such file or directory                <- THE FILE WAS NOT THERE
+  #
+  # AND /var/log/secure SAID WHAT THAT COSTS:
+  #
+  #	sshd[1662]: error: PAM: Authentication failure for vmuser from 172.30.0.1
+  #	sshd[1662]: Failed password for vmuser from 172.30.0.1 port 53736 ssh2
+  #
+  # A service with no `/etc/pam.d/<name>` file is handled by `/etc/pam.d/other`, whose default
+  # answer is to REFUSE. So sshd asked PAM, PAM fell through to `other`, and the refusal arrived as
+  # "authentication failure" - a message that names the password and therefore sends a reader to
+  # the wrong place entirely.
+  #
+  # WRITTEN IN ONE COMMAND, NOT ONE LINE AT A TIME, AND THE REASON IS THE FAILURE ABOVE. Five
+  # separate `echo ... | sudo tee -a` steps meant five chances for a dropped keystroke to leave a
+  # HALF-BUILT pam stack, with nothing checking the result: the file would exist, sshd would start,
+  # and only the ten-minute `wait for sshd` would report anything. One `printf >` either writes the
+  # five lines or does not.
+  #
+  # MEASURED AFTER THIS: `ssh vmuser@127.0.0.1 id` with the stage's own password returned
+  # `uid=1000(vmuser) gid=1000(vmuser) groups=1000(vmuser),497(wheel)`.
+  step "write the PAM stack sshd reads, which this image does not ship"
+    run == sudo sh -c 'printf "auth include common-auth\naccount include common-account\npassword include common-password\nsession include common-session\nsession include postlogin-session\n" > /etc/pam.d/sshd'
+    settle == 4
     terminal_wait == 0
-  step "give sshd the account rule"
-    run == echo "account include common-account" | sudo tee -a /etc/pam.d/sshd
-    settle == 3
-    terminal_wait == 0
-  step "give sshd the password rule"
-    run == echo "password include common-password" | sudo tee -a /etc/pam.d/sshd
-    settle == 3
-    terminal_wait == 0
-  step "give sshd the session rules"
-    run == echo "session include common-session" | sudo tee -a /etc/pam.d/sshd; echo "session include postlogin-session" | sudo tee -a /etc/pam.d/sshd
+  # AND IT IS CHECKED, LINE BY LINE, BECAUSE A HALF-WRITTEN FILE IS THE FAILURE MODE THAT COSTS TEN
+  # MINUTES TO FIND. `wc -l` must be 5 and every include must be present; anything else fails HERE,
+  # where the message names the file, instead of at `wait for sshd`, where it names a port.
+  step "the PAM stack is complete"
+    run == sudo sh -c 'test $(wc -l < /etc/pam.d/sshd) -eq 5 && grep -c include /etc/pam.d/sshd'
     settle == 3
     terminal_wait == 0
   step "prove the stack is there and reads the shadow database"
@@ -354,50 +380,22 @@ walkthrough "linux-opensuse-tumbleweed - sshd"
     run == sudo sshd -T 2>&1 | grep -iE "^(passwordauthentication|usepam|kbdinteractiveauthentication|pubkeyauthentication|permitrootlogin|authenticationmethods)"; echo --- ; sudo grep -iE "^(PasswordAuthentication|UsePAM|KbdInteractive|AuthenticationMethods)" /etc/ssh/sshd_config ; sudo sed -i s/^PasswordAuthentication.no/PasswordAuthentication.yes/ /etc/ssh/sshd_config
     settle == 5
     terminal_wait == 0
-  # SELINUX IS ENFORCING ON THIS IMAGE AND ITS POLICY REFUSES sshd's PAM AUTHENTICATION.
+  # SELINUX IS NOT TOUCHED, AND I WAS WRONG TO THINK IT MATTERED.
   #
-  # MEASURED ON THE POD, AND THIS IS THE WHOLE ANSWER TO "EVERY SETTING IS RIGHT AND AUTH STILL
-  # FAILS". Every other check on this guest passes, and each one was read off the screen:
+  # I ADDED A `setenforce 0` HERE ON THE EVIDENCE THAT `getenforce` SAID `Enforcing` AND THAT THE
+  # SAME PASSWORD WAS ACCEPTED BY `su` BUT REFUSED BY sshd - which looks exactly like a domain
+  # difference. IT WAS NOT. The actual cause was `/etc/pam.d/sshd` missing (see the step that writes
+  # it), and with that file in place sshd authenticated while SELinux was still ENFORCING.
   #
-  #	ss -ltnp               0.0.0.0:22 and [::]:22, sshd pid 1442        listening, not loopback
-  #	systemctl status       active (running)                            the daemon is up
-  #	/etc/pam.d/sshd        auth include common-auth ...                the vendor's own chain
-  #	common-auth            auth required pam_unix.so try_first_pass    the module that reads shadow
-  #	pam_*.so               all six found under /usr/lib64/security     nothing missing
-  #	passwd -S vmuser       P vmuser                                    not locked
-  #	chage -l vmuser        password expires Sep 03, 2300               never expires
-  #	echo Qz7vLp2w | su -c true vmuser ; echo rc=0   -> rc=0            THE PASSWORD IS RIGHT
-  #	firewall-cmd --list-services  dhcpv6-client ssh                   the port is open
-  #	getenforce             Enforcing
+  # MEASURED, and this is what settles it: a guest with `/etc/pam.d/sshd` written and SELinux
+  # untouched answered
   #
-  # and /var/log/secure said exactly what failed:
+  #	ssh vmuser@127.0.0.1 id  ->  uid=1000(vmuser) gid=1000(vmuser) groups=1000(vmuser),497(wheel)
   #
-  #	sshd[1662]: error: PAM: Authentication failure for vmuser from 172.30.0.1
-  #	sshd[1662]: Failed password for vmuser from 172.30.0.1 port 53736 ssh2
-  #
-  # THE SAME PASSWORD THAT `su` ACCEPTS IS REFUSED THROUGH sshd, WHICH IS A CONTEXT DIFFERENCE AND
-  # NOT A PASSWORD ONE: `su` runs from the console session, sshd runs in its own SELinux domain, and
-  # this image's policy does not let that domain complete the shadow read the way pam_unix needs.
-  #
-  # MEASURED, AND IT SETTLES IT: `sudo setenforce 0`, then the SAME ssh probe against the SAME guest
-  #
-  #	ssh: id -un -> 0
-  #
-  # - authenticated. So the policy is the cause and Permissive is the cure.
-  #
-  # THIS IS NOT A WORKAROUND AROUND A BROKEN GUEST; IT IS A PROPERTY OF WHAT THIS STAGE PROVES. The
-  # stage installs openssh, configures it, starts it and authenticates over it - it is not a test of
-  # this distribution's SELinux policy, and no other stage in this repository enables SELinux at all.
-  # `fedora-workstation`, which also ships SELinux enforcing, passes without this line because its
-  # policy allows sshd; opensuse's does not.
-  # THE SETTING IS MADE PERSISTENT AS WELL AS IMMEDIATE, because this stage reboots the guest later
-  # (`restart the machine`) and a reboot returns SELinux to whatever `/etc/selinux/config` says. A
-  # `setenforce 0` alone would leave the next boot enforcing and the stage's own `wait_until: ssh`
-  # after the reboot would fail exactly as this one did.
-  step "make SELinux permissive, because enforcing refuses sshd's PAM read"
-    run == sudo setenforce 0; sudo sed -i 's/^SELINUX=enforcing/SELINUX=permissive/' /etc/selinux/config; getenforce; grep '^SELINUX=' /etc/selinux/config
-    settle == 5
-    terminal_wait == 0
+  # TURNING A SECURITY FEATURE OFF TO MAKE A STAGE PASS IS A CLAIM THAT THE STAGE NEEDS IT OFF, and
+  # that claim was false. A walkthrough that disables SELinux to authenticate is also one that would
+  # never notice if this distribution's policy DID start refusing PAM - the failure would be hidden
+  # by the workaround.
   step "start sshd"
     run == sudo systemctl restart sshd 2>&1 | tail -3; sleep 2; systemctl is-active sshd
     settle == 10

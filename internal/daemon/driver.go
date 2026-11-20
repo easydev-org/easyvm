@@ -1094,8 +1094,22 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 	// is connected is not a cleanup, it is a self-mutilation.
 	//
 	// SO IT HAPPENS HERE, while `d.qmp` is nil and the previous machine's client is the only thing the
-	// registry can be holding. The lock is not needed: `Release` does its own.
+	// registry can be holding.
+	//
+	// `qmpMu` IS TAKEN EVEN THOUGH `Release` DOES ITS OWN LOCKING, and that is about the REGISTRY
+	// rather than the map's own mutex. The recorder's sampler captures a frame every second and takes
+	// `qmpMu` to do it; a `Release` outside that lock can land between the sampler's look at the
+	// cache and its `Acquire`, and the two then disagree about who owns the socket. MEASURED on the
+	// pod, at `boot the disk`:
+	//
+	//	boot: this qmp socket is already held by this process (by "easyvm"); pass that connection
+	//	instead of opening a second - qemu allows one client per socket
+	//
+	// - the same self-conflict the earlier fixes were about, arriving through the one path that had
+	// not been brought under the lock.
+	d.qmpMu.Lock()
 	_ = d.qmpRegistry().Release(qmpPath)
+	d.qmpMu.Unlock()
 
 	cmd := exec.Command("qemu-system-x86_64", args...)
 	cmd.Stdout = os.Stdout
@@ -1157,7 +1171,12 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 	//
 	// SO THE PROCESS IS CHECKED FIRST. If it is gone, that is the answer and it is reported as such,
 	// with qemu's exit status attached.
+	// THE CONNECTION IS TAKEN UNDER THE SAME LOCK EVERY OTHER CALLER USES, because this function
+	// `Acquire`s the registry entry the socket belongs to - and `Acquire` is what refuses a second
+	// client. Outside `qmpMu` it races the sampler for that entry.
+	d.qmpMu.Lock()
 	conn, err := d.qmpSocket()
+	d.qmpMu.Unlock()
 	if err != nil {
 		if waitErr := cmd.Process.Signal(syscall.Signal(0)); waitErr != nil {
 			exit := "unknown"

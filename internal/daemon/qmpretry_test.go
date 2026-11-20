@@ -2,7 +2,9 @@ package daemon
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -241,5 +243,51 @@ func TestASecondCallerRetriesOnTheConnectionSomebodyElsePublished(t *testing.T) 
 	if still != fresh {
 		t.Fatal("the published connection was replaced; that is the loop that made 280 reconnects " +
 			"for one boot")
+	}
+}
+
+// TestTheBootPathTakesTheSameLockAsEveryOtherCaller is the invariant the last pod run broke.
+//
+// MEASURED ON THE POD, at `boot the disk`:
+//
+//	boot: this qmp socket is already held by this process (by "easyvm"); pass that connection
+//	instead of opening a second - qemu allows one client per socket
+//
+// A conflict with itself, through the ONE path that had not been brought under `qmpMu`: `Boot`
+// released the registry entry for the previous machine and then `Acquire`d the new one, both outside
+// the lock, while the recorder's sampler was taking `qmpMu` to capture a frame. The sampler's
+// `Acquire` and the boot's `Acquire` then disagreed about who owned the socket.
+//
+// THE RULE IS "EVERY QMP TRANSACTION HOLDS qmpMu", and this checks the boot path follows it - by
+// source, because the alternative is a test that needs two goroutines, a real socket and a race
+// detector to demonstrate an ordering.
+func TestTheBootPathTakesTheSameLockAsEveryOtherCaller(t *testing.T) {
+	body, err := os.ReadFile("driver.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	code := dropLineComments(string(body))
+
+	i := strings.Index(code, "func (m machineControl) Boot(spec run.BootSpec) error {")
+	if i < 0 {
+		t.Fatal("no Boot")
+	}
+	fn := functionBody(code[i:])
+
+	// THE REGISTRY IS TOUCHED IN TWO PLACES IN Boot, and both are transactions with the socket.
+	for _, call := range []string{"d.qmpRegistry().Release(qmpPath)", "d.qmpSocket()"} {
+		j := strings.Index(fn, call)
+		if j < 0 {
+			t.Fatalf("`Boot` no longer contains %q; this test is checking a shape that changed", call)
+		}
+		before := fn[:j]
+		// the nearest lock/unlock pair before the call must be a Lock
+		lastLock := strings.LastIndex(before, "d.qmpMu.Lock()")
+		lastUnlock := strings.LastIndex(before, "d.qmpMu.Unlock()")
+		if lastLock < 0 || lastLock < lastUnlock {
+			t.Fatalf("`Boot` reaches %q without holding `qmpMu`. The recorder's sampler takes that "+
+				"lock every second, so an unguarded Acquire here races it and the daemon reports a "+
+				"socket held by ITSELF", call)
+		}
 	}
 }
