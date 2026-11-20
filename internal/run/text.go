@@ -405,6 +405,7 @@ func (e *Executor) doWhen(s walk.Step) error {
 	}
 	if !says(words, want) {
 		e.Driver.Log(fmt.Sprintf("  skipped: the screen does not say %q", strings.Join(want, " ")))
+		e.skipped = true
 		return nil
 	}
 	e.Driver.Log(fmt.Sprintf("  applies: the screen says %q", strings.Join(want, " ")))
@@ -456,6 +457,7 @@ func (e *Executor) doUnless(s walk.Step) error {
 	}
 	if already {
 		e.Driver.Log(fmt.Sprintf("  skipped: the screen already shows %q", hit))
+		e.skipped = true
 		return nil
 	}
 	// THE STEP CONTINUES. `unless` is a gate on the rest of the same step, and the dispatcher ran

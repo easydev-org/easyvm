@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/easydev-org/easyvm/internal/guest"
+	"github.com/easydev-org/easyvm/internal/journal"
 	"github.com/easydev-org/easyvm/internal/keys"
 	"github.com/easydev-org/easyvm/internal/walk"
 )
@@ -86,6 +87,15 @@ type Executor struct {
 	// assetExtras is the other files one `fetch:` produced, in its own order - the three OpenCore
 	// outputs are a boot image, a ROM and a variables file, and a boot step names all three.
 	assetExtras map[string][]string
+	// Journal receives one structured record per step - what it decided, what it read, and the
+	// pictures it decided from. IT IS OPTIONAL: a nil satisfies it, and a test that builds an
+	// Executor by value gets a silent no-op.
+	//
+	// IT IS NOT `OnStep`. `OnStep` is one callback with three arguments, enough for "where is it
+	// now"; this carries the EVIDENCE, which is what a person asking "why did this fail" needs and
+	// the log prints as a sentence they then have to decode.
+	Journal Journal
+
 	// OnStep is called as each step begins, for a daemon that must answer "where is it now".
 	//
 	// IT IS NOT LOGGING. The log is a stream a human reads; this is the one fact a client needs to
@@ -134,6 +144,20 @@ type Executor struct {
 	//
 	// THE ZERO VALUE IS USABLE, like `seen` and `facts` above.
 	numbers map[string]float64
+
+	// evidence is what the current step measured, filled in as it runs and consumed by `decorate`
+	// into the journal record. It is per-step state, reset at each step boundary.
+	evidence *evidence
+
+	// attempts are a `loop:`'s passes, for the journal. A loop is the one step whose most useful
+	// evidence is its HISTORY rather than its verdict: eight identical log lines say nothing about
+	// which attempt came closest.
+	attempts []journal.Attempt
+
+	// skipped is set by a gate (`when:`/`unless:`) that decided the step does not apply, so the
+	// journal can say "skipped" rather than "passed". A STEP THAT DID NOT RUN IS NOT A PASS, and a
+	// report that cannot tell them apart is the same lie `optional:` used to tell.
+	skipped bool
 
 	// shots is the FRAME a `see:` step captured, by the name it was given.
 	//
@@ -256,8 +280,25 @@ func (e *Executor) Run(steps []walk.Step) (Result, error) {
 		}
 
 		e.Driver.Log("=== " + s.Name)
+		// THE STEP IS ANNOUNCED BEFORE IT RUNS, so a reader following a long step sees WHICH step the
+		// time is going into. The finished record replaces it by ordinal, which is how a step that
+		// hangs still appears in the report rather than vanishing from it.
+		began := time.Now()
+		kind := kindOf(s)
+		e.journStep(s, i+1, len(steps), kind, journal.StatusRunning, time.Time{})
 		err := e.runOne(s)
+		// WHAT THE STEP MEASURED IS ATTACHED HERE, while `e.lastEvidence` still describes this step.
+		finished := e.journStep(s, i+1, len(steps), kind, journal.StatusPassed, began)
+		finished = e.decorate(finished, s)
 		if err == nil {
+			// A GATED STEP THAT DID NOT RUN IS NOT A PASS, and saying "passed" for it makes a stage
+			// that skipped its own verification look complete. `when:`/`unless:` set this.
+			if e.skipped {
+				finished.Status = journal.StatusSkipped
+				finished.Message = "the step's `when:`/`unless:` did not hold, so it did not run"
+				e.skipped = false
+			}
+			e.journ(finished)
 			res.Answered = append(res.Answered, s.Name)
 			continue
 		}
@@ -265,9 +306,17 @@ func (e *Executor) Run(steps []walk.Step) (Result, error) {
 			// AN OPTIONAL FAILURE IS SAID OUT LOUD. A step that failed and was passed over
 			// silently is indistinguishable, in the log, from one that worked.
 			e.Driver.Log(fmt.Sprintf("  %s: failed and the step is optional: %v", s.Name, err))
+			// AND IT IS ITS OWN STATUS IN THE JOURNAL, not a pass with a note. A stage that stepped
+			// over a failure is exactly what a reader of this report most needs to see.
+			finished.Status = journal.StatusOptional
+			finished.Message = err.Error()
+			e.journ(finished)
 			res.Answered = append(res.Answered, s.Name)
 			continue
 		}
+		finished.Status = journal.StatusFailed
+		finished.Message = err.Error()
+		e.journ(finished)
 		res.Err = err
 		return res, err
 	}

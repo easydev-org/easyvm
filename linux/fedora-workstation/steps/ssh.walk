@@ -380,7 +380,19 @@ walkthrough "linux-fedora-workstation - sshd"
     type_gap == 0.08
   step "the result list has had time to draw"
     settle == 4
-  press Return, waiting 25s, named "open the terminal on the first result"
+  # THE RESULT IS CLICKED, NOT OPENED WITH RETURN, AND THE DIFFERENCE IS MEASURED.
+  #
+  # MEASURED ON THE POD: with "terminal" in the box the search draws the Terminal app FIRST, at
+  # (960, 178) - and a Return at that moment opened something else, leaving a clean desktop with no
+  # window on it. Clicking that first tile opened
+  #
+  #	vmuser@fedora:~$
+  #
+  # immediately. The tile is the first row of a list whose height is fixed by the search field above
+  # it, so its centre does not move as the list fills in.
+  step "open the terminal on the first result"
+    click == [960, 178]
+    settle == 20
   # THE TERMINAL HAS TO BE PROVEN OPEN BEFORE ANY COMMAND IS TYPED INTO IT.
   #
   # THIS STEP WOULD HAVE CAUGHT THE FAULT ABOVE ON ITS FIRST RUN. The stage typed eight commands

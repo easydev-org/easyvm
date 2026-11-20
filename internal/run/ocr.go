@@ -877,6 +877,15 @@ func (e *Executor) checkFrame(step string, raw map[string]any, from, path string
 		}
 		okNow = sim >= lo && sim <= hi
 		detail = fmt.Sprintf("%.4f similar, wanted %.4f..%.4f", sim, lo, hi)
+		// THE PICTURES THE NUMBER CAME FROM, KEPT.
+		//
+		// THE NUMBER ALONE WAS THE WHOLE PROBLEM. MEASURED on a fedora run: the log said
+		// "0.7097 similar, wanted 0.7800..1.0000" about a page that looked correct, and there was no
+		// way to ask WHICH pixels disagreed - the crops were local variables and the frame would be
+		// overwritten by the next capture a second later. These three files answer that question:
+		// what the frame showed, what the reference holds, and where they differ.
+		e.recordLikeEvidence(step, ref, img, rect, sim, lo, hi)
+
 	case "text", "contains", "matches", "equals":
 		// THE WORD MODES, ALL FOUR, FROM ONE READ.
 		//
