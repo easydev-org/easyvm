@@ -237,6 +237,27 @@ walkthrough "linux-opensuse-tumbleweed - sshd"
     run == sudo mkdir -p /run/sshd /etc/ssh; sudo ssh-keygen -A; sudo ls -l /etc/ssh/ssh_host_*_key
     settle == 12
     terminal_wait == 0
+  # NOW THAT A HOST KEY EXISTS, `sshd -T` CAN ANSWER - AND IT MUST SAY WHICH FILE IT READ.
+  #
+  # MEASURED ON RUN e06024d's console, AFTER the keys were generated this time:
+  #
+  #	ssh-keygen: generating new host keys: RSA ECDSA ED25519
+  #	-rw------- 1 root root 525 Nov 20 03:49 /etc/ssh/ssh_host_ecdsa_key
+  #	... and sshd then read ACTIVE
+  #
+  # so the key half is fixed. What is left is the AUTHENTICATION half, and the config file itself
+  # says which mechanism this distribution expects:
+  #
+  #	67:# PasswordAuthentication. Depending on your PAM configuration,
+  #	   # if you wish to use the "PermitRootLogin without-password" ...
+  #
+  # OPEN SUSE AUTHENTICATES THROUGH PAM, and PAM's own password stack is what has to accept this
+  # account. `sshd -T` (which no longer needs a key) is asked for the two settings that decide it,
+  # and `pam.d/sshd` is printed, so the next recording says whether the daemon or PAM refused.
+  step "ask sshd which file it read and what it decided"
+    run == sudo sshd -T 2>&1 | grep -iE "^(passwordauthentication|usepam|kbdinteractiveauthentication|permitrootlogin|pubkeyauthentication)"; echo === ; sudo ls -l /etc/ssh/sshd_config /usr/etc/ssh/sshd_config; echo === ; sudo grep -c . /etc/pam.d/sshd
+    settle == 5
+    terminal_wait == 0
   step "start sshd"
     run == sudo systemctl restart sshd 2>&1 | tail -3; sleep 2; systemctl is-active sshd
     settle == 10
