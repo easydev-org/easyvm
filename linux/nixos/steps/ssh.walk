@@ -178,9 +178,23 @@ walkthrough "linux-nixos - sshd"
   step "prove the account over ssh"
     ssh == id -un; hostname
     timeout == 120
+  # `poweroff` CUTS THE CONNECTION IT WAS SENT OVER, SO SSH REPORTS "exited without exit status".
+  #
+  # MEASURED ON RUN aca5d8b's nixos ssh: the stage reached step 23 of 25 and failed with
+  #
+  #	ask the guest to power off: ssh: wait: remote command exited without exit status or exit signal
+  #
+  # - which is what a successful poweroff looks like from the client's side: the machine goes down
+  # mid-command and the channel closes without a status. The daemon at this point is `systemd-poweroff`,
+  # which kills the session before the shell can report.
+  #
+  # `poweroff &` RETURNS FIRST AND LETS THE SHELL EXIT CLEANLY, and the step is optional so a clean
+  # exit and a cut connection both count; `wait for the machine to stop` is the real assertion, and
+  # it is what the next stage depends on.
   step "ask the guest to power off"
-    ssh == printf '%s\n' '{{ password }}' | sudo -S -p '' poweroff
+    ssh == printf '%s\n' '{{ password }}' | sudo -S -p '' sh -c 'nohup poweroff >/dev/null 2>&1 &'
     timeout == 300
+    optional == true
   step "wait for the machine to stop"
     timeout == 300
     wait_until == stopped
