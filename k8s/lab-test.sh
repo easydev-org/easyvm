@@ -39,21 +39,33 @@ $EV destroy --work /work >/dev/null 2>&1 || true
 sleep 2
 ip link del qemutap0 2>/dev/null || true
 
-# THE DAEMON MUST BE THE SAME BUILD AS THE CLIENT, or the client sends a request the old parser
-# reads with its old vocabulary. The pod's PID 1 is `easyvm serve` from the image, so it is replaced
-# by a serve from the binary under test, on the same work directory and socket.
-echo "=== restart the daemon on $EV"
-for p in $(ps -eo pid,comm 2>/dev/null | awk '$2 ~ /^easyvm$/ { print $1 }'); do
-    [ "$p" = "1" ] && kill -TERM 1 2>/dev/null || kill -TERM "$p" 2>/dev/null || true
-done
-sleep 4
-nohup $EV serve --work /work --http :8080 > /tmp/daemon-under-test.log 2>&1 < /dev/null &
-sleep 6
-$EV status --work /work 2>&1 | head -3 || true
+# THIS SCRIPT DOES NOT START, STOP OR REPLACE THE DAEMON, BECAUSE THERE IS EXACTLY ONE PER CONTAINER.
+#
+# `k8s/lab.yaml` runs `easyvm serve --work /work` as PID 1 with `restartPolicy: Always`, and the
+# kubelet is what restarts it - that is the only reset that cannot leave a half-killed daemon behind.
+#
+# MEASURED, AND IT IS WHY THIS COMMENT EXISTS: an earlier version of this script killed whatever
+# `easyvm` it found and started its own. In a pod whose PID 1 was `sleep infinity` that produced a
+# daemon nobody supervised, and on a second run it produced TWO: the second answered
+#
+#	FAILED: http listen :8080: listen tcp :8080: bind: address already in use
+#
+# and the walk then ran against the first one, which was a different binary. The steps were answered by
+# a server that did not know the vocabulary under test, and every conclusion drawn from that run was
+# about the wrong build.
+#
+# SO THE BINARY UNDER TEST COMES FROM THE IMAGE. Rebuild it with `image.yml`, then restart the pod so
+# the kubelet brings up the new one:
+#
+#	gh workflow run image.yml -f push=true
+#	kubectl delete pod <name>        # the Deployment recreates it on the new :latest
+#
+# A LOCAL OVERRIDE IS STILL POSSIBLE and is opt-in: pass EV to point the CLIENT at another binary. The
+# server is always the pod's own.
 
 echo "=== copy the parent in"
 rm -f /work/disk.qcow2
 cp "$src" /work/disk.qcow2
 
 echo "=== run $walk"
-exec $EV run "$walk" --work /work --boot-disk /work/disk.qcow2
+exec "$EV" run "$walk" --work /work --boot-disk /work/disk.qcow2

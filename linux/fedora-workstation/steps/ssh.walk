@@ -82,8 +82,23 @@ walkthrough "linux-fedora-workstation - sshd"
   # A first boot of an installed Fedora regenerates the initramfs and starts GNOME Initial Setup; on a
   # cold disk that is several minutes. The budget is fifteen, and `settle: 10` between looks so the
   # forty looks are not spent describing the same splash.
+  # THE WIZARD IS RECOGNISED BY ITS OWN CHROME, NOT BY WHICH PAGE IT IS SHOWING.
+  #
+  # MEASURED ON THE POD, with the published `linux-fedora-workstation` disk: after the boot finished
+  # the wizard was ALREADY PAST the welcome page - the region this check reads held
+  #
+  #	"Privacy controls can be changed at any time from the Settings app."
+  #
+  # - the same sentence CI's log has been showing for runs, reported there as
+  # `none of "welcome to fedora" or "setup will guide"`. Both were reading the wizard's SIXTH page
+  # and asking for its first, so the check said "no wizard" while the wizard was on screen, and the
+  # loop spent its whole budget proving it.
+  #
+  # EVERY PAGE OF GNOME INITIAL SETUP CARRIES "Previous" AND "Next" in the header - the welcome page
+  # included, where they are drawn but disabled. That pair is the wizard's chrome and nothing else on
+  # this desktop wears it.
   step "the setup wizard is up"
-    loop == {check: {from: wizard, mode: text, name: up, rect: [450, 620, 1470, 900], rect_at: [1920, 1080], scale: 1, words: [[welcome, to, fedora], [setup, will, guide]]}, do: [{settle: 10}], max: 90, see: {name: wizard}, until: {fact: up}}
+    loop == {check: {from: wizard, mode: text, name: up, rect: [0, 150, 1920, 1080], rect_at: [1920, 1080], scale: 1, words: [[welcome, to, fedora], [setup, will, guide], [start, setup], [privacy, controls], [previous], [third, party]]}, do: [{settle: 10}], max: 90, see: {name: wizard}, until: {fact: up}}
     optional == true
   # THE CLICK AT THE BUTTON'S OWN CENTRE DID NOT TAKE, SO THE BUTTON IS REACHED BY KEYBOARD.
   #
