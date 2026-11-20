@@ -1551,7 +1551,34 @@ func (d *Driver) qmpSocket() (*qmp.Conn, error) {
 	if d.qmp != nil {
 		conn := d.qmp
 		d.mu.Unlock()
-		return conn, nil
+		// A CACHED CONNECTION IS NOT THE SAME AS A WORKING ONE, AND THIS IS WHERE THAT ASSUMPTION COST
+		// A RUN ITS WHOLE BUDGET.
+		//
+		// MEASURED ON A POD, `linux-fedora-workstation`'s ssh stage: every step from the third on
+		// answered
+		//
+		//	key "tab": input-send-event []+tab: the qmp connection is closed
+		//
+		// while qemu itself was healthy - 4 vCPUs blocked in `kvm_vcpu_block`, the guest's CPU ticks
+		// climbing 185 in five seconds, the QMP socket still LISTENing. `ss -xp` showed qemu's end of
+		// the channel ESTAB with NO PEER: the connection had gone and this cache still held it.
+		//
+		// So the cached connection is PROBED before it is handed out. `Ping` is a `query-status`,
+		// which is the cheapest question the protocol has and cannot change anything.
+		//
+		// A PROBE ON EVERY CALL IS NOT A COST WORTH AVOIDING: the alternative is a stage that reports
+		// forty false failures about a machine that is running, and a reader who cannot tell them
+		// from real ones.
+		if err := conn.Ping(); err == nil {
+			return conn, nil
+		}
+		// DEAD: drop it so the Acquire below reconnects, and close it so qemu's client slot is free.
+		d.mu.Lock()
+		if d.qmp == conn {
+			d.qmp = nil
+		}
+		d.mu.Unlock()
+		_ = conn.Close()
 	}
 	path := filepath.Join(d.work, "drive.sock.qmp")
 	d.mu.Unlock()

@@ -788,6 +788,20 @@ func (c *Conn) button(b raw.InputButton, down bool) error {
 	return nil
 }
 
+// Ping asks qemu the cheapest question the protocol has, to prove the channel still answers.
+//
+// A CACHED `*Conn` IS NOT EVIDENCE THAT QEMU IS STILL ON THE OTHER END. MEASURED on a pod: qemu was
+// healthy - four vCPUs in `kvm_vcpu_block`, the guest's own CPU ticks climbing - while this side's
+// socket was ESTAB with NO PEER, and every later key press reported "the qmp connection is closed".
+// `query-status` changes nothing, costs one round trip, and is the difference between a stage that
+// reconnects and one that reports forty false failures about a machine that is running.
+func (c *Conn) Ping() error {
+	return c.withRaw(func(m *raw.Monitor) error {
+		_, err := m.QueryStatus()
+		return err
+	})
+}
+
 // Key sends one key with no modifiers.
 func (c *Conn) Key(name string) error {
 	return c.Stroke(nil, name)
