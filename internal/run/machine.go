@@ -288,10 +288,26 @@ func MachineHalf(f *walk.File) (MachineSpec, []walk.Step, error) { return machin
 func MachineSteps(m MachineSpec) []walk.Step {
 	var out []walk.Step
 	if m.Disk != nil {
-		out = append(out, walk.Step{Name: "create the machine's disk", Spec: map[string]any{
-			"name": "create the machine's disk", "disk": m.Disk.Path,
-			"disk_gb": float64(m.Disk.GB),
-		}})
+		// `disk_gb` IS ONLY EMITTED WHEN THE FILE ASKED FOR A DISK TO BE CREATED.
+		//
+		// A `disk: alpine.qcow2` NAMES AN EXISTING FILE - the rootfs a microvm boots - and it has no
+		// size at all. This function used to emit `disk_gb: 0` for it regardless, and the executor's
+		// `createDisk` then refused with
+		//
+		//	FAILED: create the machine's disk: `disk_gb:` must be a positive number of gigabytes,
+		//	got 0
+		//
+		// which is a sentence about a key the file never wrote. MEASURED on easyvm-microvm's alpine
+		// walkthrough, which has no `disk_gb:` and could not be started by `easyvm create` at all.
+		//
+		// A ZERO SIZE MEANS "THIS DISK ALREADY EXISTS", and the step that says so is `disk:` on its
+		// own - which is exactly what the file wrote.
+		spec := map[string]any{"name": "the machine's disk", "disk": m.Disk.Path}
+		if m.Disk.GB > 0 {
+			spec["name"] = "create the machine's disk"
+			spec["disk_gb"] = float64(m.Disk.GB)
+		}
+		out = append(out, walk.Step{Name: spec["name"].(string), Spec: spec})
 	}
 	for _, f := range m.Fetch {
 		// ONE KEY, ONE SPELLING. This used to emit `asset:`, `build:` or `generate:` depending on

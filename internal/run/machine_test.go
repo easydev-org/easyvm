@@ -283,3 +283,51 @@ func TestTheGuestSizeReachesTheBootStep(t *testing.T) {
 		})
 	}
 }
+
+// A DISK THAT ALREADY EXISTS MUST NOT BE ASKED FOR A SIZE.
+//
+// MEASURED ON easyvm-microvm's alpine walkthrough, which names `disk: alpine.qcow2` - the root
+// filesystem it boots - and has no `disk_gb:` anywhere:
+//
+//	FAILED: : create the machine's disk: `disk_gb:` must be a positive number of gigabytes, got 0
+//
+// `machineFromSteps` read the absent size as 0, `MachineSteps` turned that back into `disk_gb: 0`, and
+// the executor refused a step the file never wrote. The sentence names the key rather than the
+// conversion, so it reads like a malformed walkthrough rather than like a round trip that invented one.
+func TestADiskThatAlreadyExistsIsNotGivenASize(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mem.walk")
+	body := `walkthrough "a rootfs a microvm boots"
+  resolution 1024x768
+  recording_resolution 1024x768
+  needs alpine-vmlinuz alpine-initramfs
+  disk alpine.qcow2
+  boot as a microvm from kernel "alpine-vmlinuz" and initramfs "alpine-initramfs" with "console=ttyS0" without a display with memory 768
+`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	file, err := walk.Load(path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, _, err := MachineHalf(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Disk == nil || m.Disk.Path != "alpine.qcow2" {
+		t.Fatalf("the disk was not read: %+v", m.Disk)
+	}
+	if m.Disk.GB != 0 {
+		t.Fatalf("the disk reports %d GiB; the file named an existing one and gave no size", m.Disk.GB)
+	}
+
+	st := MachineSteps(m)
+	for _, s := range st {
+		if _, ok := s.Spec["disk_gb"]; ok {
+			t.Fatalf("the regenerated step carries `disk_gb: %v`, and the file never wrote one. "+
+				"`createDisk` refuses a zero, so this walkthrough could not be started by "+
+				"`easyvm create` at all", s.Spec["disk_gb"])
+		}
+	}
+}
