@@ -158,13 +158,18 @@ walkthrough "linux-cachyos - sshd"
   step "leave the sshd diagnosis where a later boot can read it"
     ssh == "printf '%s\\n' '{{ password }}' | sudo -S -p '' sh -c '\n  {\n    echo \"=== $(date) writing the diagnosis before the reboot ===\"\n    echo \"--- is-enabled / is-active / is-failed ---\"\n    systemctl is-enabled sshd; systemctl is-active sshd; systemctl is-failed sshd\n    echo \"--- the unit that is enabled ---\"\n    systemctl cat sshd 2>&1 | head -30\n    echo \"--- the symlinks that would start it ---\"\n    ls -l /etc/systemd/system/*.wants/sshd* /etc/systemd/system/sshd* 2>&1\n    echo \"--- masked? ---\"\n    systemctl is-enabled sshd 2>&1\n    echo \"--- host keys ---\"\n    ls -l /etc/ssh/ssh_host_*_key 2>&1\n    echo \"--- the journal of this boot ---\"\n    journalctl -b -u sshd --no-pager 2>&1 | tail -20\n  } > /var/log/easyvm-sshd.txt 2>&1\n  chmod 644 /var/log/easyvm-sshd.txt\n  echo \"wrote $(wc -l < /var/log/easyvm-sshd.txt) lines to /var/log/easyvm-sshd.txt\"'\n"
     timeout == 180
+  # `optional` IS GONE BECAUSE THE COMMAND ALREADY SAYS WHICH PART MAY FAIL: the `|| true` is on the
+  # `is-enabled` probe, where a socket that is not there is a fact worth printing and not a reason to
+  # fail. The `enable --now` itself is NOT tolerant - if the socket cannot be enabled, this stage needs
+  # to know, because the next boot is what proves it.
   step "enable the socket as well, for a boot where the service does not start"
-    optional == true
     ssh == "printf '%s\\n' '{{ password }}' | sudo -S -p '' sh -c '\n  systemctl enable --now sshd.socket 2>&1 | tail -3\n  systemctl is-enabled sshd.socket 2>&1 || true'\n"
     timeout == 180
+  # `optional` IS GONE AND THE TOLERANCE IS IN THE COMMAND. A reboot that works also closes this
+  # connection, so the client reports a failure for a machine that is rebooting exactly as asked.
+  # `come back up with sshd answering` is the assertion.
   step "restart the machine"
-    optional == true
-    ssh == "printf '%s\\n' '{{ password }}' | sudo -S -p '' systemctl reboot\n"
+    ssh == "printf '%s\\n' '{{ password }}' | sudo -S -p '' systemctl reboot || true\n"
     timeout == 60
   step "come back up with sshd answering"
     require_ssh == true

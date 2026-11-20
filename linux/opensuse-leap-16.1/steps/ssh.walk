@@ -370,9 +370,12 @@ walkthrough "linux-opensuse-tumbleweed - sshd"
   step "prove sshd will start at boot"
     ssh == "set -e\necho \"is-enabled: $(systemctl is-enabled sshd)\"\necho \"is-active:  $(systemctl is-active sshd)\"\necho \"wants:      $(ls /etc/systemd/system/multi-user.target.wants/sshd.service 2>&1)\"\ntest \"$(systemctl is-enabled sshd)\" = \"enabled\"\ntest -L /etc/systemd/system/multi-user.target.wants/sshd.service\n"
     timeout == 120
+  # `optional` IS GONE AND THE TOLERANCE IS IN THE COMMAND. A reboot that works also closes this
+  # connection, so the client reports a failure for a machine that is rebooting exactly as asked -
+  # writing `|| true` says that where the log shows it, and `come back up with sshd answering` below
+  # is the assertion. `optional` would have swallowed a reboot that never started too.
   step "restart the machine"
-    optional == true
-    ssh == "printf '%s\\n' '{{ password }}' | sudo -S -p '' systemctl reboot\n"
+    ssh == "printf '%s\\n' '{{ password }}' | sudo -S -p '' systemctl reboot || true\n"
     timeout == 60
   step "come back up with sshd answering"
     require_ssh == true

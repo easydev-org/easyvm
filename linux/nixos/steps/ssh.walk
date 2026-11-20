@@ -192,9 +192,14 @@ walkthrough "linux-nixos - sshd"
   # exit and a cut connection both count; `wait for the machine to stop` is the real assertion, and
   # it is what the next stage depends on.
   step "ask the guest to power off"
-    ssh == printf '%s\n' '{{ password }}' | sudo -S -p '' sh -c 'nohup poweroff >/dev/null 2>&1 &'
+    # `optional` IS GONE AND THE TOLERANCE IS IN THE COMMAND, WHERE THE LOG SHOWS IT.
+    #
+    # poweroff cuts the connection carrying it, so the client sees "exited without exit status" for a
+    # shutdown that WORKED. Writing `|| true` says that in the command; `optional` said it by
+    # swallowing whatever happened, including a shutdown that never started. `wait for the machine to
+    # stop` is the assertion, and it runs either way.
+    ssh == printf '%s\n' '{{ password }}' | sudo -S -p '' sh -c 'nohup poweroff >/dev/null 2>&1 &' || true
     timeout == 300
-    optional == true
   step "wait for the machine to stop"
     timeout == 300
     wait_until == stopped

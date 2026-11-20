@@ -353,18 +353,26 @@ func CheckOptionalDoesNotAct(stepName string, mapping map[string]any) error {
 	// it would delete eleven files' worth of screens that are simply allowed to be absent. The keys
 	// below are the ones that cannot be undone: a click lands somewhere, a key is pressed, a command
 	// runs. `loop:`'s own body is checked when it runs, by the same dispatcher.
-	// THE KEYS BELOW PRESS SOMETHING INTO WHATEVER HAS FOCUS, and that is the whole danger: a click
-	// lands wherever the pointer is, a key goes to whichever window is in front. `optional` cannot
-	// undo any of that.
+	// EVERY KEY THAT ACTS IS ON THIS LIST, INCLUDING THE ONES THAT REACH THE GUEST OVER A CHANNEL.
 	//
-	// `ssh:`, `run:` AND `scp:` ARE NOT ON THIS LIST, AND THE DISTINCTION IS THE POINT. They reach a
-	// guest that is already up, over a channel the stage owns, so a failure is a fact about that
-	// command - `systemctl enable sshd.socket` on a system without the unit is a miss worth recording,
-	// not a keystroke fired into an unknown window. MEASURED on cachyos, whose diagnosis step is
-	// deliberately optional for exactly that reason.
+	// I FIRST LEFT `ssh:`, `run:` AND `scp:` OUT, ARGUING THEY WERE SAFER THAN A KEYSTROKE: they reach
+	// a guest the stage already owns, so a failure is "a fact about that command". THAT ARGUMENT IS
+	// WRONG, and the same run proves it. `systemctl enable sshd.socket` failing because the unit does
+	// not exist, swallowed by `optional`, leaves the stage reporting success on a machine where the
+	// socket is still not enabled - and the NEXT step then waits ten minutes for a port that this one
+	// silently failed to arrange. A swallowed command failure is the same lie as a swallowed click:
+	// the stage moves on believing something it never checked.
+	//
+	// THE ANSWER TO "THIS COMMAND MAY LEGITIMATELY FAIL" IS NOT `optional` - it is one of:
+	//
+	//	wait until the condition holds, then run it and let it fail;
+	//	write the tolerance INTO the command (`... || true`), where the log shows it;
+	//	split it, so the part that can fail is a `check:` that may be optional.
+	//
+	// A step that is `optional` AND acts is a step whose failure has nowhere to go.
 	presses := map[string]bool{
 		"click": true, "double": true, "key": true, "press": true, "type": true,
-		"script": true, "qga": true, "adb": true,
+		"run": true, "ssh": true, "scp": true, "script": true, "qga": true, "adb": true,
 	}
 	for _, key := range ActionsIn(mapping) {
 		if !presses[key] {
