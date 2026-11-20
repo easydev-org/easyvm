@@ -526,13 +526,17 @@ func (d *Daemon) handle(req Request) Response {
 		if err != nil {
 			return Response{OK: false, Error: err.Error()}
 		}
-		return d.withQMP("click", func(c *qmp.Conn) error { return c.Click(x, y) })
+		// THROUGH THE DRIVER'S OWN METHOD, NOT A QMP CALL, so the click is AUDITED. The driver is the
+		// one place a pointer press is recorded; a `withQMP` call here would send the event and leave
+		// no trace of it, which is how a person's own clicks came to be missing from the record of
+		// their own run.
+		return d.withDriver("click", func(drv *Driver) error { return drv.Click(x, y) })
 	case protocol.CommandDouble:
 		x, y, err := xyOf("double-click", req)
 		if err != nil {
 			return Response{OK: false, Error: err.Error()}
 		}
-		return d.withQMP("double-click", func(c *qmp.Conn) error { return c.DoubleClick(x, y) })
+		return d.withDriver("double-click", func(drv *Driver) error { return drv.DoubleClick(x, y) })
 	case protocol.CommandKey:
 		if req.Key == "" {
 			return Response{OK: false, Error: "`key` needs a key, for example ret or ctrl+alt+t"}
@@ -541,9 +545,10 @@ func (d *Daemon) handle(req Request) Response {
 		if err != nil {
 			return Response{OK: false, Error: err.Error()}
 		}
-		return d.withQMP("key", func(c *qmp.Conn) error {
+		// AND THE SAME RULE FOR A KEY: `drv.Stroke` is where a keystroke is written down.
+		return d.withDriver("key", func(drv *Driver) error {
 			for _, stroke := range strokes {
-				if err := c.Stroke(stroke.Modifiers, stroke.Key); err != nil {
+				if err := drv.Stroke(stroke.Modifiers, stroke.Key); err != nil {
 					return err
 				}
 			}
@@ -837,6 +842,10 @@ func (d *Daemon) withQMP(what string, op func(*qmp.Conn) error) Response {
 		if !ok {
 			return fmt.Errorf("this driver does not expose QMP")
 		}
+		if concrete.audit != nil {
+			concrete.audit.setOrigin(journal.OriginAPI)
+			defer concrete.audit.setOrigin(journal.OriginWalk)
+		}
 		return concrete.QMPCommand(op)
 	})
 	if err != nil {
@@ -848,11 +857,20 @@ func (d *Daemon) withQMP(what string, op func(*qmp.Conn) error) Response {
 
 // withDriver is `withQMP` for the operations that need the DRIVER rather than the connection -
 // `type` paces its keystrokes, and that loop lives on the driver.
+//
+// IT MARKS THE AUDIT AS `api` FOR THE DURATION, and that is what makes a person's own clicks
+// distinguishable from the file's. The driver's methods are the ONE place a keystroke is recorded, so
+// an HTTP click that went straight to QMP was not recorded at all - MEASURED: before this, a run's
+// journal held the walkthrough's 7 clicks and none of the operator's.
 func (d *Daemon) withDriver(what string, op func(*Driver) error) Response {
 	runErr := d.withMachine(func(drv run.Driver) error {
 		concrete, ok := drv.(*Driver)
 		if !ok {
 			return fmt.Errorf("this driver cannot type")
+		}
+		if concrete.audit != nil {
+			concrete.audit.setOrigin(journal.OriginAPI)
+			defer concrete.audit.setOrigin(journal.OriginWalk)
 		}
 		return op(concrete)
 	})

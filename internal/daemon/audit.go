@@ -29,6 +29,10 @@ type audit struct {
 	err   error
 	step  string
 	index int
+	// origin is who is asking: the walkthrough, a person, or the daemon. It is set around an HTTP
+	// operation and put back afterwards, so a walk resuming after a manual click is recorded as
+	// `walk` again.
+	origin journal.Origin
 }
 
 // newAudit builds the sink for one run.
@@ -48,6 +52,20 @@ func (a *audit) setStep(name string, index int) {
 	a.mu.Unlock()
 }
 
+// setOrigin says who is asking until it is set back.
+//
+// IT IS A SETTER RATHER THAN AN ARGUMENT for the reason `setStep` is: the call sites are inside
+// `Click`/`Type`/`Frame`, which take the arguments the walkthrough wrote and nothing else. Threading
+// an origin through every signature would change the interface the vocabulary is built on.
+func (a *audit) setOrigin(o journal.Origin) {
+	if a == nil {
+		return
+	}
+	a.mu.Lock()
+	a.origin = o
+	a.mu.Unlock()
+}
+
 // call records one external call. `ok` of nil means "not a call that can fail".
 //
 // IT TAKES A START TIME SO THE CALL'S DURATION IS THE CALL'S, not the write's. A keystroke that takes
@@ -58,13 +76,17 @@ func (a *audit) call(kind journal.CallKind, detail string, started time.Time, ok
 		return
 	}
 	a.mu.Lock()
-	step, index := a.step, a.index
+	step, index, origin := a.step, a.index, a.origin
 	a.mu.Unlock()
+	if origin == "" {
+		origin = journal.OriginWalk
+	}
 
 	e := journal.Event{
 		Step:       step,
 		StepIndex:  index,
 		Kind:       kind,
+		Origin:     origin,
 		Detail:     detail,
 		OK:         ok,
 		Rel:        rel,

@@ -1,14 +1,18 @@
 package daemon
 
 import (
+	"encoding/json"
 	"fmt"
 	"html"
+	"io"
 	"net/http"
 	"os"
+	"time"
 	"path/filepath"
 	"strconv"
 	"strings"
 
+	"github.com/easydev-org/easyvm/internal/console"
 	"github.com/easydev-org/easyvm/internal/journal"
 	"github.com/easydev-org/easyvm/internal/report"
 )
@@ -353,4 +357,112 @@ func (d *Daemon) handleReport(w http.ResponseWriter, r *http.Request) {
 		// status code. A reader who opened this URL wants to know why it is empty.
 		fmt.Fprintf(w, "<h1>no report</h1><p>%s</p>", html.EscapeString(err.Error()))
 	}
+}
+
+// handleJournalStream pushes events as they happen, one per line, as Server-Sent Events.
+//
+// WHY SSE RATHER THAN POLLING OR A WEBSOCKET: the page needs ONE DIRECTION - the daemon telling it
+// what happened - and it needs to survive a proxy that closes idle connections. SSE is a plain GET
+// with a `text/event-stream` body and a `retry:` hint, which every browser reconnects for free; a
+// websocket would need the noVNC bridge's upgrade path for a stream that never sends anything back.
+//
+//	GET /api/journal/stream?since=N&run=ID
+//
+// THE `since` PARAMETER IS THE WHOLE HISTORY QUESTION. A page that opens mid-run asks for everything
+// it has not seen; a page that reconnects asks from where it stopped. The stream sends what is
+// already stored first, then follows.
+func (d *Daemon) handleJournalStream(w http.ResponseWriter, r *http.Request) {
+	db := d.journalDB()
+	if db == nil {
+		http.Error(w, "this daemon has no journal", http.StatusServiceUnavailable)
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "this server cannot stream", http.StatusInternalServerError)
+		return
+	}
+	run := r.URL.Query().Get("run")
+	if run == "" {
+		run = db.RunID()
+	}
+	since, _ := strconv.Atoi(r.URL.Query().Get("since"))
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Connection", "keep-alive")
+	// A PROXY THAT BUFFERS WOULD HOLD EVERY EVENT UNTIL THE STREAM ENDED, which is never. This is the
+	// nginx convention for "do not buffer this response".
+	w.Header().Set("X-Accel-Buffering", "no")
+	// TELL THE BROWSER HOW TO RECONNECT, and so how quickly a dropped page catches up.
+	fmt.Fprint(w, "retry: 1500\n\n")
+	flusher.Flush()
+
+	tick := time.NewTicker(500 * time.Millisecond)
+	defer tick.Stop()
+	// A HEARTBEAT KEEPS THE CONNECTION ALIVE through an idle period - a run can sit on one step for
+	// ten minutes, and a proxy that sees nothing for sixty seconds drops the stream.
+	beat := time.NewTicker(20 * time.Second)
+	defer beat.Stop()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-beat.C:
+			fmt.Fprint(w, ": keep-alive\n\n")
+			flusher.Flush()
+		case <-tick.C:
+			events, err := db.EventsSince(run, since)
+			if err != nil {
+				return
+			}
+			for _, e := range events {
+				body, err := json.Marshal(e)
+				if err != nil {
+					continue
+				}
+				fmt.Fprintf(w, "id: %d\nevent: call\ndata: %s\n\n", e.Seq, body)
+				since = e.Seq
+			}
+			// AND THE STEP RECORDS, which are what the timeline's headings are. A page that only
+			// received calls would show a list of keystrokes with nothing to group them under.
+			steps, err := db.StepsSince(run, sinceStep(r, since))
+			if err == nil {
+				for _, st := range steps {
+					body, err := json.Marshal(st)
+					if err != nil {
+						continue
+					}
+					fmt.Fprintf(w, "event: step\ndata: %s\n\n", body)
+				}
+			}
+			flusher.Flush()
+		}
+	}
+}
+
+// sinceStep is the step sequence the stream has delivered, carried in the same cursor.
+//
+// IT IS NOT A SEPARATE PARAMETER because a page that has caught up on calls has also caught up on
+// steps: both are ordered by the same run, and a caller tracking two cursors would be tracking one
+// clock twice.
+func sinceStep(r *http.Request, callSeq int) int {
+	if v := r.URL.Query().Get("since_step"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return 0
+}
+
+// handleConsole serves the live page: the timeline of every call, the machine's screen, and a click
+// on that screen that reaches the guest.
+//
+// IT IS THE PAGE, NOT AN API. Everything it needs it fetches from endpoints that already exist, so
+// there is no second vocabulary and nothing to keep in step with the daemon's own views.
+func (d *Daemon) handleConsole(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = io.WriteString(w, console.Page)
 }

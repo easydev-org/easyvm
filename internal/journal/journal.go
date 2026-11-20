@@ -132,6 +132,26 @@ const (
 	CallQMP CallKind = "qmp"
 )
 
+// Origin says WHO asked for a call: the walkthrough, a person through the HTTP API, or the daemon
+// itself.
+//
+// THE DISTINCTION IS THE POINT OF THE WHOLE PAGE. A run of a `.walk` file and a person clicking the
+// console produce the SAME events - a click at 1413,193 is a click at 1413,193 - and a record that
+// could not tell them apart makes "why did the wizard advance" unanswerable. MEASURED: before this
+// field existed, `/api/click` went straight to QMP and was not recorded AT ALL, so a person's own
+// clicks were invisible in the record of their own run.
+type Origin string
+
+const (
+	// OriginWalk is a call the walkthrough file asked for.
+	OriginWalk Origin = "walk"
+	// OriginAPI is a call a person made through the HTTP surface - the console page, `curl`, a
+	// script. It is not part of the file, and a run reproduced from the file will not do it.
+	OriginAPI Origin = "api"
+	// OriginSystem is the daemon acting on its own: a boot, a shutdown, an error it handled.
+	OriginSystem Origin = "system"
+)
+
 // Image is one picture a step captured or compared.
 //
 // THERE ARE TWO WAYS TO NAME A PICTURE AND THEY MEAN DIFFERENT THINGS:
@@ -241,6 +261,12 @@ type Event struct {
 	StepIndex int    `json:"step_index"`
 	// Kind is what sort of call it was.
 	Kind CallKind `json:"kind"`
+	// Origin is who asked for it: the walkthrough, a person, or the daemon.
+	//
+	// A COLUMN RATHER THAN A GUESS FROM `Step`: an HTTP click made while a walk is running has a
+	// step, because the walk is where the machine is, and that is exactly the case where a reader
+	// must be able to tell "the file did this" from "somebody did this to the file's machine".
+	Origin Origin `json:"origin"`
 	// Detail is the call's own text: the key name, the command, the pixel pair.
 	Detail string `json:"detail,omitempty"`
 	// OK is whether it worked. Nil means "not a call that can fail".
@@ -370,6 +396,7 @@ CREATE TABLE IF NOT EXISTS event (
 	step        TEXT    NOT NULL,
 	step_index  INTEGER NOT NULL,
 	kind        TEXT    NOT NULL,
+	origin      TEXT    NOT NULL DEFAULT 'walk',
 	detail      TEXT    NOT NULL DEFAULT '',
 	ok          INTEGER,
 	error       TEXT    NOT NULL DEFAULT '',
@@ -379,6 +406,10 @@ CREATE TABLE IF NOT EXISTS event (
 );
 CREATE INDEX IF NOT EXISTS event_by_step ON event (run_id, step_index, seq);
 CREATE INDEX IF NOT EXISTS event_by_kind ON event (run_id, kind, seq);
+-- THE TIMELINE ASKS FOR EVERY CALL OF ONE RUN IN ORDER, and the since poll is the page's heartbeat;
+-- the primary key already answers that. This one serves "only the person's own actions", which is how
+-- a reader answers "did I break it or did the file".
+CREATE INDEX IF NOT EXISTS event_by_origin ON event (run_id, origin, seq);
 `
 if _, err := db.Exec(schema); err != nil {
 		return fmt.Errorf("creating the journal schema: %w", err)
@@ -527,10 +558,13 @@ func (j *DB) Event(e Event) error {
 	if e.Time == "" {
 		e.Time = now()
 	}
+	if e.Origin == "" {
+		e.Origin = OriginWalk
+	}
 	_, err := j.sql.Exec(`INSERT INTO event
-		(run_id, seq, time, step, step_index, kind, detail, ok, error, duration_ms, rel)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
-		e.RunID, e.Seq, e.Time, e.Step, e.StepIndex, string(e.Kind), e.Detail,
+		(run_id, seq, time, step, step_index, kind, origin, detail, ok, error, duration_ms, rel)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+		e.RunID, e.Seq, e.Time, e.Step, e.StepIndex, string(e.Kind), string(e.Origin), e.Detail,
 		nullBool(e.OK), e.Error, e.DurationMS, e.Rel,
 	)
 	if err != nil {
@@ -698,7 +732,7 @@ func (j *DB) Records(run string, since int) ([]Record, error) {
 // whole point of the two indexes in the schema: a detail view asks about ONE step and an audit asks
 // about ONE kind, and neither should scan the run.
 func (j *DB) Events(run string, stepIndex int, kind CallKind) ([]Event, error) {
-	q := `SELECT run_id, seq, time, step, step_index, kind, detail, ok, error, duration_ms, rel
+	q := `SELECT run_id, seq, time, step, step_index, kind, origin, detail, ok, error, duration_ms, rel
 		FROM event WHERE run_id = ?`
 	args := []any{run}
 	if stepIndex >= 0 {
@@ -720,13 +754,13 @@ func (j *DB) Events(run string, stepIndex int, kind CallKind) ([]Event, error) {
 	var out []Event
 	for rows.Next() {
 		var e Event
-		var k string
+		var k, origin string
 		var okVal sql.NullBool
-		if err := rows.Scan(&e.RunID, &e.Seq, &e.Time, &e.Step, &e.StepIndex, &k, &e.Detail,
+		if err := rows.Scan(&e.RunID, &e.Seq, &e.Time, &e.Step, &e.StepIndex, &k, &origin, &e.Detail,
 			&okVal, &e.Error, &e.DurationMS, &e.Rel); err != nil {
 			return nil, err
 		}
-		e.Kind = CallKind(k)
+		e.Kind, e.Origin = CallKind(k), Origin(origin)
 		if okVal.Valid {
 			v := okVal.Bool
 			e.OK = &v
@@ -735,6 +769,42 @@ func (j *DB) Events(run string, stepIndex int, kind CallKind) ([]Event, error) {
 	}
 	return out, rows.Err()
 }
+
+// EventsSince returns a run's calls after `seq`, in order, for a stream that follows a run.
+//
+// IT IS `Events` WITH A CURSOR rather than a separate query, so the page's poll and its stream read
+// the same rows the same way - two shapes for one table is how a live view comes to disagree with
+// the history it is showing.
+func (j *DB) EventsSince(run string, since int) ([]Event, error) {
+	rows, err := j.sql.Query(`SELECT run_id, seq, time, step, step_index, kind, origin, detail, ok,
+		error, duration_ms, rel
+		FROM event WHERE run_id = ? AND seq > ? ORDER BY seq`, run, since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []Event
+	for rows.Next() {
+		var e Event
+		var k, origin string
+		var okVal sql.NullBool
+		if err := rows.Scan(&e.RunID, &e.Seq, &e.Time, &e.Step, &e.StepIndex, &k, &origin, &e.Detail,
+			&okVal, &e.Error, &e.DurationMS, &e.Rel); err != nil {
+			return nil, err
+		}
+		e.Kind, e.Origin = CallKind(k), Origin(origin)
+		if okVal.Valid {
+			v := okVal.Bool
+			e.OK = &v
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// StepsSince returns a run's step records after `seq`, for the same stream.
+func (j *DB) StepsSince(run string, since int) ([]Record, error) { return j.Steps(run, since) }
 
 // Runs lists every run this journal holds, newest first, with a count of its records.
 //
