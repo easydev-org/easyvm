@@ -391,24 +391,58 @@ walkthrough "linux-fedora-workstation - sshd"
     click == [1413, 193]
     settle == 4
   press Return, waiting 20s, named "finish the wizard"
-  # THE TERMINAL IS OPENED WITHOUT A POINTER EVENT, BECAUSE CLICKS DO NOT LAND IN THIS GUEST.
+  # THE TERMINAL IS OPENED BY SEARCHING IN THE OVERVIEW, AND THE WAY IN IS THE ESCAPE KEY, NOT meta_l.
   #
-  # MEASURED: this stage's own wizard ignored eight clicks inside its Next button (the log shows
-  # 'clicked (1420, 193)' eight times and the page never moved), and 'click "open the terminal" at
-  # 960 178' is a click on the FIRST SEARCH RESULT - which is at the top of the list, and the list is
-  # redrawn every time a character is typed. So even when the overview opens, the click lands
-  # wherever the row happened to be a moment earlier.
+  # MEASURED ON THE POD, AND THIS IS WHY EVERY COMMAND AFTER IT WAS DEAD. The previous version opened
+  # the overview with `meta_l`, typed "terminal" and pressed Return. The screen afterwards was
   #
-  # The keyboard does the whole job: the overview opens on meta_l, the search narrows to one app, and
-  # RETURN opens the first result. No coordinate is involved.
-  press meta_l, waiting 4s, named "open the overview"
+  #	[ Type to search ]                                        <- the overview, NOT a terminal
+  #	--reloadsudo firewall-cmd --list-services                 <- this stage's own commands, in the
+  #	No results                                                   SEARCH BOX
+  #
+  # - every command the stage believed it was typing into a shell had gone into GNOME's search
+  # field, where "No results" was the only answer it ever gave. That is why `wait for sshd` then
+  # waited its full ten minutes against a guest where openssh had never been installed: nothing was
+  # installed, and nothing said so.
+  #
+  # WHAT DOES WORK, measured: ESCAPE closes the overview, and `super`'s search then opens with an
+  # empty, focused box - type "terminal", Return, and the window appears as
+  #
+  #	vmuser@fedora:~$
+  #
+  # `meta_l` LEAVES THE PREVIOUS CONTENT IN THE BOX, which is the whole difference: the wizard's last
+  # keystrokes were still in it, so Return ran a search for a command line instead of starting a
+  # program.
+  step "start from a clean desktop"
+    key == esc
+    settle == 2
+  press meta_l, waiting 3s, named "open the overview"
   step "search for the terminal"
-    settle == 3
+    settle == 2
     type == terminal
     type_gap == 0.08
   step "the result list has had time to draw"
     settle == 4
   press Return, waiting 25s, named "open the terminal on the first result"
+  # THE TERMINAL HAS TO BE PROVEN OPEN BEFORE ANY COMMAND IS TYPED INTO IT.
+  #
+  # THIS STEP WOULD HAVE CAUGHT THE FAULT ABOVE ON ITS FIRST RUN. The stage typed eight commands
+  # into GNOME's search box and reported each one "running"; only `wait for sshd`, ten minutes
+  # later, noticed that nothing had happened.
+  #
+  # The prompt is the evidence: a shell on this guest draws
+  #
+  #	vmuser@fedora:~$
+  #
+  # and GNOME's overview, which is what the older version was actually looking at, draws
+  # "Type to search" instead. `[300, 280, 1300, 800]` covers the window's text area and not the
+  # panel, so a title bar saying "fedora" cannot satisfy it on its own.
+  #
+  # THE LOOP ONLY LOOKS. Its `do:` is a `settle:` and nothing else: the window takes a few seconds to
+  # map, and a loop that PRESSED a key to "help" would be pressing it into whatever had the focus -
+  # which is exactly how the commands ended up in the search box.
+  step "the terminal is open, with a prompt"
+    loop == {check: {from: shell, mode: text, name: ready, rect: [300, 280, 1330, 810], rect_at: [1920, 1080], scale: 1, words: [[vmuser@fedora]]}, do: [{settle: 4}], max: 4, see: {name: shell}, until: {fact: ready}}
   # NO `terminal_wait:` HERE, AND THAT IS THE FIX RATHER THAN AN OMISSION.
   #
   # `terminal_wait:` OPENS A TERMINAL (ctrl+alt+t) AND THEN TYPES. The step above has already
