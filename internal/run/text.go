@@ -989,6 +989,12 @@ func (e *Executor) doRun(s walk.Step) error {
 	// diagnosis.
 	e.Driver.Log(fmt.Sprintf("  running %d line(s), %d character(s): %s", len(lines),
 		len([]rune(body)), shorten(strings.ReplaceAll(body, "\n", " ; "), 140)))
+	// THE COMMAND ITSELF IS EVIDENCE. A `run:` step's whole effect on the guest is the text it typed,
+	// and until this the journal could say "step 12 ran" without being able to say what it ran.
+	if e.evidence == nil {
+		e.evidence = &evidence{}
+	}
+	e.evidence.Command = append([]string(nil), lines...)
 	for i, line := range lines {
 		if strings.TrimSpace(line) == "" {
 			continue

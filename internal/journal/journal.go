@@ -132,10 +132,23 @@ const (
 	CallQMP CallKind = "qmp"
 )
 
-// Image is one picture a step captured or compared, and where it is.
+// Image is one picture a step captured or compared.
+//
+// THERE ARE TWO WAYS TO NAME A PICTURE AND THEY MEAN DIFFERENT THINGS:
+//
+//	Sha   a CONTENT ADDRESS in the artifact library - immutable, deduplicated, published with the run
+//	Rel   a path in the work directory - a transient artifact of the moment, served but not kept
+//
+// A `see:`/`screenshot:` picture gets a Sha and a Name. A `check:`'s crops get a Rel, because they
+// exist to explain one comparison and are not part of the library a person browses.
 type Image struct {
+	// Sha is the content address, when this picture is in the artifact library. It is what
+	// `/api/artifact?h=` serves, and it never goes stale.
+	Sha string `json:"sha,omitempty"`
+	// Name is what the walkthrough called it: the `see:` name, or the `screenshot:` path's base.
+	Name string `json:"name,omitempty"`
 	// Rel is the path relative to the work directory, slash-separated, for `/api/artifact?p=`.
-	Rel string `json:"rel"`
+	Rel string `json:"rel,omitempty"`
 	// Label is what the picture is - "the frame", "the reference", "the difference".
 	Label string `json:"label"`
 	// W and H are its pixel size, 0 when not measured.
@@ -253,8 +266,9 @@ type DB struct {
 	run string
 	// recSeq and evtSeq are per-run counters, kept here rather than derived with MAX() so a write
 	// costs one INSERT and not an INSERT after a scan.
-	recSeq int
-	evtSeq int
+	recSeq  int
+	evtSeq  int
+	imgSeqN int
 }
 
 // Open opens or creates the journal in dir and continues its sequence numbers.
@@ -299,6 +313,11 @@ func Open(dir, run string) (*DB, error) {
 }
 
 // migrate creates the tables and the indexes the read patterns need.
+//
+// EVERY INDEX HERE EXISTS FOR ONE READ THE FRONT END MAKES, and the measured cost of each is in the
+// package comment: the overview, the poll, one step's detail, and the audit's count-by-kind. A
+// schema without them answers the poll by scanning the history, which was the 225ms that decided
+// against an append-only file.
 func migrate(db *sql.DB) error {
 	const schema = `
 CREATE TABLE IF NOT EXISTS record (
@@ -324,8 +343,25 @@ CREATE TABLE IF NOT EXISTS record (
 	facts       TEXT,
 	PRIMARY KEY (run_id, seq)
 );
--- THE OVERVIEW: every step of one run, in order. This is the only read the front page makes.
 CREATE INDEX IF NOT EXISTS record_by_run ON record (run_id, seq);
+
+CREATE TABLE IF NOT EXISTS image (
+	run_id     TEXT    NOT NULL,
+	seq        INTEGER NOT NULL,
+	time       TEXT    NOT NULL,
+	name       TEXT    NOT NULL,
+	sha        TEXT    NOT NULL,
+	kind       TEXT    NOT NULL,
+	step       TEXT    NOT NULL,
+	step_index INTEGER NOT NULL,
+	w          INTEGER NOT NULL DEFAULT 0,
+	h          INTEGER NOT NULL DEFAULT 0,
+	rect       TEXT,
+	note       TEXT    NOT NULL DEFAULT '',
+	PRIMARY KEY (run_id, seq)
+);
+CREATE INDEX IF NOT EXISTS image_by_step ON image (run_id, step_index, seq);
+CREATE INDEX IF NOT EXISTS image_by_name ON image (run_id, name);
 
 CREATE TABLE IF NOT EXISTS event (
 	run_id      TEXT    NOT NULL,
@@ -341,12 +377,10 @@ CREATE TABLE IF NOT EXISTS event (
 	rel         TEXT    NOT NULL DEFAULT '',
 	PRIMARY KEY (run_id, seq)
 );
--- THE DETAIL VIEW: one step's calls, in order.
 CREATE INDEX IF NOT EXISTS event_by_step ON event (run_id, step_index, seq);
--- THE AUDIT: "every click in this run", "every capture", "the slowest calls".
 CREATE INDEX IF NOT EXISTS event_by_kind ON event (run_id, kind, seq);
 `
-	if _, err := db.Exec(schema); err != nil {
+if _, err := db.Exec(schema); err != nil {
 		return fmt.Errorf("creating the journal schema: %w", err)
 	}
 	return nil
@@ -362,6 +396,12 @@ func (j *DB) resumeSeq() error {
 	row = j.sql.QueryRow(`SELECT COALESCE(MAX(seq),0) FROM event WHERE run_id = ?`, j.run)
 	if err := row.Scan(&j.evtSeq); err != nil {
 		return fmt.Errorf("reading the journal's last event sequence: %w", err)
+	}
+	// A JOURNAL WRITTEN BEFORE THE LIBRARY EXISTED HAS NO image TABLE, and a reader of that file
+	// should see its steps rather than an error about a table it never had.
+	row = j.sql.QueryRow(`SELECT COALESCE(MAX(seq),0) FROM image WHERE run_id = ?`, j.run)
+	if err := row.Scan(&j.imgSeqN); err != nil {
+		j.imgSeqN = 0
 	}
 	return nil
 }
@@ -396,6 +436,80 @@ func (j *DB) Write(r Record) (Record, error) {
 		return r, fmt.Errorf("writing a journal record: %w", err)
 	}
 	return r, nil
+}
+
+// Image records one NAMED picture in the library, and returns the row it wrote.
+//
+// THIS IS THE `see:`/`screenshot:` PATH, not the recording's. A picture enters the library because a
+// file or a person ASKED for it by name; the recorder's thousand frames a run are the recording and
+// stay out of it.
+func (j *DB) Image(img Image, step string, stepIndex int) error {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+
+	var rect any
+	if len(img.Rect) > 0 {
+		rect = jsonOrNil(img.Rect)
+	}
+	_, err := j.sql.Exec(`INSERT INTO image
+		(run_id, seq, time, name, sha, kind, step, step_index, w, h, rect, note)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+		j.run, j.imageSeq(), now(), img.Name, img.Sha, img.Label, step, stepIndex,
+		img.W, img.H, rect, img.Note,
+	)
+	if err != nil {
+		return fmt.Errorf("recording an artifact: %w", err)
+	}
+	return nil
+}
+
+// imageSeq is the image table's own counter, kept on the DB for the reason the other two are: a
+// write should cost one INSERT, not an INSERT after a scan.
+func (j *DB) imageSeq() int {
+	j.imgSeqN++
+	return j.imgSeqN
+}
+
+// Library returns every named picture of a run, newest last.
+func (j *DB) Library(run string) ([]Image, error) {
+	rows, err := j.sql.Query(`SELECT name, sha, kind, w, h, rect, note FROM image
+		WHERE run_id = ? ORDER BY seq`, run)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []Image
+	for rows.Next() {
+		var im Image
+		var rect []byte
+		if err := rows.Scan(&im.Name, &im.Sha, &im.Label, &im.W, &im.H, &rect, &im.Note); err != nil {
+			return nil, err
+		}
+		decodeJSON(rect, &im.Rect)
+		out = append(out, im)
+	}
+	return out, rows.Err()
+}
+
+// ImageByName resolves a `see:` name to the picture it captured, for the read a check performs later.
+//
+// THE LATEST ONE WINS. A loop may `see:` the same name eight times; the picture a reader wants when
+// they ask for "shot" is what it saw last.
+func (j *DB) ImageByName(run, name string) (Image, bool, error) {
+	var im Image
+	var rect []byte
+	err := j.sql.QueryRow(`SELECT name, sha, kind, w, h, rect, note FROM image
+		WHERE run_id = ? AND name = ? ORDER BY seq DESC LIMIT 1`, run, name).
+		Scan(&im.Name, &im.Sha, &im.Label, &im.W, &im.H, &rect, &im.Note)
+	if err == sql.ErrNoRows {
+		return im, false, nil
+	}
+	if err != nil {
+		return im, false, err
+	}
+	decodeJSON(rect, &im.Rect)
+	return im, true, nil
 }
 
 // Event appends one external call.
@@ -828,4 +942,35 @@ func (j *DB) Export(dir, run string) (string, error) {
 // Heartbeat exists so a test can prove the connection is alive without touching a table.
 func (j *DB) Heartbeat(ctx context.Context) error {
 	return j.sql.PingContext(ctx)
+}
+// OpenExisting opens a journal that is already on disk, WITHOUT creating one.
+//
+// IT IS WHAT A REPORT USES, and the difference from `Open` matters: a report must not bring a journal
+// into existence. `Open` creates the file and its schema, which for a mistyped `--work` would leave a
+// plausible empty database where a person would then look for evidence that was never there.
+func OpenExisting(dir string) (*DB, error) {
+	path := filepath.Join(dir, "journal.db")
+	if _, err := os.Stat(path); err != nil {
+		return nil, fmt.Errorf("no journal at %s: %w", path, err)
+	}
+	db, err := sql.Open("sqlite", "file:"+path+
+		"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)")
+	if err != nil {
+		return nil, err
+	}
+	db.SetMaxOpenConns(4)
+
+	j := &DB{sql: db, path: path}
+	// THE RUN ID IS DISCOVERED RATHER THAN ASSERTED: a reader of the file has no run to stamp rows
+	// with, and `RunID` is used by the HTTP handlers to mean "the run to show".
+	var newest string
+	row := db.QueryRow(`SELECT run_id FROM record ORDER BY time DESC LIMIT 1`)
+	if err := row.Scan(&newest); err == nil {
+		j.run = newest
+	}
+	if err := j.resumeSeq(); err != nil {
+		db.Close()
+		return nil, err
+	}
+	return j, nil
 }

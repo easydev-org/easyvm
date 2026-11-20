@@ -1123,6 +1123,11 @@ func (e *Executor) doScreenshot(s walk.Step) error {
 		return fail(s.Name, "%v", err)
 	}
 	e.Driver.Log(fmt.Sprintf("  screenshot: %s", dest))
+	// A `screenshot:` IS THE OTHER WAY A PICTURE ENTERS THE LIBRARY, and its name is the file's own
+	// base name: a file that writes `out/login.png` has asked for a picture called `login.png`, and
+	// that is what a report should call it rather than a step ordinal.
+	w, h := f.Size()
+	e.storePicture(dest, filepath.Base(dest), "screenshot", w, h)
 	return nil
 }
 func (e *Executor) doActions(s walk.Step) error {

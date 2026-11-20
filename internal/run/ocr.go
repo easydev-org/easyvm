@@ -916,6 +916,11 @@ func (e *Executor) checkFrame(step string, raw map[string]any, from, path string
 			if err != nil {
 				return err
 			}
+			// THE WORDS IT READ, AND WHAT IT WANTED. The log prints one of these - the sentence in
+			// `detail` names either the words that matched or the ones that did not - and neither
+			// tells a reader what the OCR ACTUALLY SAW. Recording the full read is what makes
+			// "tesseract misread the pane" distinguishable from "the pane was not there".
+			e.recordTextEvidence(words, textWanted(raw), okNow, textMissing(raw, words))
 			break
 		}
 		okNow, detail, err = runCheckMode(step, mode, words, raw)
@@ -1065,6 +1070,52 @@ func stringsToSlice(v any) []string {
 	for _, item := range list {
 		if str, ok := item.(string); ok {
 			out = append(out, str)
+		}
+	}
+	return out
+}
+
+// textWanted is the words a text condition asked for, as one flat list for the journal.
+func textWanted(raw map[string]any) []string {
+	var out []string
+	if sets, ok := raw["words"]; ok {
+		if alts, err := wordSetsOfValue(sets); err == nil {
+			for _, set := range alts {
+				out = append(out, strings.Join(set, " "))
+			}
+		}
+	}
+	if without, ok := raw["without"]; ok {
+		for _, w := range stringsToSlice(without) {
+			out = append(out, "!"+w)
+		}
+	}
+	return out
+}
+
+// textMissing names the wanted words that the read did not contain.
+//
+// IT IS COMPUTED FOR THE REPORT, not for the verdict: the verdict already happened in `judgeWords`.
+// A reader looking at a failed text check needs to know WHICH word was absent, because "none of
+// welcome/install matched" and "it read 'welcome' but not 'install'" are different problems.
+func textMissing(raw map[string]any, words []string) []string {
+	var out []string
+	have := map[string]bool{}
+	for _, w := range words {
+		have[strings.ToLower(w)] = true
+	}
+	if sets, ok := raw["words"]; ok {
+		if alts, err := wordSetsOfValue(sets); err == nil {
+			for _, set := range alts {
+				if says(words, set) {
+					return nil
+				}
+				for _, w := range set {
+					if !have[strings.ToLower(w)] {
+						out = append(out, w)
+					}
+				}
+			}
 		}
 	}
 	return out

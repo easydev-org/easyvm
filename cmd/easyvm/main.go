@@ -99,6 +99,8 @@ func main() {
 		os.Exit(cmdStop(args))
 	case "health":
 		os.Exit(cmdHealth(args))
+	case "report":
+		os.Exit(cmdReport(args))
 	case "-h", "--help", "help":
 		fmt.Print(usage)
 		os.Exit(0)

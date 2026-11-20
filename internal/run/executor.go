@@ -87,7 +87,13 @@ type Executor struct {
 	// assetExtras is the other files one `fetch:` produced, in its own order - the three OpenCore
 	// outputs are a boot image, a ROM and a variables file, and a boot step names all three.
 	assetExtras map[string][]string
-	// Journal receives one structured record per step - what it decided, what it read, and the
+	// Library is the content-addressed store a run's named pictures go into.
+	Library ArtifactLibrary
+
+	// OnImage is told about each named picture, so the daemon can write its row.
+	OnImage func(name, sha, kind, step string, index, w, h int, rect []int, note string)
+
+// Journal receives one structured record per step - what it decided, what it read, and the
 	// pictures it decided from. IT IS OPTIONAL: a nil satisfies it, and a test that builds an
 	// Executor by value gets a silent no-op.
 	//
@@ -766,6 +772,16 @@ func (e *Executor) doSSH(s walk.Step) error {
 	// command's own output, because the retry is the connection's business and not the step's.
 	err := e.withGuest(run)
 	e.Driver.Log(fmt.Sprintf("  ssh: %s -> %d", oneLine(command), res.Status))
+	// THE COMMAND AND ITS EXIT STATUS, recorded: an `ssh:` step is one command in the guest, and a
+	// report that names the step but not the command cannot be checked against the machine.
+	if e.evidence == nil {
+		e.evidence = &evidence{}
+	}
+	e.evidence.Command = []string{command}
+	if err == nil {
+		okNow := res.Status == 0
+		e.evidence.OK = &okNow
+	}
 	for _, line := range headAndTail(res.Combined(), 18, 6) {
 		e.Driver.Log("    " + line)
 	}
@@ -1047,4 +1063,12 @@ func stepNeedsAGuest(s walk.Step) bool {
 		return true
 	}
 	return true
+}
+
+// ArtifactLibrary is the content-addressed store a run's named pictures go into.
+//
+// IT IS AN INTERFACE FOR THE SAME REASON `Journal` IS: `Executor` is built by value in 340 tests and
+// the zero value has to work. `Put` returns the content address the picture is known by.
+type ArtifactLibrary interface {
+	Put(path string) (string, error)
 }

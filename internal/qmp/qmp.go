@@ -195,7 +195,23 @@ func (c *Conn) Screendump(dir string) (Frame, error) {
 	// exposes the filename, and the same frame is ~100 KB - SO THE WRITE IS SHORT AND THE RACE SHRINKS
 	// WITH IT. This is one command on the same socket, written as raw JSON because the wrapper has no
 	// field for the format.
-	path := filepath.Join(dir, fmt.Sprintf("frame-%06d.png", n))
+	// THE NAME IS THE CONNECTION'S COUNTER AND A NANOSECOND STAMP, AND THE STAMP IS THE FIX.
+	//
+	// `n` ALONE RESTARTS AT 1 ON EVERY RECONNECT - it is a field of `*Conn`, and `qmpRetry` throws
+	// that object away when the socket dies. So a reconnect began writing `frame-000001.png` again,
+	// ON TOP OF A FILE A READER HAD ALREADY BEEN HANDED. MEASURED on the pod:
+	//
+	//	the setup wizard is up: loading the frame `wizard`: /work/frames/frame-000001.png:
+	//	png: invalid format: not enough pixel data (is the write still in progress? format "png")
+	//
+	// - and the question in that message was the right one. The reader was not reading a frame
+	// still being written by ITS capture; it was reading a path whose contents had been replaced by
+	// a later, shorter write from a different connection.
+	//
+	// A NANOSECOND STAMP MAKES THE NAME UNIQUE ACROSS RECONNECTS AND ACROSS THE TWO CAPTURERS (the
+	// recorder's sampler and a gate), and costs nothing: these files are named for a post-mortem, and
+	// the number is only there to keep them apart.
+	path := filepath.Join(dir, fmt.Sprintf("frame-%06d-%d.png", n, time.Now().UnixNano()))
 	cmd, err := json.Marshal(map[string]any{
 		"execute": "screendump",
 		"arguments": map[string]any{

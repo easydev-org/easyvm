@@ -22,6 +22,7 @@
 package daemon
 
 import (
+	"github.com/easydev-org/easyvm/internal/journal"
 	"errors"
 	"fmt"
 	"os"
@@ -58,6 +59,9 @@ func SocketPath(work string) string {
 
 // Daemon is the owner.
 type Daemon struct {
+	// jdb is the run's journal: the structured record of every step and every external call, which
+	// `/api/journal` reads. Nil until a run has opened one.
+	jdb *journal.DB
 	mu sync.Mutex
 	// st is the current state, guarded by mu.
 	st State
@@ -974,4 +978,18 @@ func (d *Daemon) Facts() (map[string]string, error) {
 func fileExistsDaemon(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+// currentStep is the step a picture or a call belongs to, for the audit and the library.
+func (d *Daemon) currentStep() string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.st.Step
+}
+
+// currentStepIndex places that step.
+func (d *Daemon) currentStepIndex() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.st.StepIndex
 }

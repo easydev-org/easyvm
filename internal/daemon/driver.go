@@ -18,6 +18,8 @@ import (
 	"github.com/easydev-org/easyvm/internal/machine"
 	easyvmnet "github.com/easydev-org/easyvm/internal/net"
 	"github.com/easydev-org/easyvm/internal/overlay"
+	"github.com/easydev-org/easyvm/internal/artifact"
+	"github.com/easydev-org/easyvm/internal/journal"
 	"github.com/easydev-org/easyvm/internal/qmp"
 	"github.com/easydev-org/easyvm/internal/run"
 	"github.com/easydev-org/easyvm/internal/screen"
@@ -126,6 +128,13 @@ type Driver struct {
 	// serves it over HTTP at `/shared/` - there is no smbd, no port and no config file any more.
 	shareDir string
 	logf     func(string)
+	// audit writes down every external call this driver makes, when a journal is attached. Nil in a
+	// test, and every call site tolerates it.
+	audit *audit
+	// lib is the run's picture library. A `see:`/`screenshot:` puts its capture here and records the
+	// name; a frame the recorder takes does NOT, because a library of two thousand unnamed frames is
+	// the recording, not a library.
+	lib *artifact.Store
 }
 
 // NewDriver builds the driver and returns a closer for the caller's defer.
@@ -234,6 +243,18 @@ func (d *Driver) Log(msg string) { fmt.Println(msg) }
 // A CALLER THAT NEEDED A FRESH FRAME USES FrameAt. This one is "the newest" and is what a reader
 // looks at when it does not care when the frame was taken - the browser page, a recording tick.
 func (d *Driver) Frame() (run.Frame, error) {
+	started := time.Now()
+	f, err := d.frame()
+	var ok *bool
+	if err == nil {
+		ok = okPtr(true)
+	}
+	d.auditCall(journal.CallScreendump, "", started, ok, err, "")
+	return f, err
+}
+
+// frame is `Frame` without the audit, so a re-entrant call cannot record twice.
+func (d *Driver) frame() (run.Frame, error) {
 	cache := d.frameCache()
 	if cache == nil {
 		return nil, fmt.Errorf("this machine has no frame cache")
@@ -295,6 +316,18 @@ func (f frame) Words() []string  { return nil } // no OCR in this build; see the
 // QMP'S ABSOLUTE POINTER TAKES ONE EVENT PAIR PER AXIS, and the guest's tablet scales them. That is
 // why the coordinates are the file's own measured pixels rather than anything the host computes.
 func (d *Driver) Click(x, y int) error {
+	started := time.Now()
+	err := d.click(x, y)
+	var ok *bool
+	if err == nil {
+		ok = okPtr(true)
+	}
+	d.auditCall(journal.CallClick, fmt.Sprintf("%d,%d", x, y), started, ok, err, "")
+	return err
+}
+
+// click is `Click` without the audit, so a double-click records ONE call rather than two.
+func (d *Driver) click(x, y int) error {
 	// QMP, NOT THE VNC SESSION, AND THE REASON IS THAT QEMU'S VNC SERVER TAKES ONE CLIENT.
 	//
 	// The pointer was routed through VNC for a while, on the evidence that a click in the browser
@@ -314,19 +347,48 @@ func (d *Driver) Click(x, y int) error {
 }
 
 func (d *Driver) DoubleClick(x, y int) error {
-	if err := d.Click(x, y); err != nil {
+	started := time.Now()
+	err := d.doubleClick(x, y)
+	var ok *bool
+	if err == nil {
+		ok = okPtr(true)
+	}
+	d.auditCall(journal.CallClick, fmt.Sprintf("%d,%d double", x, y), started, ok, err, "")
+	return err
+}
+
+func (d *Driver) doubleClick(x, y int) error {
+	if err := d.click(x, y); err != nil {
 		return err
 	}
 	time.Sleep(120 * time.Millisecond)
-	return d.Click(x, y)
+	return d.click(x, y)
 }
 
 func (d *Driver) Key(qcode string) error {
-	return d.qmpRetry(func(conn *qmp.Conn) error { return conn.Key(qcode) })
+	started := time.Now()
+	err := d.qmpRetry(func(conn *qmp.Conn) error { return conn.Key(qcode) })
+	var ok *bool
+	if err == nil {
+		ok = okPtr(true)
+	}
+	d.auditCall(journal.CallKey, qcode, started, ok, err, "")
+	return err
 }
 
 func (d *Driver) Stroke(modifiers []string, key string) error {
-	return d.qmpRetry(func(conn *qmp.Conn) error { return conn.Stroke(modifiers, key) })
+	started := time.Now()
+	err := d.qmpRetry(func(conn *qmp.Conn) error { return conn.Stroke(modifiers, key) })
+	var ok *bool
+	if err == nil {
+		ok = okPtr(true)
+	}
+	detail := key
+	if len(modifiers) > 0 {
+		detail = strings.Join(modifiers, "+") + "+" + key
+	}
+	d.auditCall(journal.CallKey, detail, started, ok, err, "")
+	return err
 }
 
 // Type sends text one keystroke at a time, at the pace the caller measured.
@@ -364,9 +426,22 @@ func (d *Driver) Type(text string, perChar time.Duration) ([]rune, error) {
 func (d *Driver) sendStrokes(strokes []keys.Stroke, perChar time.Duration) error {
 	for _, s := range strokes {
 		stroke := s
-		if err := d.qmpRetry(func(conn *qmp.Conn) error {
+		started := time.Now()
+		err := d.qmpRetry(func(conn *qmp.Conn) error {
 			return conn.Stroke(stroke.Modifiers, stroke.Key)
-		}); err != nil {
+		})
+		// EVERY CHARACTER IS ITS OWN ROW, because a typed password and a typed command are the two
+		// things an audit of this repository has most often needed to reconstruct.
+		var ok *bool
+		if err == nil {
+			ok = okPtr(true)
+		}
+		detail := stroke.Key
+		if len(stroke.Modifiers) > 0 {
+			detail = strings.Join(stroke.Modifiers, "+") + "+" + stroke.Key
+		}
+		d.auditCall(journal.CallType, detail, started, ok, err, "")
+		if err != nil {
 			return err
 		}
 		if perChar > 0 {
@@ -2013,4 +2088,16 @@ func (d *Driver) SSHTarget() guest.Target {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.sshTarget
+}
+
+// auditCall writes one external call down, when a journal is attached.
+//
+// IT TAKES THE START TIME rather than timing the write: a keystroke that takes 40ms and a screendump
+// that takes 900ms are the two most useful numbers in an audit of a slow stage, and neither is
+// visible if the timer wraps the INSERT.
+func (d *Driver) auditCall(kind journal.CallKind, detail string, started time.Time, ok *bool, err error, rel string) {
+	if d.audit == nil {
+		return
+	}
+	d.audit.call(kind, detail, started, ok, err, rel)
 }
