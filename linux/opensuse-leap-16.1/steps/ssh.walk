@@ -206,13 +206,30 @@ walkthrough "linux-opensuse-tumbleweed - sshd"
     run == sudo systemctl enable sshd 2>&1 | tail -3
     settle == 8
     terminal_wait == 0
-  # `/run/sshd` IS sshd's OWN PRIVILEGE SEPARATION DIRECTORY AND THIS IMAGE DOES NOT CREATE IT.
+  # sshd REFUSES TO START WITHOUT A HOST KEY, AND THIS IMAGE SHIPS NONE.
   #
-  # MEASURED: `sshd -T` printed "Missing privilege separation directory: /run/sshd" - sshd needs that
-  # directory to exist before it will start at all, and on this distribution the unit does not create
-  # it. That is the other half of why the port never answered.
+  # MEASURED ON RUN ef86936's console, three times, once per config path:
+  #
+  #	vmuser@localhost:~> sudo sshd -T -f /etc/ssh/sshd_config 2>&1 | head -5
+  #	sshd: no hostkeys available -- exiting.
+  #	exit=0
+  #
+  # "no hostkeys available" is the FIRST thing sshd checks - before it reads the config at all - so
+  # every `sshd -T` question this file asked for three runs was answered by that line and nothing
+  # else. And the exit status reads 0 because `head` is the last command in the pipe, not sshd.
+  #
+  # The keys are generated here, through the CONSOLE, because there is no ssh yet: `ssh-keygen -A`
+  # writes one of each type sshd's defaults ask for, and this image's package install never ran the
+  # generator (the same `policy-rc.d`-shaped gap zorin had).
+  #
+  # `/run/sshd` IS sshd's PRIVILEGE SEPARATION DIRECTORY AND THIS IMAGE DOES NOT CREATE IT EITHER.
+  # Measured: "Missing privilege separation directory: /run/sshd".
+  step "generate the host keys sshd will not start without"
+    run == sudo mkdir -p /run/sshd /etc/ssh; sudo ssh-keygen -A; sudo ls -l /etc/ssh/ssh_host_*_key
+    settle == 12
+    terminal_wait == 0
   step "start sshd"
-    run == sudo mkdir -p /run/sshd; sudo systemctl restart sshd 2>&1 | tail -3
+    run == sudo systemctl restart sshd 2>&1 | tail -3; sleep 2; systemctl is-active sshd
     settle == 10
     terminal_wait == 0
   step "prove sshd is active"
@@ -232,12 +249,6 @@ walkthrough "linux-opensuse-tumbleweed - sshd"
   step "prove the account over ssh"
     ssh == id -un; hostname
     timeout == 120
-  step "make sure the host keys exist"
-    ssh == "set -e\nprintf '%s\\n' '{{ password }}' | sudo -S -p '' mkdir -p /etc/ssh\nprintf '%s\\n' '{{ password }}' | sudo -S -p '' ssh-keygen -A 2>&1 | tail -4\necho \"--- the keys ---\"\nls -l /etc/ssh/ssh_host_*_key | head -8\necho \"--- and the one sshd needs first ---\"\nprintf '%s\\n' '{{ password }}' | sudo -S -p '' test -s /etc/ssh/ssh_host_ed25519_key\n"
-    timeout == 120
-  step "restart sshd now that the keys are on disk"
-    ssh == "printf '%s\\n' '{{ password }}' | sudo -S -p '' systemctl restart sshd 2>&1 | tail -3\nsleep 2\nsystemctl is-active sshd\nss -lnt 2>/dev/null | grep ':22 ' || apt-get --version >/dev/null 2>&1 || true\n"
-    timeout == 180
   step "enable sshd again, over ssh, where the exit status is readable"
     ssh == "printf '%s\\n' '{{ password }}' | sudo -S -p '' systemctl enable --now sshd 2>&1 | tail -3\nsystemctl is-enabled sshd\ntest \"$(systemctl is-enabled sshd)\" = \"enabled\"\n"
     timeout == 180
