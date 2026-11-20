@@ -79,24 +79,29 @@ walkthrough "linux-opensuse-tumbleweed - sshd"
     timeout == 120
     optional == true
   press ctrl+alt+t, waiting 5s, named "open a terminal, when there is a desktop to open one on"
-  # THE CONSOLE LOGIN IS ONE RETRIED SEQUENCE, BECAUSE TYPING IT IN PIECES KEEPS GETTING OUT OF STEP.
+  # THE CONSOLE LOGIN IS ONE RETRIED SEQUENCE, AND ITS SUCCESS TEST IS THE PROMPT - NOT THE NAME.
   #
-  # MEASURED ON THIS RUN, whose recording at 240 s reads
+  # MEASURED ON RUN 44701006147's recording, and it is the reason this step is rewritten:
   #
-  #	localhost login: Qz7vLp2w
-  #	Password: _
+  #	Welcome to openSUSE Leap 16.1 - Kernel 6.12.0-160100.8-default (tty1).
+  #	localhost login: ^[_
   #
-  # - THE PASSWORD IN THE USER-NAME SLOT, and getty now asking for the password of a user called
-  # "Qz7vLp2w". That is what every attempt here has looked like: the name typed after a Return does
-  # not arrive, the password does. Splitting it into "wait, type name, Return, type password" gave
-  # four chances to be out of step and they were taken every time.
+  # The screen NEVER LEFT THE LOGIN PROMPT. The previous check asked for the word "vmuser", which
+  # appears in this guest's own prompt (`vmuser@linux:~>`) - so on a screen showing `localhost login:`
+  # the check was looking at a word that was not there, and on a screen that HAD logged in it would
+  # pass. That much is right. What was wrong is the `do`: its first action was a bare Return, which
+  # submits an EMPTY user name and makes getty answer `Login incorrect` before the name is typed. Every
+  # pass therefore spent its first stroke on a mistake, and the sequence was one keystroke out of step
+  # for the rest of the pass - which is exactly the `^[` left on the prompt.
   #
-  # SO THE WHOLE SEQUENCE IS REPEATED UNTIL THE SHELL PROMPT IS ON THE SCREEN. Each pass presses
-  # Return (abandoning whatever the console holds), types the name, presses Return, types the
-  # password, presses Return, and the pass is repeated only if `vmuser@` is not yet on screen. A
-  # failed login returns to `login:`, so the next pass starts clean.
+  # SO A PASS IS THE LOGIN AND NOTHING ELSE: type the name, Return, type the password, Return. A pass
+  # that fails returns the console to `login:`, and that is what makes repeating it safe - there is no
+  # state to abandon first.
+  #
+  # THE SUCCESS TEST IS THE SHELL PROMPT. `vmuser@` is what a logged-in prompt starts with and what a
+  # `login:` prompt cannot contain, so the two screens cannot be confused for one another.
   step "log in on the console, retrying until the shell answers"
-    loop == {check: {from: console, mode: text, name: logged_in, rect: [0, 100, 1920, 1000], rect_at: [1920, 1080], scale: 1, words: [[vmuser]]}, do: [{key: ret, settle: 3}, {type: "{{ user }}", type_gap: 0.10, settle: 5}, {key: ret, settle: 8}, {type: "{{ password }}", type_gap: 0.10, settle: 5}, {key: ret, settle: 14}], max: 5, see: {name: console}, until: {fact: logged_in}}
+    loop == {check: {from: console, mode: text, name: logged_in, rect: [0, 100, 1920, 1000], rect_at: [1920, 1080], scale: 1, words: [[vmuser@]]}, do: [{type: "{{ user }}", type_gap: 0.10, settle: 5}, {key: ret, settle: 8}, {type: "{{ password }}", type_gap: 0.10, settle: 5}, {key: ret, settle: 14}], max: 5, see: {name: console}, until: {fact: logged_in}}
   step "unlock sudo once for this session"
     run == printf '%s\n' {{ password }} | sudo -S -v
     settle == 4
