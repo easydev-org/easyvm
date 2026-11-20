@@ -196,39 +196,6 @@ walkthrough "linux-fedora-workstation - sshd"
   # `range: [0.78, 1.00]` is the tool's suggestion: the worst reject plus a 0.02 margin, so ordinary
   # rendering jitter cannot flip it.
   #
-  # EVERY PAGE IS LEFT BY CLICKING NEXT, AND THAT WAS MEASURED RATHER THAN ASSUMED.
-  #
-  # THIS REPLACES TWO EARLIER ATTEMPTS AT THE SAME ROUTE, AND BOTH FAILED IN THE SAME WAY - by
-  # pressing keys at a wizard whose focus they did not know:
-  #
-  #	fixed [Tab, Tab, Return] x8        stopped on "Third-Party Repositories"
-  #	Tab,Tab,Return in a `loop:`        stopped on the same page
-  #	Return / Shift+Tab+Return per page  left the screen ON PRIVACY, OCR reading "Previous Privacy
-  #	                                    Privacy", while the next four steps walked a wizard that
-  #	                                    had not moved
-  #
-  # The last one is the dangerous shape: every later step "succeeded" against the wrong page, because
-  # a keystroke on the wrong page is still a keystroke. On the pod, the same route by CLICKING went
-  # from Privacy to Third-Party on the first click and to About You on the second, and Previous
-  # walked it back the same way. The pointer is the part of this wizard that behaves.
-  #
-  # (640, 690) IS A LANDMARK, NOT A NAVIGATION. It is Los Angeles on the map, and clicking it is what
-  # the earlier version of this file did to enable Next - but Next is THE SAME BLUE BUTTON either way,
-  # measured: clicking Next on an unanswered Time Zone page moved the wizard on to Third-Party. The
-  # map click is kept because a time zone is worth setting and the coordinate was confirmed by the
-  # page's own bubble reading "PST (UTC-08) Los Angeles, United States"; it is NOT what makes the
-  # page pass.
-  step "the map, if the wizard is showing one"
-    click == [640, 690]
-    settle == 3
-  step "leave the time zone page"
-    click == [1413, 193]
-    settle == 5
-  step "leave the third-party repositories page"
-    click == [1413, 193]
-    settle == 5
-  press Escape, waiting 2s, named "clear a context menu if the wizard had already closed"
-
   # THE ACCOUNT FORM IS RECOGNISED BY A PICTURE, NOT BY WORDS OR A GUESS ABOUT FOCUS.
   #
   # MEASURED ON THIS WIZARD, six runs: the words on the page are not unique to it (Privacy, the update
@@ -277,55 +244,45 @@ walkthrough "linux-fedora-workstation - sshd"
   # Return ALONE is what works on most pages, because the wizard focuses Next when a page opens. The
   # pages where it does not are the two whose content takes the focus - Privacy's switch and Time
   # Zone's search box - and there Shift+Tab is what reaches Next.
-  step "leave the welcome page"
-    key == ret
-    settle == 5
-  # THE PRIVACY PAGE'S SWITCH TAKES THE FOCUS, so Next is one Shift+Tab away. Its state is left alone:
-  # this stage is not about location services, and Return on a focused switch would toggle it.
+  # EVERY PAGE AFTER THE WELCOME IS LEFT BY CLICKING NEXT, AND THAT WAS MEASURED.
+  #
+  # THIS REPLACES THREE EARLIER ATTEMPTS AT THE SAME ROUTE, AND ALL THREE FAILED THE SAME WAY - by
+  # pressing keys at a wizard whose focus they did not know:
+  #
+  #	fixed [Tab, Tab, Return] x8          stopped on "Third-Party Repositories"
+  #	Tab,Tab,Return in a `loop:`          stopped on the same page
+  #	Return / Shift+Tab+Return per page    left the screen ON PRIVACY (OCR read "Previous Privacy
+  #	                                      Privacy") while the next four steps walked a wizard that
+  #	                                      had not moved
+  #
+  # The last one is the dangerous shape: a keystroke on the wrong page is still a keystroke, so every
+  # later step reported a real action against the wrong screen. On the pod, the same route by
+  # CLICKING went from Privacy to Third-Party on the first click and to About You on the second, and
+  # Previous walked it back the same way. The pointer is the part of this wizard that behaves.
+  #
+  # THE WELCOME PAGE IS HANDLED ABOVE, by `Tab, Return` on "Start Setup": it is the only control on
+  # that page, so there is nothing else for the focus to land on.
+  #
+  # THE PRIVACY PAGE IS LEFT THE SAME WAY - one click on Next, at (1413, 193), the coordinate the
+  # wizard draws it at on every page. Its location switch is left alone: this stage is not about
+  # location services, and clicking the page's centre would toggle it.
   step "leave the privacy page"
-    do == [{key: shift+tab, settle: 1}, {key: ret, settle: 6}]
-  # TIME ZONE ONLY ENABLES Next ONCE A CITY IS PICKED, AND ITS SEARCH BOX DOES NOT ANSWER.
-  #
-  # MEASURED TWICE: typing "los angeles" into the box left the suggestion list unpopulated and Next
-  # grey - the box held the text and nothing else happened. What does work is the MAP: a click at
-  # (640, 690) lands on Los Angeles and the page immediately draws
-  #
-  #	PST (UTC-08)
-  #	Los Angeles, United States
-  #
-  # with Next enabled. An earlier attempt clicked (680, 640) and got Creston, Canada - the map is a
-  # world map and 40 pixels is a different city, so the coordinate is named for the city it selects.
-  # THE PAGE IS RECOGNISED BY ITS OWN WORDS, AND THE PICTURE THAT USED TO DO IT IS GONE.
-  #
-  # MEASURED ON THE POD: `reference/timezone-page.png` scores 0.6462 against a frame of the real page,
-  # and 1.0000 against ITSELF - so it is a frame of a DIFFERENT session, not of this page as this disk
-  # draws it. Its rectangle also framed the "Please search for a nearby city" card, which exists only
-  # until a city is picked: a page that has already been answered would stop being recognised as
-  # itself. A picture reference that cannot match the page it names is worse than no reference.
-  #
-  # THE WORDS ARE THE PAGE'S OWN CHROME AND ITS OWN SENTENCE:
-  #
-  #	Time Zone
-  #	The time zone will be set automatically if your location can be found.
-  #
-  # neither of which appears on any other page of this wizard.
-  step "a Time Zone page, if the wizard is showing one"
-    loop == {check: {from: timezone, mode: text, name: showing, rect: [380, 160, 1540, 440], rect_at: [1920, 1080], scale: 1, words: [[time, zone], [set, automatically]]}, do: [{settle: 4}], max: 6, see: {name: timezone}, until: {fact: showing}}
-    optional == true
-  # THE MAP IS CLICKED WHETHER OR NOT THE CHECK ABOVE MATCHED, AND THAT IS THE SAME RULE THE ACCOUNT
-  # FIELDS FOLLOW: a click on a page that is not Time Zone lands on nothing, while a click that is
-  # skipped leaves the wizard stuck on a page whose Next stays grey.
-  step "point the map at Los Angeles"
-    click == [640, 690]
+    click == [1413, 193]
     settle == 5
-  # AND THE SEARCH BOX HAS THE FOCUS AFTER THAT CLICK, so Next is again one Shift+Tab away.
+  #
+  # (640, 690) IS A LANDMARK, NOT A NAVIGATION. It is Los Angeles on the map, and clicking it sets a
+  # time zone worth having - confirmed by the page's own bubble reading
+  # "PST (UTC-08) Los Angeles, United States". It is NOT what makes the page pass: measured, Next on
+  # an unanswered Time Zone page is the same blue button and moves the wizard on to Third-Party.
+  step "point the map at Los Angeles, when the wizard is showing one"
+    click == [640, 690]
+    settle == 3
   step "leave the time zone page"
-    do == [{key: shift+tab, settle: 1}, {key: ret, settle: 6}]
-  # THIRD-PARTY REPOSITORIES IS LEFT AT ITS DEFAULT (disabled) - the stage only needs a working
-  # account, not extra packages - and Return alone moves on, because this page gives Next the focus.
+    click == [1413, 193]
+    settle == 5
   step "leave the third-party repositories page"
-    key == ret
-    settle == 6
+    click == [1413, 193]
+    settle == 5
   # THE ACCOUNT FORM IS RECOGNISED BY A PICTURE, NOT BY WORDS OR A GUESS ABOUT FOCUS.
   #
   # MEASURED ON THIS WIZARD, six runs: the words on the page are not unique to it (Privacy, the update

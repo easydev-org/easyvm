@@ -187,3 +187,59 @@ func TestQmpRetryDropsTheCacheBeforeItReconnects(t *testing.T) {
 	t.Skip("covered by TestTheCacheAndTheRegistryAreNeverOutOfStep; the reconnect's own wait is thirty " +
 		"seconds and adds nothing to the ordering assertion")
 }
+
+// TestASecondCallerRetriesOnTheConnectionSomebodyElsePublished is the loop that never settled.
+//
+// MEASURED ON THE POD: 280 "reconnecting" lines for ONE boot, every command failing. The recorder's
+// sampler calls `qmpRetry` every second, and the first version of the function called `qmpSocket()`
+// again after dropping the dead connection and used what it found there. Two callers then took turns
+// dropping each other's fresh connection:
+//
+//	sampler   drops the dead one, opens a new one, publishes it
+//	this call drops THE ONE THE SAMPLER JUST PUBLISHED
+//	sampler's next tick drops the one this call opened
+//
+// The rule is: a caller that fails must replace the connection ONLY IF IT IS STILL THE DEAD ONE. If
+// somebody else already published a different one, that connection is the machine's and this caller
+// retries on it.
+func TestASecondCallerRetriesOnTheConnectionSomebodyElsePublished(t *testing.T) {
+	d := &Driver{daemon: &Daemon{}}
+	dead := &qmp.Conn{}
+	d.qmp = dead
+	fresh := &qmp.Conn{}
+
+	calls := 0
+	err := d.qmpRetry(func(c *qmp.Conn) error {
+		calls++
+		if calls == 1 {
+			if c != dead {
+				t.Fatalf("the first attempt did not run on the cached connection")
+			}
+			// THE SAMPLER WINS THE RECONNECT WHILE THIS COMMAND IS IN FLIGHT. That is the ordering
+			// that matters: the caller already holds the dead connection, somebody else publishes a
+			// new one, and the caller's command then fails. The caller must retry on the PUBLISHED
+			// one, not drop it.
+			d.mu.Lock()
+			d.qmp = fresh
+			d.mu.Unlock()
+			return qmp.ErrClosed
+		}
+		if c != fresh {
+			t.Errorf("the retry ran on a connection other than the one somebody else published")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("qmpRetry: %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("the command ran %d time(s), want 2 - one failure and one retry", calls)
+	}
+	d.mu.Lock()
+	still := d.qmp
+	d.mu.Unlock()
+	if still != fresh {
+		t.Fatal("the published connection was replaced; that is the loop that made 280 reconnects " +
+			"for one boot")
+	}
+}

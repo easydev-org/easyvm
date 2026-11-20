@@ -1620,43 +1620,41 @@ func (d *Driver) qmpRetry(fn qmpCommand) error {
 		return err
 	}
 
-	// THE CONNECTION IS DROPPED ONLY IF IT IS STILL THE ONE THAT FAILED.
+	// ONE RECONNECT, AND IT IS PUBLISHED RATHER THAN TAKEN.
 	//
-	// Another caller - the recorder's sampler, a gate - may have replaced `d.qmp` while this command
-	// was in flight. `Release` CLOSES what the registry holds for the path, so calling it
-	// unconditionally would close the replacement that somebody else is about to use, and the retry
-	// would then reproduce the very failure it exists to repair.
-	// THE DROP AND THE REGISTRY RELEASE HAPPEN UNDER THE SAME LOCK, AND THAT IS NOT TIDINESS - IT IS
-	// THE WHOLE POINT. MEASURED ON THE POD, on the step after the one this retry was written for:
+	// THE FIRST VERSION OF THIS FUNCTION CALLED `qmpSocket()` AGAIN AND USED WHAT IT RETURNED, WHICH
+	// WAS A LOOP THAT NEVER SETTLED. MEASURED on the pod: 280 "reconnecting" lines for ONE boot,
+	// every command failing - because the recorder's sampler calls this every second and:
 	//
-	//	leave the time zone page: key "shift+tab": another caller held the qmp socket for 10s and never
-	//	published a connection ... this qmp socket is already held by this process (by "easyvm")
+	//	sampler   sees the dead connection, drops it, opens a new one, publishes it in `d.qmp`
+	//	this call sees the dead connection, drops it - THE ONE THE SAMPLER JUST PUBLISHED -
+	//	          opens another, and the sampler's next tick drops that one
 	//
-	// Between `d.qmp = nil` and `Release` the cache said "no connection" while the REGISTRY still
-	// claimed the path. A second caller arriving in that window saw no cache, asked the registry, was
-	// told `ErrBusy` by this very process, and went into `waitForQMP` - which waited ten seconds for a
-	// publisher that was this goroutine's own next line. The two then deadlocked each other's
-	// recovery, and the error named a conflict with itself.
-	//
-	// `Release` does not block (it closes one socket and deletes two map entries), so holding `d.mu`
-	// across it is safe. What it buys is that no caller can observe "cache empty, registry held".
+	// Each caller treated "the cached connection is not the one I used" as "mine to replace". The
+	// remedy is to distinguish the two: a caller that finds SOMEBODY ELSE'S working connection in the
+	// cache after a failure RETRIES ON THAT ONE, and only a caller that still finds the dead
+	// connection replaces it.
 	d.mu.Lock()
-	mine := d.qmp == conn
-	if mine {
+	current := d.qmp
+	switch {
+	case current == nil:
+		// nobody else has reconnected: this caller does it
+	case current == conn:
+		// still the dead one, so it is this caller's to drop
 		d.qmp = nil
 		_ = d.qmpRegistry().Release(filepath.Join(d.work, "drive.sock.qmp"))
+	default:
+		// somebody else already replaced it, and that connection is this machine's
+		d.mu.Unlock()
+		return fn(current)
 	}
 	d.mu.Unlock()
 
-	d.logf("  qmp: the connection reported itself closed; reconnecting")
 	fresh, err := d.qmpSocket()
 	if err != nil {
-		d.logf(fmt.Sprintf("  qmp: the reconnect failed: %v", err))
 		return err
 	}
 	if fresh == conn {
-		d.logf("  qmp: the reconnect handed back THE SAME connection")
-		// the dead connection is still cached, which means this retry would fail identically
 		return fmt.Errorf("the qmp connection reported itself closed and could not be replaced: %w",
 			qmp.ErrClosed)
 	}
