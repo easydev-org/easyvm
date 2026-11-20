@@ -151,24 +151,35 @@ walkthrough "linux-opensuse-tumbleweed - sshd"
   step "allow password authentication"
     run == sudo sed -i -e s/^#PasswordAuthentication/PasswordAuthentication/ -e s/^PasswordAuthentication.no$/PasswordAuthentication.yes/ /etc/ssh/sshd_config ; sudo grep -n PasswordAuthentication /etc/ssh/sshd_config
     settle == 3
-  # `sshd -T` IS THE ONLY OPINION THAT COUNTS, AND IT DISAGREED WITH `grep -c` ON THE LAST RUN.
+  # `sshd -T` SAID NOTHING AT ALL, WHICH MEANS IT IS NOT READING THE FILE THAT WAS EDITED.
   #
-  # MEASURED ON RUN e58656b's console: `grep -c PasswordAuthentication /etc/ssh/sshd_config` printed
-  # **1** and `sshd -T | grep -i passwordauthentication` printed NOTHING - so the daemon's effective
-  # configuration did not mention the setting at all, and the client was refused with
+  # MEASURED ON TWO RUNS, the same two lines in a row:
   #
-  #	unable to authenticate, attempted methods [none password keyboard-interactive]
+  #	$ sudo sshd -T 2>&1 | grep -i passwordauthentication
+  #	(nothing)
+  #	$ grep -c PasswordAuthentication /etc/ssh/sshd_config
+  #	1
   #
-  # (Progress: the previous run failed at 'unexpected message type 51', so the config copy fixed the
-  # protocol half. What is left is that the setting the daemon actually uses is not the one the file
-  # shows.)
+  # A file that contains the setting and a daemon that reports none of it. On this distribution
+  # /etc/ssh/sshd_config is a COPY laid beside a vendor file that the unit's own `-f` points at, so
+  # editing the copy changes nothing.
   #
-  # The vendor file may ship an uncommented `PasswordAuthentication no`, or an Include that this
-  # image reads instead. Both spellings are rewritten, and then the daemon is asked again - the loop
-  # runs the same edit with a `-e` pair only while sshd still says no.
-  step "make sshd's own view say yes"
-    run == sudo sed -i -e s/^#PasswordAuthentication/PasswordAuthentication/ -e s/^PasswordAuthentication.no$/PasswordAuthentication.yes/ -e s/^PasswordAuthentication.no\\b/PasswordAuthentication.yes/ /etc/ssh/sshd_config ; sudo sshd -T 2>&1 | grep -i passwordauthentication ; sudo sshd -T 2>&1 | grep -ci "passwordauthentication yes"
-    settle == 3
+  # SO THE VALUE IS ASKED FOR WITH THE FILE NAMED, AND WRITTEN TO BOTH: `sshd -T -f` prints what that
+  # exact file would do, and the drop-in is written for every path that exists. Both lines are printed
+  # back with their answer, so the next recording says which file the daemon is actually using
+  # instead of leaving it to be guessed.
+  step "show what each config file would do"
+    run == sudo sshd -T -f /etc/ssh/sshd_config 2>&1 | grep -i passwordauthentication ; echo --- ; sudo sshd -T -f /usr/etc/ssh/sshd_config 2>&1 | grep -i passwordauthentication ; echo --- ; sudo ls -l /etc/ssh/sshd_config /usr/etc/ssh/sshd_config
+    settle == 4
+    terminal_wait == 0
+  # ONE AUTHORITATIVE DROP-IN, AND THE MAIN FILE REWRITTEN WITH IT.
+  #
+  # THE ORDER MATTERS AND SO DOES THE PROOF: the drop-in is written for every directory that exists,
+  # then the main file is made to say the same thing, then `sshd -T -f` is asked about each. If the
+  # daemon still reports nothing, the next recording says so at the step that caused it.
+  step "write the setting in both places"
+    run == sudo sh -c "mkdir -p /etc/ssh/sshd_config.d /usr/etc/ssh/sshd_config.d; printf 'PasswordAuthentication yes\\n' > /etc/ssh/sshd_config.d/99-vm.conf; printf 'PasswordAuthentication yes\\n' > /usr/etc/ssh/sshd_config.d/99-vm.conf"; sudo sed -i -e s/^PasswordAuthentication.no/PasswordAuthentication.yes/ -e s/^#PasswordAuthentication/PasswordAuthentication/ /etc/ssh/sshd_config ; sudo grep -i passwordauthentication /etc/ssh/sshd_config ; sudo sshd -T 2>&1 | grep -i passwordauthentication
+    settle == 4
     terminal_wait == 0
   step "enable sshd at boot"
     run == sudo systemctl enable sshd 2>&1 | tail -3
