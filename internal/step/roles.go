@@ -306,6 +306,81 @@ func ActionsIn(mapping map[string]any) []string {
 // THE MESSAGE NAMES THE LOST KEY, because that is the whole point: a file that wrote
 // `double:` beside `check:` looks correct, loads today, and runs the check without the click. The
 // reader of the error has to learn which of the two was doing nothing.
+// has reports whether a mapping carries this key at all, including a false value.
+func has(mapping map[string]any, key string) bool {
+	_, ok := mapping[key]
+	return ok
+}
+
+// CheckOptionalDoesNotAct refuses `optional:` on a step that presses, clicks or types.
+//
+// `optional:` MEANS "THIS MISS IS NOT FATAL", AND IT WAS BEING READ AS "THIS STEP MAY DO NOTHING".
+// Those are different, and the gap between them cost a real run.
+//
+// MEASURED ON THE POD, `linux/fedora-workstation/steps/ssh.walk`: the greeter check read the same
+// region five times and answered false every time - correctly, that disk has no greeter - and then
+//
+//	greeter - wake the screen    key esc
+//	greeter - the user tile      click (960, 488)
+//	greeter - the password box   click (936, 628), type "admin"
+//	greeter - submit             key ret
+//
+// ALL RAN ANYWAY. They were `optional`, so their failures were swallowed, and their ACTIONS went
+// into the GNOME Initial Setup window that was actually on screen - Escape, a click, five
+// characters and a Return, typed into a wizard nobody had asked them to touch. The wizard's own step
+// afterwards still read "welcome to fedora" and passed, which is why the damage only surfaced two
+// steps later as "the qmp connection is closed".
+//
+// SO THE TWO KINDS OF STEP ARE TOLD APART. A step that only LOOKS - `check:`, `see:`, `desktop:`,
+// `until:` - may be optional: a screen that does not show the thing is a fact worth recording, not an
+// action worth taking. A step that ACTS - clicks, types, presses - must be gated by `when:`/`unless:`
+// or not be written at all. A conditional action is a gate AROUND an action; `optional` is a shrug
+// after one, and a shrug cannot un-press a key.
+//
+// `when:`/`unless:` ARE NOT REFUSED HERE, because a gated action is exactly the shape being asked
+// for - the gate decides whether the action runs, so its absence is not a miss.
+func CheckOptionalDoesNotAct(stepName string, mapping map[string]any) error {
+	if !has(mapping, "optional") {
+		return nil
+	}
+	if has(mapping, "when") || has(mapping, "when_not") || has(mapping, "when_not_any") || has(mapping, "unless") {
+		return nil
+	}
+	// ONLY THE KEYS THAT PUT SOMETHING INTO THE GUEST ARE REFUSED.
+	//
+	// `loop:` IS AN ACTION IN `Roles` BECAUSE IT RUNS SOMETHING, but its `do:` may be nothing but
+	// `settle:` - waiting for a pane that may never come is a legitimate optional step, and refusing
+	// it would delete eleven files' worth of screens that are simply allowed to be absent. The keys
+	// below are the ones that cannot be undone: a click lands somewhere, a key is pressed, a command
+	// runs. `loop:`'s own body is checked when it runs, by the same dispatcher.
+	// THE KEYS BELOW PRESS SOMETHING INTO WHATEVER HAS FOCUS, and that is the whole danger: a click
+	// lands wherever the pointer is, a key goes to whichever window is in front. `optional` cannot
+	// undo any of that.
+	//
+	// `ssh:`, `run:` AND `scp:` ARE NOT ON THIS LIST, AND THE DISTINCTION IS THE POINT. They reach a
+	// guest that is already up, over a channel the stage owns, so a failure is a fact about that
+	// command - `systemctl enable sshd.socket` on a system without the unit is a miss worth recording,
+	// not a keystroke fired into an unknown window. MEASURED on cachyos, whose diagnosis step is
+	// deliberately optional for exactly that reason.
+	presses := map[string]bool{
+		"click": true, "double": true, "key": true, "press": true, "type": true,
+		"script": true, "qga": true, "adb": true,
+	}
+	for _, key := range ActionsIn(mapping) {
+		if !presses[key] {
+			continue
+		}
+		return fmt.Errorf("step %q is `optional` AND does `%s:` - `optional` swallows a failure, "+
+			"it does not stop the action, so this %s happens whether or not the screen asked for it. "+
+			"Gate it with `when:` (or `unless:`), or delete it: a conditional action is a gate around "+
+			"an action, and `optional` is a shrug after one. Measured: four `optional` greeter steps "+
+			"typed Escape, a click, a password and a Return into a GNOME wizard that was on screen "+
+			"because the greeter was not.",
+			stepName, key, key)
+	}
+	return nil
+}
+
 func CheckOneAction(stepName string, mapping map[string]any) error {
 	actions := ActionsIn(mapping)
 	if len(actions) < 2 {

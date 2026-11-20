@@ -79,15 +79,17 @@ walkthrough "linux-mx - sshd"
   step "the greeter is drawn"
     loop == {check: {from: greeter, mode: text, name: up, rect: [740, 470, 1340, 770], rect_at: [1920, 1080], scale: 2, words: [[password], [vmuser]]}, do: [{settle: 5}], max: 12, see: {name: greeter}, until: {fact: up}}
     optional == true
-  click "greeter - the password box" at 936 628, waiting 2s, optionally, named "greeter - the password box"
+  step "greeter - the password box"
+    when == [password, vmuser]
+    click == [936, 628]
 
   step "greeter - log in"
-    optional == true
+    when == [password, vmuser]
     settle == 3
     type == '{{ password }}'
   step "greeter - submit"
+    when == [password, vmuser]
     key == ret
-    optional == true
     settle == 12
   # THE SESSION TAKES LONGER THAN THE TWELVE SECONDS AFTER `Return`, AND A CHORD PRESSED IN THAT
   # GAP GOES TO THE GREETER. This is the same gate the same medium's install walk uses.
@@ -101,7 +103,9 @@ walkthrough "linux-mx - sshd"
   # the focused window, and the terminal never opened, so every run: after it typed into nothing.
   #
   # The window's own X is at 1305,163. Escape after it covers a window that is already gone.
-  click "close the welcome window, which holds focus" at 1305 163, waiting 3s, optionally, named "close the welcome window"
+  step "close the welcome window, which holds focus"
+    when == [password, vmuser]
+    click == [1305, 163]
   press Escape, waiting 2s, named "clear anything it left behind"
   press ctrl+alt+t, waiting 20s, named "open the terminal"
   # NO `terminal_wait:` HERE, AND THAT IS THE FIX RATHER THAN AN OMISSION.

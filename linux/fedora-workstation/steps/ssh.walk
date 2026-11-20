@@ -33,28 +33,28 @@ walkthrough "linux-fedora-workstation - sshd"
   # That screen is the FIRST-LOGIN WELCOME, i.e. the session is already up - exactly what the rest
   # of this file handles with `optional: true` on every greeter step. A wait that blocks when the
   # greeter is absent turns "this medium auto-logs-in" into a failure.
-  step "the greeter is drawn"
-    loop == {check: {from: greeter, mode: text, name: up, rect: [740, 470, 1340, 770], rect_at: [1920, 1080], scale: 2, words: [[password], [vmuser]]}, do: [{settle: 4}], max: 5, see: {name: greeter}, until: {fact: up}}
-    # FIVE ATTEMPTS, NOT SIXTY. This disk has no greeter at all - the first boot is the
-    # welcome wizard - and sixty attempts at four seconds each is what the stage spent before
-    # it ever reached the wizard's own step. MEASURED: 'the greeter is drawn' failed twelve
-    # times in a row with the wizard's words on screen, and the stage never moved on.
-    optional == true
-  step "greeter - wake the screen"
-    key == esc
-    optional == true
-    settle == 5
-  click "greeter - the user tile" at 960 488, waiting 4s, optionally, named "greeter - the user tile"
-  step "greeter - the password box"
-    clear == false
-    click == [936, 628]
-    optional == true
-    settle == 4
-    type == '{{ password }}'
-  step "greeter - submit"
-    key == ret
-    optional == true
-    settle == 12
+  # THIS DISK HAS NO GREETER, AND THE FOUR STEPS THAT PRETENDED IT MIGHT WERE DOING HARM.
+  #
+  # MEASURED ON THE POD, with the published `linux-fedora-workstation` disk, reading the same region
+  # five times four seconds apart:
+  #
+  #	"seeliano En 'Opan Platform Firmware Development"     the firmware screen
+  #	""                                                     black
+  #	"a ill J B Q . i y ' =n q a ..."                       the boot splash
+  #	"Rood ww s = come to Fedora Linux 45 (Workstation Edition)!"   THE WIZARD
+  #	"Rood ww s = come to Fedora Linux 45 (Workstation Edition)!"   still the wizard
+  #
+  # The check asked for "password" or "vmuser" and answered false - correctly, there is no greeter
+  # on this disk. AND THEN THE FOUR STEPS BELOW IT RAN ANYWAY: `optional:` makes a FAILURE non-fatal,
+  # it does not stop a step from acting. So the stage pressed Escape, clicked (960,488), typed the
+  # password and pressed Return - all of it into the Setup Assistant it had just found. The wizard's
+  # own step later read "welcome to fedora" and passed, which is why the damage was invisible until
+  # `focus the wizard's only button` tried to press Tab and the QMP connection was gone.
+  #
+  # A DISK THAT BOOTS TO A GREETER IS NOT WHAT THIS STAGE TESTS. This medium's install walk ends with
+  # `shutdown: kill` and no account, so the first boot is GNOME Initial Setup by construction. The
+  # greeter path is deleted rather than gated: a gate here would have to read the screen twice to
+  # decide what it had already read once.
   # THIS DISK HAS NO USER, SO THE FIRST BOOT IS GNOME INITIAL SETUP - NOT A GREETER.
   #
   # MEASURED ON RUN 44557858241, whose ssh recording ends on the Setup window and stays there:

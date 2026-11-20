@@ -774,6 +774,11 @@ func Validate(stepName string, mapping map[string]any) error {
 	if err := CheckOneAction(stepName, mapping); err != nil {
 		return err
 	}
+	// AND A STEP THAT ACTS MAY NOT BE `optional`. See the measurement in CheckOptionalDoesNotAct:
+	// four optional greeter steps pressed Escape, clicked, typed and returned into a wizard.
+	if err := CheckOptionalDoesNotAct(stepName, mapping); err != nil {
+		return err
+	}
 	for name, value := range mapping {
 		if key, ok := Keys[name]; ok {
 			// THE NAME IS WHAT THE LOG SAYS, SO IT IS A STRING AND NOTHING ELSE.

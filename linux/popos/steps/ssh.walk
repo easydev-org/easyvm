@@ -38,14 +38,16 @@ walkthrough "linux-popos - sshd"
     settle == 2
     type == '{{ password }}'
   press Return, waiting 20s, named "submit the passphrase"
-  click "greeter - the password box" at 1120 283, waiting 2s, optionally, named "greeter - the password box"
+  step "greeter - the password box"
+    when == [password, vmuser]
+    click == [1120, 283]
   step "greeter - log in"
-    optional == true
+    when == [password, vmuser]
     settle == 3
     type == '{{ password }}'
   step "greeter - submit"
+    when == [password, vmuser]
     key == ret
-    optional == true
     settle == 12
   click "open the terminal" at 1092 1048, waiting 20s, named "open the terminal"
   # NO `terminal_wait:` HERE, AND THAT IS THE FIX RATHER THAN AN OMISSION.

@@ -39,21 +39,19 @@ walkthrough "linux-zorin - sshd"
   # y 470..770. Read back from that recording at scale 2 it yields "Password vmuser"; at scale 1 it
   # yields nothing, which is why the scale is 2 and not the default.
   step "the greeter is drawn"
-    loop == {check: {from: greeter, mode: text, name: up, rect: [740, 470, 1340, 770], rect_at: [1920, 1080], scale: 2, words: [[password], [vmuser]]}, do: [{settle: 5}], max: 60, see: {name: greeter}, until: {fact: up}}
-  step "greeter - wake the screen"
-    key == esc
-    optional == true
-    settle == 5
-  click "greeter - the user tile" at 960 488, waiting 4s, optionally, named "greeter - the user tile"
+    loop == {check: {from: greeter, mode: text, name: up, rect: [740, 470, 1340, 770], rect_at: [1920, 1080], scale: 2, words: [[password], [vmuser]]}, do: [{key: esc, settle: 4}], max: 60, see: {name: greeter}, until: {fact: up}}
+  step "greeter - the user tile"
+    when == [password, vmuser]
+    click == [960, 488]
   step "greeter - the password box"
+    when == [password, vmuser]
     clear == false
     click == [960, 627]
-    optional == true
     settle == 4
     type == '{{ password }}'
   step "greeter - submit"
+    when == [password, vmuser]
     key == ret
-    optional == true
     settle == 12
   # ZORIN'S FIRST-RUN "Start Tour" PANEL IS A MODAL THAT TAKES THE KEYBOARD, AND IT MUST GO FIRST.
   #
@@ -68,7 +66,9 @@ walkthrough "linux-zorin - sshd"
   # a blanked screen.
   #
   # `No Thanks` is at 873,797. Escape follows for a panel that is already dismissed.
-  click "dismiss the first-run tour panel, which takes the keyboard" at 873 797, waiting 3s, optionally, named "dismiss the first-run tour panel"
+  step "dismiss the first-run tour panel, which takes the keyboard"
+    when == [password, vmuser]
+    click == [873, 797]
   press Escape, waiting 2s, named "clear anything the panel left behind"
   press ctrl+alt+t, waiting 20s, named "open the terminal"
   # NO `terminal_wait:` HERE, AND THAT IS THE FIX RATHER THAN AN OMISSION.

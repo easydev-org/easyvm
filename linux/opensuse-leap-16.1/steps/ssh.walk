@@ -63,14 +63,16 @@ walkthrough "linux-opensuse-tumbleweed - sshd"
     loop == {check: {from: grubmenu, mode: text, name: at_menu, rect: [150, 330, 1720, 460], rect_at: [1920, 1080], scale: 1, words: [[opensuse, leap], [recovery, mode]]}, do: [{settle: 5}], max: 12, see: {name: grubmenu}, until: {fact: at_menu}}
     optional == true
   press Return, waiting 60s, named "boot the highlighted entry, which is the installed system"
-  click "greeter - the password box" at 960 640, waiting 2s, optionally, named "greeter - the password box"
+  step "greeter - the password box"
+    when == [password, vmuser]
+    click == [960, 640]
   step "greeter - log in"
-    optional == true
+    when == [password, vmuser]
     settle == 3
     type == '{{ password }}'
   step "greeter - submit"
+    when == [password, vmuser]
     key == ret
-    optional == true
     settle == 12
   step "wait for the desktop, when this disk has one"
     desktop == linux
