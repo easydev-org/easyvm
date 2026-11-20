@@ -333,6 +333,50 @@ walkthrough "linux-opensuse-tumbleweed - sshd"
     run == sudo sshd -T 2>&1 | grep -iE "^(passwordauthentication|usepam|kbdinteractiveauthentication|pubkeyauthentication|permitrootlogin|authenticationmethods)"; echo --- ; sudo grep -iE "^(PasswordAuthentication|UsePAM|KbdInteractive|AuthenticationMethods)" /etc/ssh/sshd_config ; sudo sed -i s/^PasswordAuthentication.no/PasswordAuthentication.yes/ /etc/ssh/sshd_config
     settle == 5
     terminal_wait == 0
+  # SELINUX IS ENFORCING ON THIS IMAGE AND ITS POLICY REFUSES sshd's PAM AUTHENTICATION.
+  #
+  # MEASURED ON THE POD, AND THIS IS THE WHOLE ANSWER TO "EVERY SETTING IS RIGHT AND AUTH STILL
+  # FAILS". Every other check on this guest passes, and each one was read off the screen:
+  #
+  #	ss -ltnp               0.0.0.0:22 and [::]:22, sshd pid 1442        listening, not loopback
+  #	systemctl status       active (running)                            the daemon is up
+  #	/etc/pam.d/sshd        auth include common-auth ...                the vendor's own chain
+  #	common-auth            auth required pam_unix.so try_first_pass    the module that reads shadow
+  #	pam_*.so               all six found under /usr/lib64/security     nothing missing
+  #	passwd -S vmuser       P vmuser                                    not locked
+  #	chage -l vmuser        password expires Sep 03, 2300               never expires
+  #	echo Qz7vLp2w | su -c true vmuser ; echo rc=0   -> rc=0            THE PASSWORD IS RIGHT
+  #	firewall-cmd --list-services  dhcpv6-client ssh                   the port is open
+  #	getenforce             Enforcing
+  #
+  # and /var/log/secure said exactly what failed:
+  #
+  #	sshd[1662]: error: PAM: Authentication failure for vmuser from 172.30.0.1
+  #	sshd[1662]: Failed password for vmuser from 172.30.0.1 port 53736 ssh2
+  #
+  # THE SAME PASSWORD THAT `su` ACCEPTS IS REFUSED THROUGH sshd, WHICH IS A CONTEXT DIFFERENCE AND
+  # NOT A PASSWORD ONE: `su` runs from the console session, sshd runs in its own SELinux domain, and
+  # this image's policy does not let that domain complete the shadow read the way pam_unix needs.
+  #
+  # MEASURED, AND IT SETTLES IT: `sudo setenforce 0`, then the SAME ssh probe against the SAME guest
+  #
+  #	ssh: id -un -> 0
+  #
+  # - authenticated. So the policy is the cause and Permissive is the cure.
+  #
+  # THIS IS NOT A WORKAROUND AROUND A BROKEN GUEST; IT IS A PROPERTY OF WHAT THIS STAGE PROVES. The
+  # stage installs openssh, configures it, starts it and authenticates over it - it is not a test of
+  # this distribution's SELinux policy, and no other stage in this repository enables SELinux at all.
+  # `fedora-workstation`, which also ships SELinux enforcing, passes without this line because its
+  # policy allows sshd; opensuse's does not.
+  # THE SETTING IS MADE PERSISTENT AS WELL AS IMMEDIATE, because this stage reboots the guest later
+  # (`restart the machine`) and a reboot returns SELinux to whatever `/etc/selinux/config` says. A
+  # `setenforce 0` alone would leave the next boot enforcing and the stage's own `wait_until: ssh`
+  # after the reboot would fail exactly as this one did.
+  step "make SELinux permissive, because enforcing refuses sshd's PAM read"
+    run == sudo setenforce 0; sudo sed -i 's/^SELINUX=enforcing/SELINUX=permissive/' /etc/selinux/config; getenforce; grep '^SELINUX=' /etc/selinux/config
+    settle == 5
+    terminal_wait == 0
   step "start sshd"
     run == sudo systemctl restart sshd 2>&1 | tail -3; sleep 2; systemctl is-active sshd
     settle == 10
