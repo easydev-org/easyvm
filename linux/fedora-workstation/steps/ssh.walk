@@ -98,27 +98,56 @@ walkthrough "linux-fedora-workstation - sshd"
   #
   # The loop presses Next until the wizard's own heading is gone. `max: 12` is the number of pages
   # this wizard has plus slack; a page that does not advance costs one press, not the whole stage.
-  # TAB MOVES THE FOCUS AND RETURN PRESSES WHAT HAS IT - AND THE PAGE HAS TWO CONTROLS BEFORE NEXT.
+  # THE WIZARD IS WALKED BY KEYBOARD TO "About You", AND THAT PAGE IS FILLED IN.
   #
-  # THE ONE THING THAT IS KNOWN TO WORK IN THIS WIZARD IS Tab+Return: it is what pressed Start Setup
-  # when a click at the button's own centre did nothing. So the wizard is reachable by keyboard; the
-  # question was only where the focus lands.
+  # MEASURED ACROSS SIX RUNS, AND THE LAST ONE IS THE ONE THAT MATTERS:
   #
-  # MEASURED ON THE PRIVACY PAGE, four attempts:
-  #   eight clicks at (1420,193) inside Next  -> nothing;
-  #   eight [Tab, Return] pairs              -> the Location Services switch toggled, page unchanged;
-  #   ten bare Returns                       -> nothing;
-  #   twelve `alt+n`                          -> the switch toggled again, page unchanged
-  #                                              (frames at 250/600/700/850 s are all Privacy).
+  #   eight clicks at (1420,193) inside Next   -> nothing (the pointer does not reach this wizard)
+  #   eight [Tab, Return] pairs                -> the Location Services switch toggled
+  #   ten bare Returns                         -> nothing
+  #   twelve alt+n                             -> the switch toggled again
+  #   eight [Tab, Tab, Return] triples         -> THE WIZARD MOVED: frames at 400 s show "About You"
+  #                                               with Full Name and Username, and at 500 s the
+  #                                               same dialog in ENTERPRISE LOGIN mode - because one
+  #                                               of the triples pressed that toggle at the bottom.
   #
-  # The toggle explains all of it: on this page the FIRST Tab lands on the switch and Return flips
-  # it. Next is the row AFTER it, so the button needs TWO Tabs - and every attempt so far pressed
-  # Return one Tab too early.
+  # So Tab+Tab+Return is the sequence that advances pages, and on "About You" the page it lands on is
+  # the account form this stage needs. The cursor is IN the Full Name field on that frame (its border
+  # is the accent colour), so the fields are typed without a click.
   #
-  # So each page gets [Tab, Tab, Return]. Eight pages of that is this wizard's length plus slack; a
-  # Return on a desktop opens nothing that Escape cannot close.
-  step "walk the setup wizard to its end"
-    do == [{key: tab, settle: 1}, {key: tab, settle: 1}, {key: ret, settle: 7}, {key: tab, settle: 1}, {key: tab, settle: 1}, {key: ret, settle: 7}, {key: tab, settle: 1}, {key: tab, settle: 1}, {key: ret, settle: 7}, {key: tab, settle: 1}, {key: tab, settle: 1}, {key: ret, settle: 7}, {key: tab, settle: 1}, {key: tab, settle: 1}, {key: ret, settle: 7}, {key: tab, settle: 1}, {key: tab, settle: 1}, {key: ret, settle: 7}, {key: tab, settle: 1}, {key: tab, settle: 1}, {key: ret, settle: 7}, {key: tab, settle: 1}, {key: tab, settle: 1}, {key: ret, settle: 9}]
+  # THE FIELDS ARE THE TWO THE FORM SHOWS - Full Name and Username - and GNOME auto-fills the user
+  # name from the full name as it is typed, which is why the second field is CLEARED before typing
+  # (the fault that made manjaro's account `vmuservmuser`). Next enables once both are valid; the
+  # password is asked for on the page after it.
+  step "walk the wizard to About You"
+    do == [{key: tab, settle: 1}, {key: tab, settle: 1}, {key: ret, settle: 7}, {key: tab, settle: 1}, {key: tab, settle: 1}, {key: ret, settle: 7}, {key: tab, settle: 1}, {key: tab, settle: 1}, {key: ret, settle: 8}]
+  # THE FIELDS ARE TYPED UNCONDITIONALLY, BECAUSE A WRONG PAGE MAKES THEM HARMLESS RATHER THAN DAMAGING.
+  #
+  # A `when: [about]` GATE WAS TRIED AND REJECTED: `doCheck` only binds the fact when the check RUNS,
+  # and the check here is inside an `optional` loop, so a page that never matched would leave the
+  # name unbound and the gate would skip the typing silently - the same "optional step that let the
+  # miss through" fault this file's header already complains about.
+  #
+  # Typing into a page that is NOT this form lands in whatever has focus, and the only thing on the
+  # other side of this dialog is the wizard's own chrome. The steps that matter are gated afterwards
+  # by the account existing: if the typing missed, the sshd install below has no user to authenticate
+  # and the stage fails there, with the reason on screen.
+  step "the full name"
+    type == '{{ user }}'
+    type_gap == 0.09
+    settle == 3
+  press Tab, waiting 2s, named "on to the user name"
+  step "clear the auto-filled user name"
+    key == ctrl+a
+    settle == 1
+  step "the user name"
+    type == '{{ user }}'
+    type_gap == 0.09
+    settle == 3
+  press Return, waiting 10s, named "submit the account page"
+  # AND THE PAGES AFTER IT, IN THE SAME [Tab, Tab, Return] SHAPE THAT GOT THIS FAR.
+  step "walk the rest of the setup wizard"
+    do == [{key: tab, settle: 1}, {key: tab, settle: 1}, {key: ret, settle: 7}, {key: tab, settle: 1}, {key: tab, settle: 1}, {key: ret, settle: 7}, {key: tab, settle: 1}, {key: tab, settle: 1}, {key: ret, settle: 9}]
   press Escape, waiting 2s, named "clear a context menu if the wizard had already closed"
 
   # THE TERMINAL IS OPENED WITHOUT A POINTER EVENT, BECAUSE CLICKS DO NOT LAND IN THIS GUEST.
