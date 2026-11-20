@@ -194,12 +194,21 @@ walkthrough "linux-opensuse-tumbleweed - sshd"
     run == sudo sshd -T -f /etc/ssh/sshd_config 2>&1 | head -5; echo "exit=$?"; echo ===; sudo sshd -T -f /usr/etc/ssh/sshd_config 2>&1 | head -5; echo "exit=$?"; echo ===; sudo sshd -T 2>&1 | head -5; echo "exit=$?"
     settle == 5
     terminal_wait == 0
+  # NO `\\n` INSIDE A DOUBLE-QUOTED `sh -c`, AND THAT IS THE WHOLE FIX FOR THIS STEP.
+  #
+  # MEASURED ON RUN e799ae4's console: every command after this one appeared with a bare `>` in front
+  # of it, ending at a lone `> _` - zsh waiting for a quote to close. `printf '...\\n'` inside a
+  # YAML double-quoted string had its `\\n` turned into A REAL NEWLINE before the shell ever saw it,
+  # so the single-quoted argument opened on one line and never closed, and the rest of the stage was
+  # swallowed as string literal.
+  #
+  # `echo` NEEDS NO ESCAPE, so there is nothing for the two layers of quoting to disagree about.
   step "write the drop-in everywhere a config dir exists"
-    run == sudo sh -c "mkdir -p /etc/ssh/sshd_config.d /usr/etc/ssh/sshd_config.d; printf 'PasswordAuthentication yes\\n' > /etc/ssh/sshd_config.d/99-vm.conf; printf 'PasswordAuthentication yes\\n' > /usr/etc/ssh/sshd_config.d/99-vm.conf"; sudo sed -i s/^PasswordAuthentication.no/PasswordAuthentication.yes/ /etc/ssh/sshd_config ; sudo grep -n PasswordAuthentication /etc/ssh/sshd_config"
+    run == sudo mkdir -p /etc/ssh/sshd_config.d /usr/etc/ssh/sshd_config.d; echo PasswordAuthentication yes | sudo tee /etc/ssh/sshd_config.d/99-vm.conf; echo PasswordAuthentication yes | sudo tee /usr/etc/ssh/sshd_config.d/99-vm.conf; sudo sed -i s/^PasswordAuthentication.no/PasswordAuthentication.yes/ /etc/ssh/sshd_config; sudo grep -n PasswordAuthentication /etc/ssh/sshd_config
     settle == 3
     terminal_wait == 0
   step "the vendor file says it too, because that is the one sshd may read"
-    run == sudo sh -c "grep -q ^PasswordAuthentication /usr/etc/ssh/sshd_config || printf 'PasswordAuthentication yes\\n' >> /usr/etc/ssh/sshd_config"; sudo sed -i s/^PasswordAuthentication.no/PasswordAuthentication.yes/ /usr/etc/ssh/sshd_config ; sudo grep -n PasswordAuthentication /usr/etc/ssh/sshd_config
+    run == sudo grep -q ^PasswordAuthentication /usr/etc/ssh/sshd_config || echo PasswordAuthentication yes | sudo tee -a /usr/etc/ssh/sshd_config; sudo sed -i s/^PasswordAuthentication.no/PasswordAuthentication.yes/ /usr/etc/ssh/sshd_config; sudo grep -n PasswordAuthentication /usr/etc/ssh/sshd_config
     settle == 3
     terminal_wait == 0
   step "enable sshd at boot"
