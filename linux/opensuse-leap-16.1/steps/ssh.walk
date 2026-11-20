@@ -254,8 +254,33 @@ walkthrough "linux-opensuse-tumbleweed - sshd"
   # OPEN SUSE AUTHENTICATES THROUGH PAM, and PAM's own password stack is what has to accept this
   # account. `sshd -T` (which no longer needs a key) is asked for the two settings that decide it,
   # and `pam.d/sshd` is printed, so the next recording says whether the daemon or PAM refused.
-  step "ask sshd which file it read and what it decided"
-    run == sudo sshd -T 2>&1 | grep -iE "^(passwordauthentication|usepam|kbdinteractiveauthentication|permitrootlogin|pubkeyauthentication)"; echo === ; sudo ls -l /etc/ssh/sshd_config /usr/etc/ssh/sshd_config; echo === ; sudo grep -c . /etc/pam.d/sshd
+  # `usepam yes` WITH NO `/etc/pam.d/sshd` IS THE WHOLE AUTHENTICATION FAILURE.
+  #
+  # MEASURED ON RUN c2d6a1f's console, and this is the answer the last six runs were looking for:
+  #
+  #\tvmuser@localhost:~> sudo sshd -T | grep -iE "^(passwordauthentication|usepam|...)"
+  #\tusepam yes
+  #\tpermitrootlogin prohibit-password
+  #\tpubkeyauthentication yes
+  #\tkbdinteractiveauthentication yes
+  #\tpasswordauthentication yes
+  #
+  #\tvmuser@localhost:~> sudo grep -c . /etc/pam.d/sshd
+  #\tgrep: /etc/pam.d/sshd: No such file or directory
+  #
+  # SO THE DAEMON IS TOLD TO AUTHENTICATE THROUGH PAM and the PAM configuration for it does not
+  # exist. Every password offered is refused by a stack that is not there, which is exactly the
+  # message the client printed: "unable to authenticate, attempted methods [none password
+  # keyboard-interactive]".
+  #
+  # WHAT IS IN THE DIRECTORY decides how to fix it, so it is listed first; then the file is created
+  # from the same skeleton openSUSE's own `login` stack uses, which is the one that reads /etc/shadow.
+  step "look at what PAM has, since sshd now needs a file it does not have"
+    run == sudo ls /etc/pam.d/ | head -20; echo === ; sudo cat /etc/pam.d/login 2>/dev/null | head -12
+    settle == 5
+    terminal_wait == 0
+  step "give sshd the PAM stack that reads /etc/shadow"
+    run == test -f /etc/pam.d/sshd || sudo cp /etc/pam.d/login /etc/pam.d/sshd; sudo ls -l /etc/pam.d/sshd; sudo grep -c . /etc/pam.d/sshd
     settle == 5
     terminal_wait == 0
   step "start sshd"
