@@ -98,33 +98,45 @@ walkthrough "linux-fedora-workstation - sshd"
   #
   # The loop presses Next until the wizard's own heading is gone. `max: 12` is the number of pages
   # this wizard has plus slack; a page that does not advance costs one press, not the whole stage.
-  # NEITHER A CLICK NOR TAB+RETURN ADVANCES THIS WIZARD; A BARE RETURN DOES, BECAUSE NEXT IS THE
-  # PAGE'S DEFAULT ACTION.
+  # THE WIZARD IS DRIVEN BY ITS OWN MNEMONIC, BECAUSE IT IGNORES BOTH THE MOUSE AND A BARE RETURN.
   #
-  # MEASURED ON THREE RUNS:
-  #   1. a click at Start Setup's own centre logged "clicked (960, 844)" and did nothing; a Tab+Return
+  # MEASURED, FOUR RUNS, FOUR DIFFERENT ATTEMPTS AT THE SAME PAGE:
+  #   1. a click at Start Setup's centre logged "clicked (960,844)" and did nothing; Tab+Return then
   #      started the wizard;
-  #   2. eight clicks at (1420,193) - inside Next on every page - logged eight "clicked" lines and
-  #      the page never changed;
-  #   3. eight Tab+Return pairs left the recording on the Privacy page with the Location Services
-  #      switch TURNED ON - so Tab had put the focus on the SWITCH and each Return toggled it.
+  #   2. eight clicks at (1420,193) - inside Next on every page - logged eight "clicked" lines and the
+  #      Privacy page never changed;
+  #   3. eight Tab+Return pairs left the Privacy page with the Location Services switch ON: Tab had
+  #      focused the switch and each Return toggled it;
+  #   4. ten bare Returns left it exactly as it was.
   #
-  # The Next button is drawn in the accent colour, which in this toolkit means it is the page's
-  # DEFAULT action: a Return with no focus in the content area activates it. Tab must not be pressed
-  # first, because the first Tab lands on the switch.
+  # So on this page neither a pointer event nor Return reaches the Next button. Its label carries a
+  # mnemonic - GTK underlines the letter and binds it to Alt - and `alt+n` is that binding. It works
+  # whatever has focus, and on the pages where Next is the default it is harmless.
   #
-  # Eight Returns is this wizard's page count plus slack; past the last page a Return on a desktop
-  # opens nothing that Escape cannot close.
+  # Twelve presses is this wizard's page count plus slack; past the last page Alt+N does nothing,
+  # and Escape dismisses anything that was opened.
   step "walk the setup wizard to its end"
-    do == [{key: ret, settle: 7}, {key: ret, settle: 7}, {key: ret, settle: 7}, {key: ret, settle: 7}, {key: ret, settle: 7}, {key: ret, settle: 7}, {key: ret, settle: 7}, {key: ret, settle: 7}, {key: ret, settle: 7}, {key: ret, settle: 9}]
+    do == [{key: alt+n, settle: 7}, {key: alt+n, settle: 7}, {key: alt+n, settle: 7}, {key: alt+n, settle: 7}, {key: alt+n, settle: 7}, {key: alt+n, settle: 7}, {key: alt+n, settle: 7}, {key: alt+n, settle: 7}, {key: alt+n, settle: 7}, {key: alt+n, settle: 7}, {key: alt+n, settle: 7}, {key: alt+n, settle: 9}]
   press Escape, waiting 2s, named "clear a context menu if the wizard had already closed"
 
-  click "desktop - give the shell focus" at 960 700, waiting 2s, named "desktop - give the shell focus"
+  # THE TERMINAL IS OPENED WITHOUT A POINTER EVENT, BECAUSE CLICKS DO NOT LAND IN THIS GUEST.
+  #
+  # MEASURED: this stage's own wizard ignored eight clicks inside its Next button (the log shows
+  # 'clicked (1420, 193)' eight times and the page never moved), and 'click "open the terminal" at
+  # 960 178' is a click on the FIRST SEARCH RESULT - which is at the top of the list, and the list is
+  # redrawn every time a character is typed. So even when the overview opens, the click lands
+  # wherever the row happened to be a moment earlier.
+  #
+  # The keyboard does the whole job: the overview opens on meta_l, the search narrows to one app, and
+  # RETURN opens the first result. No coordinate is involved.
   press meta_l, waiting 4s, named "open the overview"
   step "search for the terminal"
-    settle == 4
+    settle == 3
     type == terminal
-  click "open the terminal" at 960 178, waiting 20s, named "open the terminal"
+    type_gap == 0.08
+  step "the result list has had time to draw"
+    settle == 4
+  press Return, waiting 25s, named "open the terminal on the first result"
   # NO `terminal_wait:` HERE, AND THAT IS THE FIX RATHER THAN AN OMISSION.
   #
   # `terminal_wait:` OPENS A TERMINAL (ctrl+alt+t) AND THEN TYPES. The step above has already
