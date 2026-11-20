@@ -260,15 +260,22 @@ func (d *Driver) frameCache() *frameCache {
 		d.frames = newFrameCache(func() (cachedFrame, error) {
 			d.frameMu.Lock()
 			defer d.frameMu.Unlock()
-			conn, err := d.qmpSocket()
+			// THE CAPTURE GOES THROUGH `qmpRetry` FOR THE SAME REASON EVERY OTHER COMMAND DOES: a
+			// frame that fails because the socket went away is a tick this sampler can still deliver,
+			// and a leftover `d.qmp` would otherwise cost every later capture too.
+			var out cachedFrame
+			err := d.qmpRetry(func(conn *qmp.Conn) error {
+				f, err := conn.Screendump(filepath.Join(d.work, "frames"))
+				if err != nil {
+					return err
+				}
+				out = cachedFrame{path: f.Path, w: f.Width, h: f.Height, at: time.Now()}
+				return nil
+			})
 			if err != nil {
 				return cachedFrame{}, err
 			}
-			f, err := conn.Screendump(filepath.Join(d.work, "frames"))
-			if err != nil {
-				return cachedFrame{}, err
-			}
-			return cachedFrame{path: f.Path, w: f.Width, h: f.Height, at: time.Now()}, nil
+			return out, nil
 		})
 	}
 	return d.frames
@@ -303,11 +310,7 @@ func (d *Driver) Click(x, y int) error {
 	// and a walk whose pointer is a socket contention problem fails in a way that reads as a dead
 	// widget. QMP has no such limit: it is the same connection the daemon already owns for status,
 	// screendumps and shutdown.
-	conn, err := d.qmpSocket()
-	if err != nil {
-		return err
-	}
-	return conn.Click(x, y)
+	return d.qmpRetry(func(conn *qmp.Conn) error { return conn.Click(x, y) })
 }
 
 func (d *Driver) DoubleClick(x, y int) error {
@@ -319,27 +322,15 @@ func (d *Driver) DoubleClick(x, y int) error {
 }
 
 func (d *Driver) Key(qcode string) error {
-	conn, err := d.qmpSocket()
-	if err != nil {
-		return err
-	}
-	return conn.Key(qcode)
+	return d.qmpRetry(func(conn *qmp.Conn) error { return conn.Key(qcode) })
 }
 
 func (d *Driver) Stroke(modifiers []string, key string) error {
-	conn, err := d.qmpSocket()
-	if err != nil {
-		return err
-	}
-	return conn.Stroke(modifiers, key)
+	return d.qmpRetry(func(conn *qmp.Conn) error { return conn.Stroke(modifiers, key) })
 }
 
 // Type sends text one keystroke at a time, at the pace the caller measured.
 func (d *Driver) Type(text string, perChar time.Duration) ([]rune, error) {
-	conn, err := d.qmpSocket()
-	if err != nil {
-		return nil, err
-	}
 	strokes, err := keys.ForText(text)
 	if err != nil {
 		// A CHARACTER WITH NO QCODE IS NOT FATAL, and the caller logs which ones were skipped.
@@ -356,17 +347,26 @@ func (d *Driver) Type(text string, perChar time.Duration) ([]rune, error) {
 			kept = append(kept, one...)
 		}
 		strokes = kept
-		if err := d.sendStrokes(conn, strokes, perChar); err != nil {
+		if err := d.sendStrokes(strokes, perChar); err != nil {
 			return skipped, err
 		}
 		return skipped, nil
 	}
-	return nil, d.sendStrokes(conn, strokes, perChar)
+	return nil, d.sendStrokes(strokes, perChar)
 }
 
-func (d *Driver) sendStrokes(conn *qmp.Conn, strokes []keys.Stroke, perChar time.Duration) error {
+// sendStrokes types one string, and EVERY STROKE IS RETRIED ON ITS OWN CONNECTION IF IT NEEDS TO BE.
+//
+// THE UNIT OF RETRY IS THE STROKE, NOT THE STRING. A string is many commands, and re-running the whole
+// string after a reconnect would type the first half twice - which in a password field is a wrong
+// password, not a visible mistake. A stroke is one `input-send-event`: either the guest received it
+// or it did not, so retrying that one is exactly "send it again".
+func (d *Driver) sendStrokes(strokes []keys.Stroke, perChar time.Duration) error {
 	for _, s := range strokes {
-		if err := conn.Stroke(s.Modifiers, s.Key); err != nil {
+		stroke := s
+		if err := d.qmpRetry(func(conn *qmp.Conn) error {
+			return conn.Stroke(stroke.Modifiers, stroke.Key)
+		}); err != nil {
 			return err
 		}
 		if perChar > 0 {
@@ -382,7 +382,7 @@ func (d *Driver) sendStrokes(conn *qmp.Conn, strokes []keys.Stroke, perChar time
 	//
 	// It runs ONCE PER TYPED STRING rather than per character: an extra modifier event in the middle
 	// of text is a way to lose a character, and the fault is at the seam between two lines.
-	return conn.ReleaseModifiers()
+	return d.qmpRetry(func(conn *qmp.Conn) error { return conn.ReleaseModifiers() })
 }
 
 // The guest's screen, and the default is FHD because every coordinate in this repository was
@@ -1234,12 +1234,8 @@ func (d *Driver) shutdownOverAgent() error {
 
 // shutdownOverACPI presses the power button through QMP.
 func (d *Driver) shutdownOverACPI() error {
-	conn, err := d.qmpSocket()
-	if err != nil {
-		return err
-	}
 	d.logf("  pressing the power button")
-	return conn.SystemPowerdown()
+	return d.qmpRetry(func(conn *qmp.Conn) error { return conn.SystemPowerdown() })
 }
 
 // killAndReap takes the machine down now and returns once it is gone.
@@ -1340,14 +1336,10 @@ func (d *Driver) waitForExit(limit time.Duration) error {
 // QMP is what `REBOOT` means in every file that asks for one.
 func (m machineControl) Reboot() error {
 	d := m.d
-	conn, err := d.qmpSocket()
-	if err != nil {
-		return err
-	}
 	// QEMU'S OWN RESET, NOT A PROCESS RESTART. The command is the machine's, and the guest sees a
 	// warm reboot - which is what a stage that says `reboot:` wants, because the alternative is a
 	// cold boot that restarts an installer.
-	if err := conn.Reset(); err != nil {
+	if err := d.qmpRetry(func(conn *qmp.Conn) error { return conn.Reset() }); err != nil {
 		return fmt.Errorf("resetting the machine: %w", err)
 	}
 	// AND THE CACHED SSH CONNECTION DIES WITH THE GUEST.
@@ -1399,12 +1391,8 @@ func (m machineControl) OS() string {
 // and it reaps only when it gets round to it.
 // ResetMachine is the QMP reset, which is what `acpi: reset` sends.
 func (m machineControl) ResetMachine() error {
-	conn, err := m.d.qmpSocket()
-	if err != nil {
-		return err
-	}
 	m.d.logf("  resetting the machine")
-	return conn.Reset()
+	return m.d.qmpRetry(func(conn *qmp.Conn) error { return conn.Reset() })
 }
 
 // PressPowerButton is `acpi: power`: the ACPI power-button event, and nothing else.
@@ -1547,42 +1535,35 @@ func (d *Driver) qmpRegistry() *qmp.Registry {
 }
 
 func (d *Driver) qmpSocket() (*qmp.Conn, error) {
-	// A CACHED CONNECTION IS NOT THE SAME AS A WORKING ONE, AND THIS IS WHERE THAT ASSUMPTION COST A
-	// RUN ITS WHOLE BUDGET.
+	// THE CACHED CONNECTION IS HANDED OUT WITHOUT BEING PROBED, AND THAT IS A CORRECTION OF MY OWN
+	// LAST ATTEMPT RATHER THAN OF THE ORIGINAL CLAIM.
 	//
-	// MEASURED ON A POD, `linux-fedora-workstation`'s ssh stage: every step from the third on answered
+	// The connection is a SHARED resource: the recorder's sampler asks for a frame every second, a
+	// gate polls the screen, and a step types into it - all through the one `*Conn` this field holds.
+	// SO A PROBE THAT CLOSES ON FAILURE IS A CLOSE THAT LANDS UNDER SOMEBODY ELSE'S COMMAND, and that
+	// is exactly what the previous version did. MEASURED ON A POD, through the daemon's own HTTP
+	// endpoint rather than a hand-made QMP client:
 	//
-	//	key "tab": input-send-event []+tab: the qmp connection is closed
+	//	POST /api/command {"command":"key","key":"shift"}   20/20 ok   one command per request
+	//	POST /api/command {"command":"type","text":"a"}      0/15 ok   stroke + release-modifiers
+	//	    "type: release modifiers: the qmp connection is closed"
 	//
-	// while qemu itself was healthy - 4 vCPUs blocked in `kvm_vcpu_block`, the guest's CPU ticks
-	// climbing 185 in five seconds, the QMP socket still LISTENing. `ss -xp` showed qemu's end of the
-	// channel ESTAB with NO PEER: the connection had gone and this cache still held it.
+	// while qemu answered `query-status` with `running: true` and the daemon had restarted zero
+	// times. THE FIRST COMMAND OF A REQUEST NEVER FAILED AND THE SECOND REPEATEDLY DID, which is the
+	// shape of a close performed by a third party in between - one probe, one close, one victim.
 	//
-	// So the cached connection is PROBED before it is handed out, with `query-status` - the cheapest
-	// question the protocol has, and one that cannot change anything. A dead one is dropped so the
-	// Acquire below reconnects.
+	// A FAILED PROBE WAS NEVER PROOF EITHER. `Ping` takes the same mutex every other command takes,
+	// so a momentary failure closed a channel that was about to be used successfully.
 	//
-	// THE PROBE IS OUTSIDE THE LOCK. It is a round trip to qemu and must not be held while other
-	// callers - the recorder's sampler runs this every second - wait on the mutex. THE FIRST VERSION
-	// OF THIS FUNC WAS WRONG IN A LOUDER WAY: it unlocked twice on the hit path and the daemon died
-	// with `fatal error: sync: unlock of unlocked mutex` forty seconds into a boot, which from outside
-	// looked exactly like the QMP fault it was meant to fix.
+	// THE REPAIR BELONGS WHERE THE FAILURE IS OBSERVED: `qmpRetry` runs the command, and only a
+	// command that reports `ErrClosed` drops this cached connection and reconnects. A dead connection
+	// is then discovered by USING it, which is the only evidence that counts, and a working one is
+	// never closed out from under a caller that is about to use it.
 	d.mu.Lock()
 	cached := d.qmp
 	d.mu.Unlock()
-
 	if cached != nil {
-		if err := cached.Ping(); err == nil {
-			return cached, nil
-		}
-		// DEAD: forget it, so a caller that races here cannot pick it up again, and close it so
-		// qemu's single client slot is free.
-		d.mu.Lock()
-		if d.qmp == cached {
-			d.qmp = nil
-		}
-		d.mu.Unlock()
-		_ = cached.Close()
+		return cached, nil
 	}
 
 	path := filepath.Join(d.work, "drive.sock.qmp")
@@ -1597,18 +1578,8 @@ func (d *Driver) qmpSocket() (*qmp.Conn, error) {
 		// those two race: the sampler asks for a frame a moment after qemu creates the socket, wins the
 		// Acquire, and `Boot` then gets `ErrBusy` for a machine it just started successfully.
 		//
-		// MEASURED ON CI, ON ubuntu-install AND bsd-ghostbsd-install, AS A HANG THAT LOOKED LIKE A LOCK:
-		//
-		//	=== boot the installer
-		//	qemu -machine q35,accel=kvm ...
-		//	(the run then sat at `status: starting` until the job timed out)
-		//
-		// - no `qemu is up` line, and a ONE-SECOND VIDEO, because `Boot` returned the busy error and
-		// `doBoot` reported `boot: qmp ... is already held by "easyvm"` on a machine that was running.
-		//
 		// So the other caller's connection is waited for rather than refused. It is the same rule as
-		// the "another caller won the race" branch below, and the wait is bounded by the caller's own
-		// retry: the sampler stores its connection in `d.qmp` before this returns.
+		// the "another caller won the race" branch below.
 		if errors.Is(err, qmp.ErrBusy) {
 			return d.waitForQMP()
 		}
@@ -1627,6 +1598,54 @@ func (d *Driver) qmpSocket() (*qmp.Conn, error) {
 	d.qmp = conn
 	d.mu.Unlock()
 	return conn, nil
+}
+
+// qmpRetry runs one QMP command, and reconnects ONCE if the connection reported itself closed.
+//
+// THIS IS WHERE A DEAD CONNECTION IS NOW DISCOVERED - not by a probe before use, but by the command
+// that needed it. `ErrClosed` is the transport saying the socket is gone, and it is trustworthy in a
+// way a `query-status` failure was not: it comes from the command the caller actually wanted.
+//
+// ONLY `ErrClosed` IS RETRIED. A QMP error reply ("the device does not exist") is the machine's
+// answer and is returned as-is; retrying it would send the same keystroke twice.
+type qmpCommand func(*qmp.Conn) error
+
+func (d *Driver) qmpRetry(fn qmpCommand) error {
+	conn, err := d.qmpSocket()
+	if err != nil {
+		return err
+	}
+	err = fn(conn)
+	if !errors.Is(err, qmp.ErrClosed) {
+		return err
+	}
+
+	// THE CONNECTION IS DROPPED ONLY IF IT IS STILL THE ONE THAT FAILED.
+	//
+	// Another caller - the recorder's sampler, a gate - may have replaced `d.qmp` while this command
+	// was in flight. `Release` CLOSES what the registry holds for the path, so calling it
+	// unconditionally would close the replacement that somebody else is about to use, and the retry
+	// would then reproduce the very failure it exists to repair.
+	d.mu.Lock()
+	mine := d.qmp == conn
+	if mine {
+		d.qmp = nil
+	}
+	d.mu.Unlock()
+	if mine {
+		_ = d.qmpRegistry().Release(filepath.Join(d.work, "drive.sock.qmp"))
+	}
+
+	fresh, err := d.qmpSocket()
+	if err != nil {
+		return err
+	}
+	if fresh == conn {
+		// the dead connection is still cached, which means this retry would fail identically
+		return fmt.Errorf("the qmp connection reported itself closed and could not be replaced: %w",
+			qmp.ErrClosed)
+	}
+	return fn(fresh)
 }
 
 // waitForQMP waits for ANOTHER caller's connection to be published, and returns it.

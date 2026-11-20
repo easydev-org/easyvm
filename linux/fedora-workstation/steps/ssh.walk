@@ -145,8 +145,26 @@ walkthrough "linux-fedora-workstation - sshd"
   # name from the full name as it is typed, which is why the second field is CLEARED before typing
   # (the fault that made manjaro's account `vmuservmuser`). Next enables once both are valid; the
   # password is asked for on the page after it.
-  step "walk the wizard to About You"
-    do == [{key: tab, settle: 1}, {key: tab, settle: 1}, {key: ret, settle: 7}, {key: tab, settle: 1}, {key: tab, settle: 1}, {key: ret, settle: 7}, {key: tab, settle: 1}, {key: tab, settle: 1}, {key: ret, settle: 8}]
+  #
+  # MEASURED ON THE POD, AND THE FIXED COUNT IS WHAT THIS REPLACES. The list of eight strokes below
+  # was measured across six CI runs, and on this disk it stopped the wizard on
+  #
+  #	[ Previous ]   Third-Party Repositories   [ Next ]
+  #	Third-party repositories provide access to additional software ...
+  #	[ Disable Third-Party Repositories ]
+  #
+  # - TWO PAGES SHORT of the account form, with the whole rest of the stage waiting behind it. A
+  # fixed number of presses encodes "this image has N pages before About You", which is a fact about
+  # one image rather than about the wizard. THE NUMBER OF PAGES IS NOT THIS STAGE'S BUSINESS; the
+  # page it has to reach is.
+  #
+  # SO THE SAME TRIPLE IS PRESSED UNTIL THE ACCOUNT FORM IS UP, recognised by the same picture the
+  # next step judged it by. `max: 8` is every page this wizard has plus slack - a page that refuses
+  # to advance costs one triple, not the stage.
+  #
+  # THE TRIPLE ITSELF IS MEASURED AND STAYS: Tab reaches the switch, Tab reaches Next, Return presses
+  # it. A bare click at Next does nothing on this wizard, and a bare Return does nothing either -
+  # both were tried and both were recorded (see the note above).
   # THE ACCOUNT FORM IS RECOGNISED BY A PICTURE, NOT BY WORDS OR A GUESS ABOUT FOCUS.
   #
   # MEASURED ON THIS WIZARD, six runs: the words on the page are not unique to it (Privacy, the update
@@ -177,9 +195,11 @@ walkthrough "linux-fedora-workstation - sshd"
   #
   # `range: [0.78, 1.00]` is the tool's suggestion: the worst reject plus a 0.02 margin, so ordinary
   # rendering jitter cannot flip it.
-  step "the create-account form is up, with the cursor in Full Name"
-    loop == {check: {from: account_form, mode: like, name: ready, rect: [700, 300, 1100, 420], rect_at: [1920, 1080], reference: reference/about-you-create-account.png, range: [0.78, 1.0]}, do: [{settle: 5}], max: 10, see: {name: account_form}, until: {fact: ready}}
-    optional == true
+  step "walk the wizard to About You"
+    loop == {check: {from: account_form, mode: like, name: ready, rect: [700, 300, 1100, 420], rect_at: [1920, 1080], reference: reference/about-you-create-account.png, range: [0.78, 1.0]}, do: [{key: tab, settle: 1}, {key: tab, settle: 1}, {key: ret, settle: 7}], max: 8, see: {name: account_form}, until: {fact: ready}}
+  # THE WALK ABOVE ENDS ON THIS PAGE AND WOULD HAVE FAILED IF IT DID NOT, so there is no second,
+  # optional check here. An `optional` check that repeats a condition the previous step already
+  # asserted adds nothing but a way for the stage to continue past a page it never reached.
   # THE FIELDS ARE TYPED UNCONDITIONALLY, BECAUSE A WRONG PAGE MAKES THEM HARMLESS RATHER THAN DAMAGING.
   #
   # A `when: [ready]` GATE WAS TRIED AND REJECTED: `doCheck` only binds the fact when the check RUNS,

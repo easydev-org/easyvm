@@ -796,6 +796,12 @@ func (c *Conn) button(b raw.InputButton, down bool) error {
 // `query-status` changes nothing, costs one round trip, and is the difference between a stage that
 // reconnects and one that reports forty false failures about a machine that is running.
 func (c *Conn) Ping() error {
+	// A CONNECTION THAT WAS NEVER OPENED ANSWERS LIKE ONE THAT WAS CLOSED, and the difference matters:
+	// `Ping` is asked by callers that already hold a `*Conn` and cannot tell "never dialled" from
+	// "dialled and gone". A nil dereference here would be a panic in the daemon, which is PID 1.
+	if c == nil || c.l == nil {
+		return ErrClosed
+	}
 	return c.withRaw(func(m *raw.Monitor) error {
 		_, err := m.QueryStatus()
 		return err
