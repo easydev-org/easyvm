@@ -821,11 +821,21 @@ var (
 // what does the state look like now. A browser polling `status` while clicking must not be told a
 // click worked when there was no machine to click.
 func (d *Daemon) withQMP(what string, op func(*qmp.Conn) error) Response {
-	conn, err := d.interactiveConn()
+	// THE COMMAND GOES THROUGH THE DRIVER'S REPAIR, NOT THROUGH A CONNECTION TAKEN AND USED ONCE.
+	//
+	// MEASURED on the pod: `api/state` reported a frame captured 0.2 seconds earlier - the recorder's
+	// sampler was working - while `POST /api/command {"command":"key"}` answered `the qmp connection
+	// is closed`, every time. Both use the same `*Driver` and the same one connection; the sampler
+	// recovers through `qmpRetry` and this path did not, because `interactiveConn` handed out the
+	// cached connection and the command ran on it exactly once.
+	err := d.withMachine(func(drv run.Driver) error {
+		concrete, ok := drv.(*Driver)
+		if !ok {
+			return fmt.Errorf("this driver does not expose QMP")
+		}
+		return concrete.QMPCommand(op)
+	})
 	if err != nil {
-		return Response{OK: false, Error: err.Error()}
-	}
-	if err := op(conn); err != nil {
 		return Response{OK: false, Error: fmt.Sprintf("%s: %v", what, err)}
 	}
 	st := d.snapshot()

@@ -196,6 +196,70 @@ walkthrough "linux-fedora-workstation - sshd"
   # `range: [0.78, 1.00]` is the tool's suggestion: the worst reject plus a 0.02 margin, so ordinary
   # rendering jitter cannot flip it.
   #
+  # EVERY PAGE IS LEFT BY CLICKING NEXT, AND THAT WAS MEASURED RATHER THAN ASSUMED.
+  #
+  # THIS REPLACES TWO EARLIER ATTEMPTS AT THE SAME ROUTE, AND BOTH FAILED IN THE SAME WAY - by
+  # pressing keys at a wizard whose focus they did not know:
+  #
+  #	fixed [Tab, Tab, Return] x8        stopped on "Third-Party Repositories"
+  #	Tab,Tab,Return in a `loop:`        stopped on the same page
+  #	Return / Shift+Tab+Return per page  left the screen ON PRIVACY, OCR reading "Previous Privacy
+  #	                                    Privacy", while the next four steps walked a wizard that
+  #	                                    had not moved
+  #
+  # The last one is the dangerous shape: every later step "succeeded" against the wrong page, because
+  # a keystroke on the wrong page is still a keystroke. On the pod, the same route by CLICKING went
+  # from Privacy to Third-Party on the first click and to About You on the second, and Previous
+  # walked it back the same way. The pointer is the part of this wizard that behaves.
+  #
+  # (640, 690) IS A LANDMARK, NOT A NAVIGATION. It is Los Angeles on the map, and clicking it is what
+  # the earlier version of this file did to enable Next - but Next is THE SAME BLUE BUTTON either way,
+  # measured: clicking Next on an unanswered Time Zone page moved the wizard on to Third-Party. The
+  # map click is kept because a time zone is worth setting and the coordinate was confirmed by the
+  # page's own bubble reading "PST (UTC-08) Los Angeles, United States"; it is NOT what makes the
+  # page pass.
+  step "the map, if the wizard is showing one"
+    click == [640, 690]
+    settle == 3
+  step "leave the time zone page"
+    click == [1413, 193]
+    settle == 5
+  step "leave the third-party repositories page"
+    click == [1413, 193]
+    settle == 5
+  press Escape, waiting 2s, named "clear a context menu if the wizard had already closed"
+
+  # THE ACCOUNT FORM IS RECOGNISED BY A PICTURE, NOT BY WORDS OR A GUESS ABOUT FOCUS.
+  #
+  # MEASURED ON THIS WIZARD, six runs: the words on the page are not unique to it (Privacy, the update
+  # pane and this form are all white cards with a title and a blue Next), and the two ways it can look
+  # are "Create Account" (Full Name + Username) and "Enterprise Login" (Domain + Username + Password).
+  # A stage that typed on the wrong one put the password into a domain field and the wizard sat there.
+  #
+  # SO THE REGION IS COMPARED AS A PICTURE against a frame from run 145ff2b, in which the cursor is IN
+  # the Full Name field - which is the state this stage needs, not merely a page that mentions the
+  # same words.
+  #
+  # THE NUMBERS ARE MEASURED WITH `tools/reflike.py`, WHICH USES THE ENGINE'S OWN RULE.
+  #
+  # `reflike.py suggest` SEARCHES for the rectangle that separates the state from everything else,
+  # rather than taking the one I drew by eye - and it found a better one:
+  #
+  #	rect [700, 300, 1100, 420]   match 1.0000   worst reject 0.7551   gap 0.2449
+  #
+  # Against the box I had chosen first, [710, 530, 1215, 655], whose gap was 0.111:
+  #
+  #	1.0000  create-account form, cursor in Full Name     <- the state to act on
+  #	0.8890  an earlier wizard page                       <- only 0.11 below
+  #
+  # The difference is what is INSIDE the box. The first one framed the two input fields, which are
+  # white on both this page and every other page of the wizard; the second frames the row of marks
+  # above them - the account silhouette, the "About You" heading and its one line of body text - which
+  # exists on this page and nowhere else.
+  #
+  # `range: [0.78, 1.00]` is the tool's suggestion: the worst reject plus a 0.02 margin, so ordinary
+  # rendering jitter cannot flip it.
+  #
   # EVERY STROKE BELOW WAS MEASURED ON THE POD THROUGH THE DAEMON'S OWN HTTP ENDPOINT, PAGE BY PAGE,
   # AND THE WIZARD WAS WALKED TO "All done!" THAT WAY. What it replaces was a fixed list of
   # [Tab, Tab, Return] triples that stopped on "Third-Party Repositories" - and a `loop:` that pressed
@@ -327,8 +391,6 @@ walkthrough "linux-fedora-workstation - sshd"
     click == [1413, 193]
     settle == 4
   press Return, waiting 20s, named "finish the wizard"
-  press Escape, waiting 2s, named "clear a context menu if the wizard had already closed"
-
   # THE TERMINAL IS OPENED WITHOUT A POINTER EVENT, BECAUSE CLICKS DO NOT LAND IN THIS GUEST.
   #
   # MEASURED: this stage's own wizard ignored eight clicks inside its Next button (the log shows

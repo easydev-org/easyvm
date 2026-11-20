@@ -1648,11 +1648,14 @@ func (d *Driver) qmpRetry(fn qmpCommand) error {
 	}
 	d.mu.Unlock()
 
+	d.logf("  qmp: the connection reported itself closed; reconnecting")
 	fresh, err := d.qmpSocket()
 	if err != nil {
+		d.logf(fmt.Sprintf("  qmp: the reconnect failed: %v", err))
 		return err
 	}
 	if fresh == conn {
+		d.logf("  qmp: the reconnect handed back THE SAME connection")
 		// the dead connection is still cached, which means this retry would fail identically
 		return fmt.Errorf("the qmp connection reported itself closed and could not be replaced: %w",
 			qmp.ErrClosed)
@@ -1929,6 +1932,19 @@ func humanBytes(n int64) string {
 // a hung guest. That is the same rule `Registry` exists to enforce, and it is why the click and key
 // commands live in the daemon rather than in a process of their own.
 func (d *Driver) QMP() (*qmp.Conn, error) { return d.qmpSocket() }
+
+// QMPCommand runs one command with the same repair every walkthrough step gets.
+//
+// IT EXISTS BECAUSE THE INTERACTIVE SURFACE WAS THE ONE CALLER LEFT OUT. `/api/key`, `/api/click` and
+// `/api/type` went through `Daemon.withQMP`, which asked `QMP()` for the connection and ran the
+// command ONCE - so a connection that had gone away answered `the qmp connection is closed` for
+// every request, for ever, while the recorder's sampler on the SAME driver recovered by itself
+// through `qmpRetry`. MEASURED on the pod: `api/state` reported a frame captured 0.2 seconds ago
+// (the sampler was fine) at the same moment `POST /api/command {"command":"key"}` answered
+// `the qmp connection is closed` - two paths, one connection, only one of them repairing it.
+//
+// A dead connection is discovered by USING it, so the repair belongs on every path that uses one.
+func (d *Driver) QMPCommand(fn func(*qmp.Conn) error) error { return d.qmpRetry(fn) }
 
 // VNCPort is where the CURRENT machine's VNC listener is, or 0 when there is no machine.
 //
