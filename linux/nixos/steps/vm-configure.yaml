@@ -1,4 +1,7 @@
 name: linux-nixos - configure the vm (name, share, guest agent)
+recording_resolution:
+- 1920
+- 1080
 resolution:
 - 1920
 - 1080
@@ -24,8 +27,6 @@ vars:
 ssh_user: vmuser
 ssh_port: 2222
 steps:
-- name: start recording
-  record: vm-configure.mp4
 - name: take the input disk
   disk: disk.qcow2
 - name: boot the disk
@@ -98,14 +99,8 @@ steps:
 
     '
   timeout: 120
-- name: serve the host share
-  share_serve: true
-  timeout: 60
 - name: prove the guest can fetch from the host share
-  share_mount: true
-  share_family: linux
-  requires:
-  - share
+  ssh: sh -c 'curl -fsS --max-time 20 http://172.30.0.1:8080/shared/ || wget -qO- --timeout=20 http://172.30.0.1:8080/shared/'
   timeout: 180
 - name: show what the guest sees at the share
   # THE SHARE IS HTTP, SO THE GUEST'S OWN CLIENT IS THE PROOF. `share_mount:` fetches a sentinel the
@@ -117,14 +112,8 @@ steps:
   ssh: >-
     sh -c 'curl -fsS --max-time 20 http://172.30.0.1:8080/shared/ 2>&1 | head -20; echo "fetch exit = $?"'
   timeout: 120
-- name: write the launcher
-  write: launcher
-  family: linux
-  timeout: 60
 - name: copy the launcher in
-  scp:
-  - bootstrap-launcher.sh
-  - /tmp/bootstrap-launcher.sh
+  scp: {template: launcher, to: /tmp/bootstrap-launcher.sh}
   timeout: 300
 - name: install the launcher
   ssh: 'set -e
@@ -174,10 +163,11 @@ steps:
 
     '
   timeout: 60
-- name: stop the machine
-  shutdown: ssh
+- name: ask the guest to power off
+  ssh: printf '%s\n' '{{ password }}' | sudo -S -p '' poweroff
+  timeout: 300
+- name: wait for the machine to stop
+  wait_until: stopped
   timeout: 300
 - name: publish the disk
   compress: '{{ out }}'
-- name: stop recording
-  record: false

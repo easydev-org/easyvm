@@ -56,9 +56,11 @@ TWO MODES, AND THEY DIFFER IN WHEN THE MACHINE STOPS:
   easyvm stop    [--work DIR]                    stop the run and the machine
   easyvm destroy [--work DIR]                    stop a sandbox's machine (its only ending)
   easyvm health  [--work DIR]                    exit 0 only if QMP and the guest both answer
+  easyvm report  [--work DIR] [--out DIR]        write the run's journal as a self-contained page
 
   easyvm check   FILE                            validate without any machine at all
   easyvm list    FILE                            one line per step
+  easyvm walk    FILE...                          convert YAML to the sentence form
   easyvm versions                                what this build expects of qemu
 
 run flags:
@@ -80,6 +82,8 @@ func main() {
 	switch os.Args[1] {
 	case "check", "list":
 		os.Exit(cmdInspect(os.Args[1], args))
+	case "walk":
+		os.Exit(cmdWalk(args))
 	case "versions":
 		os.Exit(cmdVersions())
 	case "serve":
@@ -96,6 +100,8 @@ func main() {
 		os.Exit(cmdStop(args))
 	case "health":
 		os.Exit(cmdHealth(args))
+	case "report":
+		os.Exit(cmdReport(args))
 	case "-h", "--help", "help":
 		fmt.Print(usage)
 		os.Exit(0)

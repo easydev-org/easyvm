@@ -22,7 +22,10 @@ const realFiles = "../.."
 // THE WINDOWS AND MACOS FILES ARE NOW HERE, which is what moved this from "28 of 54 borrowed from
 // the Python repository" to "10 of 10 in this one". None of them uses a `python:` step any more:
 // the extension each one named became a key in the vocabulary.
-const portedFloor = 10
+// THE FLOOR IS A REGRESSION GUARD, NOT A TARGET: it is the number of walkthroughs that load today.
+// It went from 10 to 40 when the generator converted the upstream files whose vocabulary already
+// matched, and it may only go up.
+const portedFloor = 40
 
 func TestLoadsEveryRealWalkthrough(t *testing.T) {
 	if _, err := os.Stat(realFiles); err != nil {
@@ -32,16 +35,31 @@ func TestLoadsEveryRealWalkthrough(t *testing.T) {
 	var found int
 	var loaded int
 	var pythonBlocked []string
+	var awaiting []string
 	var unexpected []string
 
 	err := filepath.Walk(realFiles, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
 		}
-		if info.IsDir() || !strings.HasSuffix(path, ".yaml") {
+		if info.IsDir() || !strings.Contains(path, string(filepath.Separator)+"steps"+string(filepath.Separator)) {
 			return nil
 		}
-		if !strings.Contains(path, string(filepath.Separator)+"steps"+string(filepath.Separator)) {
+		// THE `.walk` IS THE FILE THIS PACKAGE IS ANSWERABLE FOR, AND THE `.yaml` BESIDE IT IS THE
+		// FILE IT REPLACED.
+		//
+		// THIS USED TO WALK `.yaml` AND SKIP ANY THAT HAD A `.walk`, which was right while the
+		// migration was a handful of hand-written files and became wrong the moment a generator could
+		// convert the rest: 31 files gained a `.walk` in one commit, every `.yaml` was skipped for
+		// having one, and nothing was loaded at all. The measurement said "0 of 10" about a tree that
+		// had 47 loadable files in it.
+		switch {
+		case strings.HasSuffix(path, ".walk"):
+		case strings.HasSuffix(path, ".yaml"):
+			if _, err := os.Stat(strings.TrimSuffix(path, ".yaml") + ".walk"); err == nil {
+				return nil // superseded; the `.walk` above is counted instead
+			}
+		default:
 			return nil
 		}
 		found++
@@ -61,6 +79,14 @@ func TestLoadsEveryRealWalkthrough(t *testing.T) {
 			pythonBlocked = append(pythonBlocked, path)
 			return nil
 		}
+		// AN UPSTREAM `.yaml` THAT HAS NOT BEEN CONVERTED is a KNOWN, NAMED extension of the same
+		// kind: it writes keys this vocabulary removed (`require:`, `record:`, `ocr:`), and each is
+		// converted in its own time. The list is printed so the gap is visible rather than counted as
+		// a pass - a file that still fails AFTER its `.walk` exists is a real defect and is reported.
+		if strings.HasSuffix(path, ".yaml") && isUnmigratedKeys(msg) {
+			awaiting = append(awaiting, path)
+			return nil
+		}
 		unexpected = append(unexpected, msg)
 		return nil
 	})
@@ -71,8 +97,9 @@ func TestLoadsEveryRealWalkthrough(t *testing.T) {
 		t.Skip("no walkthrough files found")
 	}
 
-	t.Logf("loaded %d of %d walkthroughs; %d blocked on the unported `python:` steps",
-		loaded, found, len(pythonBlocked))
+	t.Logf("loaded %d of %d walkthroughs; %d blocked on the unported `python:` steps; "+
+		"%d upstream `.yaml` files awaiting conversion", loaded, found, len(pythonBlocked),
+		len(awaiting))
 
 	if len(unexpected) > 0 {
 		t.Fatalf("%d walkthrough(s) failed for a reason that is NOT a known extension - a "+
@@ -104,6 +131,7 @@ func TestPythonStepsAreRefusedWithASentence(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "x.yaml")
 	body := `name: a file with a python step
+recording_resolution: [1920, 1080]
 steps:
   - name: enable remote login
     python: ssh_panes:enable_remote_login
@@ -133,6 +161,7 @@ func TestUnknownKeysAreRefused(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "x.yaml")
 	body := `name: a typo
+recording_resolution: [1920, 1080]
 steps:
   - name: click the button
     until_ms: 5000
@@ -171,6 +200,7 @@ func TestMissingVarIsRefused(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "x.yaml")
 	body := `name: unresolved
+recording_resolution: [1920, 1080]
 vars:
   user:
     value: vmuser
@@ -199,6 +229,7 @@ func TestArgsOverrideVars(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "x.yaml")
 	body := `name: args
+recording_resolution: [1920, 1080]
 vars:
   user:
     from: args.user
@@ -233,6 +264,7 @@ func TestDuplicateKeysAreRefused(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "x.yaml")
 	body := `name: dup
+recording_resolution: [1920, 1080]
 ssh_port: 2222
 ssh_port: 2223
 steps:
@@ -262,13 +294,19 @@ steps:
 // THE RULE IS THE ONE THE WHOLE DSL RESTS ON: one step does one thing. A reading and a decision are
 // two, and a vocabulary that accepts them together is a vocabulary that lets a file say something it
 // does not mean.
-func TestAnOCRStepCannotAlsoCheck(t *testing.T) {
+// A STEP THAT READS AND DECIDES IN ONE MAPPING IS REFUSED, because the dispatcher runs the first
+// branch it matches and returns - so the second half would never run, in a file that loaded.
+//
+// `see:` IS THE READING NOW (`ocr:` was the same operation restricted to a word list), and the rule
+// is unchanged: one step does one thing.
+func TestAReadingStepCannotAlsoCheck(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "x.yaml")
 	body := `name: probe
+recording_resolution: [1920, 1080]
 steps:
 - name: read and decide
-  ocr: {name: screen, region: [0, 0, 100, 100], region_at: [1920, 1080], scale: 1, wait: 0}
+  see: {name: screen, of: [text], rect: [0, 0, 100, 100], rect_at: [1920, 1080], wait: 0}
   check: {name: done, from: screen, mode: says_any, words: [[ok]]}
 `
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
@@ -276,10 +314,28 @@ steps:
 	}
 	_, err := Load(path, nil)
 	if err == nil {
-		t.Fatal("a step with both `ocr:` and `check:` loaded, and the `check:` would never run - the " +
-			"dispatcher calls `doOCR` and returns. Split it into two steps.")
+		t.Fatal("a step with both `see:` and `check:` loaded, and the `check:` would never run - the " +
+			"dispatcher takes the reading branch and returns. Split it into two steps.")
 	}
 	if !strings.Contains(err.Error(), "one thing") && !strings.Contains(err.Error(), "check") {
 		t.Fatalf("the error should say why: %v", err)
 	}
+}
+
+// isUnmigratedKeys reports whether a load failure is a key this vocabulary REMOVED, which is what an
+// upstream `.yaml` that has not been converted still writes.
+//
+// IT IS A NAMED LIST, NOT A PATTERN: "any unknown key" would make this test pass on a typo, and the
+// whole point of `TestLoadsEveryRealWalkthrough` is that a vocabulary gap cannot hide.
+func isUnmigratedKeys(msg string) bool {
+	for _, key := range []string{
+		`unknown key "require"`, `unknown key "record"`, `unknown key "ocr"`,
+		`unknown key "reboot"`, `unknown key "wait_after"`, `unknown key "family"`,
+		`no longer a key`, `unknown key "region"`, `unknown key "region_at"`,
+	} {
+		if strings.Contains(msg, key) {
+			return true
+		}
+	}
+	return false
 }

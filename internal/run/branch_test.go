@@ -146,11 +146,17 @@ func fmtStr(v any) string {
 // real tesseract, which would make this a slow test of OCR rather than a fast test of the executor.
 func TestALoopAssemblesItsPartsWithTheirKeys(t *testing.T) {
 	ocrRaw := map[string]any{
-		"name": "screen", "region": []any{0, 0, 1920, 1080},
-		"region_at": []any{1920, 1080}, "scale": 1, "wait": 0,
+		"name": "screen", "rect": []any{0, 0, 1920, 1080},
+		"rect_at": []any{1920, 1080}, "scale": 1, "wait": 0,
 	}
-	// THE SHAPE THE LOOP MUST BUILD. Built here the same way doLoop builds it.
-	ocrStep := walk.Step{Name: "probe [ocr]", Spec: map[string]any{"ocr": ocrRaw}}
+	// THE SHAPE THE LOOP MUST BUILD - AND IT IS BUILT BY THE LOOP.
+	//
+	// This test used to construct the sub-step itself, and so it asserted on its own copy of the
+	// shape rather than on the code that runs. When `doLoop` started handing `parseOCRStep` the `see:`
+	// mapping under a `see` key, this test still passed and EVERY LOOP IN EVERY WALKTHROUGH failed in
+	// a real run - measured on 44078798458, on a migrated `.walk`. A test that rebuilds the thing it
+	// is testing cannot see the thing change.
+	ocrStep, _, _ := loopParts(walk.Step{Index: 1, Name: "probe"}, "ocr", ocrRaw, nil, nil)
 	spec, err := parseOCRStep(ocrStep)
 	if err != nil {
 		t.Fatalf("a sub-step built as {ocr: {...}} is refused: %v", err)
@@ -180,5 +186,40 @@ func TestALoopAssemblesItsPartsWithTheirKeys(t *testing.T) {
 	}
 	if !ex.facts["done"] {
 		t.Fatal("the check did not bind its boolean")
+	}
+}
+
+// A LOOP'S `see:` IS A CAPTURE, AND THE LOOP MUST NOT DEMAND PARAMETERS IT NO LONGER HAS.
+//
+// `see:` USED TO CARRY `of:` AND A `rect:`, and a loop canonicalised the key to `ocr:` - a different
+// vocabulary with different parameters - so every converted file was refused with
+//
+//	wait for the installer window [ocr]: `ocr:` has unknown key "of"
+//
+// MEASURED on run 44083524097. The two vocabularies are one now: `see: {name: shot}` captures, and the
+// questions live in the loop's `check:`. This test builds the mapping a converted file writes and
+// requires the loop to accept it.
+func TestALoopReadsSeeAsACapture(t *testing.T) {
+	ex, _ := newExec(&fakeDriver{})
+	gate := walk.Step{Index: 1, Name: "gate"}
+
+	// THE SHAPE EVERY CONVERTED FILE WRITES.
+	see := map[string]any{"name": "screen"}
+	reading, _, _ := loopParts(gate, "see", see, nil, nil)
+	if _, ok := reading.Spec["see"]; !ok {
+		t.Fatal("the reading was not handed over under `see`")
+	}
+	if err := ex.checkReading(reading); err != nil {
+		t.Fatalf("a loop's `see: {name: screen}` was refused: %v", err)
+	}
+
+	// AND THE OLD SHAPE IS REFUSED WITH A SENTENCE THAT NAMES WHERE `of:` BELONGS.
+	legacy := map[string]any{"name": "screen", "of": []any{"text"},
+		"rect": []any{0, 0, 1920, 1080}, "rect_at": []any{1920, 1080}}
+	old, _, _ := loopParts(gate, "see", legacy, nil, nil)
+	err := ex.checkReading(old)
+	if err == nil {
+		t.Fatal("a loop's `see:` still carrying `of:` was accepted; its `check:` would then find no " +
+			"words and fail pointing at the wrong step")
 	}
 }

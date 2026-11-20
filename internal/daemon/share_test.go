@@ -31,7 +31,7 @@ import (
 // AND `kill` IS NOT A SUBSTITUTE: the disk that stage publishes IS the artifact, and a killed guest
 // leaves a filesystem that replays a journal on the next boot - which reads in the next stage's log as
 // a slow boot rather than as a torn disk.
-func TestTheThreeGracefulShutdownsAreImplemented(t *testing.T) {
+func TestEveryShutdownMethodStopsTheMachineAndWaits(t *testing.T) {
 	body, err := os.ReadFile("driver.go")
 	if err != nil {
 		t.Fatal(err)
@@ -45,21 +45,34 @@ func TestTheThreeGracefulShutdownsAreImplemented(t *testing.T) {
 	if end := strings.Index(rest[1:], "\nfunc "); end > 0 {
 		rest = rest[:end+1]
 	}
-	for _, method := range []string{"ssh", "guest_agent", "acpi"} {
+
+	// EVERY METHOD `Stop` ACCEPTS MUST ACTUALLY STOP SOMETHING. There were three graceful ones
+	// (`ssh`, `acpi`, `guest_agent`) and they are gone from here on purpose: a shutdown is now `kill`
+	// (take the process down) or `ssh` (the old one-step form), and the graceful requests are their
+	// own steps - `acpi: power`, `qga: shutdown`, `ssh: ... poweroff`.
+	for _, method := range []string{"kill", "ssh"} {
 		if !strings.Contains(rest, `case "`+method+`"`) {
 			t.Errorf("`shutdown: %s` has no branch, so a stage naming it fails on its last step", method)
 		}
 	}
-	// AND NONE OF THEM SILENTLY FALLS BACK TO A KILL. A shutdown that reported success after killing
-	// is the failure the Python implementation removed a whole fallback chain to stop making.
-	if !strings.Contains(rest, "shutdownOverSSH") || !strings.Contains(rest, "shutdownOverAgent") ||
-		!strings.Contains(rest, "shutdownOverACPI") {
-		t.Fatal("a shutdown method does not reach its own implementation")
+	// AND THE GRACEFUL PATHS DID NOT DISAPPEAR, THEY MOVED. `acpi: power` and `qga: shutdown` reach
+	// the same implementations, so a request that used to be a `shutdown:` method still exists.
+	for _, moved := range []string{"shutdownOverSSH", "shutdownOverAgent", "shutdownOverACPI"} {
+		if !strings.Contains(src, moved) {
+			t.Errorf("%s is gone, so the request it sends cannot be made from any key", moved)
+		}
 	}
 	// AND THE WAIT EXISTS, because a guest that was asked politely has to actually exit before the
 	// next step reads its disk.
 	if !strings.Contains(rest, "waitForExit") {
 		t.Fatal("no wait after the request; the next step would read a disk qemu still holds")
+	}
+	// AND IT IS NOT A WAIT-ONLY METHOD. `shutdown: wait` existed for one commit and was a verb that
+	// did not happen: `shutdown:` names how to STOP the machine, so a case that sent nothing was a
+	// word that lied. The waiting is `wait_until: stopped`, a step of its own.
+	if strings.Contains(rest, `case "wait"`) {
+		t.Error("`shutdown: wait` is back. It sends nothing, so it is not a way to stop a machine - " +
+			"a file that needs to wait writes `wait_until: stopped`")
 	}
 }
 

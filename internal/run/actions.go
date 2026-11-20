@@ -2,9 +2,12 @@ package run
 
 import (
 	"fmt"
+	"image"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -36,9 +39,6 @@ func (e *Executor) doBoot(s walk.Step) error {
 	// landing on the wrong screen.
 	if running, ok := m.(interface{ IsRunning() bool }); ok && running.IsRunning() {
 		want := s.Get("os")
-		if want == "" {
-			want = s.Get("family")
-		}
 		if want != "" {
 			if named, ok := m.(interface{ OS() string }); ok {
 				if have := named.OS(); have != "" && have != want {
@@ -50,11 +50,10 @@ func (e *Executor) doBoot(s walk.Step) error {
 		e.Driver.Log(fmt.Sprintf("  already running: %s", s.Name))
 		return nil
 	}
-	// `os:` REPLACED `family:`, and both are read so a file that has not been renamed still runs.
+	// `family:` WAS THE SAME KEY UNDER ANOTHER NAME and is gone: MEASURED 15 uses against `os:`'s
+	// 56, every one of them meaning the same thing, and the reader had to guess which spelling a
+	// given file used. `os:` is the name.
 	osName := s.Get("os")
-	if osName == "" {
-		osName = s.Get("family")
-	}
 	if osName == "" {
 		return fail(s.Name, "a boot step must name `os:` (windows, linux or macos)")
 	}
@@ -76,13 +75,13 @@ func (e *Executor) doBoot(s walk.Step) error {
 		}
 	}
 	spec := BootSpec{
-		OS:           osName,
-		Disk:         e.bootDisk(),
-		ISO:          e.assetPath(s.Get("iso")),
-		AnswerCD:     e.assetPath(s.Get("answer_cd")),
-		DriverCD:     e.assetPath(s.Get("driver_cd")),
-		Recovery:     e.assetPath(s.Get("recovery")),
-		Incoming:     resumeFrom,
+		OS:       osName,
+		Disk:     e.bootDisk(),
+		ISO:      e.assetPath(s.Get("iso")),
+		AnswerCD: e.assetPath(s.Get("answer_cd")),
+		DriverCD: e.assetPath(s.Get("driver_cd")),
+		Recovery: e.assetPath(s.Get("recovery")),
+		Incoming: resumeFrom,
 		// THE DISK IS FRESH IF THIS FILE CREATED IT. `disk_gb:` is the only step that makes a disk
 		// rather than naming one, so it is the only thing that can answer this - and the machine needs
 		// the answer twice: a fresh disk runs on itself (no throwaway diff that `ReleaseDiff` deletes),
@@ -105,6 +104,24 @@ func (e *Executor) doBoot(s walk.Step) error {
 	}
 	if n, err := s.Float("cpus", 0); err == nil && n > 0 {
 		spec.CPUs = int(n)
+	}
+	// `microvm: true` SELECTS THE SMALLEST MACHINE, and it is a property of the step rather than of
+	// the file because a file may install a distribution and then verify it in the same run.
+	if v, ok := s.Spec["microvm"].(bool); ok && v {
+		spec.MicroVM = true
+		spec.Kernel = e.assetPath(s.Get("kernel"))
+		spec.Initrd = e.assetPath(s.Get("initrd"))
+		spec.KernelAppend = s.Get("kernel_append")
+		spec.MicroVMDisplay = s.Get("microvm_display")
+		if spec.MicroVMDisplay == "" {
+			spec.MicroVMDisplay = "terminal"
+		}
+		if spec.CPUs == 0 {
+			spec.CPUs = 1
+		}
+		if spec.MemMB == 0 {
+			spec.MemMB = 512
+		}
 	}
 	// THE OPENCORE FILES ARE NEEDED BY EVERY MACOS BOOT, AND ONLY SOME OF THEM ATTACH THE
 	// RECOVERY IMAGE. They are built from it - Apple's APFS driver comes out of that image - but
@@ -131,6 +148,17 @@ func (e *Executor) doBoot(s walk.Step) error {
 		mediaNote(spec)))
 	if err := m.Boot(spec); err != nil {
 		return fail(s.Name, "boot: %v", err)
+	}
+	// THE BUDGET THE FILE PUT ON THE BOOT IS HANDED TO THE WAIT THAT FOLLOWS IT.
+	//
+	// `doBoot` starts qemu and returns, and every waiting step after it had a hard-coded default -
+	// `untilConsole` 180 seconds, `doRequireSSH` 900. A file that wrote `timeout == 900` on its boot
+	// was describing its guest to a step that never read it. See Executor.bootBudget.
+	if budget := seconds(s, "timeout", 0); budget > 0 {
+		e.bootBudget = budget
+		e.bootBudgetSet = true
+		e.Driver.Log(fmt.Sprintf("  the boot's %s becomes the budget for the wait that follows",
+			budget))
 	}
 	e.Driver.Log("  qemu started")
 	return nil
@@ -244,31 +272,6 @@ func (e *Executor) doShutdown(s walk.Step) error {
 	}
 	return nil
 }
-
-func (e *Executor) doReboot(s walk.Step) error {
-	m := e.Driver.Machine()
-	if m == nil {
-		return fail(s.Name, "this driver has no machine to reboot")
-	}
-	if err := m.Reboot(); err != nil {
-		return fail(s.Name, "%v", err)
-	}
-	e.Driver.Log("  the machine is back")
-	return nil
-}
-
-// --- the disk -------------------------------------------------------------------------
-
-// doDisk names the file `boot:` will start.
-//
-// `disk:` IS A PATH, NOT A MAPPING. Every real file writes `disk: disk.qcow2`, and the richer
-// {from, copy} form was never used outside a comment. Accepting both would be a second shape for
-// one fact, which is the drift this port exists to remove - so a mapping is refused by name rather
-// than silently half-read.
-//
-// THE OVERLAY IS `boot:`'s JOB, and that is from the Python implementation: a file used to need a
-// separate `disk_overlay:` step because letting `boot:` make the overlay had no way to say so. Now
-// it does, so this step only says which file.
 func (e *Executor) doDisk(s walk.Step) error {
 	// A STEP WITH `disk_gb:` CREATES A DISK; one with `disk:` NAMES AN EXISTING ONE.
 	//
@@ -425,9 +428,6 @@ func (e *Executor) doDesktop(s walk.Step) error {
 	// every file here writes `desktop: windows|macos|linux` - so reading it is the whole job.
 	family := s.Get("desktop")
 	if family == "" {
-		family = s.Get("desktop_family")
-	}
-	if family == "" {
 		family = s.Get("os")
 	}
 	if family == "" {
@@ -440,6 +440,9 @@ func (e *Executor) doDesktop(s walk.Step) error {
 	start := time.Now()
 	deadline := start.Add(timeout)
 	var lastStats screen.Stats
+	// refVerdict carries the last reference comparison's numbers out of the loop, for the log line
+	// that says what the step was waiting for when it gave up.
+	refVerdict := ""
 	for time.Now().Before(deadline) {
 		f, err := e.Driver.Frame()
 		if err != nil {
@@ -454,107 +457,208 @@ func (e *Executor) doDesktop(s walk.Step) error {
 			time.Sleep(poll)
 			continue
 		}
+		// A REFERENCE IMAGE ANSWERS THE SAME QUESTION WITH A MEASUREMENT THAT DOES NOT DRIFT.
+		//
+		// `desktop:` CURRENTLY DECIDES ON SIX FAMILY-WIDE THRESHOLDS, and every one of them was
+		// chosen against a particular renderer at a particular size. MEASURED on one ubuntu
+		// recording, comparing each frame with the desktop reference the file already ships:
+		//
+		//	 30s   similarity 0.0004   the boot splash
+		//	 90s   similarity 0.0041   still splashing
+		//	120s   similarity 0.9909   the desktop
+		//	1600s  similarity 0.9767   the desktop, an hour later
+		//
+		// THE GAP IS TWO ORDERS OF MAGNITUDE - 0.0043 at the widest for "not a desktop" against
+		// 0.9669 at the tightest for "a desktop" - where the brightness thresholds that windows
+		// fails on are three numbers within a few percent of each other.
+		//
+		// SO A STEP MAY NAME `reference:` AND THE FRAME IS COMPARED WITH IT. The thresholds stay for
+		// every file that does not, so nothing changes for them.
 		var ok bool
-		switch family {
-		case "windows":
-			ok, lastStats = screen.IsWindowsDesktop(img)
-		case "macos":
-			// A MACOS DESKTOP IS DECIDED BY THE DOCK AND THE BODY, not by words: there is no text
-			// on it to read. `internal/screen.IsMacOSDesktop` has been implemented and tested since
-			// the port began; the dispatcher simply had no branch for it, so `desktop: macos` in
-			// macos/15/steps/ssh.yaml would have failed on the first frame.
-			var mac screen.MacOSStats
-			ok, mac = screen.IsMacOSDesktop(img)
-			lastStats = mac.Stats()
-		case "linux":
-			// A LINUX DESKTOP IS A PANEL: a strip of colour along an edge that the installer under
-			// it does not draw. The same measurement serves every distribution here because they all
-			// run a panel - GNOME, KDE, XFCE, MATE, Cinnamon - and the installers they boot do not.
-			ok, lastStats = screen.IsLinuxDesktop(img)
+		if ref := s.Get("reference"); ref != "" {
+			// THE REFERENCE IS BESIDE THE WALK, the same way `check: {mode: like}` resolves one -
+			// not relative to the work directory, which is where the media land.
+			path := ref
+			if !filepath.IsAbs(path) && e.File != nil {
+				beside := filepath.Join(filepath.Dir(e.File.Path), ref)
+				if fileExists(beside) {
+					path = beside
+				}
+			}
+			reference, err := screen.Load(path)
+			if err != nil {
+				return fail(s.Name, "`desktop: %s` with `reference: %s`: %v", family, ref, err)
+			}
+			// THE REFERENCE IS THE WHOLE PICTURE AND `rect:` NAMES THE PART COMPARED.
+			//
+			// MEASURED ON cachyos, the whole frame against its own wallpaper:
+			//
+			//	boot splash                                     0.0000
+			//	the desktop                                    1.0000
+			//	the desktop with its installer window over it   0.6019 .. 0.6788
+			//
+			// A window is most of the middle of the screen, so a whole-frame comparison changes its
+			// answer when a window opens - and the window is what the walk does NEXT. THE SAME
+			// COMPARISON OVER THE TOP 120 ROWS, which is wallpaper and menu bar and nothing else:
+			//
+			//	boot splash                                     0.0002
+			//	the desktop                                    1.0000
+			//	the desktop with a window over it               1.0000
+			//
+			// The clock in the corner sits below that band, which is why the band is 120 and not 200.
+			// THE FRAME AND THE REFERENCE MAY BE DIFFERENT SIZES, AND THAT IS NOT AN ERROR HERE.
+			//
+			// MEASURED ON RUN 44471094050 (popos) AND 44471102369 (zorin), step 4 of 28:
+			//
+			//	wait for the live desktop: the frame is 1920x1080 and the reference is 800x600
+			//
+			// The REFERENCE is right - it was taken from that medium's own recording at 1920x1080 -
+			// and the FRAME is a 800x600 guest that has not switched modes yet. `screen.Compare`
+			// refuses unequal sizes on purpose, because for a `check:` assertion comparing the corner
+			// they share would be a wrong answer that looks like a right one.
+			//
+			// A `desktop:` TEST IS A DIFFERENT QUESTION: "does this screen show the wallpaper of this
+			// system". The same picture at another size is still that wallpaper, so both sides are
+			// scaled to the same small size and compared - and the band is a FRACTION of the frame
+			// rather than a pixel rect, so it means the same place at either size.
+			rc, fc := reference, img
+			if r, ok := rectOfDesktop(s); ok {
+				a, b, err := cropBoth(reference, img, r)
+				if err == nil {
+					rc, fc = a, b
+				}
+			}
+			if rc.Bounds().Dx() != fc.Bounds().Dx() || rc.Bounds().Dy() != fc.Bounds().Dy() {
+				rc, fc = normalisePair(rc, fc)
+			}
+			d, err := screen.Compare(rc, fc, 8)
+			if err != nil {
+				return fail(s.Name, "comparing with `%s`: %v", ref, err)
+			}
+			sim := 1 - d.Changed
+			lo, hi := 0.90, 1.0
+			if v, err := s.Float("range", -1); err == nil && v >= 0 {
+				lo = v
+				if r2, ok := s.Spec["range"].([]any); ok && len(r2) == 2 {
+					if h, ok := toFloat(r2[1]); ok {
+						hi = h
+					}
+				}
+			}
+			ok = sim >= lo && sim <= hi
+			// A DESKTOP AT THE WRONG SIZE IS THE SAME PROBLEM A THRESHOLD TEST WOULD SEE, so the
+			// frame's own dimensions are carried through and the size gate below still applies.
+			w, h := img.Bounds().Dx(), img.Bounds().Dy()
+			lastStats = screen.Stats{Width: w, Height: h}
+			refVerdict = fmt.Sprintf("similarity %.4f (want %.2f..%.2f)", sim, lo, hi)
+			e.Driver.Log(fmt.Sprintf("  reference %s: similarity %.4f (want %.2f..%.2f)",
+				filepath.Base(ref), sim, lo, hi))
+			if !ok {
+				time.Sleep(poll)
+				continue
+			}
+		} else {
+			switch family {
+			case "windows":
+				ok, lastStats = screen.IsWindowsDesktop(img)
+			case "macos":
+				// A MACOS DESKTOP IS DECIDED BY THE DOCK AND THE BODY, not by words: there is no text
+				// on it to read. `internal/screen.IsMacOSDesktop` has been implemented and tested since
+				// the port began; the dispatcher simply had no branch for it, so `desktop: macos` in
+				// macos/15/steps/ssh.yaml would have failed on the first frame.
+				var mac screen.MacOSStats
+				ok, mac = screen.IsMacOSDesktop(img)
+				lastStats = mac.Stats()
+			case "linux":
+				// A LINUX DESKTOP IS A PANEL: a strip of colour along an edge that the installer under
+				// it does not draw. The same measurement serves every distribution here because they all
+				// run a panel - GNOME, KDE, XFCE, MATE, Cinnamon - and the installers they boot do not.
+				ok, lastStats = screen.IsLinuxDesktop(img)
 
-		// THE DISTRIBUTION'S OWN TEST, NAMED `linux/<name>`, FOR A MEDIUM WHOSE FIRST SCREEN IS NOT
-		// A DESKTOP.
-		//
-		// Kubuntu 26.04 boots to a KDE launcher drawn on a full-bleed gradient: no panel, so
-		// `IsLinuxDesktop` answers false with `Drop=0.0`, and a `desktop: linux` step would spend its
-		// fifteen minutes on a machine that is sitting on its installer. MEASURED on that image:
-		//
-		//	the launcher                 sat=96.9
-		//	every Calamares page         sat= 4.1 .. 6.2
-		//
-		// `screen.IsKubuntuLauncher` is that measurement, and naming it in the file as
-		// `desktop: linux/kubuntu` is what makes the choice visible where the walk is read rather
-		// than implicit in a family-wide threshold.
-		// THE DESKTOP ENVIRONMENT IS THE UNIT, NOT THE DISTRIBUTION.
-		//
-		// Two media that run the same environment draw the same desktop, and one measurement serves
-		// both; two media that run different environments do not, and a single `linux` threshold
-		// answers for neither. So the key names the ENVIRONMENT - `linux/kde`, `linux/gnome`,
-		// `linux/cinnamon`, `linux/xfce` - and the distribution reaches it by the desktop its ISO
-		// carries:
-		//
-		//	kde        kubuntu, cachyos, endeavouros, manjaro, opensuse-leap-16.1
-		//	gnome      ubuntu, popos, fedora-workstation, nixos, zorin
-		//	cinnamon   mint
-		//	xfce       mx
-		//
-		// `linux/kubuntu` REMAINS, because that medium's first screen is not a desktop at all - it is
-		// a launcher on a full-bleed gradient, and it has its own measurement. The name is kept
-		// rather than renamed because the file that uses it says which medium it is about.
-		case "linux/kubuntu":
-			ok, lastStats = screen.IsKubuntuLauncher(img)
+			// THE DISTRIBUTION'S OWN TEST, NAMED `linux/<name>`, FOR A MEDIUM WHOSE FIRST SCREEN IS NOT
+			// A DESKTOP.
+			//
+			// Kubuntu 26.04 boots to a KDE launcher drawn on a full-bleed gradient: no panel, so
+			// `IsLinuxDesktop` answers false with `Drop=0.0`, and a `desktop: linux` step would spend its
+			// fifteen minutes on a machine that is sitting on its installer. MEASURED on that image:
+			//
+			//	the launcher                 sat=96.9
+			//	every Calamares page         sat= 4.1 .. 6.2
+			//
+			// `screen.IsKubuntuLauncher` is that measurement, and naming it in the file as
+			// `desktop: linux/kubuntu` is what makes the choice visible where the walk is read rather
+			// than implicit in a family-wide threshold.
+			// THE DESKTOP ENVIRONMENT IS THE UNIT, NOT THE DISTRIBUTION.
+			//
+			// Two media that run the same environment draw the same desktop, and one measurement serves
+			// both; two media that run different environments do not, and a single `linux` threshold
+			// answers for neither. So the key names the ENVIRONMENT - `linux/kde`, `linux/gnome`,
+			// `linux/cinnamon`, `linux/xfce` - and the distribution reaches it by the desktop its ISO
+			// carries:
+			//
+			//	kde        kubuntu, cachyos, endeavouros, manjaro, opensuse-leap-16.1
+			//	gnome      ubuntu, popos, fedora-workstation, nixos, zorin
+			//	cinnamon   mint
+			//	xfce       mx
+			//
+			// `linux/kubuntu` REMAINS, because that medium's first screen is not a desktop at all - it is
+			// a launcher on a full-bleed gradient, and it has its own measurement. The name is kept
+			// rather than renamed because the file that uses it says which medium it is about.
+			case "linux/kubuntu":
+				ok, lastStats = screen.IsKubuntuLauncher(img)
 
-		// KDE, WHOSE PANEL IS NOT ONE HEIGHT. MEASURED on two live media:
-		//
-		//	manjaro   panel 48 rows   IsLinuxDesktop=true   drop=128.4
-		//	cachyos   panel  8 rows   IsLinuxDesktop=false  drop=  0.0   edge=16.9
-		//
-		// `IsKDEDesktop` tries the band average first and the row-step second, so one branch answers
-		// for both without either file depending on the other's panel height.
-		case "linux/kde":
-			ok, lastStats = screen.IsKDEDesktop(img)
+			// KDE, WHOSE PANEL IS NOT ONE HEIGHT. MEASURED on two live media:
+			//
+			//	manjaro   panel 48 rows   IsLinuxDesktop=true   drop=128.4
+			//	cachyos   panel  8 rows   IsLinuxDesktop=false  drop=  0.0   edge=16.9
+			//
+			// `IsKDEDesktop` tries the band average first and the row-step second, so one branch answers
+			// for both without either file depending on the other's panel height.
+			case "linux/kde":
+				ok, lastStats = screen.IsKDEDesktop(img)
 
-		case "linux/gnome":
-			ok, lastStats = screen.IsGNOMEDesktop(img)
+			case "linux/gnome":
+				ok, lastStats = screen.IsGNOMEDesktop(img)
 
-		case "linux/cinnamon":
-			ok, lastStats = screen.IsCinnamonDesktop(img)
+			case "linux/cinnamon":
+				ok, lastStats = screen.IsCinnamonDesktop(img)
 
-		case "linux/xfce":
-			ok, lastStats = screen.IsXFCEDesktop(img)
+			case "linux/xfce":
+				ok, lastStats = screen.IsXFCEDesktop(img)
 
-		case "android":
-			// ANDROID IS NOT A PANEL TEST, AND SAYING SO IS MORE USEFUL THAN A DETECTOR THAT ALMOST
-			// WORKS.
-			//
-			// `IsLinuxDesktop` ANSWERS FALSE ON ANDROID'S DESKTOP, and that is correct of it: it
-			// wants `margin > 40 && spread < 42` in the lowest 4.5%, and Taskbar is a 40 px
-			// translucent bar over a dark wallpaper - contrast 9, spread 121, saturation 0.
-			//
-			// A DETECTOR WAS WRITTEN FOR ANDROID'S SHAPE AND IT WAS WITHDRAWN, BECAUSE IT DEPENDS ON
-			// THE FRAMEBUFFER'S SIZE. Measured on one frame, at two sizes:
-			//
-			//	1920x1080   desktop step 1.17 -> true    splash step 0.61 -> false
-			//	 640x360    desktop step 2.36 -> true    splash step 1.71 -> TRUE   <- wrong
-			//
-			// A verdict that changes when the same picture is scaled is not a verdict, and both
-			// thresholds that were tried moved the failure rather than removing it.
-			//
-			// THE QUESTION HAS A BETTER ANSWER. adbd reports what the window manager thinks is in
-			// front, which is the fact a person reading the frame is trying to infer:
-			//
-			//	adb: dumpsys window | grep mCurrentFocus | grep com.farmerbb.taskbar
-			//
-			// and `android/blissos16/steps/vm-configure.yaml` asks it three ways - `mCurrentFocus`,
-			// `ResumedActivity`, and a window count - each of which a boot splash, the home-app
-			// chooser and a lock screen all fail.
-			return fail(s.Name, "`desktop: android` is not implemented, and the pixel test it used "+
-				"to run was withdrawn because its verdict changed with the framebuffer's size. Ask "+
-				"the system instead: `adb: dumpsys window | grep mCurrentFocus | grep "+
-				"com.farmerbb.taskbar`, or `dumpsys activity activities | grep ResumedActivity`")
-		default:
-			return fail(s.Name, "the %q desktop test is not implemented in this build; the four "+
-				"are windows, macos, linux and android", family)
+			case "android":
+				// ANDROID IS NOT A PANEL TEST, AND SAYING SO IS MORE USEFUL THAN A DETECTOR THAT ALMOST
+				// WORKS.
+				//
+				// `IsLinuxDesktop` ANSWERS FALSE ON ANDROID'S DESKTOP, and that is correct of it: it
+				// wants `margin > 40 && spread < 42` in the lowest 4.5%, and Taskbar is a 40 px
+				// translucent bar over a dark wallpaper - contrast 9, spread 121, saturation 0.
+				//
+				// A DETECTOR WAS WRITTEN FOR ANDROID'S SHAPE AND IT WAS WITHDRAWN, BECAUSE IT DEPENDS ON
+				// THE FRAMEBUFFER'S SIZE. Measured on one frame, at two sizes:
+				//
+				//	1920x1080   desktop step 1.17 -> true    splash step 0.61 -> false
+				//	 640x360    desktop step 2.36 -> true    splash step 1.71 -> TRUE   <- wrong
+				//
+				// A verdict that changes when the same picture is scaled is not a verdict, and both
+				// thresholds that were tried moved the failure rather than removing it.
+				//
+				// THE QUESTION HAS A BETTER ANSWER. adbd reports what the window manager thinks is in
+				// front, which is the fact a person reading the frame is trying to infer:
+				//
+				//	adb: dumpsys window | grep mCurrentFocus | grep com.farmerbb.taskbar
+				//
+				// and `android/blissos16/steps/vm-configure.yaml` asks it three ways - `mCurrentFocus`,
+				// `ResumedActivity`, and a window count - each of which a boot splash, the home-app
+				// chooser and a lock screen all fail.
+				return fail(s.Name, "`desktop: android` is not implemented, and the pixel test it used "+
+					"to run was withdrawn because its verdict changed with the framebuffer's size. Ask "+
+					"the system instead: `adb: dumpsys window | grep mCurrentFocus | grep "+
+					"com.farmerbb.taskbar`, or `dumpsys activity activities | grep ResumedActivity`")
+			default:
+				return fail(s.Name, "the %q desktop test is not implemented in this build; the four "+
+					"are windows, macos, linux and android", family)
+			}
 		}
 		if ok {
 			// A DESKTOP AT THE WRONG SIZE IS NOT A DESKTOP, BECAUSE EVERY COORDINATE IN THE FILE WAS
@@ -607,84 +711,57 @@ func (e *Executor) doDesktop(s walk.Step) error {
 				time.Sleep(poll)
 				continue
 			}
+			what := lastStats.Explain()
+			if refVerdict != "" {
+				what = refVerdict
+			}
 			e.Driver.Log(fmt.Sprintf("  a desktop is on screen (%s); %s",
-				time.Since(start).Round(time.Second), lastStats.Explain()))
+				time.Since(start).Round(time.Second), what))
 			return nil
 		}
+		// A GUEST THAT BLANKS ITS OWN SCREEN WAKES ON INPUT, and a blank screen during a boot is
+		// normal rather than a failure. THIS IS UNCONDITIONAL NOW, because it used to be behind
+		// `keep_alive:` and that key was written `true` in all 25 places it appeared - a switch
+		// nobody ever set to false is not a switch, it is the behaviour.
+		wakeTheScreen(e)
 		time.Sleep(poll)
 	}
 	return failWithScreen(s.Name, e.Driver,
-		"no %s desktop within %s; %s", family, timeout, lastStats.Explain())
+		"no %s desktop within %s; %s", family, timeout, func() string {
+			if refVerdict != "" {
+				return refVerdict
+			}
+			return lastStats.Explain()
+		}())
 }
 
 // --- host commands --------------------------------------------------------------------
-
-// doScript writes a body on the host, copies it in and runs it by path.
-//
-// WHY BY PATH RATHER THAN AS A QUOTED ONE-LINER: the body is the guest's own shell, and a command
-// that has to survive python -> ssh -> cmd loses its quotes. That is measured - the Python
-// implementation's own comment says the Build Tools `--override` arrived with none of them.
-func (e *Executor) doScript(s walk.Step) error {
-	client := e.Driver.Guest()
-	if client == nil {
-		return fail(s.Name, "no ssh connection; a `require_ssh:` step must come first")
-	}
-	shell := s.Get("script_shell")
-	if shell == "" {
-		shell = "powershell"
-	}
-	name := scriptName(s)
-	local := filepath.Join(e.Work, name)
-	if err := os.MkdirAll(e.Work, 0o755); err != nil {
-		return fail(s.Name, "%v", err)
-	}
-	body := s.Get("script")
-	if shell == "cmd" {
-		// cmd.exe reads a .bat byte for byte, and a stray \n is a command name.
-		body = strings.ReplaceAll(strings.ReplaceAll(body, "\r\n", "\n"), "\n", "\r\n")
-	}
-	if err := os.WriteFile(local, []byte(body), 0o644); err != nil {
-		return fail(s.Name, "writing %s: %v", name, err)
-	}
-
-	remote := "C:/Users/" + e.File.SSHUser + "/" + name
-	if shell == "sh" {
-		remote = "/tmp/" + name
-	}
-	if err := scpFile(client, local, remote); err != nil {
-		return fail(s.Name, "copying %s in: %v", name, err)
-	}
-
-	var command string
-	switch shell {
-	case "cmd":
-		command = `cmd /c "` + strings.ReplaceAll(remote, "/", `\`) + `"`
-	case "powershell", "pwsh":
-		command = `powershell -NoProfile -ExecutionPolicy Bypass -File "` + remote + `"`
-	default:
-		// `bash`, not `sh`: these bodies use `set -uo pipefail` and `[[ ]]`, which POSIX sh does
-		// not have and which silently ignores a failing stage of a pipeline.
-		command = "bash " + remote
-	}
-
-	res, err := client.Run(command, seconds(s, "timeout", 1800))
-	e.Driver.Log(fmt.Sprintf("  script %s (%s) -> %d", name, shell, res.Status))
-	for _, line := range headAndTail(res.Combined(), 18, 6) {
-		e.Driver.Log("    " + line)
-	}
-	if err != nil {
-		return fail(s.Name, "%v", err)
-	}
-	if res.Status != 0 {
-		return fail(s.Name, "the script exited %d", res.Status)
-	}
-	return nil
-}
 
 func (e *Executor) doSCP(s walk.Step) error {
 	client := e.Driver.Guest()
 	if client == nil {
 		return fail(s.Name, "no ssh connection; a `require_ssh:` step must come first")
+	}
+	// `scp: {template: launcher, to: /tmp/x}` IS THE ONE-STEP FORM, and it replaces a `write:` step
+	// plus the `scp:` that copied what it wrote. Measured: all 16 `write:` steps were followed
+	// immediately by exactly that `scp:`.
+	if m, ok := s.Spec["scp"].(map[string]any); ok {
+		kind, _ := m["template"].(string)
+		remote, _ := m["to"].(string)
+		if kind == "" || remote == "" {
+			return fail(s.Name, "`scp:` as a mapping needs `template:` (what to render) and "+
+				"`to:` (where it goes): `scp: {template: launcher, to: /tmp/bootstrap-launcher.sh}`")
+		}
+		local, err := e.writeTemplate(s, kind)
+		if err != nil {
+			return err
+		}
+		path := filepath.Join(e.Work, local)
+		if err := scpFile(client, path, remote); err != nil {
+			return fail(s.Name, "scp %s -> %s: %v", local, remote, err)
+		}
+		e.Driver.Log(fmt.Sprintf("  scp: %s (%s) -> %s", local, kind, remote))
+		return nil
 	}
 	raw, ok := s.Spec["scp"].([]any)
 	if !ok || len(raw) != 2 {
@@ -730,176 +807,8 @@ func (e *Executor) doSCP(s walk.Step) error {
 	return nil
 }
 
-// --- the share ------------------------------------------------------------------------
+// --- the share ------------------------------------------------------------------------// --- recording and publishing ---------------------------------------------------------
 
-func (e *Executor) doShareServe(s walk.Step) error {
-	dir := s.Get("share_dir")
-	if dir == "" {
-		dir = "~/shared"
-	}
-	dir = strings.ReplaceAll(dir, "~", os.Getenv("HOME"))
-	e.Driver.Log(fmt.Sprintf("  share: serving %s", dir))
-	if sv, ok := e.Driver.(interface{ ServeShare(string) error }); ok {
-		if err := sv.ServeShare(dir); err != nil {
-			return fail(s.Name, "%v", err)
-		}
-		return nil
-	}
-	return notImplemented(s, "share_serve")
-}
-
-// shareDirOrEmpty is the directory being served, for a proof that must look on the host side.
-func (e *Executor) shareDirOrEmpty() string {
-	if d, ok := e.Driver.(interface{ ShareDir() string }); ok {
-		return d.ShareDir()
-	}
-	return ""
-}
-
-// shareURLOf asks the driver where the share is served. It is "" when nothing is shared, which the
-// caller has already refused.
-func shareURLOf(e *Executor) string {
-	if sv, ok := e.Driver.(interface{ ShareURL() string }); ok {
-		return sv.ShareURL()
-	}
-	return ""
-}
-
-// doShareMount proves the guest can read the shared directory over HTTP.
-//
-// IT USED TO MOUNT AN SMB SHARE, AND EVERY GUEST NEEDED A DIFFERENT CLIENT: `mount -t cifs` on
-// Linux, Apple's mount_smbfs on macOS, `net use` on Windows - and on FreeBSD NOTHING IN THE BASE
-// SYSTEM COULD CONNECT AT ALL, because netsmb speaks SMB1 on NetBIOS 139 while the server offers
-// SMB3 on 445.
-//
-// THE TRANSPORT IS NOW THE DAEMON'S OWN HTTP LISTENER, so this step asks the guest to FETCH a file
-// the host just wrote, with whatever that platform ships:
-//
-//	linux/bsd/macos   curl
-//	windows           Invoke-WebRequest
-//
-// THE SENTINEL IS WRITTEN ON THE HOST AND READ IN THE GUEST, because the guest's own round trip
-// proves nothing: measured on manjaro, where the mount had never happened and `~/shared` was an
-// ordinary directory - a file written there and read back came back unchanged, and the check
-// passed on a share that did not exist.
-func (e *Executor) doShareMount(s walk.Step) error {
-	family := s.Get("share_family")
-	if family == "" {
-		family = "windows"
-	}
-
-	dir := e.shareDirOrEmpty()
-	if dir == "" {
-		return fail(s.Name, "no directory is being shared; a `share_serve:` step must come first")
-	}
-
-	client := e.Driver.Guest()
-	if client == nil {
-		return fail(s.Name, "no ssh connection to fetch the proof with")
-	}
-
-	sentinel := fmt.Sprintf(".easyvm-share-proof-%d", time.Now().UnixNano())
-	hostPath := filepath.Join(dir, sentinel)
-	body := "from-the-host"
-	if err := os.WriteFile(hostPath, []byte(body+"\n"), 0o644); err != nil {
-		return fail(s.Name, "writing the proof file on the host: %v", err)
-	}
-	defer os.Remove(hostPath)
-
-	url := shareURLOf(e) + sentinel
-	e.Driver.Log(fmt.Sprintf("  share: the %s guest fetches %s", family, url))
-
-	// THE FETCH IS THE GUEST'S OWN COMMAND, IN THE GUEST'S OWN CLIENT.
-	//
-	// MEASURED ON windows-vm-configure, in the SMB era: the check ran `cat`, which Windows does not
-	// have, and reported "'cat' is not recognized as an internal or external command" - a working
-	// share failing on the checker's own vocabulary. The same mistake is not repeated here.
-	var cmd string
-	if family == "windows" {
-		cmd = `powershell -NoProfile -Command "(Invoke-WebRequest -UseBasicParsing -TimeoutSec 20 ` +
-			"'" + url + "'" + `).Content"`
-	} else if family == "bsd" {
-		// `fetch` IS IN THE FREEBSD BASE SYSTEM and `curl` is not guaranteed; both are tried so the
-		// check does not depend on which the image happens to carry.
-		cmd = "sh -c 'curl -fsS --max-time 20 " + url + " 2>/dev/null || fetch -qo - " + url + "'"
-	} else {
-		cmd = "sh -c 'curl -fsS --max-time 20 " + url + " || wget -qO- --timeout=20 " + url + "'"
-	}
-
-	res, err := client.Run(cmd, 90*time.Second)
-	got := strings.TrimSpace(res.Stdout)
-	if err != nil || got != body {
-		return fail(s.Name, "the guest cannot fetch a file this host wrote into %s. The daemon "+
-			"serves it at %s; a guest that wrote to ~/shared instead would have written into its "+
-			"OWN filesystem. (%v, read %q)", dir, url, err, firstLineOf(res.Combined()))
-	}
-	e.Driver.Log("  share: a file written on the host is readable in the guest - the share is real")
-	return nil
-}
-
-// --- recording and publishing ---------------------------------------------------------
-
-// doRecord starts or stops a recording.
-//
-// `record:` IS BOTH, because a file says `record: out/x.mp4` to start and `record: false` to stop.
-// The stop half STOPS THE SAMPLER FIRST, so the last second is on disk before the encoder reads -
-// stopping the encoder while the sampler still writes gives a video that ends one frame early, and
-// on a fast shutdown that is the frame with the work in it.
-func (e *Executor) doRecord(s walk.Step) error {
-	value := s.Get("record")
-	if value == "false" || value == "" {
-		e.stopSampler()
-		if e.rec == nil {
-			return fail(s.Name, "`record: false` but nothing was recording")
-		}
-		// THE NAME COMES FROM THE START STEP, WHICH IS A DIFFERENT `walk.Step`.
-		//
-		// `s.Get("_video")` READ THE STOP STEP'S OWN SPEC and was therefore ALWAYS EMPTY - so every
-		// recording was written to the fallback `install.mp4` whatever `record:` had said at the start.
-		// A file with two `record:` steps produced a video named for neither.
-		// THE NAME IS JOINED ONTO THE WORK DIRECTORY, WHICH IS WHAT THE FILES SAY.
-		//
-		// `record: zorin-install.mp4` IS A NAME, NOT A PATH: the artifact step uploads `work/*.mp4`, and
-		// the daemon's cwd is not the work directory. MEASURED ON zorin-install:
-		//
-		//	=== stop recording
-		//	  recording: 2643 frame(s) -> zorin-install.mp4
-		//	  path: work/*.mp4
-		//	  ##[warning]No files were found with the provided path: work/*.mp4
-		//
-		// THE ENCODE SUCCEEDED AND THE FILE WAS IN THE WRONG PLACE - 2643 frames, written to the
-		// process's own directory instead of `work/`, so the artifact step found nothing and the run
-		// reported a successful recording that does not exist.
-		video := e.recVideo
-		if video == "" {
-			video = "install.mp4"
-		}
-		if !filepath.IsAbs(video) {
-			video = filepath.Join(e.Work, video)
-		}
-		if err := e.rec.encode(video, e.Driver.Log); err != nil {
-			return fail(s.Name, "%v", err)
-		}
-		e.rec = nil
-		e.recVideo = ""
-		return nil
-	}
-	if err := e.sampler(filepath.Join(e.Work, "shots")); err != nil {
-		return fail(s.Name, "%v", err)
-	}
-	// REMEMBERED, because the `record: false` step is a DIFFERENT Step object and cannot see this one's
-	// Spec - and because `finishRecording` needs it when the walk fails before that step runs.
-	e.recVideo = value
-	e.Driver.Log(fmt.Sprintf("  recording: %s", value))
-	return nil
-}
-
-// doCompress flattens the disk this stage ran on into the artifact the workflow publishes.
-//
-// THE PATH IS RELATIVE TO THE REPOSITORY, NOT TO THE WORK DIRECTORY. A workflow writes
-// `out/windows11-ssh.qcow2` from where the job started; joining that onto `work` produced
-// `out/ssh-work/out/windows11-ssh.qcow2` and the publish step then uploaded nothing. Measured on the
-// first real run of this step in the Python implementation.
 func (e *Executor) doCompress(s walk.Step) error {
 	dest := s.Get("compress")
 	if dest == "" {
@@ -909,6 +818,9 @@ func (e *Executor) doCompress(s walk.Step) error {
 	if source == nil {
 		return fail(s.Name, "no machine is known; a `boot:` step must come first")
 	}
+	// THE DISK IS READ WITH qemu-img, SO QEMU MUST NOT STILL HAVE IT OPEN - and the step that waits
+	// for that is `wait_until: stopped`, which a file writes where it wants it. Doing the wait here
+	// as well would make "did anyone stop the machine?" a question with two answers.
 	disk := ""
 	if d, ok := source.(interface{ Disk() string }); ok {
 		disk = d.Disk()
@@ -965,7 +877,7 @@ func (e *Executor) doCompress(s walk.Step) error {
 func notImplementedCount(steps []walk.Step, can map[string]bool) (int, string) {
 	count := 0
 	first := ""
-	passive := map[string]bool{"name": true, "optional": true, "timeout": true, "requires": true,
+	passive := map[string]bool{"name": true, "optional": true, "timeout": true,
 		"wait_after": true, "poll": true, "os": true, "family": true}
 	for _, s := range steps {
 		blocking := false
@@ -1007,12 +919,27 @@ func (e *Executor) doWrite(s walk.Step) error {
 	if kind == "" {
 		return fail(s.Name, "`write:` must name a file kind")
 	}
+	name, err := e.writeTemplate(s, kind)
+	if err != nil {
+		return err
+	}
+	e.Driver.Log(fmt.Sprintf("  wrote %s; the scp: step after this copies it in", name))
+	return nil
+}
+
+// writeTemplate renders one bootstrap file into the work directory and returns its name.
+//
+// IT IS SHARED WITH `scp:`'s `template:` ARGUMENT, because `write:` AND THE `scp:` AFTER IT WERE
+// ALWAYS ONE OPERATION. Measured over the tree: all 16 `write:` steps are followed immediately by
+// the `scp:` that copies the same file in, so a file said "make this" and then "copy the thing you
+// just made" - two names for one fact, and a reader cannot see the file's content without opening
+// Go. `scp: {template: launcher, to: /tmp/x}` is one step that says both.
+func (e *Executor) writeTemplate(s walk.Step, kind string) (string, error) {
 	family := s.Get("family")
 	if family == "" {
 		family = s.Get("os")
 	}
 	if family == "" && e.File != nil {
-		// The walkthrough's own os, from its first boot step, if it names one.
 		for _, other := range e.File.Steps {
 			if v := other.Get("os"); v != "" {
 				family = v
@@ -1047,22 +974,18 @@ func (e *Executor) doWrite(s walk.Step) error {
 		body, name = bootstrap.WindowsTaskScript(
 			"C:/Users/"+e.userForPaths()+"/bootstrap-launcher.ps1"), "bootstrap-install.ps1"
 	default:
-		return fail(s.Name, "`write: %s` is not a file this build writes; the kinds are "+
+		return "", fail(s.Name, "`%s` is not a file this build writes; the kinds are "+
 			"launcher, macos_agent_plist, windows_task", kind)
 	}
 
 	path := filepath.Join(e.Work, name)
 	if err := os.MkdirAll(e.Work, 0o755); err != nil {
-		return fail(s.Name, "%v", err)
+		return "", fail(s.Name, "%v", err)
 	}
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-		return fail(s.Name, "writing %s: %v", name, err)
+		return "", fail(s.Name, "writing %s: %v", name, err)
 	}
-	// THE PATH IS LOGGED because the `scp:` that follows names it, and a mismatch between the two
-	// is the failure this split exists to make visible.
-	e.Driver.Log(fmt.Sprintf("  wrote %s (%d bytes); the scp: step after this copies it in",
-		path, len(body)))
-	return nil
+	return name, nil
 }
 
 func (e *Executor) userForPaths() string {
@@ -1079,19 +1002,21 @@ func (e *Executor) userForPaths() string {
 // that took them from the environment instead would be a second place those facts live, and the
 // disk would be installed with one account and driven with another.
 func (e *Executor) doFetch(s walk.Step) error {
-	// ONE KIND, THREE KEY NAMES. Which key the file used says what is being done - taking a
-	// published file, assembling one, or rendering one - and this reads it without caring which.
-	kind := s.Get("asset")
+	// ONE KIND, FOUR KEY NAMES, AND NOW ONE. `asset:`, `build:` and `generate:` all dispatched to
+	// this function and differed only in the WORD the file chose - taking a published file,
+	// assembling one, or rendering one. MEASURED: `asset:` 1, `build:` 2, `generate:` 1, so the
+	// distinction was never load-bearing; the KIND is the value, and `fetch:` is the verb.
+	//
+	// THE OLD THREE ARE STILL READ so a file that has not been renamed runs, and the migration is
+	// per file.
+	kind := s.Get("fetch")
 	if kind == "" {
-		kind = s.Get("build")
+		return fail(s.Name, "the step must name what it prepares: `fetch: <kind>` - an installer "+
+			"image, a guest agent, a firmware, an answer CD")
 	}
-	if kind == "" {
-		kind = s.Get("generate")
-	}
-	if kind == "" {
-		return fail(s.Name, "the step must name what it prepares: `asset:`, `build:` or `generate:`")
-	}
-	family := s.Get("family")
+	// `os:` AND NOT `family:`: the family spelling is gone from the vocabulary, and this was the
+	// last reader of it.
+	family := s.Get("os")
 	if family == "" && e.File != nil {
 		for _, other := range e.File.Steps {
 			if v := other.Get("os"); v != "" {
@@ -1178,49 +1103,6 @@ func str(v any) string {
 }
 
 // --- macOS's own steps ----------------------------------------------------------------
-
-// doWaitFor waits for a control with no readable title.
-//
-// THE LOGIN WINDOW'S ONLY TEXT IS THE PASSWORD FIELD'S PLACEHOLDER, twelve pixels tall in a 165x40
-// box. A whole-frame read returns NOTHING on a finished Setup Assistant, which is why a walk whose
-// gate lists fifteen pane titles waits out its entire budget on a screen that is already done.
-func (e *Executor) doWaitFor(s walk.Step) error {
-	what := s.Get("wait_for")
-	if what != "login_window" {
-		return fail(s.Name, "`wait_for:` knows login_window only; got %q", what)
-	}
-	timeout := seconds(s, "timeout", 240)
-	poll := seconds(s, "poll", 3)
-
-	e.Driver.Log(fmt.Sprintf("  waiting up to %s for the login window", timeout))
-	start := time.Now()
-	for time.Since(start) < timeout {
-		f, err := e.Driver.Frame()
-		if err != nil {
-			time.Sleep(poll)
-			continue
-		}
-		img, err := screen.Load(f.Path())
-		if err != nil {
-			time.Sleep(poll)
-			continue
-		}
-		if screen.HasLoginWindow(img) {
-			e.Driver.Log(fmt.Sprintf("  the login window is up (%s)",
-				time.Since(start).Round(time.Second)))
-			return nil
-		}
-		time.Sleep(poll)
-	}
-	// THE CEILING IS NOT A FAILURE *WHEN THE FILE SAYS optional*. `wait_for` returning an error
-	// either way, with the tolerance baked in, made the file's own `optional:` a decoration - and
-	// the two disagreed about who decided. The decision is the file's, so this reports and lets
-	// the walk decide.
-	return fmt.Errorf("%s: no login window within %s", s.Name, timeout)
-}
-
-// doScreenshot saves the screen, for a step that asks for the picture rather than a failure taking
-// one.
 func (e *Executor) doScreenshot(s walk.Step) error {
 	dest := s.Get("screenshot")
 	if dest == "" {
@@ -1241,34 +1123,13 @@ func (e *Executor) doScreenshot(s walk.Step) error {
 		return fail(s.Name, "%v", err)
 	}
 	e.Driver.Log(fmt.Sprintf("  screenshot: %s", dest))
+	// A `screenshot:` IS THE OTHER WAY A PICTURE ENTERS THE LIBRARY, and its name is the file's own
+	// base name: a file that writes `out/login.png` has asked for a picture called `login.png`, and
+	// that is what a report should call it rather than a step ordinal.
+	w, h := f.Size()
+	e.storePicture(dest, filepath.Base(dest), "screenshot", w, h)
 	return nil
 }
-
-// doDemoScript writes a throwaway script, for the primitives walkthrough.
-func (e *Executor) doDemoScript(s walk.Step) error {
-	if s.Get("demo_script") == "" {
-		return fail(s.Name, "`demo_script:` must name the file to write")
-	}
-	return notImplemented(s, "demo_script")
-}
-
-// --- the compound action ------------------------------------------------------------------
-//
-// `do:` IS A LIST OF ACTIONS THAT BELONG TO ONE STEP, and it exists for a step whose NAME is the
-// thing being done - "dismiss the overlays macOS puts up on a first login" is three clicks four
-// seconds apart, and splitting it into three named steps would name the clicks rather than the deed.
-//
-// IT IS NOT A LANE OR A PANE. Those are the four-key state machines (`when`/`once`/`end`/`panes:`) for
-// a GUI that has to be answered until it stops asking; this is one step, run once, whose actions
-// happen in order.
-//
-// MEASURED ON macos-ssh, step 10 of 33:
-//
-//	error:   dismiss the overlays macOS puts up on a first login: no implementation for this step's keys
-//
-// The key was declared in the vocabulary and had no dispatcher branch - the exact failure the
-// vocabulary exists to refuse, arriving from the one direction it does not cover: a key that IS
-// declared, IS valid YAML, and does nothing.
 func (e *Executor) doActions(s walk.Step) error {
 	raw, ok := s.Spec["do"].([]any)
 	if !ok || len(raw) == 0 {
@@ -1296,44 +1157,6 @@ func (e *Executor) doActions(s walk.Step) error {
 	return e.settle(s)
 }
 
-// --- snapshots ---------------------------------------------------------------------
-//
-// `snapshot:` WRITES THE MACHINE'S WHOLE STATE TO A FILE, so a later run can start from it instead of
-// booting. It is the one primitive that makes a sandbox's "pause" mean something: the guest's memory,
-// its devices and its UEFI variables all go into one stream.
-//
-// WHY IT IS A MIGRATION AND NOT `savevm` - the guest refuses that, and the reason is structural:
-//
-//	savevm s1  ->  Error: Device 'pflash1' is writable but does not support snapshots
-//
-// Every guest here boots UEFI, and UEFI's variable store is a pflash device - a firmware chip, not a
-// qcow2 - so `savevm`, which writes the state INTO a block device, has nowhere to put it. A migration
-// stream is a file of its own and asks nothing of the devices.
-//
-// THE STEP TAKES A PATH AND NOTHING ELSE, because everything else about a resume belongs to the boot
-// that reads it: the cpu, the machine type and the device set must match, and this build gives every
-// guest the same ones. A `snapshot:` that also recorded the machine would be a second description of
-// the machine, and the two would disagree.
-func (e *Executor) doSnapshot(s walk.Step) error {
-	dest := s.Get("snapshot")
-	if strings.TrimSpace(dest) == "" {
-		return fail(s.Name, "`snapshot:` must name the file to write the machine state to")
-	}
-	// A RELATIVE PATH IS RESOLVED AGAINST THE WORK DIRECTORY, the same rule `scp:` and `disk:`
-	// follow: a file that a later `run --boot-from` names lives where the daemon put it.
-	if !filepath.IsAbs(dest) {
-		dest = filepath.Join(e.Work, dest)
-	}
-	sv, ok := e.Driver.(interface{ Snapshot(string) error })
-	if !ok {
-		return notImplemented(s, "snapshot")
-	}
-	if err := sv.Snapshot(dest); err != nil {
-		return fail(s.Name, "%v", err)
-	}
-	return nil
-}
-
 // resSwitchBudget is how long a desktop at the wrong size is given to switch to the right one.
 //
 // IT IS NOT THE `timeout:` OF THE STEP, DELIBERATELY. The step's timeout is how long the guest may
@@ -1343,14 +1166,336 @@ func (e *Executor) doSnapshot(s walk.Step) error {
 // do switch and bounded for the ones that never will.
 const resSwitchBudget = 2 * time.Minute
 
-// resolutionOf is the guest screen size a file's coordinates were measured at.
-//
-// IT IS THE FILE'S OWN `resolution:`, and 1920x1080 when the file does not say - which is the size
-// every walkthrough here was measured on. A guest that has not switched to it is a guest whose
-// coordinates mean something else entirely.
 func resolutionOf(f *walk.File) [2]int {
 	if f != nil && f.Resolution[0] > 0 && f.Resolution[1] > 0 {
 		return f.Resolution
 	}
 	return [2]int{1920, 1080}
+}
+
+// wakeTheScreen nudges the guest with a click so a blanked display comes back.
+//
+// IT MOVES EACH TIME, because a click at exactly the same place twice is a double-click to some
+// toolkits and would open whatever is under it. The x walks a 40-pixel band, which is enough to be a
+// different position and small enough to stay on the wallpaper of every desktop here.
+//
+// THE COST IS ONE CLICK PER POLL, and it is paid by both waits that use it: a `desktop:` polling
+// every five seconds and a `disk_settle:` every twenty. That is deliberate - this is what makes an
+// unattended wait survive a screen saver, and `keep_alive:` used to make it OPTIONAL while every one
+// of its 25 uses said yes.
+func wakeTheScreen(e *Executor) {
+	x := 400 + int(time.Now().UnixNano()/int64(time.Second))%40
+	_ = e.Driver.Click(x, 300)
+}
+
+// doWaitUntil waits for a CONDITION ABOUT THE MACHINE, naming what it waited for.
+//
+// IT IS THE SECOND HALF OF A SHUTDOWN, MADE VISIBLE. `shutdown: ssh` used to send the request AND
+// wait for qemu in one key - and its request was refused (no `sudo`), so the wait then spent its
+// whole grace on a machine nobody had asked to stop. Once the request is an `ssh:` step the file
+// shows, the waiting has to be a step too, or it hides inside whichever step reads the disk next.
+//
+// THE CONDITION IS A NAME, NOT A BOOLEAN EXPRESSION: `stopped` is the one that exists, and adding a
+// second is a decision in this switch rather than a string a file can invent.
+func (e *Executor) doWaitUntil(s walk.Step) error {
+	what := s.Get("wait_until")
+
+	// A CEILING IS REQUIRED, NOT DEFAULTED. "How long is too long" is a fact about the guest and the
+	// step, so the file says it - a default would be a number nobody chose, and the failure it
+	// produces ("still running after 5m0s") would name a budget the author never set.
+	if !s.Has("timeout") {
+		return fail(s.Name, "`wait_until: %s` needs a `timeout:`. A wait with no ceiling that is "+
+			"never satisfied hangs the stage until the runner's own limit, and the error then names "+
+			"the runner rather than this step", what)
+	}
+	limit := seconds(s, "timeout", 0)
+	poll := 2 * time.Second
+	if v, err := s.Float("poll", 0); err == nil && v > 0 {
+		poll = time.Duration(v * float64(time.Second))
+	}
+
+	facts, ok := e.Driver.(interface {
+		Facts() (map[string]string, error)
+	})
+	if !ok {
+		return fail(s.Name, "this driver cannot report the facts a `wait_until:` waits on")
+	}
+
+	// THE CONDITIONS ARE NAMES, AND EACH ONE IS A QUESTION ABOUT A FACT. It is a switch rather than
+	// an expression language on purpose: a file that could write `qemu.running == false` could also
+	// write `qemu.running == false and ssh.ready`, which is two waits wearing one line, and the
+	// failure would not say which half never happened.
+	check := func(f map[string]string) (bool, string) {
+		switch what {
+		case "stopped":
+			return f["qemu_running"] == "false", "the machine is still running"
+		case "started":
+			return f["qemu_running"] == "true", "the machine is not running"
+		case "ssh":
+			return f["ssh_ready"] == "true", "sshd does not accept a connection"
+		case "qga":
+			return f["qga_ready"] == "true", "the guest agent does not answer"
+		case "booted":
+			return f["guest_phase"] == "up", "the guest has not finished starting"
+		case "console_idle":
+			// THE THRESHOLD IS THE STEP'S OWN, because "quiet" is not one number: a boot prompt goes
+			// quiet for a second and an install pauses for a minute between phases.
+			return f["console_idle"] != "" && atLeast(f["console_idle"], s), "the console is still being written"
+		case "disk_idle":
+			return atLeast(f["disk_grow_rate"], s), "the disk is still growing"
+		case "recording":
+			return f["recording"] == "true", "nothing is recording"
+		case "share":
+			return f["share_ready"] == "true", "the share has no directory"
+		case "frame_still":
+			return atLeast(f["frame_age"], s), "the frame is still being captured"
+		}
+		return false, ""
+	}
+
+	switch what {
+	case "stopped", "started", "ssh", "qga", "booted", "console_idle", "disk_idle",
+		"recording", "share", "frame_still":
+	default:
+		return fail(s.Name, "`wait_until: %s` is not a condition this build knows. The ones it "+
+			"knows are stopped, started, ssh, qga, booted, console_idle, disk_idle, recording, "+
+			"share and frame_still", what)
+	}
+
+	// THE FIRST MEASUREMENT IS OUTSIDE THE LOOP, so a condition that is already true costs one
+	// snapshot rather than one poll interval.
+	start := time.Now()
+	var why string
+	for {
+		f, err := facts.Facts()
+		if err != nil {
+			return fail(s.Name, "%v", err)
+		}
+		done, reason := check(f)
+		if done {
+			e.Driver.Log(fmt.Sprintf("  %s (%s)", what, time.Since(start).Round(time.Second)))
+			return nil
+		}
+		why = reason
+		if time.Since(start) >= limit {
+			return fail(s.Name, "`wait_until: %s` was never satisfied within %s: %s. The facts at "+
+				"the last look were %s", what, limit, why, describeFacts(f))
+		}
+		time.Sleep(poll)
+	}
+}
+
+// atLeast reads a fact as a number and compares it to the step's own threshold.
+//
+// THE NUMBER COMES FROM A STRING because the facts are a string map: they travel through the same
+// `/api/state` a person reads, and a number that had to be typed there would have to be formatted
+// twice. `minimum:` is the step's own key; without it the comparison cannot be made and the wait is
+// refused rather than guessed.
+func atLeast(fact string, s walk.Step) bool {
+	if fact == "" {
+		return false
+	}
+	have, err := strconv.ParseFloat(fact, 64)
+	if err != nil {
+		return false
+	}
+	want, err := s.Float("minimum", 0)
+	if err != nil {
+		return false
+	}
+	return have >= want
+}
+
+func describeFacts(f map[string]string) string {
+	keys := make([]string, 0, len(f))
+	for k := range f {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var parts []string
+	for _, k := range keys {
+		parts = append(parts, k+"="+f[k])
+	}
+	return strings.Join(parts, " ")
+}
+
+// doACPI sends one message through QEMU's ACPI path.
+//
+// IT IS A CHANNEL WITH OPERATIONS, not a method of `shutdown:`. The two are different questions:
+// "press the power button" and "how do I stop this machine" produced the same key before, so a file
+// could not ask for a RESET without also stopping.
+//
+// THE WAIT IS NOT HERE. `acpi: power` presses the button and returns; whether the guest ever goes is
+// `wait_until: stopped`, which is a separate step a reader can see. Bundling them was what made the
+// old `shutdown: ssh` spend five minutes waiting for a machine nobody had asked to stop.
+func (e *Executor) doACPI(s walk.Step) error {
+	what := s.Get("acpi")
+	m := e.Driver.Machine()
+	if m == nil {
+		return fail(s.Name, "no machine is known; a `boot:` step must come first")
+	}
+	switch what {
+	case "power":
+		btn, ok := m.(interface{ PressPowerButton() error })
+		if !ok {
+			return fail(s.Name, "this driver cannot press the guest's power button")
+		}
+		if err := btn.PressPowerButton(); err != nil {
+			return fail(s.Name, "%v", err)
+		}
+		e.Driver.Log("  pressed the power button; the guest decides whether to honour it")
+		return nil
+	case "reset":
+		reset, ok := m.(interface{ ResetMachine() error })
+		if !ok {
+			return fail(s.Name, "this driver cannot reset its machine")
+		}
+		if err := reset.ResetMachine(); err != nil {
+			return fail(s.Name, "%v", err)
+		}
+		e.Driver.Log("  reset the machine")
+		return nil
+	}
+	return fail(s.Name, "`acpi: %s` is not an ACPI message this build sends; the ones it sends are "+
+		"`power` (the power button) and `reset`", what)
+}
+
+// doQGA runs one qemu-guest-agent command.
+//
+// THE AGENT IS THE ONLY CHANNEL THAT NEEDS NEITHER SSHD NOR AN ACPI HANDLER, which is why it is the
+// one that works on a guest with no network and no login: a macOS install with Remote Login off
+// answers the power button with a dialog and has nothing else to ask.
+func (e *Executor) doQGA(s walk.Step) error {
+	command := s.Get("qga")
+	m := e.Driver.Machine()
+	if m == nil {
+		return fail(s.Name, "no machine is known; a `boot:` step must come first")
+	}
+	agent, ok := m.(interface {
+		GuestAgent(string, map[string]any) (string, error)
+	})
+	if !ok {
+		return fail(s.Name, "this driver has no guest agent channel")
+	}
+
+	args := map[string]any{}
+	for _, key := range []string{"argv", "path", "body", "mode", "timeout"} {
+		if v, ok := s.Spec[key]; ok {
+			args[key] = v
+		}
+	}
+	out, err := agent.GuestAgent(command, args)
+	if err != nil {
+		return fail(s.Name, "`qga: %s`: %v", command, err)
+	}
+	if out != "" {
+		for _, line := range headAndTail(out, 12, 6) {
+			e.Driver.Log("  " + line)
+		}
+	} else {
+		e.Driver.Log(fmt.Sprintf("  qga: %s ok", command))
+	}
+	return nil
+}
+
+// rectOfDesktop reads a `desktop:` step's `rect:`, in the three forms the vocabulary allows: a pixel
+// quadruple, a fraction (`middle`), or a named band (`bottom 40px`).
+//
+// A PIXEL RECT IS SCALED AGAINST `rect_at:`, the same way `check:`'s is - the reference is a picture
+// of ONE screen size, and a guest that draws at another needs the same place on the page.
+func rectOfDesktop(s walk.Step) ([4]int, bool) {
+	raw, ok := s.Spec["rect"]
+	if !ok {
+		return [4]int{}, false
+	}
+	if v, ok := raw.([]any); ok && len(v) == 4 {
+		var r [4]int
+		for i := 0; i < 4; i++ {
+			f, ok := toFloat(v[i])
+			if !ok {
+				return [4]int{}, false
+			}
+			r[i] = int(f)
+		}
+		return r, true
+	}
+	return [4]int{}, false
+}
+
+// cropBoth crops the SAME PROPORTION of two pictures that may be different sizes.
+//
+// A pixel rect is written against a frame the file measured - `rect: [0, 0, 1920, 120]` - and a guest
+// that is still at 800x600 has the same band at 800x50. Scaling the rect by each picture's own width
+// is what makes that the same place rather than the corner they share.
+func cropBoth(reference, frame image.Image, r [4]int) (image.Image, image.Image, error) {
+	crop := func(img image.Image, w, h int) (image.Image, error) {
+		b := img.Bounds()
+		fw, fh := b.Dx(), b.Dy()
+		if w <= 0 {
+			w = fw
+		}
+		if h <= 0 {
+			h = fh
+		}
+		x0 := r[0] * fw / w
+		y0 := r[1] * fh / h
+		x1 := r[2] * fw / w
+		y1 := r[3] * fh / h
+		if x1 <= x0 {
+			x1 = x0 + 1
+		}
+		if y1 <= y0 {
+			y1 = y0 + 1
+		}
+		return screen.Crop(img, [4]int{x0, y0, x1, y1}, 1)
+	}
+	// The reference's own size is the rect's coordinate space, so it is the one whose numbers do not
+	// move; the frame's band is the same proportion of whatever it arrived at.
+	rb := reference.Bounds()
+	a, err := crop(reference, rb.Dx(), rb.Dy())
+	if err != nil {
+		return nil, nil, err
+	}
+	b, err := crop(frame, rb.Dx(), rb.Dy())
+	if err != nil {
+		return nil, nil, err
+	}
+	return a, b, nil
+}
+
+// normalisePair scales two pictures to the smaller of their sizes, so a comparison can run at all.
+//
+// NEAREST NEIGHBOUR, and only down: this runs once per poll on a picture that is about to be reduced
+// to a fraction of changed pixels, so an interpolated edge would add grey that no threshold asked for.
+func normalisePair(a, b image.Image) (image.Image, image.Image) {
+	aw, ah := a.Bounds().Dx(), a.Bounds().Dy()
+	bw, bh := b.Bounds().Dx(), b.Bounds().Dy()
+	w, h := aw, ah
+	if bw < w {
+		w = bw
+	}
+	if bh < h {
+		h = bh
+	}
+	scale := func(img image.Image) image.Image {
+		out := image.NewRGBA(image.Rect(0, 0, w, h))
+		ib := img.Bounds()
+		if ib.Dx() == w && ib.Dy() == h {
+			for y := 0; y < h; y++ {
+				for x := 0; x < w; x++ {
+					out.Set(x, y, img.At(ib.Min.X+x, ib.Min.Y+y))
+				}
+			}
+			return out
+		}
+		for y := 0; y < h; y++ {
+			sy := ib.Min.Y + y*ib.Dy()/h
+			for x := 0; x < w; x++ {
+				sx := ib.Min.X + x*ib.Dx()/w
+				out.Set(x, y, img.At(sx, sy))
+			}
+		}
+		return out
+	}
+	return scale(a), scale(b)
 }

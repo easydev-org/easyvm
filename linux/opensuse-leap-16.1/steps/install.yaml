@@ -3,6 +3,9 @@ notes: >
   Its installer is a form-only installer: Agama is a WEB UI the live session opens straight into, with
   no panel at any point. MEASURED, the two frames before the product chooser give `drop` 0.0 and 6.9
   where `IsLinuxDesktop` wants more than 15 - see TestAnInstallerIsWaitedForTheWayItAppears.
+recording_resolution:
+- 1920
+- 1080
 resolution:
 - 1920
 - 1080

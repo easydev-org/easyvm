@@ -1,4 +1,7 @@
 name: linux-ubuntu - configure the vm (name, share, guest agent)
+recording_resolution:
+- 1920
+- 1080
 resolution:
 - 1920
 - 1080

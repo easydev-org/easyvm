@@ -83,6 +83,52 @@ func says(words []string, want []string) bool {
 	return true
 }
 
+// readWords reads a screen.Rect with OCR, which is what lets a `see:` step produce WORDS as well as
+// numbers. The rect is a FRACTION, so it is converted to pixels against the frame that arrived - the
+// same protection `region:` gets from `region_at:`, without the key.
+// readWords OCRs a rect at a chosen ENLARGEMENT.
+//
+// `scale:` IS NOT TUNING AND IT IS NOT OPTIONAL FOR SMALL TEXT. MEASURED on macOS's 640x480 recovery
+// frame, whose `Uninitialized` row is drawn at about 12 px: at scale 6 tesseract read four rows, at
+// scale 2 it read two. A reading that finds nothing is indistinguishable from a pane that is not
+// there, so the enlargement belongs to the reading rather than to a default.
+func (e *Executor) readWords(img image.Image, r screen.Rect, scale int) ([]string, error) {
+	b := img.Bounds()
+	w, h := b.Dx(), b.Dy()
+	// A PIXEL RECT IS SCALED AGAINST THE SCREEN IT WAS WRITTEN FOR - `rect_at:`, carried in `Rect` as
+	// `AtW`/`AtH` - and NOT against the frame that happened to arrive.
+	//
+	// THE DIFFERENCE IS THE WHOLE BUG: a macos recovery frame is 640x480 and its rects were measured at
+	// 1920x1080. Dividing by the frame reads `1400` as a coordinate in a 640-wide image and asks for a
+	// crop outside it:
+	//
+	//	crop [760, 200, 1400, 560] is not inside a 640x480 frame
+	//
+	// The frame is the fallback ONLY when the file named no size, which is the one case where it is
+	// the best answer available.
+	from, to, xf, xt := r.From, r.To, r.XFrom, r.XTo
+	if r.Pixels {
+		aw, ah := float64(r.AtW), float64(r.AtH)
+		if aw <= 0 || ah <= 0 {
+			aw, ah = float64(w), float64(h)
+		}
+		from, to = r.From/ah, r.To/ah
+		xf, xt = r.XFrom/aw, r.XTo/aw
+	}
+	region := [4]int{
+		int(float64(w) * xf), int(float64(h) * from),
+		int(float64(w) * xt), int(float64(h) * to),
+	}
+	if scale <= 0 {
+		scale = 3
+	}
+	cropped, err := screen.Crop(img, region, scale)
+	if err != nil {
+		return nil, err
+	}
+	return e.readCrop(cropped, "see")
+}
+
 // readScreen captures a frame and reads it, cropping when the step says so.
 //
 // THE CROP IS DONE IN GO RATHER THAN WITH AN EXTERNAL TOOL. `lib/assistant.py` used Pillow for this,
@@ -99,7 +145,7 @@ func (e *Executor) readScreen(s walk.Step, label string) ([]string, error) {
 	}
 
 	crop := img
-	if region, ok := rectOf(s, "region"); ok {
+	if region, ok := rectOf(s, "rect"); ok {
 		// `region_at:` IS REQUIRED WITH `region:`, AND ITS ABSENCE IS AN ERROR RATHER THAN A DEFAULT.
 		//
 		// A RECTANGLE IS PIXELS ON ONE PARTICULAR SCREEN. Without the size it was measured at there
@@ -115,7 +161,7 @@ func (e *Executor) readScreen(s walk.Step, label string) ([]string, error) {
 		// The first version FAILED on a mismatch, which turned "the pane is not up yet" into "the
 		// file is broken"; the second scaled the rectangle silently. Neither is possible to reason
 		// about when the number that says what the measurement was is optional.
-		if _, ok := pairOf(s, "region_at"); !ok {
+		if _, ok := pairAt(s); !ok {
 			return nil, fail(s.Name, "`region:` must say `region_at: [width, height]` - the size "+
 				"those pixels were measured at. A rectangle without it cannot be scaled for a guest "+
 				"that draws at another size, and this guest does: the UEFI shell is 1280x800, macOS "+
@@ -159,7 +205,7 @@ func (e *Executor) readScreen(s walk.Step, label string) ([]string, error) {
 		//
 		// AND THE LOG SAYS SO, because a silently scaled rectangle is a reading taken from somewhere
 		// other than where the file said, and that has to be visible when a step fails.
-		if at, ok := pairOf(s, "region_at"); ok {
+		if at, ok := pairAt(s); ok {
 			w, h := f.Size()
 			if at[0] != w || at[1] != h {
 				scaled := [4]int{
@@ -232,10 +278,24 @@ func (e *Executor) readCrop(crop image.Image, label string) ([]string, error) {
 // words, checked once. `timeout:` and `poll:` are refused with it, because accepting them would
 // restore the loop this replaced.
 func (e *Executor) doUntil(s walk.Step) error {
+	// `from: console` IS THE SERIAL LOG, AND IT IS A PARAMETER RATHER THAN A SECOND KEY.
+	//
+	// `until_console:` WAS ITS OWN STEP with its own do* function, and the two differed in ONE thing:
+	// where the text was read. The console wait polls a file for `timeout:` seconds and matches a
+	// substring; the screen wait reads once and matches words. That made `until:` a dead key (0 uses)
+	// beside a live twin (4), and two functions to keep in step.
+	//
+	// THE CONSOLE PATH KEEPS ITS OWN POLLING because a serial log is a FILE that grows: there is no
+	// "read it once" that means anything, so `timeout:`, `poll:` and `blind_after:` are legal here
+	// and refused for the screen.
+	if s.Get("from") == "console" {
+		return e.untilConsole(s)
+	}
 	if s.Has("timeout") || s.Has("poll") {
 		return fail(s.Name, "`until:` is ONE measurement and takes no `timeout:` or `poll:`. A "+
 			"retry is a `loop:` - with `do:`, `ocr:`, `check:` and `until: {fact: ...}` - so the "+
-			"file says how many times it will look and what it waits between")
+			"file says how many times it will look and what it waits between. For a serial log, "+
+			"which grows, say `from: console`")
 	}
 	if s.Has("keep_alive") {
 		return fail(s.Name, "`keep_alive:` belonged to the retrying `until:`. A loop that has to "+
@@ -290,6 +350,72 @@ func (e *Executor) doUntil(s walk.Step) error {
 // IT IS HOW A RETRY IS WRITTEN WITHOUT A CONDITIONAL INSIDE A CLICK. opensuse's installer retry must
 // not press the desktop icon while YaST2 is already open, because a second double-click lands on the
 // wizard - and a step that cannot say "unless this is already up" has to be a Python function.
+// doActionList runs a step's `do:` list in order, under the step's own name.
+//
+// IT IS THE PANE MODEL'S ACTION LIST AND IT IS ORDINARY: `loop:`'s `do:` and `if:`'s `then:` are the
+// same shape, and both already run through this dispatcher. Only the TOP-LEVEL `do:` had no branch,
+// so `macos/15/steps/sequoia.yaml`'s eight multi-click panes clicked nothing.
+//
+// A FAILURE NAMES THE OUTER STEP AND THE INNER ONE, because "the analytics pane failed" is not enough
+// when it is the second of two clicks - the reader needs to know which.
+func (e *Executor) doActionList(s walk.Step) error {
+	raw, ok := s.Spec["do"].([]any)
+	if !ok || len(raw) == 0 {
+		return fail(s.Name, "`do:` must be a list of steps")
+	}
+	for i, entry := range raw {
+		m, ok := entry.(map[string]any)
+		if !ok {
+			return fail(s.Name, "`do:` entry %d is not a step", i+1)
+		}
+		inner := walk.Step{Index: s.Index, Name: s.Name, Spec: m}
+		if _, hasName := m["name"]; !hasName {
+			inner.Name = fmt.Sprintf("%s [%d]", s.Name, i+1)
+		}
+		if err := e.runOne(inner); err != nil {
+			return fmt.Errorf("%s, step %d of %d: %w", s.Name, i+1, len(raw), err)
+		}
+	}
+	return nil
+}
+
+// doWhen runs a step only if the screen shows the words it names.
+//
+// `when:` IS `unless:`'S MIRROR, AND IT WAS DECLARED WITHOUT AN IMPLEMENTATION - which made it the
+// worst kind of key. MEASURED: 16 uses in `macos/15/steps/sequoia.yaml`, the Setup Assistant walk,
+// and `runOne` has no branch for it, so every one of those steps reached the switch's last arm and
+// returned `no implementation for this step's keys`. The macOS setup walk could not run.
+//
+// IT IS THE SECOND STEP MODEL ("panes") AND THAT IS WHY IT IS BEING FOLDED IN RATHER THAN REVIVED ON
+// ITS OWN. A pane file said `when:` (the words that mean this pane is up) and `do:` (the actions),
+// which is the same three parts `loop:` and `check:` already spell out. `when:` keeps its meaning and
+// gains an implementation here; `do:` is read by the dispatcher as the step's own action; and the
+// separate `once:`/`end:`/`stuck_after:` state machine is deleted rather than rebuilt, because a
+// pane that is answered twice is a `loop:` whose fact goes false.
+//
+// THE READING IS ONE CAPTURE, like `unless:`, so the gate and the action that follows it cannot see
+// two different screens.
+func (e *Executor) doWhen(s walk.Step) error {
+	want := wordsOf(s, "when")
+	if len(want) == 0 {
+		return fail(s.Name, "`when:` must name the words that mean this step applies")
+	}
+	words, err := e.readScreen(s, s.Name+" - when")
+	if err != nil {
+		return err
+	}
+	if !says(words, want) {
+		e.Driver.Log(fmt.Sprintf("  skipped: the screen does not say %q", strings.Join(want, " ")))
+		e.skipped = true
+		return nil
+	}
+	e.Driver.Log(fmt.Sprintf("  applies: the screen says %q", strings.Join(want, " ")))
+	// THE ACTION IS THE REST OF THE STEP. `when:` is a GATE, not an action, so the dispatcher is
+	// re-entered with the gate removed - the same shape `unless:` uses, and for the same reason: a
+	// step says one thing and a gate is not that thing.
+	return e.dispatchRest(s)
+}
+
 func (e *Executor) doUnless(s walk.Step) error {
 	// `unless_any:` IS THE ALTERNATIVES FORM, and it exists for the same reason `expect_any:` does: a
 	// pane can announce itself in more than one way. Measured on opensuse-tumbleweed's installer, whose
@@ -299,14 +425,14 @@ func (e *Executor) doUnless(s walk.Step) error {
 	// `unless:` REMAINS ONE WORD-SET WITH AND MEANING, because a gate that required ANY of two words
 	// and a gate that required BOTH were spelled the same way and that is a trap. Two keys, two
 	// meanings, no guessing.
-	alternatives := wordSetsOf(s, "unless_any")
+	alternatives := wordSetsOf(s, "when_not_any")
 	if len(alternatives) == 0 {
-		if want := wordsOf(s, "unless"); len(want) > 0 {
+		if want := wordsOf(s, "when_not"); len(want) > 0 {
 			alternatives = [][]string{want}
 		}
 	}
 	if len(alternatives) == 0 {
-		return fail(s.Name, "`unless:` or `unless_any:` must name words")
+		return fail(s.Name, "`when_not:` or `when_not_any:` must name words")
 	}
 	words, err := e.readScreen(s, s.Name+" - unless")
 	if err != nil {
@@ -335,18 +461,25 @@ func (e *Executor) doUnless(s walk.Step) error {
 		// THE CALLER MUST BE ABLE TO TELL "SKIPPED" FROM "GO AHEAD", AND IT COULD NOT.
 		//
 		// MEASURED ON THE macOS 26 ssh STAGE, and it cost that stage its whole run. This function
-		// returned nil for both outcomes, and `dispatchRest` ran the step's action on either - so
+		// reported success for both outcomes, and the dispatcher ran the step's action on either - so
 		//
 		//	- name: open the remote login pane from the keyboard
 		//	  unless: [allow, full, disk, access]
 		//	  do: [Cmd+F, Return]
 		//
-		// printed `skipped: the screen already shows "allow full disk access"` and THEN pressed
-		// Cmd+F and Return, which closed the panel it was supposed to leave alone. The next step's
-		// reading was 0 words - a blank screen - and the stage failed there.
+		// logged `skipped: the screen already shows "allow full disk access"` and THEN pressed Cmd+F
+		// and Return, which closed the panel it was supposed to leave alone. The next step's reading
+		// was 0 words - a blank screen - and the stage failed there.
 		//
-		// `errUnlessAlready` IS NOT AN ERROR. It is the third outcome `unless` always had and could
-		// never say: the gate is shut. The dispatcher turns it into a plain return.
+		// A FLAG DOES NOT STOP THE ACTION. This branch of the merge had one - `e.skipped = true`
+		// followed by `return nil` - and the dispatcher runs `dispatchRest` whenever this function
+		// returns nil, so the flag changed what the JOURNAL called the step and nothing about what
+		// the step DID. That is the defect above, dressed as a fix.
+		//
+		// THE SENTINEL IS THE ONLY MECHANISM: `dispatchRest` is what runs the rest of the step, so
+		// the "do not" answer has to be a value the dispatcher recognises. It is also what the
+		// dispatcher uses to mark the step `skipped` in the journal, so the report and the action
+		// cannot disagree - see the `when_not` arm.
 		return errUnlessAlready
 	}
 	// THE STEP CONTINUES. `unless` is a gate on the rest of the same step, and the dispatcher ran
@@ -449,8 +582,20 @@ func firstLineOf(s string) string {
 	return s
 }
 
+// pairAt reads the size a pixel rect was measured at, under `rect_at:` or its old name
+// `region_at:`. One region, one meaning: a rectangle is pixels on ONE screen.
+func pairAt(s walk.Step) ([2]int, bool) {
+	if v, ok := pairOf(s, "rect_at"); ok {
+		return v, true
+	}
+	return pairOf(s, "region_at")
+}
+
 func rectOf(s walk.Step, key string) ([4]int, bool) {
 	v, ok := s.Spec[key]
+	if !ok && key == "rect" {
+		v, ok = s.Spec["region"]
+	}
 	if !ok {
 		return [4]int{}, false
 	}
@@ -591,6 +736,49 @@ func (e *Executor) doAtColor(s walk.Step) error {
 //
 // THE LABEL IS NOT READ. tesseract reads these 14-px labels unreliably - `Select` came back as
 // nothing at all on two panes - while the fill is 84x34 px of one colour.
+// doAtBottom clicks at an x, a fixed number of pixels above the FRAME's bottom edge.
+//
+// IT WAS DECLARED AND NEVER DISPATCHED, which made it the worst kind of key: eight nixos steps write
+// `at_bottom: [1327, 15]` and the executor answered `no implementation for this step's keys`. A file
+// that loads, validates and then fails at run time on a key the vocabulary advertises.
+//
+// WHY A KEY AT ALL RATHER THAN A PLAIN COORDINATE: a wizard's `Next` sits a fixed distance above the
+// BOTTOM OF THE WINDOW, and the window's height is what changes between pages - Calamares' footer
+// moves from 751 to 872 depending on how tall the content above it is. A plain y would have to be
+// re-measured per page; this does not. MEASURED on nixos: every one of the eight is `[1327, 15]`,
+// against a footer at y=1065 in a 1080 frame - so 15 from the bottom is 1065.
+//
+// THE FRAME, NOT A SCAN FOR THE WINDOW. `at_window` tried to find the window's edge and its own
+// comment records four failed attempts at the SCAN rather than at the button. This is the case where
+// there is nothing to scan: the wizard's footer is at the screen's bottom.
+func (e *Executor) doAtBottom(s walk.Step) error {
+	pair, ok := s.Spec["at_bottom"].([]any)
+	if !ok || len(pair) != 2 {
+		return fail(s.Name, "`at_bottom:` must be [x, dy] - an x, and how many pixels above the "+
+			"bottom edge to click")
+	}
+	x, okX := toFloat(pair[0])
+	dy, okY := toFloat(pair[1])
+	if !okX || !okY {
+		return fail(s.Name, "`at_bottom:` must be two numbers")
+	}
+	f, err := e.Driver.Frame()
+	if err != nil {
+		return fail(s.Name, "reading the frame to find its bottom edge: %v", err)
+	}
+	_, h := f.Size()
+	y := h - int(dy)
+	if y < 0 {
+		y = 0
+	}
+	e.Driver.Log(fmt.Sprintf("  clicking (%d, %d): %g above the bottom of a %d-pixel frame",
+		int(x), y, dy, h))
+	if err := e.Driver.Click(int(x), y); err != nil {
+		return fail(s.Name, "%v", err)
+	}
+	return e.settle(s)
+}
+
 func (e *Executor) doAtButton(s walk.Step) error {
 	r, ok := rectOf(s, "at_button")
 	if !ok {
@@ -702,12 +890,13 @@ func ConsolePath(work string) string { return filepath.Join(work, "console.log")
 // OCR STILL HAS ITS PLACE IN THIS STAGE, one step later: `until:` on the installer's first pane is
 // how the run confirms it actually reached Setup. That is a question about a screen, which is what
 // OCR is for; this step is a question about a five-second firmware window, which is not.
-func (e *Executor) doUntilConsole(s walk.Step) error {
-	want := s.Get("until_console")
+func (e *Executor) untilConsole(s walk.Step) error {
+	want := s.Get("until")
 	if want == "" {
-		return fail(s.Name, "`until_console:` must name the text to wait for")
+		return fail(s.Name, "`until: {from: console}` must name the text to wait for")
 	}
-	timeout := seconds(s, "timeout", 180)
+	// THE 180 IS NOT A CONSTANT ANY MORE WHEN THE FILE'S OWN `boot:` SAID OTHERWISE.
+	timeout := e.budget(s, "timeout", 180)
 	poll := seconds(s, "poll", 1)
 	// THE BLIND FALLBACK, AND IT IS FROM MEASUREMENT RATHER THAN CAUTION. Some media boot without
 	// any prompt, and some firmwares never emit the marker - so a step that waited for text alone
@@ -797,63 +986,6 @@ func shorten(s string, n int) string {
 }
 
 // --- a host-side log, for a step that witnesses rather than judges ---------------------
-
-// doHostLog prints the tail of a host-side log, when this build has one to print.
-//
-// IT IS FOR A STEP WHOSE ONLY JOB IS TO SAY WHAT THE SERVER SAW, and whose ABSENCE of output is
-// information: GhostBSD's smbd log sits AFTER the mount touched the share and BEFORE the proof, so it
-// runs even when the proof is about to fail - which is the only time its output is worth anything.
-//
-// WHEN THERE IS NO SUCH LOG THIS SAYS SO RATHER THAN PRETENDING. `smbd` is not started by this build
-// yet: `internal/net` does tap, bridge, dnsmasq and iptables, and the SMB server a `share_serve:`
-// step would start is not implemented. A step that reported success with nothing to show would be
-// worse than one that names the gap, because the file's own comment says the log exists to explain a
-// failure - and an empty log explanation reads as "the server logged nothing".
-func (e *Executor) doHostLog(s walk.Step) error {
-	name := s.Get("host_log")
-	if name == "" {
-		return fail(s.Name, "`host_log:` must name what to print: smbd")
-	}
-	switch name {
-	case "smbd":
-		path := "/tmp/easydiskbake-smbd.log"
-		body, err := os.ReadFile(path)
-		if err != nil {
-			// NOT A FAILURE: this step is `optional` in the file that uses it, and the honest
-			// statement is that there is no server log because nothing started a server.
-			e.Driver.Log(fmt.Sprintf("  no smbd log at %s (%v)", path, err))
-			e.Driver.Log("  this build does not start an SMB server yet - `share_serve:` is not " +
-				"implemented - so there is no server side to read")
-			return nil
-		}
-		lines := strings.Split(strings.TrimRight(string(body), "\n"), "\n")
-		if len(lines) > 60 {
-			lines = lines[len(lines)-60:]
-		}
-		for _, l := range lines {
-			e.Driver.Log("  " + shorten(strings.TrimRight(l, "\r"), 200))
-		}
-		return nil
-	}
-	return fail(s.Name, "`host_log: %s` is not a log this build prints; the one it knows is smbd", name)
-}
-
-// --- a shell line typed into the guest's own terminal ----------------------------------
-
-// doRun types a shell command into the guest's terminal, one line at a time.
-//
-// IT IS A GUI ACTION, NOT AN SSH COMMAND. The whole point of `run:` is a guest whose sshd does not
-// exist yet - the Linux and BSD `ssh.yaml` stages install sshd this way. `ssh:` would need the thing
-// being installed.
-//
-// THE TERMINAL IS NORMALLY OPENED BY ITS OWN STEP (`open the terminal` / `key: ctrl+alt+t`), because
-// "did the terminal open" is the first question when an install produces nothing - and a recording
-// answers it. `terminal_wait` therefore DEFAULTS TO ZERO HERE, meaning "the terminal is already up".
-//
-// The Python implementation pressed ctrl+alt+t unconditionally, and that is wrong for a desktop whose
-// shortcut does not work: Pop!_OS' COSMIC ignores it, and pressing it again after a dock click opened
-// the terminal types a control chord into the focused window. A file that wants the shortcut says
-// `terminal_wait: 8` and gets it.
 func (e *Executor) doRun(s walk.Step) error {
 	body := s.Get("run")
 	if strings.TrimSpace(body) == "" {
@@ -885,6 +1017,12 @@ func (e *Executor) doRun(s walk.Step) error {
 	// diagnosis.
 	e.Driver.Log(fmt.Sprintf("  running %d line(s), %d character(s): %s", len(lines),
 		len([]rune(body)), shorten(strings.ReplaceAll(body, "\n", " ; "), 140)))
+	// THE COMMAND ITSELF IS EVIDENCE. A `run:` step's whole effect on the guest is the text it typed,
+	// and until this the journal could say "step 12 ran" without being able to say what it ran.
+	if e.evidence == nil {
+		e.evidence = &evidence{}
+	}
+	e.evidence.Command = append([]string(nil), lines...)
 	for i, line := range lines {
 		if strings.TrimSpace(line) == "" {
 			continue

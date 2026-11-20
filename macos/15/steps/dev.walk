@@ -1,0 +1,87 @@
+walkthrough "macos 15 - developer toolchain"
+  resolution 1920x1080
+  recording_resolution 1920x1080
+  user vmuser
+  password admin
+  var out == {default: out/distro.qcow2, from: args.out}
+  var shutdown == {default: ssh, from: args.shutdown}
+  var user == {default: vmuser, from: args.user}
+  header boot_disk == from_caller
+  header ssh_port == 2222
+
+  needs boot.img macos.rom macos.vars Xcode_26.3_Universal.xip node.pkg python.pkg, named "the media this stage boots from is already on disk"
+  step "boot the disk"
+    boot == true
+    os == macos
+    # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
+    memory_mb == 12288
+    timeout == 900
+  step "wait for sshd"
+    require_ssh == true
+    timeout == 900
+  step "copy xcode into the guest"
+    scp == [Xcode_26.3_Universal.xip, /tmp/Xcode.xip]
+  step "copy run-xcode-install.sh in"
+    scp == [run-xcode-install.sh, /tmp/run-xcode-install.sh]
+    timeout == 300
+  step "expand and select xcode"
+    ssh == "sh /tmp/run-xcode-install.sh"
+    timeout == 7200
+  step "remove the xip"
+    ssh == rm -f /Users/{{ user }}/Xcode.xip && df -h / | tail -1
+    timeout == 300
+  # THE STEP THAT USED TO SIT HERE HAD NO KEYS AT ALL, AND AN EMPTY STEP IS A RUNTIME FAILURE.
+  #
+  # UPSTREAM'S JOB 133769640513 FAILED ON EXACTLY THAT, and the message is the one an empty step
+  # produces:
+  #
+  #	fetch the packages on the host: no implementation for this step's keys
+  #
+  # It is still an empty `- name:` with only comments under it on upstream HEAD, so the conversion
+  # reproduced it faithfully and then could not run it. `runOne` refuses a spec with no action:
+  #
+  #	empty: no implementation for this step's keys
+  #
+  # THE JOB IT WAS TRYING TO DO IS ALREADY DONE ELSEWHERE. `fetchDevPackages` pulls `dev-node-pkg` and
+  # `dev-python-pkg`; in this workflow both arrive through `assets:` BEFORE the run starts, which is the
+  # rule every stage here follows. So the step has nothing left to do and is removed rather than
+  # invented: `scp: [node.pkg, /tmp/node.pkg]` below is the step that proves the files are there.
+  step "copy the packages into the guest"
+    scp == [node.pkg, /tmp/node.pkg]
+  step "copy the python package into the guest"
+    scp == [python.pkg, /tmp/python.pkg]
+  step "copy install-node.sh in"
+    scp == [install-node.sh, /tmp/install-node.sh]
+    timeout == 300
+  step "install node"
+    ssh == "sh /tmp/install-node.sh"
+    timeout == 1800
+  step "copy install-python.sh in"
+    scp == [install-python.sh, /tmp/install-python.sh]
+    timeout == 300
+  step "install python"
+    ssh == "sh /tmp/install-python.sh"
+    timeout == 1800
+  step "copy prove-toolchain.sh in"
+    scp == [prove-toolchain.sh, /tmp/prove-toolchain.sh]
+    timeout == 300
+  step "prove the toolchain"
+    ssh == "sh /tmp/prove-toolchain.sh"
+    timeout == 300
+  step "prove xcode is selected"
+    ssh == xcode-select -p && xcodebuild -version
+    timeout == 300
+  step "copy swift-check.sh in"
+    scp == [swift-check.sh, /tmp/swift-check.sh]
+    timeout == 300
+  step "prove swift compiles"
+    ssh == "sh /tmp/swift-check.sh"
+    timeout == 1800
+  step "note what is present"
+    ssh == export PATH=/usr/local/bin:$PATH; echo "node=$(node --version)"; echo "python=$(python3 --version)"; echo "git=$(git --version)"; echo "swift=$(swift --version 2>&1 | head -1)"; echo "xcode=$(xcodebuild -version | head -1)"
+    timeout == 300
+  step "stop the machine"
+    shutdown == '{{ shutdown }}'
+    timeout == 300
+  step "publish the disk"
+    compress == '{{ out }}'

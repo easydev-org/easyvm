@@ -14,5 +14,12 @@
 .idea/
 .vscode/
 *.swp
-easyvm
+# THE BUILT BINARY IS NAMED `easyvm`, AND A BARE PATTERN FOR IT ALSO MATCHES THE PACKAGE DIRECTORY
+# `cmd/easyvm/` - so a NEW FILE THERE WAS SILENTLY IGNORED. MEASURED: `cmd/easyvm/walk.go` was written,
+# built, tested locally and absent from the commit, and CI answered
+#
+#	cmd/easyvm/main.go:85:11: undefined: cmdWalk
+#
+# The slash anchors it to a file in the root, which is what a build output is.
+/easyvm
 __pycache__/

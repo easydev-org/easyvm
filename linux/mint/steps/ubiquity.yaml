@@ -1,4 +1,7 @@
 name: mint 22.3 cinnamon (ubiquity)
+recording_resolution:
+- 1920
+- 1080
 resolution:
 - 1920
 - 1080
@@ -19,43 +22,53 @@ steps:
     i in $(seq 1 1080); do xdotool mousemove_relative -- 1 0 2>/dev/null; xdotool mousemove_relative -- -1 0 2>/dev/null; sleep 20; done ) >/dev/null 2>&1 & exit
   terminal_wait: 8
   type_gap: 0.15
-  wait_after: 10
+  settle: 10
 - name: open the installer
   double:
   - 114
   - 47
-  expect: welcome
-  wait_after: 25
+  settle: 25
+- name: open the installer - what is on screen
+  see: {name: open_the_installer}
+- name: open the installer - the screen says so
+  check:
+    name: asserted
+    from: open_the_installer
+    mode: text
+    words:
+    - welcome
+    rect: [0, 0, 1920, 1080]
+    rect_at: [1920, 1080]
 - name: welcome
   click:
   - 1306
   - 727
-  wait_after: 12
+  settle: 12
 - name: keyboard layout
   click:
   - 1306
   - 727
-  wait_after: 12
+  settle: 12
 - name: multimedia codecs
   click:
   - 1306
   - 727
-  wait_after: 12
+  settle: 12
 - name: installation type
   click:
   - 1306
   - 727
-  wait_after: 15
+  settle: 15
 - name: write the changes to disks
   click:
   - 1269
   - 659
-  wait_after: 20
+  settle: 20
 - name: time zone
   click:
   - 1306
   - 727
-  wait_after: 15
+  settle: 15
 - name: full name
   click:
   - 965
@@ -80,7 +93,6 @@ steps:
   click:
   - 1306
   - 727
-  wait_after: 20
+  settle: 20
 - name: install
-  wait: 2400
-  keep_alive: true
+  settle: 2400

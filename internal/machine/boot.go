@@ -105,6 +105,26 @@ type Boot struct {
 	OpenCoreVars string
 	// BootImage is OpenCore's own disk image, the one the firmware boots first.
 	BootImage string
+	// MicroVM asks for the smallest machine that boots a modern Linux kernel: qemu's `microvm`
+	// machine type, no PCIe, no IDE, no USB, no VGA.
+	MicroVM bool
+	// MicroVMDisplay is serial, terminal or desktop - whether the microvm has a VGA adapter.
+	//
+	//	serial     graphics=off: serial only. `see:` reads nothing and a recording is blank.
+	//	terminal   graphics=on:  a VGA adapter the guest draws its TTY on. A recording of a
+	//	                         headless guest is a PICTURE of its console.
+	//	desktop    graphics=on:  the same adapter with a window manager on it.
+	//
+	// The last two are the SAME qemu machine; what separates them is what the guest runs.
+	MicroVMDisplay string
+	// Kernel and Initrd are handed to qemu directly, which is how a microvm starts: there is no
+	// firmware to read a boot sector, so the host supplies the kernel the guest runs.
+	Kernel string
+	Initrd string
+	// KernelAppend is the guest's own boot line. Empty means the Alpine default, which is what a
+	// microvm here boots.
+	KernelAppend string
+
 	// Incoming is a migration stream to restore instead of booting. See the -incoming arguments in
 	// Boot.StorageArgs' caller: it is not a device, it is the machine's starting state.
 	Incoming string
@@ -355,6 +375,13 @@ func (b Boot) StorageArgs() []string {
 			)
 		}
 		args = append(args, "-device", "usb-tablet,bus=xhci.0")
+		// AND THE KEYBOARD THE COMMENT ABOVE SAYS THIS GUEST NEEDS. `lib/vm.py` gives this bus a
+		// `usb-tablet` AND a `usb-kbd`, "because a macOS guest has no PS/2 and every pointer or key
+		// it receives arrives over USB" - and only the tablet was ever added here. The walks have
+		// been typing into macOS over USB anyway, which is why this was not caught: qemu's HID
+		// keyboard falls back to the PS/2 port for keycodes, and the firmware's own menus are the
+		// one place that fallback does not reach.
+		args = append(args, "-device", "usb-kbd,bus=xhci.0")
 		return args
 	}
 
@@ -438,6 +465,25 @@ func (b Boot) StorageArgs() []string {
 	//
 	// A CD-ROM IS `ide-cd` ON q35 - the machine has an IDE controller for it and no SATA bus unless one
 	// is asked for, and the installer is a CD-R.
+	appendVirtioDisk := func(path string) {
+		if path == "" {
+			return
+		}
+		id := fmt.Sprintf("media%d", nextID)
+		nextID++
+		// NO `bootindex`: the host hands the kernel over, so nothing on this bus is booted from. It
+		// is a BLOCK DEVICE the guest reads `modloop=` out of.
+		//
+		// MEASURED, and the reason it matters: giving it one collided with the target disk's index 0
+		//
+		//	-device virtio-blk-device,drive=target,bootindex=0: The bootindex 0 has already been used
+		//
+		// - qemu refused at startup and the step reported `qmp ... connection refused`.
+		args = append(args,
+			"-drive", fmt.Sprintf("file=%s,if=none,format=raw,readonly=on,id=%s", path, id),
+			"-device", fmt.Sprintf("virtio-blk-device,drive=%s", id),
+		)
+	}
 	appendMedia := func(path string) {
 		if path == "" {
 			return
@@ -453,6 +499,14 @@ func (b Boot) StorageArgs() []string {
 	}
 
 	// 1. THE INSTALLER, SO THE FIRMWARE BOOTS IT - and the ONLY one on the IDE bus.
+	//
+	// A MICROVM HAS NO FIRMWARE AND NO IDE, so its medium is a virtio-blk disk at the next index.
+	// That is not a workaround: an Alpine microvm boots a kernel the host hands it and reads its
+	// `modloop=` squashfs out of this image, so what it needs is a BLOCK DEVICE, not a bootable
+	// CD-ROM - which is exactly what a virtio disk is.
+	if b.MicroVM {
+		appendMedia = appendVirtioDisk
+	}
 	appendMedia(b.ISO)
 
 	// 2. THE ANSWER CD. Windows Setup scans removable media for Autounattend.xml and
@@ -464,15 +518,38 @@ func (b Boot) StorageArgs() []string {
 	// `discard=unmap` IS ON WHEN NOTHING IS INSTALLING, for the same reason and with the opposite
 	// sign as macOS: after a system is on the disk, its TRIMs are information the qcow2 can use to
 	// stay small.
+	// A MICROVM'S TARGET IS INDEX 0, BECAUSE NOTHING ELSE IS IN THE BOOT ORDER: the host hands the
+	// kernel over, so no medium carries a `bootindex` and the counter is still 0. Using it there
+	// collided the disk with itself -
+	//
+	//	-device virtio-blk-device,drive=target,bootindex=0: The bootindex 0 has already been used
+	//
+	// - and every other machine keeps the counter, where the installer is 0 and the target is 1 so
+	// the firmware cannot outrank the medium it was told to boot.
+	//
+	// AND A MICROVM'S TARGET IS INDEX 1 RATHER THAN 0, measured the hard way: qemu takes index 0 for
+	// the kernel it was handed, so the disk answering 0 is
+	//
+	//	-device virtio-blk-device,drive=target,bootindex=0: The bootindex 0 has already been used
+	//
+	// - and the same command line has NO other `bootindex` in it, which is what made this look like a
+	// duplicate-device bug for three attempts.
 	diskIndex := nextIndex
-	nextIndex++
+	if b.MicroVM {
+		diskIndex = 1
+	} else {
+		nextIndex++
+	}
 	disk := fmt.Sprintf("file=%s,if=none,format=qcow2,id=target", b.Disk)
 	if b.Discardable() {
 		disk += ",discard=unmap"
 	}
 	args = append(args,
 		"-drive", disk,
-		"-device", fmt.Sprintf("virtio-blk-pci,drive=target,bootindex=%d", diskIndex),
+		// A MICROVM HAS NO PCI BUS, so its disk is the virtio-mmio device. `virtio-blk-device` and
+		// `virtio-blk-pci` are the same driver to the guest, and the mmio form is what a machine with
+		// no PCIe can attach.
+		"-device", fmt.Sprintf("%s,drive=target,bootindex=%d", b.virtioBlk(), diskIndex),
 	)
 
 	// 4. THE DRIVER CD, FOR THE SYSTEM THAT WILL RUN ON THIS DISK.
@@ -493,11 +570,43 @@ func (b Boot) StorageArgs() []string {
 	// pointing device comes through OpenCore, and the tablet is still attached so a person can drive the
 	// recovery screen. `StorageArgs` has already created the controller for the recovery disk there,
 	// which is the same variable.
+	// A MICROVM HAS NO PCI BUS, so there is no xHCI controller for a USB tablet to hang from - and
+	// measured, asking for one stops qemu at startup:
+	//
+	//	qemu-system-x86_64: -device qemu-xhci,id=xhci: No 'PCI' bus found for device 'qemu-xhci'
+	//
+	// A guest whose job is to prove the vocabulary does not need a pointer: the steps that click are
+	// exercised on the full machines, where a pointer exists. What this machine proves is that the
+	// vocabulary starts a guest, reads its console, and measures its screen.
+	if b.MicroVM {
+		return args
+	}
 	if !xhciAdded {
 		args = append(args, "-device", "qemu-xhci,id=xhci")
 		xhciAdded = true
 	}
 	args = append(args, "-device", "usb-tablet,bus=xhci.0")
+	// AND A KEYBOARD ON THE SAME BUS, BECAUSE SOME MENUS ONLY READ USB INPUT.
+	//
+	// MEASURED ON RUN 44484688558 (mx), whose recording is the SAME UEFI "Select Language" panel for
+	// its whole 80 minutes:
+	//
+	//	=== that menu is the language submenu this medium opens on     (the check PASSED - it read
+	//	                                                                Language, Keyboard, Timezone)
+	//	=== leave the language submenu for the real boot menu   key esc
+	//	=== up to the first entry ... up again ... and once more  key up
+	//	=== boot it                                             key ret
+	//	=== wait for the live desktop                           80 minutes of the same frame
+	//
+	// Every key was sent and none arrived. This guest had `usb-tablet` and NO KEYBOARD AT ALL: q35
+	// gives it PS/2, and OVMF's graphical menu does not read PS/2 - it reads EFI Simple Text Input,
+	// which on this machine is USB. The menu is a device list, which is why a pointer would not have
+	// helped either.
+	//
+	// `usb-kbd` IS WHAT macOS ALREADY NEEDS and what `lib/vm.py` gives every guest on this bus. It is
+	// harmless elsewhere: a guest that already has a PS/2 keyboard just has a second one, and the
+	// keycodes the daemon sends are the same either way.
+	args = append(args, "-device", "usb-kbd,bus=xhci.0")
 	return args
 }
 
@@ -590,6 +699,12 @@ func (b Boot) Discardable() bool { return !b.installing() }
 // like OVMF, which is why it appears here rather than in the storage section - and why a macOS guest
 // given OVMF's files in these slots boots to a crossed-out circle.
 func (b Boot) FirmwareArgs(ovmfCode, ovmfVars string) []string {
+	// A MICROVM HAS NO FIRMWARE. It boots a kernel the host hands it, which is the whole point of the
+	// machine type: no pflash, no boot order, no UEFI, and one fewer thing that can fail before the
+	// guest is up.
+	if b.MicroVM {
+		return nil
+	}
 	if b.OS.IsMacOS() {
 		return []string{
 			"-drive", "if=pflash,format=raw,readonly=on,file=" + b.OpenCoreROM,
@@ -794,6 +909,12 @@ func (b Boot) VGAFor(defaultVGA string) string {
 // silently opt out, and the failure mode is the one above: a guest with no card that reports it as a
 // capture bug three stages later.
 func (b Boot) AudioArgs() []string {
+	// A MICROVM HAS NO PCI BUS, so `ich9-intel-hda` - the default sound card - cannot attach. A guest
+	// whose job is to prove the vocabulary does not need audio, and the device it cannot have is the
+	// one that stops the machine at startup.
+	if b.MicroVM {
+		return nil
+	}
 	// `usb-audio` NEEDS THE xHCI CONTROLLER, which Windows' answer/driver CDs already create and
 	// macOS's own device list creates. On a guest with neither, `bus=xhci.0` names a bus that does
 	// not exist and qemu refuses to start - so this branch is only taken for macOS, whose
@@ -848,4 +969,67 @@ func (b Boot) MediaList() string {
 		}
 	}
 	return strings.Join(parts, ", ")
+}
+
+// KernelArgs hands the guest its kernel directly, which is how a microvm boots.
+//
+// A `microvm` MACHINE HAS NO FIRMWARE, so there is no boot sector for a disk to carry and nothing to
+// read an El Torito image. The kernel comes out of the medium the host already has, and qemu starts
+// it - which is exactly the mechanism `os: android` used before this, and the comment in this file
+// records why it was the wrong answer THERE: Android's own boot chain is what its install proves. A
+// microvm is the opposite case: the walkthrough proves the VOCABULARY, not a boot loader.
+func (b Boot) KernelArgs() []string {
+	if b.Kernel == "" {
+		return nil
+	}
+	args := []string{"-kernel", b.Kernel}
+	if b.Initrd != "" {
+		args = append(args, "-initrd", b.Initrd)
+	}
+	// THE APPEND IS THE GUEST'S OWN BOOT LINE, and the default is Alpine's own `syslinux.cfg`:
+	//
+	//	APPEND modules=loop,squashfs,sd-mod,usb-storage quiet
+	//
+	// plus `console=ttyS0` - a microvm has no display, so the serial line is its only output, and
+	// without it the kernel writes to a VGA adapter that does not exist and the console stays
+	// EMPTY, which reads as "the guest never booted".
+	//
+	// `modloop=` NAMES THE SQUASHFS INSIDE THE MEDIUM, and it is what makes an Alpine microvm come
+	// up: MEASURED, without it the initramfs mounts nothing and drops to
+	//
+	//	mount: mounting /dev/vda on /sysroot failed: Invalid argument
+	//	initramfs emergency recovery shell launched
+	//
+	// while WITH it the same machine prints `Welcome to Alpine Linux 3.21` and `localhost login:` in
+	// 2.09 seconds on 512 MiB.
+	// `modloop=/dev/vda` IS THE MEDIUM'S OWN SQUASHFS, at the block device the boot step attaches.
+	// MEASURED, live: with it the guest prints `Welcome to Alpine Linux 3.21` and `localhost login:`
+	// in 2.09 seconds on 512 MiB; without it the initramfs mounts nothing.
+	cmdline := b.KernelAppend
+	if cmdline == "" {
+		cmdline = "console=ttyS0 modules=loop,squashfs,sd-mod modloop=/dev/vda"
+	}
+	args = append(args, "-append", cmdline)
+	return args
+}
+
+// virtioBlk is the disk device name this machine can attach.
+//
+// `virtio-blk-pci` NEEDS A PCI BUS, and a microvm has none - measured: the machine refuses at
+// startup with `-device virtio-blk-pci: no bus found`, which arrives as `qmp ... connect: connection
+// refused` because qemu exits before creating the socket. The mmio form is the same driver to the
+// guest.
+func (b Boot) virtioBlk() string {
+	if b.MicroVM {
+		return "virtio-blk-device"
+	}
+	return "virtio-blk-pci"
+}
+
+// VirtioNet is the network device name this machine can attach.
+func (b Boot) VirtioNet() string {
+	if b.MicroVM {
+		return "virtio-net-device"
+	}
+	return "virtio-net-pci"
 }

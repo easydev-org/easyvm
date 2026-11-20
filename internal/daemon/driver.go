@@ -3,6 +3,7 @@ package daemon
 import (
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"net"
 	"os"
 	"os/exec"
@@ -12,7 +13,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/easydev-org/easyvm/internal/artifact"
 	"github.com/easydev-org/easyvm/internal/guest"
+	"github.com/easydev-org/easyvm/internal/journal"
 	"github.com/easydev-org/easyvm/internal/keys"
 	"github.com/easydev-org/easyvm/internal/machine"
 	easyvmnet "github.com/easydev-org/easyvm/internal/net"
@@ -26,13 +29,20 @@ import (
 const (
 	// vncBase is qemu's own numbering: display N listens on 5900+N.
 	vncBase = 5900
-	// vncDisplay is the display number, and it is a CONSTANT RATHER THAN STATE.
+	// vncDisplay IS THE FALLBACK, and the display is chosen per WORK DIRECTORY.
 	//
-	// ONE GUEST PER CONTAINER, so there is nothing to compute: qemu is always given
-	// `-vnc 127.0.0.1:0` and therefore always listens on 5900. The driver used to carry a
-	// `vncPort int` field for this, which could only ever hold 5900 or 0 - and the 0 was really
-	// the answer to a DIFFERENT question, "is there a machine". Two facts in one field, and the
-	// console page read it on every browser connect.
+	// IT WAS A CONSTANT ON THE ASSUMPTION "ONE GUEST PER CONTAINER", and that assumption is true of
+	// the deployed pod and false of every other place this runs - measured, repeatedly, in the lab:
+	// a second daemon on another port answers at startup
+	//
+	//	qemu-system-x86_64: -vnc 127.0.0.1:0: Failed to find an available port: Address already in
+	//	use
+	//
+	// and because qemu exits, the step that needed it reports `qmp ... connection refused`, which
+	// reads as a socket problem rather than a VNC one.
+	//
+	// SO THE DISPLAY COMES FROM THE WORK DIRECTORY: two daemons with different work directories get
+	// different displays, and the deployed pod - which has one - still gets 0.
 	vncDisplay = 0
 )
 
@@ -69,9 +79,6 @@ type Driver struct {
 	daemon *Daemon
 	file   *walk.File
 	work   string
-	// qmpWait bounds `waitForQMP`. Zero means `qmpHandshakeWait`, which is what production uses; a
-	// test sets it smaller so it does not pay ten seconds to reach the code after the wait.
-	qmpWait time.Duration
 	// guestOS is the family the machine was actually STARTED as, remembered at boot.
 	//
 	// IT IS NOT READ FROM THE FILE, because a sandbox runs several files against one machine and the
@@ -102,16 +109,48 @@ type Driver struct {
 	// machine is perfectly healthy (a `reboot:` kills it), which is why it repairs itself at the
 	// moment of use rather than being treated as part of the machine's lifetime. See `sshSession`.
 	ssh *sshSession
+	// sshTarget is the address the session dials, kept so `/api/state` can probe it.
+	sshTarget guest.Target
 	// diff is the throwaway overlay this run wrote into, when it made one. Its Close is what
 	// proves the base was not written to, so it belongs to the driver rather than to a step.
 	diff *overlay.Overlay
 	// frameMu serialises screen capture. ONE FRAME AT A TIME, because three readers of one screen do
 	// not need three screendumps and interleaved writes produce unreadable files.
 	frameMu sync.Mutex
+	// qmpMu SERIALISES "take the connection, use it, and repair it if it is dead" AS ONE UNIT.
+	//
+	// THE TRANSPORT ALREADY SERIALISES ONE COMMAND - `line.Run` holds its own mutex - AND THAT IS NOT
+	// ENOUGH, BECAUSE THE REPAIR IS NOT A COMMAND. MEASURED ON THE POD, on opensuse's console login:
+	//
+	//	login [2.3]: typing: input-send-event []+7: the qmp connection is closed
+	//
+	// The first character of the password landed and the second did not, on a guest whose qemu was
+	// running and whose socket was listening. The recorder's sampler captures a frame every second and
+	// a `type:` sends one `input-send-event` per character; when a capture failed, the sampler took
+	// the repair path - drop the shared connection, open another - and the typing caller's next
+	// character went into the socket that had just been closed underneath it.
+	//
+	// SO THE UNIT OF EXCLUSION IS THE WHOLE TRANSACTION, NOT THE COMMAND. Two callers can no longer
+	// both decide "this connection is dead" and both act on it; the second waits and finds a working
+	// connection that the first already repaired. The cost is nothing that was not already paid:
+	// `line.Run` serialises every command anyway, so this lock does not reduce throughput, it only
+	// stops the DECISIONS from interleaving.
+	qmpMu sync.Mutex
+	// frames is the one-a-second capture every reader shares. See framecache.go for the measurement
+	// that made it: the sampler and a gate fought over one QMP socket and the gate lost 166 of 180
+	// attempts in silence.
+	frames *frameCache
 	// shareDir is the directory a `share_serve:` step published, or "" when none did. The daemon
 	// serves it over HTTP at `/shared/` - there is no smbd, no port and no config file any more.
 	shareDir string
 	logf     func(string)
+	// audit writes down every external call this driver makes, when a journal is attached. Nil in a
+	// test, and every call site tolerates it.
+	audit *audit
+	// lib is the run's picture library. A `see:`/`screenshot:` puts its capture here and records the
+	// name; a frame the recorder takes does NOT, because a library of two thousand unnamed frames is
+	// the recording, not a library.
+	lib *artifact.Store
 }
 
 // NewDriver builds the driver and returns a closer for the caller's defer.
@@ -120,6 +159,31 @@ type Driver struct {
 // because a `disk:` step could name it - but a machine has exactly one disk and it is chosen before
 // qemu starts. A setter meant the answer could change under a running guest, and the field was read
 // in three places that each had to remember it might.
+// Facts reports the machine's measured state, for a `wait_until:` step.
+//
+// THIS WAS MISSING AND THAT IS A REAL DEFECT: `doWaitUntil` asserts its driver implements
+//
+//	interface{ Facts() (map[string]string, error) }
+//
+// and `Daemon` HAS `Facts` - the snapshot `/api/state` serves - but the DRIVER a walk runs through
+// did not forward it. So every `wait_until: stopped` in the tree failed with
+//
+//	wait for the machine to stop: this driver cannot report the facts a `wait_until:` waits on
+//
+// MEASURED on windows/11/steps/install.walk step 19 of 20, which is the step that waits for the
+// installed guest to power off before the disk is published - the last thing the leg does, after
+// nineteen steps that had all worked.
+//
+// IT IS A FORWARD RATHER THAN A SECOND IMPLEMENTATION, because `Daemon.Facts` is already built from
+// the same snapshot `/api/state` reads. Two sources for "is sshd up" is how a step comes to wait on
+// one answer while the log shows another.
+func (d *Driver) Facts() (map[string]string, error) {
+	if d.daemon == nil {
+		return nil, fmt.Errorf("this driver has no daemon, so it cannot report the machine's facts")
+	}
+	return d.daemon.Facts()
+}
+
 func NewDriver(owner *Daemon, f *walk.File, work, bootDisk string, port int,
 	password string) (run.Driver, func(), error) {
 	if err := os.MkdirAll(work, 0o755); err != nil {
@@ -141,14 +205,16 @@ func NewDriver(owner *Daemon, f *walk.File, work, bootDisk string, port int,
 	// A `dev.yaml` runs against a machine that is already up, so the session must exist before any step
 	// asks for it - and it dials lazily, on the first use, so a file whose first step is a `disk:` does
 	// not pay for a connection the guest cannot accept yet.
+	// THE TARGET IS KEPT, not just captured by the closure, because `/api/state` has to answer
+	// "does sshd accept a connection" and a probe needs the address to ask.
+	d.sshTarget = guest.Target{
+		Host:     "172.30.0.1",
+		Port:     port,
+		User:     f.SSHUser,
+		Password: password,
+	}
 	d.ssh = newSSHSession(func() (*guest.Client, error) {
-		target := guest.Target{
-			Host:     "172.30.0.1",
-			Port:     port,
-			User:     f.SSHUser,
-			Password: password,
-		}
-		return guest.Dial(target, 30*time.Second)
+		return guest.Dial(d.sshTarget, 30*time.Second)
 	})
 	return d, func() {
 		d.shutdown()
@@ -183,21 +249,87 @@ func (d *Driver) Log(msg string) { fmt.Println(msg) }
 // takes the same result. That is not a cache with a timeout - it is the observation that three readers
 // of one screen do not need three screens, and it makes the interleaving impossible instead of
 // making the readers polite.
+// Frame returns a capture from the shared cache, waiting for one if the cache is empty.
+//
+// IT USED TO TAKE A FRESH SCREENDUMP FOR EVERY CALLER, under a mutex. That made three readers of one
+// screen fight: the recorder, a `check:` gate and the browser page all asked qemu, and the gate lost
+// - measured on macos-setup, 14 of 180 attempts returned a frame. The cache takes one capture a
+// second, which is what the recorder alone used to make, and every reader shares it.
+//
+// A CALLER THAT NEEDED A FRESH FRAME USES FrameAt. This one is "the newest" and is what a reader
+// looks at when it does not care when the frame was taken - the browser page, a recording tick.
 func (d *Driver) Frame() (run.Frame, error) {
-	// THE LOCK IS HELD FOR THE WHOLE CAPTURE, so a second caller cannot start a second screendump.
-	// It waits, and then takes the frame that the first caller produced.
-	d.frameMu.Lock()
-	defer d.frameMu.Unlock()
+	started := time.Now()
+	f, err := d.frame()
+	var ok *bool
+	if err == nil {
+		ok = okPtr(true)
+	}
+	d.auditCall(journal.CallScreendump, "", started, ok, err, "")
+	return f, err
+}
 
-	conn, err := d.qmpSocket()
+// frame is `Frame` without the audit, so a re-entrant call cannot record twice.
+func (d *Driver) frame() (run.Frame, error) {
+	cache := d.frameCache()
+	if cache == nil {
+		return nil, fmt.Errorf("this machine has no frame cache")
+	}
+	// THE FIRST CALLER MAY ARRIVE BEFORE THE FIRST TICK, and the recorder's does: its sampler starts
+	// at step one, when the ticker has had no chance to run. Waiting for one capture is cheaper than
+	// making every caller understand that the cache starts empty.
+	if f, ok := cache.waitForFirst(3 * time.Second); ok {
+		return f, nil
+	}
+	f, err := cache.latest()
 	if err != nil {
 		return nil, err
 	}
-	f, err := conn.Screendump(filepath.Join(d.work, "frames"))
-	if err != nil {
-		return nil, err
+	return f, nil
+}
+
+// frameCache starts the cache on first use, so a driver built by a test that never looks at the
+// screen pays for no ticker.
+func (d *Driver) frameCache() *frameCache {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.frames == nil {
+		d.frames = newFrameCache(func() (cachedFrame, error) {
+			d.frameMu.Lock()
+			defer d.frameMu.Unlock()
+			// A FRAME THAT FAILS IS A LOST TICK, NOT A REASON TO RECONNECT A SHARED CONNECTION.
+			//
+			// THE SAMPLER AND A TYPING CALLER SHARE ONE `*Conn`, and `qmpRetry`'s repair CLOSES the
+			// connection it gives up on. So a sampler that took the repair path closed the socket a
+			// `type:` was in the middle of using. MEASURED on the pod, on opensuse's console login:
+			//
+			//	login [2.3]: typing: input-send-event []+7: the qmp connection is closed
+			//
+			// - the first character landed, the second did not, and the guest was fine.
+			//
+			// A CAPTURE IS WORTH LESS THAN A KEYSTROKE. If this tick fails the recording is one frame
+			// shorter and says so in its own count; the connection stays as it is, and the caller that
+			// is actually SENDING something is the one that gets to decide whether it needs repair.
+			// That is why this goes through `qmpSocket` and a bare `Screendump` rather than
+			// `qmpRetry`: the sampler observes, it does not repair.
+			// THE SAME LOCK AS EVERY OTHER COMMAND, because the transport is shared and a capture is
+			// not privileged over a keystroke. What makes this safe is that the capture does NOT
+			// repair: a failed tick is a lost frame, and the connection stays as it is for whoever is
+			// actually sending something.
+			d.qmpMu.Lock()
+			defer d.qmpMu.Unlock()
+			conn, err := d.qmpSocket()
+			if err != nil {
+				return cachedFrame{}, err
+			}
+			f, err := conn.Screendump(filepath.Join(d.work, "frames"))
+			if err != nil {
+				return cachedFrame{}, err
+			}
+			return cachedFrame{path: f.Path, w: f.Width, h: f.Height, at: time.Now()}, nil
+		})
 	}
-	return frame{path: f.Path, w: f.Width, h: f.Height}, nil
+	return d.frames
 }
 
 type frame struct {
@@ -214,6 +346,18 @@ func (f frame) Words() []string  { return nil } // no OCR in this build; see the
 // QMP'S ABSOLUTE POINTER TAKES ONE EVENT PAIR PER AXIS, and the guest's tablet scales them. That is
 // why the coordinates are the file's own measured pixels rather than anything the host computes.
 func (d *Driver) Click(x, y int) error {
+	started := time.Now()
+	err := d.click(x, y)
+	var ok *bool
+	if err == nil {
+		ok = okPtr(true)
+	}
+	d.auditCall(journal.CallClick, fmt.Sprintf("%d,%d", x, y), started, ok, err, "")
+	return err
+}
+
+// click is `Click` without the audit, so a double-click records ONE call rather than two.
+func (d *Driver) click(x, y int) error {
 	// QMP, NOT THE VNC SESSION, AND THE REASON IS THAT QEMU'S VNC SERVER TAKES ONE CLIENT.
 	//
 	// The pointer was routed through VNC for a while, on the evidence that a click in the browser
@@ -229,43 +373,56 @@ func (d *Driver) Click(x, y int) error {
 	// and a walk whose pointer is a socket contention problem fails in a way that reads as a dead
 	// widget. QMP has no such limit: it is the same connection the daemon already owns for status,
 	// screendumps and shutdown.
-	conn, err := d.qmpSocket()
-	if err != nil {
-		return err
-	}
-	return conn.Click(x, y)
+	return d.qmpRetry(func(conn *qmp.Conn) error { return conn.Click(x, y) })
 }
 
 func (d *Driver) DoubleClick(x, y int) error {
-	if err := d.Click(x, y); err != nil {
+	started := time.Now()
+	err := d.doubleClick(x, y)
+	var ok *bool
+	if err == nil {
+		ok = okPtr(true)
+	}
+	d.auditCall(journal.CallClick, fmt.Sprintf("%d,%d double", x, y), started, ok, err, "")
+	return err
+}
+
+func (d *Driver) doubleClick(x, y int) error {
+	if err := d.click(x, y); err != nil {
 		return err
 	}
 	time.Sleep(120 * time.Millisecond)
-	return d.Click(x, y)
+	return d.click(x, y)
 }
 
 func (d *Driver) Key(qcode string) error {
-	conn, err := d.qmpSocket()
-	if err != nil {
-		return err
+	started := time.Now()
+	err := d.qmpRetry(func(conn *qmp.Conn) error { return conn.Key(qcode) })
+	var ok *bool
+	if err == nil {
+		ok = okPtr(true)
 	}
-	return conn.Key(qcode)
+	d.auditCall(journal.CallKey, qcode, started, ok, err, "")
+	return err
 }
 
 func (d *Driver) Stroke(modifiers []string, key string) error {
-	conn, err := d.qmpSocket()
-	if err != nil {
-		return err
+	started := time.Now()
+	err := d.qmpRetry(func(conn *qmp.Conn) error { return conn.Stroke(modifiers, key) })
+	var ok *bool
+	if err == nil {
+		ok = okPtr(true)
 	}
-	return conn.Stroke(modifiers, key)
+	detail := key
+	if len(modifiers) > 0 {
+		detail = strings.Join(modifiers, "+") + "+" + key
+	}
+	d.auditCall(journal.CallKey, detail, started, ok, err, "")
+	return err
 }
 
 // Type sends text one keystroke at a time, at the pace the caller measured.
 func (d *Driver) Type(text string, perChar time.Duration) ([]rune, error) {
-	conn, err := d.qmpSocket()
-	if err != nil {
-		return nil, err
-	}
 	strokes, err := keys.ForText(text)
 	if err != nil {
 		// A CHARACTER WITH NO QCODE IS NOT FATAL, and the caller logs which ones were skipped.
@@ -282,24 +439,55 @@ func (d *Driver) Type(text string, perChar time.Duration) ([]rune, error) {
 			kept = append(kept, one...)
 		}
 		strokes = kept
-		if err := d.sendStrokes(conn, strokes, perChar); err != nil {
+		if err := d.sendStrokes(strokes, perChar); err != nil {
 			return skipped, err
 		}
 		return skipped, nil
 	}
-	return nil, d.sendStrokes(conn, strokes, perChar)
+	return nil, d.sendStrokes(strokes, perChar)
 }
 
-func (d *Driver) sendStrokes(conn *qmp.Conn, strokes []keys.Stroke, perChar time.Duration) error {
+// sendStrokes types one string, and EVERY STROKE IS RETRIED ON ITS OWN CONNECTION IF IT NEEDS TO BE.
+//
+// THE UNIT OF RETRY IS THE STROKE, NOT THE STRING. A string is many commands, and re-running the whole
+// string after a reconnect would type the first half twice - which in a password field is a wrong
+// password, not a visible mistake. A stroke is one `input-send-event`: either the guest received it
+// or it did not, so retrying that one is exactly "send it again".
+func (d *Driver) sendStrokes(strokes []keys.Stroke, perChar time.Duration) error {
 	for _, s := range strokes {
-		if err := conn.Stroke(s.Modifiers, s.Key); err != nil {
+		stroke := s
+		started := time.Now()
+		err := d.qmpRetry(func(conn *qmp.Conn) error {
+			return conn.Stroke(stroke.Modifiers, stroke.Key)
+		})
+		// EVERY CHARACTER IS ITS OWN ROW, because a typed password and a typed command are the two
+		// things an audit of this repository has most often needed to reconstruct.
+		var ok *bool
+		if err == nil {
+			ok = okPtr(true)
+		}
+		detail := stroke.Key
+		if len(stroke.Modifiers) > 0 {
+			detail = strings.Join(stroke.Modifiers, "+") + "+" + stroke.Key
+		}
+		d.auditCall(journal.CallType, detail, started, ok, err, "")
+		if err != nil {
 			return err
 		}
 		if perChar > 0 {
 			time.Sleep(perChar)
 		}
 	}
-	return nil
+	// THE SHIFT THAT THE LAST CHARACTER NEEDED IS RELEASED AGAIN, BY NAME.
+	//
+	// A guest can drop a modifier's up-event, and the symptom is the whole NEXT line in capitals:
+	// `echo SCREEN_KEPT_ON` ends in an uppercase letter, and zorin's next command arrived as
+	// `PKILL _F UPDATE_NOTIFIER` / `SUDO APT_GET UPDATE`. See
+	// `qmp.Conn.ReleaseModifiers` for the recording.
+	//
+	// It runs ONCE PER TYPED STRING rather than per character: an extra modifier event in the middle
+	// of text is a way to lose a character, and the fault is at the seam between two lines.
+	return d.qmpRetry(func(conn *qmp.Conn) error { return conn.ReleaseModifiers() })
 }
 
 // The guest's screen, and the default is FHD because every coordinate in this repository was
@@ -314,6 +502,28 @@ func (d *Driver) sendStrokes(conn *qmp.Conn, strokes []keys.Stroke, perChar time
 // frame, and the symptom is a black screen from the first capture with no error at all. 32 MiB is
 // four frames of headroom.
 const DefaultVideoDevice = "VGA,xres=1920,yres=1080,vgamem_mb=32"
+
+// machineType is the qemu machine this boot asks for.
+//
+// `q35` IS THE FULL MACHINE and the default: PCIe, an IDE controller for the CD-ROM, a USB
+// controller for the tablet, a VGA adapter. Every distribution installer here needs all of it.
+//
+// `microvm` IS THE SMALL ONE: virtio-mmio devices and a serial line, no PCIe, no IDE, no USB, no
+// VGA. A `microvm:` boot says so on its step, because a file may install a distribution and then
+// verify the result in the same run, and only the verification wants the small machine.
+func machineType(boot machine.Boot) string {
+	if boot.MicroVM {
+		// `graphics=on` IS WHAT MAKES `see:` POSSIBLE ON A MICROVM, and without it the machine is
+		// serial-only. A walkthrough that PROVES THE VOCABULARY has to read the screen, so a microvm
+		// with no display could only test the console half - and the measurement primitives are the
+		// half this branch exists to make testable.
+		//
+		// IT IS STILL THE SMALL MACHINE: no PCIe, no IDE, no USB. The graphics option adds the VGA
+		// adapter back on the ISA bus, which is one device and about 16 MiB.
+		return "microvm,accel=kvm,pcie=off,graphics=on"
+	}
+	return "q35,accel=kvm,vmport=off"
+}
 
 // --- the guest ------------------------------------------------------------------------
 
@@ -512,17 +722,22 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 	// THE BOOT DESCRIPTION GOES THROUGH Validate BEFORE ANY PATH IS USED. A stage that never ran
 	// its `fetch:` gets a sentence naming what is missing, not qemu's message about a drive.
 	boot := machine.Boot{
-		OS:           guestOS,
-		Disk:         spec.Disk,
-		ISO:          spec.ISO,
-		AnswerCD:     spec.AnswerCD,
-		DriverCD:     spec.DriverCD,
-		Recovery:     spec.Recovery,
-		FreshDisk:    spec.FreshDisk,
-		OpenCoreROM:  spec.OpenCoreROM,
-		OpenCoreVars: spec.OpenCoreVars,
-		BootImage:    spec.BootImage,
-		Incoming:     spec.Incoming,
+		OS:             guestOS,
+		Disk:           spec.Disk,
+		ISO:            spec.ISO,
+		AnswerCD:       spec.AnswerCD,
+		DriverCD:       spec.DriverCD,
+		MicroVM:        spec.MicroVM,
+		MicroVMDisplay: spec.MicroVMDisplay,
+		KernelAppend:   spec.KernelAppend,
+		Kernel:         spec.Kernel,
+		Initrd:         spec.Initrd,
+		Recovery:       spec.Recovery,
+		FreshDisk:      spec.FreshDisk,
+		OpenCoreROM:    spec.OpenCoreROM,
+		OpenCoreVars:   spec.OpenCoreVars,
+		BootImage:      spec.BootImage,
+		Incoming:       spec.Incoming,
 	}
 	if err := boot.Validate(); err != nil {
 		return err
@@ -624,7 +839,18 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 		//
 		// THE TABLET IS STILL ATTACHED (`usb-tablet,bus=xhci.0`): this disables the COMPETING handler,
 		// so the events reach the device the walkthrough was measured against.
-		"-machine", "q35,accel=kvm,vmport=off",
+		// A MICROVM IS `microvm` RATHER THAN `q35`, AND THAT IS THE WHOLE DIFFERENCE: no PCIe bus, no
+		// IDE controller, no USB controller, no VGA - only virtio-mmio devices and a serial line.
+		//
+		// IT IS FOR WALKTHROUGHS THAT PROVE THE VOCABULARY RATHER THAN INSTALL A DISTRIBUTION. A
+		// distribution installer needs UEFI, a virtio-blk disk, a VGA adapter and a USB tablet; a
+		// walk whose job is "drive a guest and read its screen" pays for all four and needs none.
+		// MEASURED: the kubuntu install is 4 GiB of RAM, 128 GiB of disk and forty minutes for
+		// thirty-eight steps; the alpine microvm below is 512 MiB, 1 GiB and under two minutes.
+		//
+		// `pcie=off` IS EXPLICIT because qemu's default depends on the machine type, and a machine
+		// that quietly grew a PCIe bus would be the thing this branch exists to avoid.
+		"-machine", machineType(boot),
 		"-cpu", cpu,
 		"-smp", boot.SMP(opts.CPUs),
 		"-m", fmt.Sprint(opts.MemMB),
@@ -670,7 +896,15 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 	// which is the FIRST isa-serial device qemu adds, so this must be the only one and it is.
 	qgaSocket := filepath.Join(d.work, "qga.sock")
 	_ = os.Remove(qgaSocket)
-	if guestOS.IsMacOS() {
+	//
+	// A MICROVM GETS `isa-serial` FOR THE SAME KIND OF REASON: `virtio-serial` is a PCI device and a
+	// microvm has no PCI bus. MEASURED, live:
+	//
+	//	qemu-system-x86_64: -device virtio-serial: No 'PCI' bus found for device 'virtio-serial-pci'
+	//
+	// and because qemu exits at startup the step reports `qmp ... connection refused`, which reads
+	// as a socket problem rather than an argument one.
+	if guestOS.IsMacOS() || boot.MicroVM {
 		args = append(args,
 			"-chardev", "socket,id=qga0,path="+qgaSocket+",server=on,wait=off",
 			"-device", "isa-serial,chardev=qga0",
@@ -718,7 +952,54 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 		args = append(args, "-vga", "none")
 	case machine.AndroidVGA:
 		args = append(args, "-device", "virtio-vga,xres=1920,yres=1080")
-	default:
+	case "std":
+		// A MICROVM HAS NO PCI BUS, so `-device VGA` cannot attach - measured:
+		//
+		//	qemu-system-x86_64: -device VGA,xres=1920,yres=1080,vgamem_mb=32:
+		//	No 'PCI' bus found for device 'VGA'
+		//
+		// `-vga std` IS THE ISA FORM of the same adapter. It cannot carry a resolution, which is why
+		// every other guest here uses the `-device` form - but a microvm's screen is a text console
+		// whose resolution is qemu's own default, and the walkthrough that reads it says what it
+		// expects rather than needing 1920x1080.
+		if boot.MicroVM {
+			// `desktop` ASKS FOR A GPU, NOT A TEXT CONSOLE.
+			//
+			// `isa-vga` IS A TEXT-MODE ADAPTER: it gives the guest 80x25 with no DRM node and no
+			// `/dev/fb0`, so an X server on it cannot find a screen. MEASURED, twice:
+			//
+			//	openbox on isa-vga   (EE) no screens found - X exits before it draws
+			//	xfce on Xvfb         the desktop is in the guest's MEMORY, and a qemu screendump
+			//	                     reads the ADAPTER, so the recording shows the console instead
+			//
+			// `virtio-gpu-device` IS ON THE virtio BUS, NOT PCI, which is why a machine with no PCIe
+			// can still attach it: it is the same transport `virtio-blk-device` and
+			// `virtio-net-device` already use here. It provides DRM/KMS, so the guest gets
+			// `/dev/dri/card0`, X draws, and - the point of this whole exercise - the picture is in
+			// an adapter qemu owns, so `screendump` records it.
+			if boot.MicroVMDisplay == "desktop" {
+				args = append(args, "-device", "virtio-gpu-device")
+				break
+			}
+			// `isa-vga` IS THE ADAPTER A `microvm` CAN ACTUALLY CREATE, and `-vga std` is not:
+			//
+			//	qemu-system-x86_64: warning: A -vga option was passed but this machine type does
+			//	not use that option; No VGA device has been created
+			//
+			// MEASURED, after switching to `-device isa-vga`: a screendump of the running microvm
+			// returns a 720x400 frame that reads
+			//
+			//	SeaBIOS (version 1.17.0-debian-1.17.0-1)
+			//	Booting from ROM...
+			//	Welcome to Alpine Linux 3.21
+			//	Kernel 6.12.1-3-virt on an x86_64 (/dev/tty1)
+			//	localhost login:
+			//
+			// - which is what `see:` measures. `vgamem_mb=16` is enough for a text console and a
+			// quarter of what a full machine's adapter takes.
+			args = append(args, "-device", "isa-vga,vgamem_mb=16")
+			break
+		}
 		args = append(args, "-device", DefaultVideoDevice)
 	}
 	args = append(args, boot.StorageArgs()...)
@@ -730,11 +1011,15 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 	args = append(args, boot.ExtraArgs()...)
 	args = append(args,
 		"-qmp", "unix:"+qmpPath+",server=on,wait=off",
-		"-vnc", fmt.Sprintf("127.0.0.1:%d", vncDisplay),
+		"-vnc", fmt.Sprintf("127.0.0.1:%d", d.vncNumber()),
 		"-netdev", fmt.Sprintf("tap,id=net0,ifname=%s,script=no,downscript=no",
 			easyvmnet.TapName),
-		"-device", fmt.Sprintf("virtio-net-pci,netdev=net0,mac=%s,romfile=,host_mtu=%d",
-			easyvmnet.TapMAC, easyvmnet.UplinkMTU()),
+		// `romfile=` AND `host_mtu=` ARE NOT OPTIONS EVERY VIRTIO NET DEVICE HAS. `virtio-net-device`
+		// - the mmio form a microvm needs - has neither:
+		//
+		//	-device virtio-net-device,netdev=net0,...,romfile=,host_mtu=1450:
+		//	Property 'virtio-net-device.romfile' not found
+		"-device", netDevice(boot, easyvmnet.TapMAC, easyvmnet.UplinkMTU()),
 	)
 	// THE POINTER IS ADDED BY `StorageArgs`, NOT HERE, AND THAT IS THE FIX FOR WINDOWS.
 	//
@@ -766,6 +1051,10 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 		}
 	}
 	args = append(args, boot.FirmwareArgs(ovmfCode, ovmfVars)...)
+	// A MICROVM GETS ITS KERNEL FROM THE HOST, because there is no firmware to read a boot sector and
+	// no display to fall back to. The two are mutually exclusive by construction: `FirmwareArgs`
+	// returns nothing for a microvm.
+	args = append(args, boot.KernelArgs()...)
 
 	// A RESUME LOADS INSTEAD OF BOOTING, and `-incoming` is what says so.
 	//
@@ -805,8 +1094,22 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 	// is connected is not a cleanup, it is a self-mutilation.
 	//
 	// SO IT HAPPENS HERE, while `d.qmp` is nil and the previous machine's client is the only thing the
-	// registry can be holding. The lock is not needed: `Release` does its own.
+	// registry can be holding.
+	//
+	// `qmpMu` IS TAKEN EVEN THOUGH `Release` DOES ITS OWN LOCKING, and that is about the REGISTRY
+	// rather than the map's own mutex. The recorder's sampler captures a frame every second and takes
+	// `qmpMu` to do it; a `Release` outside that lock can land between the sampler's look at the
+	// cache and its `Acquire`, and the two then disagree about who owns the socket. MEASURED on the
+	// pod, at `boot the disk`:
+	//
+	//	boot: this qmp socket is already held by this process (by "easyvm"); pass that connection
+	//	instead of opening a second - qemu allows one client per socket
+	//
+	// - the same self-conflict the earlier fixes were about, arriving through the one path that had
+	// not been brought under the lock.
+	d.qmpMu.Lock()
 	_ = d.qmpRegistry().Release(qmpPath)
+	d.qmpMu.Unlock()
 
 	cmd := exec.Command("qemu-system-x86_64", args...)
 	cmd.Stdout = os.Stdout
@@ -868,7 +1171,12 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 	//
 	// SO THE PROCESS IS CHECKED FIRST. If it is gone, that is the answer and it is reported as such,
 	// with qemu's exit status attached.
+	// THE CONNECTION IS TAKEN UNDER THE SAME LOCK EVERY OTHER CALLER USES, because this function
+	// `Acquire`s the registry entry the socket belongs to - and `Acquire` is what refuses a second
+	// client. Outside `qmpMu` it races the sampler for that entry.
+	d.qmpMu.Lock()
 	conn, err := d.qmpSocket()
+	d.qmpMu.Unlock()
 	if err != nil {
 		if waitErr := cmd.Process.Signal(syscall.Signal(0)); waitErr != nil {
 			exit := "unknown"
@@ -962,32 +1270,16 @@ func (m machineControl) Stop(method string, grace time.Duration) error {
 		d.logf("  killing the guest")
 		killNow = true
 	case "ssh":
-		// THE GUEST SHUTS ITSELF DOWN, AND THE FILESYSTEM IT IS ABOUT TO PUBLISH IS CLOSED.
-		//
-		// This is the method every Linux and BSD `vm-configure` file names, and it was not
-		// implemented - so a stage that had done all its work failed on its LAST step:
-		//
-		//	stop the machine: shutdown method "ssh" is not implemented in this build; `kill` is
-		//
-		// A KILL IS NOT A SUBSTITUTE HERE. The disk this stage produces is the artifact, and a killed
-		// guest leaves a filesystem that has to replay a journal on the next boot - which reads, in
-		// the next stage's log, as a slow boot rather than as a torn disk.
+		// KEPT FOR A FILE THAT WAS NOT PORTED. It is the old one-step form: send `poweroff` and wait.
+		// New files write the two steps, so the command is visible in the file.
 		if err := d.shutdownOverSSH(); err != nil {
 			return err
 		}
-	case "guest_agent":
-		if err := d.shutdownOverAgent(); err != nil {
-			return err
-		}
-	case "acpi":
-		// THE POWER BUTTON, WHICH SOME GUESTS ANSWER AND SOME PROMPT ON. Windows and Linux shut down
-		// from it; macOS puts up "Restart / Sleep / Cancel / Shut Down" and waits for a click, which
-		// is why every macOS file names `ssh` or `guest_agent` instead.
-		if err := d.shutdownOverACPI(); err != nil {
-			return err
-		}
 	default:
-		return fmt.Errorf("%q is not a shutdown method; use guest_agent, ssh, acpi or kill", method)
+		return fmt.Errorf("%q is not a shutdown method; the ones this build has are `kill` and "+
+			"`ssh`. To press the power button write `acpi: power`, to ask the guest agent write "+
+			"`qga: shutdown`, and to stop it over ssh write the command as its own step: "+
+			"`ssh: ... poweroff` then `wait_until: stopped`", method)
 	}
 	// AND THE PROCESS IS WAITED FOR, WHICHEVER PATH ASKED IT TO STOP. A guest that was asked politely
 	// has to actually exit, or the disk is still open when the next step reads it.
@@ -1058,7 +1350,7 @@ func (d *Driver) shutdownOverAgent() error {
 			"is the step that checks it", sock, err)
 	}
 	d.logf("  asking the guest agent to shut down")
-	if err := qgaShutdown(sock); err != nil {
+	if err := qgaShutdown(sock, "powerdown"); err != nil {
 		return fmt.Errorf("guest agent shutdown: %w", err)
 	}
 	return nil
@@ -1066,12 +1358,8 @@ func (d *Driver) shutdownOverAgent() error {
 
 // shutdownOverACPI presses the power button through QMP.
 func (d *Driver) shutdownOverACPI() error {
-	conn, err := d.qmpSocket()
-	if err != nil {
-		return err
-	}
 	d.logf("  pressing the power button")
-	return conn.SystemPowerdown()
+	return d.qmpRetry(func(conn *qmp.Conn) error { return conn.SystemPowerdown() })
 }
 
 // killAndReap takes the machine down now and returns once it is gone.
@@ -1172,14 +1460,10 @@ func (d *Driver) waitForExit(limit time.Duration) error {
 // QMP is what `REBOOT` means in every file that asks for one.
 func (m machineControl) Reboot() error {
 	d := m.d
-	conn, err := d.qmpSocket()
-	if err != nil {
-		return err
-	}
 	// QEMU'S OWN RESET, NOT A PROCESS RESTART. The command is the machine's, and the guest sees a
 	// warm reboot - which is what a stage that says `reboot:` wants, because the alternative is a
 	// cold boot that restarts an installer.
-	if err := conn.Reset(); err != nil {
+	if err := d.qmpRetry(func(conn *qmp.Conn) error { return conn.Reset() }); err != nil {
 		return fmt.Errorf("resetting the machine: %w", err)
 	}
 	// AND THE CACHED SSH CONNECTION DIES WITH THE GUEST.
@@ -1229,6 +1513,89 @@ func (m machineControl) OS() string {
 // and been reaped gives `os.ErrProcessDone`; one that exited and has not been reaped is a zombie, which
 // `Signal` also refuses - and in this container that is the normal state, because PID 1 is the daemon
 // and it reaps only when it gets round to it.
+// ResetMachine is the QMP reset, which is what `acpi: reset` sends.
+func (m machineControl) ResetMachine() error {
+	m.d.logf("  resetting the machine")
+	return m.d.qmpRetry(func(conn *qmp.Conn) error { return conn.Reset() })
+}
+
+// PressPowerButton is `acpi: power`: the ACPI power-button event, and nothing else.
+//
+// `shutdown: acpi` USED TO BE THIS PLUS A WAIT. The wait is `wait_until: stopped` now, so a file
+// shows both halves - and a file that presses the button and does not wait is a file whose meaning
+// is visible rather than one that stopped early by accident.
+func (m machineControl) PressPowerButton() error {
+	return m.d.shutdownOverACPI()
+}
+
+// GuestAgent runs one qemu-guest-agent command.
+//
+// THE NAMES ARE THE PROTOCOL'S OWN, so a reader of the walkthrough and a reader of the QGA schema see
+// the same words. This switch is the whole list, so an unknown name is refused here rather than
+// reaching the agent and coming back in its vocabulary.
+func (m machineControl) GuestAgent(command string, args map[string]any) (string, error) {
+	sock := filepath.Join(m.d.work, "qga.sock")
+	if _, err := os.Stat(sock); err != nil {
+		return "", fmt.Errorf("no guest agent socket at %s: %v. The guest must have "+
+			"qemu-guest-agent installed AND running", sock, err)
+	}
+	switch command {
+	case "ping":
+		return "", qgaPing(sock)
+	case "info":
+		return qgaInfo(sock)
+	case "shutdown":
+		mode, _ := args["mode"].(string)
+		return "", qgaShutdown(sock, mode)
+	case "exec":
+		code, out, err := qgaExec(sock, stringsOf(args["argv"]),
+			time.Duration(floatOf(args["timeout"], 300)*float64(time.Second)))
+		if err != nil {
+			return out, err
+		}
+		if code != 0 {
+			return out, fmt.Errorf("the command exited %d: %s", code, out)
+		}
+		return out, nil
+	case "file-write":
+		path, _ := args["path"].(string)
+		body, _ := args["body"].(string)
+		return "", qgaWriteFile(sock, path, []byte(body))
+	case "file-read":
+		path, _ := args["path"].(string)
+		data, err := qgaReadFile(sock, path)
+		return string(data), err
+	case "set-time":
+		return "", qgaSetTime(sock, time.Now())
+	case "interfaces":
+		out, err := qgaNetworkInterfaces(sock)
+		return strings.Join(out, "\n"), err
+	}
+	return "", fmt.Errorf("`qga: %s` is not a command this build runs; the ones it runs are ping, "+
+		"info, shutdown, exec, file-read, file-write, set-time and interfaces", command)
+}
+
+func stringsOf(v any) []string {
+	list, _ := v.([]any)
+	out := make([]string, 0, len(list))
+	for _, item := range list {
+		if str, ok := item.(string); ok {
+			out = append(out, str)
+		}
+	}
+	return out
+}
+
+func floatOf(v any, fallback float64) float64 {
+	switch t := v.(type) {
+	case float64:
+		return t
+	case int:
+		return float64(t)
+	}
+	return fallback
+}
+
 func (m machineControl) IsRunning() bool {
 	d := m.d
 	d.mu.Lock()
@@ -1292,143 +1659,95 @@ func (d *Driver) qmpRegistry() *qmp.Registry {
 }
 
 func (d *Driver) qmpSocket() (*qmp.Conn, error) {
+	// THE CACHED CONNECTION IS HANDED OUT AS IT IS, AND THE REPAIR HAPPENS ON USE.
+	//
+	// THIS FUNCTION IS ONLY EVER CALLED WITH `qmpMu` HELD (from `qmpRetry` and from the capture
+	// path), so "one connection" is not something it has to enforce - there is exactly one caller at
+	// a time, and the connection it returns cannot be closed by anybody else while it is being used.
+	//
+	// THAT IS WHY THERE IS NO PROBE HERE ANY MORE. A probe that failed used to CLOSE the shared
+	// connection, and the caller that had just been handed it sent its next command into a closed
+	// socket. MEASURED, through the daemon's own HTTP endpoint:
+	//
+	//	POST /api/command {"command":"key","key":"shift"}   20/20 ok   one command per request
+	//	POST /api/command {"command":"type","text":"a"}      0/15 ok   stroke + release-modifiers
+	//	    "type: release modifiers: the qmp connection is closed"
+	//
+	// - the FIRST command of a request never failed and the SECOND repeatedly did, which is the
+	// shape of a close performed by a third party in between. A dead connection is discovered by
+	// USING it, in `qmpRetry`, where the failure is real.
 	d.mu.Lock()
 	if d.qmp != nil {
 		conn := d.qmp
 		d.mu.Unlock()
 		return conn, nil
 	}
-	path := filepath.Join(d.work, "drive.sock.qmp")
 	d.mu.Unlock()
 
-	// THE HANDSHAKE HAPPENS OUTSIDE THE LOCK, because it waits up to thirty seconds for a socket that
-	// a dead qemu will never create - and every other caller of this driver would block behind it.
+	path := filepath.Join(d.work, "drive.sock.qmp")
+	// THE HANDSHAKE IS OUTSIDE `d.mu` AND INSIDE `qmpMu`: it can wait for a socket qemu has not
+	// created yet, and nothing else may touch the connection while that wait happens.
 	conn, err := d.qmpRegistry().Acquire(path, "easyvm", 30*time.Second)
 	if err != nil {
-		// `ErrBusy` MEANS SOMEONE ELSE ALREADY DID THIS, AND THAT IS A SUCCESS.
-		//
-		// THE RECORDER'S SAMPLER CALLS `Frame()` EVERY SECOND, AND `Frame()` CALLS THIS. During a boot
-		// those two race: the sampler asks for a frame a moment after qemu creates the socket, wins the
-		// Acquire, and `Boot` then gets `ErrBusy` for a machine it just started successfully.
-		//
-		// MEASURED ON CI, ON ubuntu-install AND bsd-ghostbsd-install, AS A HANG THAT LOOKED LIKE A LOCK:
-		//
-		//	=== boot the installer
-		//	qemu -machine q35,accel=kvm ...
-		//	(the run then sat at `status: starting` until the job timed out)
-		//
-		// - no `qemu is up` line, and a ONE-SECOND VIDEO, because `Boot` returned the busy error and
-		// `doBoot` reported `boot: qmp ... is already held by "easyvm"` on a machine that was running.
-		//
-		// So the other caller's connection is waited for rather than refused. It is the same rule as
-		// the "another caller won the race" branch below, and the wait is bounded by the caller's own
-		// retry: the sampler stores its connection in `d.qmp` before this returns.
-		if errors.Is(err, qmp.ErrBusy) {
-			return d.waitForQMP()
-		}
 		return nil, err
 	}
-
 	d.mu.Lock()
-	if d.qmp != nil {
-		// another caller won the race; its connection is the machine's, so this one is given back
-		// rather than left open beside it - qemu has one client slot and two would poison it.
-		other := d.qmp
-		d.mu.Unlock()
-		_ = conn.Close()
-		return other, nil
-	}
 	d.qmp = conn
 	d.mu.Unlock()
 	return conn, nil
 }
 
-// waitForQMP waits for ANOTHER caller's connection to be published, and returns it.
+// qmpRetry runs one QMP command, and reconnects ONCE if the connection reported itself closed.
 //
-// IT EXISTS FOR ONE RACE, described on `qmpSocket`: the recorder's sampler and a boot both ask for the
-// QMP socket within a second of each other, and only one of them can hold it. The loser waits here for
-// the winner's connection rather than reporting `ErrBusy` about a machine that is running.
+// THIS IS WHERE A DEAD CONNECTION IS NOW DISCOVERED - not by a probe before use, but by the command
+// that needed it. `ErrClosed` is the transport saying the socket is gone, and it is trustworthy in a
+// way a `query-status` failure was not: it comes from the command the caller actually wanted.
 //
-// THE WAIT IS BOUNDED, AND WHEN IT EXPIRES THE ENTRY IS CLEANED UP RATHER THAN ONLY DESCRIBED.
-//
-// MEASURED, on a work directory whose previous machine was killed without a `destroy`:
-//
-//	boot: another caller has held the qmp socket for 10s and never published a connection;
-//	that caller is stuck, and it has to be found rather than waited for
-//
-// THE SENTENCE WAS TRUE AND THE RUN WAS NOT DEAD. `Boot` releases the registry entry before it starts
-// qemu; the recorder's sampler then won the `Acquire`, and that sampler exited - on the killed
-// machine's step boundary - without ever publishing `d.qmp`. The registry went on claiming the path,
-// so every later `Acquire` returned `ErrBusy` naming an owner that no longer existed, and the next run
-// could not boot at all. The message asked a person to go and find the caller; in that state there was
-// nothing left to find.
-//
-// SO THE GHOST IS REMOVED HERE. `Release` is idempotent and closes whatever the map holds, which is
-// exactly "find it" without leaving the process. Only then is it worth one more `Acquire` - if the map
-// was lying, this recovers; if it was not, the error below still names the real problem.
-func (d *Driver) waitForQMP() (*qmp.Conn, error) {
-	// THE BOUND IS A FIELD SO A TEST DOES NOT HAVE TO SPEND IT. Ten seconds is right in production -
-	// it is a hundred times the handshake it covers - and wrong in a unit test, which would pay ten
-	// seconds per case for a wait it is about to demonstrate the far side of.
-	wait := qmpHandshakeWait
-	if d.qmpWait > 0 {
-		wait = d.qmpWait
+// ONLY `ErrClosed` IS RETRIED. A QMP error reply ("the device does not exist") is the machine's
+// answer and is returned as-is; retrying it would send the same keystroke twice.
+type qmpCommand func(*qmp.Conn) error
+
+func (d *Driver) qmpRetry(fn qmpCommand) error {
+	// ONE TRANSACTION AT A TIME: take the connection, use it, repair it, retry - and let nobody else
+	// in until that is finished. See the note on `qmpMu` for the measured failure this prevents.
+	d.qmpMu.Lock()
+	defer d.qmpMu.Unlock()
+
+	conn, err := d.qmpSocket()
+	if err != nil {
+		return err
 	}
-	deadline := time.Now().Add(wait)
-	for time.Now().Before(deadline) {
-		time.Sleep(50 * time.Millisecond)
-		d.mu.Lock()
-		conn := d.qmp
-		d.mu.Unlock()
-		if conn != nil {
-			return conn, nil
-		}
+	err = fn(conn)
+	if !errors.Is(err, qmp.ErrClosed) {
+		return err
 	}
 
-	// THE WINNER IS A GHOST: DROP THE DEAD CLAIM AND TRY ONCE.
-	//
-	// THE PATH COMES FROM THE SAME PLACE `qmpSocket` GOT IT. A second spelling of the same join is a
-	// second chance to disagree, and a relative path here silently probed `drive.sock.qmp` in the
-	// process's own directory while the machine's socket lived nowhere near it.
-	path := filepath.Join(d.work, "drive.sock.qmp")
-	_ = d.qmpRegistry().Release(path)
-	conn, acquireErr := d.qmpRegistry().Acquire(path, "easyvm", wait)
-	if acquireErr == nil {
-		d.mu.Lock()
-		if d.qmp != nil {
-			// a third caller published while this one was acquiring; keep theirs and give this
-			// one back, because qemu has one client slot and two would poison it.
-			other := d.qmp
-			d.mu.Unlock()
-			_ = conn.Close()
-			return other, nil
-		}
-		d.qmp = conn
-		d.mu.Unlock()
-		return conn, nil
+	// THE FAILED CONNECTION IS DROPPED AND THE PATH RELEASED IN THE SAME CRITICAL SECTION, so no
+	// caller can observe "cache empty, registry held" - and since this whole function is now
+	// exclusive, nobody can be using the connection this is about to close.
+	d.mu.Lock()
+	if d.qmp == conn {
+		d.qmp = nil
+		_ = d.qmpRegistry().Release(filepath.Join(d.work, "drive.sock.qmp"))
+	}
+	other := d.qmp
+	d.mu.Unlock()
+
+	if other != nil {
+		// somebody published a replacement while this command was in flight (the boot path does this)
+		return fn(other)
 	}
 
-	// THE SECOND ATTEMPT'S REASON IS CARRIED, AND THAT IS NOT TIDINESS.
-	//
-	// Without it the message says "the socket itself does not answer either", which is a CLAIM this
-	// function cannot make: `Acquire` fails for several reasons and only one of them is a socket with
-	// no listener. MEASURED while writing the test for this path - the real cause was a test listener
-	// whose handshake did not complete, and the sentence pointed at the socket:
-	//
-	//	and the socket itself does not answer either; that caller is stuck
-	//
-	// A reader with that message redeploys a container. A reader with the wrapped error has the
-	// handshake failure in front of them.
-	return nil, fmt.Errorf("another caller held the qmp socket for %s and never published a "+
-		"connection, and releasing that claim did not help: %w", wait, acquireErr)
+	fresh, err := d.qmpSocket()
+	if err != nil {
+		return err
+	}
+	if fresh == conn {
+		return fmt.Errorf("the qmp connection reported itself closed and could not be replaced: %w",
+			qmp.ErrClosed)
+	}
+	return fn(fresh)
 }
-
-// qmpHandshakeWait is how long a loser of the QMP race waits for the winner's connection.
-//
-// IT IS SHORTER THAN `Acquire`'S OWN THIRTY SECONDS BY DESIGN: this wait only covers "the winner is
-// mid-handshake", which is milliseconds, so a number that bounds a wedged winner quickly is worth more
-// than one that would tolerate it.
-const qmpHandshakeWait = 10 * time.Second
 
 // shutdown releases everything this machine owns, AND IT IS IDEMPOTENT.
 //
@@ -1613,6 +1932,19 @@ func humanBytes(n int64) string {
 // commands live in the daemon rather than in a process of their own.
 func (d *Driver) QMP() (*qmp.Conn, error) { return d.qmpSocket() }
 
+// QMPCommand runs one command with the same repair every walkthrough step gets.
+//
+// IT EXISTS BECAUSE THE INTERACTIVE SURFACE WAS THE ONE CALLER LEFT OUT. `/api/key`, `/api/click` and
+// `/api/type` went through `Daemon.withQMP`, which asked `QMP()` for the connection and ran the
+// command ONCE - so a connection that had gone away answered `the qmp connection is closed` for
+// every request, for ever, while the recorder's sampler on the SAME driver recovered by itself
+// through `qmpRetry`. MEASURED on the pod: `api/state` reported a frame captured 0.2 seconds ago
+// (the sampler was fine) at the same moment `POST /api/command {"command":"key"}` answered
+// `the qmp connection is closed` - two paths, one connection, only one of them repairing it.
+//
+// A dead connection is discovered by USING it, so the repair belongs on every path that uses one.
+func (d *Driver) QMPCommand(fn func(*qmp.Conn) error) error { return d.qmpRetry(fn) }
+
 // VNCPort is where the CURRENT machine's VNC listener is, or 0 when there is no machine.
 //
 // THE CONSOLE'S URL NO LONGER DEPENDS ON IT, and that is the improvement: there is one listener, on the
@@ -1626,7 +1958,26 @@ func (d *Driver) VNCPort() int {
 		// NO MACHINE, NO PORT. The port itself is not a variable: see `vncDisplay`.
 		return 0
 	}
-	return vncBase + vncDisplay
+	return vncBase + d.vncNumber()
+}
+
+// vncNumber is the display this driver's qemu listens on, derived from its work directory.
+//
+// TWO DAEMONS MUST NOT ASK FOR THE SAME DISPLAY, and the work directory is what identifies a daemon:
+// the deployed pod has one and gets 0, which is the port the console page expects; a second daemon
+// anywhere else gets a number that its own path hashes to, so the two cannot collide.
+//
+// THE RANGE IS SMALL ON PURPOSE - 32 displays, 5900 to 5931 - because a display number is a port and
+// a wide scatter would be indistinguishable from a real service. A collision inside the range is
+// still possible and qemu says so plainly, which is better than the silent wrong-answer this
+// replaced.
+func (d *Driver) vncNumber() int {
+	if d.work == "" || d.work == "/work" {
+		return vncDisplay
+	}
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(d.work))
+	return int(h.Sum32() % 32)
 }
 
 // ErrMachineGone is what a caller gets once the guest's qemu has exited.
@@ -1641,3 +1992,38 @@ func (d *Driver) VNCPort() int {
 // fail, not retry: "the guest is gone" is the answer, and every further attempt is a minute of somebody's
 // afternoon spent confirming it.
 var ErrMachineGone = errors.New("the guest is no longer running")
+
+// netDevice builds the network device this machine can attach.
+//
+// THE PCI FORM TAKES `romfile=` AND `host_mtu=`, and both are load-bearing there: the empty `romfile`
+// keeps qemu from looking for a PXE ROM that is not installed in this image, and `host_mtu` matches
+// the tap. The mmio form a microvm needs has NEITHER property, so the two cannot share a format
+// string - MEASURED, live:
+//
+//	-device virtio-net-device,netdev=net0,...,romfile=,host_mtu=1450:
+//	Property 'virtio-net-device.romfile' not found
+func netDevice(boot machine.Boot, mac string, mtu int) string {
+	if boot.MicroVM {
+		return fmt.Sprintf("virtio-net-device,netdev=net0,mac=%s", mac)
+	}
+	return fmt.Sprintf("virtio-net-pci,netdev=net0,mac=%s,romfile=,host_mtu=%d", mac, mtu)
+}
+
+// SSHTarget is where this machine's sshd listens, for a caller that has to ask whether it answers.
+func (d *Driver) SSHTarget() guest.Target {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.sshTarget
+}
+
+// auditCall writes one external call down, when a journal is attached.
+//
+// IT TAKES THE START TIME rather than timing the write: a keystroke that takes 40ms and a screendump
+// that takes 900ms are the two most useful numbers in an audit of a slow stage, and neither is
+// visible if the timer wraps the INSERT.
+func (d *Driver) auditCall(kind journal.CallKind, detail string, started time.Time, ok *bool, err error, rel string) {
+	if d.audit == nil {
+		return
+	}
+	d.audit.call(kind, detail, started, ok, err, rel)
+}

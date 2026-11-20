@@ -1,0 +1,60 @@
+walkthrough "linux-ubuntu - sshd"
+  resolution 1920x1080
+  recording_resolution 1920x1080
+  password admin
+  var out == {default: out/distro.qcow2, from: args.out}
+  var user == {default: vmuser, from: args.user}
+
+  step "boot the disk"
+    boot == true
+    os == linux
+    # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
+    memory_mb == 4096
+    timeout == 900
+  step "wait for the greeter's X server to settle on the mode it was given"
+    loop == {check: {from: greeter, mode: text, name: settled, words: [[password], [log], [complete, your, setup], [welcome, to, ubuntu]], rect: [768, 641, 1062, 755], rect_at: [1920, 1080]}, do: [{settle: 5}], max: 24, see: {name: greeter}, until: {fact: settled}}
+  click "greeter - the password box" at 936 628, waiting 3s, named "greeter - the password box"
+  step "greeter - log in"
+    settle == 3
+    type == '{{ password }}'
+  press Return, waiting 12s, named "greeter - submit"
+  step "the first-login wizard is up, when this build shows one"
+    loop == {check: {from: screen, mode: text, name: done, words: [[welcome, to, ubuntu], [complete, your, setup]], rect: [768, 641, 1062, 755], rect_at: [1920, 1080]}, do: [{settle: 3}], max: 30, see: {name: screen}, until: {fact: done}}
+  step "walk the first-login pages to the end"
+    loop == {check: {from: page, mode: matches, name: done, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1, pattern: .}, do: [{click: [1464, 194]}, {settle: 4}], max: 12, see: {name: page}, until: {fact: done}}
+  press ctrl+alt+t, waiting 20s, named "open the terminal"
+  step "keep the screen on"
+    run == xset s off; xset -dpms; xset s noblank
+    settle == 3
+  step "sudo is unlocked for this session"
+    run == printf '%s\n' {{ password }} | sudo -S -v
+    settle == 2
+  step "install openssh-server"
+    run == sudo apt-get install -y openssh-server
+    settle == 5
+  step "allow password authentication"
+    run == sudo sed -i s/^#PasswordAuthentication.*/PasswordAuthentication\ yes/ /etc/ssh/sshd_config && grep -i ^PasswordAuthentication /etc/ssh/sshd_config
+    settle == 3
+  step "enable ssh at boot"
+    run == sudo systemctl enable --now ssh
+    settle == 5
+  step "prove ssh is active"
+    run == systemctl is-active ssh
+    settle == 3
+  step "wait for sshd"
+    require_ssh == true
+    timeout == 600
+  step "prove the kernel over ssh"
+    ssh == uname -a
+    timeout == 120
+  step "prove the account over ssh"
+    ssh == id -un; hostname
+    timeout == 120
+  step "ask the guest to power off"
+    ssh == printf '%s\n' '{{ password }}' | sudo -S -p '' poweroff
+    timeout == 300
+  step "wait for the machine to stop"
+    wait_until == stopped
+    timeout == 300
+  step "publish the disk"
+    compress == '{{ out }}'

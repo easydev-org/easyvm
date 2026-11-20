@@ -1,0 +1,56 @@
+walkthrough "android 13 (blissos 16.9.7) - install onto a disk this file makes"
+  resolution 1920x1080
+  var disk_gb == {default: "128", from: args.disk_gb}
+  var esp_mib == {default: "260", from: args.esp_mib}
+  var out == {default: out/blissos16.qcow2, from: args.out}
+  header recording_resolution == [1920, 1080]
+
+  needs blissos-16.9.7.iso, named "the media this stage boots from is already on disk"
+  step "give the installer a disk with its ESP already there"
+    disk == disk.qcow2
+    disk_esp_mib == '{{ esp_mib }}'
+    disk_gb == '{{ disk_gb }}'
+    disk_gpt == true
+  step "boot the installer"
+    boot == true
+    iso == blissos-16.9.7.iso
+    memory_mb == 4096
+    os == android
+    timeout == 900
+  settle 20s, named "let the menu draw"
+  step "read the menu"
+    see == name: menu
+  step "the menu offers Installation"
+    check == {from: menu, mode: text, name: has_install, rect: [816, 507, 965, 571], rect_at: [1920, 1080], words: [installation]}
+  press down, waiting 1s, named "down to the second row"
+  press down, waiting 1s, named "down to the third row"
+  press down, waiting 1s, named "down to the fourth row"
+  press down, waiting 1s, named "down to Installation"
+  press Return, waiting 45s, named "start the installer"
+  press Return, waiting 15s, named "open the ESP's filesystem question"
+  press f, waiting 3s, named "choose FAT32"
+  press Return, waiting 10s, named "confirm the filesystem"
+  press Return, waiting 12s, named "keep the ESP label"
+  press left, waiting 2s, named "select Yes for the ESP format"
+  press Return, waiting 30s, named "format the ESP"
+  press down, waiting 3s, named "move to the system partition"
+  press Return, waiting 15s, named "open vda2"
+  press e, waiting 3s, named "choose ext4"
+  press Return, waiting 10s, named "confirm the filesystem for vda2"
+  press Return, waiting 12s, named "keep the system volume label"
+  press left, waiting 2s, named "select Yes for the system format"
+  press Return, waiting 300s, named "format vda2 and copy the system"
+  press right, waiting 3s, named "decline the OTA preparation"
+  press Return, waiting 40s, named "confirm the OTA answer"
+  press Return, waiting 200s, named "write Grub2 into the ESP"
+  step "read the result"
+    see == name: done
+  step "it says the install succeeded"
+    check == {from: done, mode: text, name: installed, rect: [818, 392, 1033, 453], rect_at: [1920, 1080], words: [[congratulations], [successfully]]}
+  step "stop the installer"
+    shutdown == kill
+    timeout == 120
+  step "copy the loader to the UEFI fallback path"
+    esp_fallback == {disk: disk, from: /EFI/BLISSOS}
+  step "publish the disk"
+    compress == '{{ out }}'

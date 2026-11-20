@@ -33,7 +33,11 @@ on:
     inputs:
       disks_repository:
         description: "the ghcr repository that holds the disks"
-        default: "easydev-org/easyvm"
+        default: "easydev-org/easyvm-fork"
+      from_tag:
+        description: >-
+          start from a PUBLISHED disk: linux-opensuse-leap-16.1 or linux-opensuse-leap-16.1-ssh. Empty runs the whole chain.
+        default: ""
 
 concurrency:
   group: opensuse-leap-16.1
@@ -58,36 +62,73 @@ permissions:
   # live log is a check run, and publishing one needs `checks: write`.
   checks: write
 
+# THE LEGS ARE JOBS THAT DEPEND ON EACH OTHER, NOT A MATRIX.
+#
+# THIS FILE USED TO PASS ALL THREE LEGS AS ONE `stages:` MATRIX, so they STARTED AT ONCE - and the
+# ssh leg asks for the tag the install leg publishes, which does not exist yet. MEASURED on run
+# 44346623094: `linux-manjaro-install` finished 32 of 32 steps and pushed its disk, while
+# `linux-manjaro-ssh` failed at step 5 with
+#
+#	linux-manjaro-ssh is not in the package
+#
+# because it was pulling a tag ANOTHER LEG IN ITS OWN MATRIX had not written. `needs:` is the fix,
+# and `cachyos.yml` already had it.
 jobs:
-  stages:
+  install:
+    if: github.event_name != 'workflow_dispatch' || inputs.from_tag == ''
     uses: ./.github/workflows/stage.yml
     secrets: inherit
     with:
       group: opensuse-leap-16.1
       disks_repository: ${{ inputs.disks_repository }}
-      # THE LEGS, AS JSON. `fromJSON` in the called workflow turns this back into a matrix.
+      stages: |
+        [
+          {
+            "name": "linux-opensuse-leap-16.1-install",
+            "file": "linux/opensuse-leap-16.1/steps/install.walk",
+            "pull": "",
+            "assets": [
+              "iso-opensuse-leap-16.1:opensuse-leap-16.1.iso"
+            ],
+            "out": "linux-opensuse-leap-16.1.qcow2",
+            "publish": "linux-opensuse-leap-16.1",
+            "timeout": 90
+          }
+        ]
+
+  ssh:
+    needs: [install]
+    if: always() && !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.from_tag == 'linux-opensuse-leap-16.1')
+    uses: ./.github/workflows/stage.yml
+    secrets: inherit
+    with:
+      group: opensuse-leap-16.1
+      disks_repository: ${{ inputs.disks_repository }}
       stages: |
         [
           {
             "name": "linux-opensuse-leap-16.1-ssh",
-            "file": "linux/opensuse-leap-16.1/steps/ssh.yaml",
+            "file": "linux/opensuse-leap-16.1/steps/ssh.walk",
             "pull": "linux-opensuse-leap-16.1",
             "out": "linux-opensuse-leap-16.1-ssh.qcow2",
             "timeout": 60,
             "publish": "linux-opensuse-leap-16.1-ssh"
-          },
-          {
-            "name": "linux-opensuse-leap-16.1-install",
-            "file": "linux/opensuse-leap-16.1/steps/install.yaml",
-            "pull": "",
-            "assets": ["iso-opensuse-leap-16.1:opensuse-leap-16.1.iso"],
-            "out": "linux-opensuse-leap-16.1.qcow2",
-            "publish": "linux-opensuse-leap-16.1",
-            "timeout": 90
-          },
+          }
+        ]
+
+  vm:
+    needs: [ssh]
+    if: always() && !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.from_tag == 'linux-opensuse-leap-16.1' || inputs.from_tag == 'linux-opensuse-leap-16.1-ssh')
+    uses: ./.github/workflows/stage.yml
+    secrets: inherit
+    with:
+      group: opensuse-leap-16.1
+      disks_repository: ${{ inputs.disks_repository }}
+      stages: |
+        [
           {
             "name": "linux-opensuse-leap-16.1-vm",
-            "file": "linux/opensuse-leap-16.1/steps/vm-configure.yaml",
+            "file": "linux/opensuse-leap-16.1/steps/vm-configure.walk",
             "pull": "linux-opensuse-leap-16.1-ssh",
             "fallback": "linux-opensuse-leap-16.1",
             "out": "linux-opensuse-leap-16.1-vm.qcow2",

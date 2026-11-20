@@ -1,4 +1,7 @@
 name: manjaro - the Calamares walk
+recording_resolution:
+- 1920
+- 1080
 resolution:
 - 1920
 - 1080
@@ -18,10 +21,8 @@ steps:
   # forty minutes into a run. Every one of these files is declared by this leg's
   # `assets:` in its workflow and placed here by `pull-artifact.sh` before
   # `easyvm run` is called; nothing in this file downloads.
-  require:
+  needs:
   - manjaro.iso
-- name: start recording
-  record: manjaro-install.mp4
 - name: create the empty disk
   disk: disk.qcow2
   disk_gb: 128
@@ -33,41 +34,47 @@ steps:
 - name: wait for the live desktop
   desktop: linux/kde
   timeout: 5400
-  poll: 5
-  keep_alive: true
 - name: let the desktop settle
-  wait: 15
-  keep_alive: true
+  settle: 15
 - name: open the installer
   double:
   - 960
   - 760
-  expect_any:
-  - - welcome
-  - - location
-  wait_after: 35
+  settle: 35
+- name: open the installer - what is on screen
+  see: {name: open_the_installer}
+- name: open the installer - the screen says so
+  check:
+    name: asserted
+    from: open_the_installer
+    mode: text
+    words:
+    - [welcome]
+    - [location]
+    rect: [0, 0, 1920, 1080]
+    rect_at: [1920, 1080]
 - name: open the installer (once more, if it did not)
-  unless:
+  when_not:
   - welcome
   double:
   - 960
   - 760
-  wait_after: 40
+  settle: 40
 - name: welcome
   click:
   - 1325
   - 801
-  wait_after: 18
+  settle: 18
 - name: location
   click:
   - 1325
   - 801
-  wait_after: 18
+  settle: 18
 - name: keyboard
   click:
   - 1325
   - 801
-  wait_after: 18
+  settle: 18
 # `Erase disk` IS PRESELECTED ON THIS MEDIUM - unlike CachyOS and EndeavourOS, where both radio
 # buttons start empty. Measured: the page opens with `Erase disk` already chosen and the panel under
 # it showing `300.00 MiB FAT32  127.71 GiB btrfs`.
@@ -75,7 +82,7 @@ steps:
   click:
   - 653
   - 340
-  wait_after: 6
+  settle: 6
 
 # AND THE FILESYSTEM COMBO DEFAULTS TO btrfs, WHICH THIS WALK DOES NOT WANT.
 #
@@ -93,102 +100,93 @@ steps:
   click:
   - 955
   - 396
-  wait_after: 5
+  settle: 5
 
 - name: choose ext4
   click:
   - 933
   - 459
-  wait_after: 6
+  settle: 6
 
 - name: the partitions page after choosing ext4
-  ocr:
-    name: fs
-    region:
-    - 0
-    - 0
-    - 1920
-    - 1080
-    region_at:
-    - 1920
-    - 1080
-    scale: 1
-    wait: 3
+  see: {name: fs}
 
 - name: the root partition is ext4
   check:
     name: ext4
     from: fs
-    mode: says
+    mode: text
     words:
     - ext4
 
+    rect: [0, 0, 1920, 1080]
+    rect_at: [1920, 1080]
 - name: partitions
   click:
   - 1325
   - 801
-  wait_after: 20
+  settle: 20
 - name: users - full name
   click:
   - 741
   - 320
   type: '{{ user }}'
-  wait_after: 2
+  settle: 2
 - name: users - login name
   click:
   - 741
   - 385
   type: '{{ user }}'
-  wait_after: 2
+  settle: 2
 - name: users - password
   click:
   - 724
   - 523
   type: '{{ password }}'
-  wait_after: 2
+  settle: 2
 - name: users - confirm password
   click:
   - 944
   - 523
   type: '{{ password }}'
-  wait_after: 2
+  settle: 2
 - name: users - root password
   click:
   - 741
   - 650
   type: '{{ password }}'
-  wait_after: 2
+  settle: 2
 - name: users - confirm root password
   click:
   - 944
   - 650
   type: '{{ password }}'
-  wait_after: 3
+  settle: 3
 - name: users
   click:
   - 1325
   - 801
-  wait_after: 20
+  settle: 20
 - name: office suite - no office suite
   click:
   - 700
   - 288
-  wait_after: 6
+  settle: 6
 - name: office suite
   click:
   - 1334
   - 794
-  wait_after: 20
+  settle: 20
 - name: summary - install
   click:
   - 1318
   - 799
-  wait_after: 18
+  settle: 18
 - name: the install confirmation's install now
   click:
   - 1055
   - 537
-  wait_after: 30
+  settle: 30
 - name: the installer finishes
   loop:
     max: 180
@@ -196,23 +194,14 @@ steps:
     - click:
       - 420
       - 300
-      wait_after: 20
-    ocr:
-      name: screen
-      region:
-      - 0
-      - 0
-      - 1920
-      - 1080
-      region_at:
-      - 1920
-      - 1080
-      scale: 1
-      wait: 0
+      settle: 20
+    see: {name: screen}
     check:
       name: done
       from: screen
-      mode: says_any
+      mode: text
+      rect: [0, 0, 1920, 1080]
+      rect_at: [1920, 1080]
       words:
       - - all
         - done
@@ -238,5 +227,3 @@ steps:
   timeout: 120
 - name: publish the disk
   compress: '{{ out }}'
-- name: stop recording
-  record: false

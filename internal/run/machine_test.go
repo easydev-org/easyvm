@@ -35,9 +35,8 @@ func TestTheMachineHalfIsThePreparationAndTheBoot(t *testing.T) {
 	doc, err := loadFixture(t, map[string]any{
 		"name": "probe",
 		"steps": []any{
-			map[string]any{"name": "start recording", "record": "x.mp4"},
 			map[string]any{"name": "create the empty disk", "disk": "disk.qcow2", "disk_gb": 128},
-			map[string]any{"name": "the installer image", "asset": "linux_iso", "release": "ubuntu"},
+			map[string]any{"name": "the installer image", "fetch": "linux_iso", "release": "ubuntu"},
 			map[string]any{"name": "boot the installer", "boot": true, "os": "linux", "iso": "installer_iso"},
 			map[string]any{"name": "wait for the desktop", "desktop": "linux"},
 			map[string]any{"name": "click Next", "click": []any{10, 20}},
@@ -131,7 +130,7 @@ func TestAnISOAndARecoveryAreTheSameShape(t *testing.T) {
 		doc, err := loadFixture(t, map[string]any{
 			"name":    c.name,
 			"machine": map[string]any{"disk_gb": 128, "fetch": c.fetch, "boot": c.boot},
-			"steps":   []any{map[string]any{"name": "wait", "wait": 1}},
+			"steps":   []any{map[string]any{"name": "wait", "settle": 1}},
 		})
 		if err != nil {
 			t.Fatalf("%s: %v", c.name, err)
@@ -147,7 +146,7 @@ func TestAnISOAndARecoveryAreTheSameShape(t *testing.T) {
 		}
 		// `hasAny` RATHER THAN `Has`: a synthesized `disk_gb: 0` is present but empty, and `Has`
 		// asks whether the key carries a value. The order is what this asserts.
-		if !stepHasKey(steps[0], "disk") || !stepHasKey(steps[1], "asset") || !stepHasKey(steps[2], "boot") {
+		if !stepHasKey(steps[0], "disk") || !stepHasKey(steps[1], "fetch") || !stepHasKey(steps[2], "boot") {
 			t.Fatalf("%s: the machine half is out of order: %v (keys: %v / %v / %v)", c.name,
 				[]string{steps[0].Name, steps[1].Name, steps[2].Name},
 				keysOf(steps[0]), keysOf(steps[1]), keysOf(steps[2]))
@@ -174,6 +173,11 @@ func TestAFileWithNoMachineIsRefused(t *testing.T) {
 // describe something the parser would refuse.
 func loadFixture(t *testing.T, doc map[string]any) (*walk.File, error) {
 	t.Helper()
+	// EVERY WALKTHROUGH MUST NAME ITS VIDEO'S SIZE, and these fixtures are walkthroughs. It is added
+	// here rather than in each test because the header is background, not the subject of any of them.
+	if _, ok := doc["recording_resolution"]; !ok {
+		doc["recording_resolution"] = []any{1920, 1080}
+	}
 	body, err := yaml.Marshal(doc)
 	if err != nil {
 		t.Fatal(err)
@@ -231,7 +235,7 @@ func TestTheGuestSizeReachesTheBootStep(t *testing.T) {
 			},
 			// A `machine:` file states its own steps; the block is the machine, not the walk.
 			"steps": []any{
-				map[string]any{"name": "wait", "wait": 5},
+				map[string]any{"name": "wait", "settle": 5},
 			},
 		}},
 		{"boot step", map[string]any{
@@ -240,7 +244,7 @@ func TestTheGuestSizeReachesTheBootStep(t *testing.T) {
 				map[string]any{"name": "disk", "disk": "disk.qcow2", "disk_gb": 128},
 				map[string]any{"name": "boot it", "boot": true, "os": "bsd",
 					"memory_mb": 8192, "cpus": 4},
-				map[string]any{"name": "wait", "wait": 5},
+				map[string]any{"name": "wait", "settle": 5},
 			},
 		}},
 	} {

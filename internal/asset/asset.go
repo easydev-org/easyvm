@@ -221,7 +221,6 @@ const windowsISOTag = "iso-windows11"
 // slightly smaller still passes, and well above the size of a truncated download or an error page.
 const windowsISOMinSize = 2000 << 20
 
-
 // recoveryMacOSTag is the artifact the recovery image is published under.
 //
 // IT IS PER RELEASE AND NOT A PREFIX SCAN: easydev-org publishes macos-recovery-sequoia for 15, and
@@ -239,7 +238,6 @@ func recoveryMacOSTag(release string) string {
 	}
 	return "macos-recovery-" + release
 }
-
 
 // fetchOpenCore builds the firmware a macOS guest boots through.
 //
@@ -332,7 +330,6 @@ func linuxISOTag(release string) string {
 	}
 	return "iso-" + release
 }
-
 
 // fetchAnswerISO builds Windows' answer CD.
 //

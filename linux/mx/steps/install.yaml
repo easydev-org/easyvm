@@ -1,4 +1,7 @@
 name: mx - the minstall walk
+recording_resolution:
+- 1920
+- 1080
 resolution:
 - 1920
 - 1080
@@ -18,10 +21,8 @@ steps:
   # forty minutes into a run. Every one of these files is declared by this leg's
   # `assets:` in its workflow and placed here by `pull-artifact.sh` before
   # `easyvm run` is called; nothing in this file downloads.
-  require:
+  needs:
   - mx.iso
-- name: start recording
-  record: mx-install.mp4
 - name: create the empty disk
   disk: disk.qcow2
   disk_gb: 128
@@ -105,240 +106,175 @@ steps:
 - name: wait for the live desktop
   desktop: linux/xfce
   timeout: 5400
-  poll: 5
-  keep_alive: true
 - name: desktop - installer
-  wait_after: 28
+  settle: 28
   do:
   - click:
     - 81
     - 259
-    wait_after: 3
+    settle: 3
   - click:
     - 81
     - 259
-    wait_after: 3
+    settle: 3
 - name: wait for the terms page
   loop:
     max: 30
     do:
-    - wait: 6
-    ocr:
-      name: screen
-      region:
-      - 690
-      - 225
-      - 1560
-      - 265
-      region_at:
-      - 1920
-      - 1080
-      scale: 2
-      wait: 0
+    - settle: 6
+    see: {name: screen}
     check:
       name: done
       from: screen
-      mode: says
+      mode: text
       words:
       - terms
       - of
       - use
+      rect: [0, 0, 1920, 1080]
+      rect_at: [1920, 1080]
     until:
       fact: done
 - name: terms of use
   click:
   - 1482
   - 889
-  wait_after: 14
+  settle: 14
 - name: wait for the installation type page
   loop:
     max: 30
     do:
-    - wait: 6
-    ocr:
-      name: screen
-      region:
-      - 690
-      - 225
-      - 1560
-      - 265
-      region_at:
-      - 1920
-      - 1080
-      scale: 2
-      wait: 0
+    - settle: 6
+    see: {name: screen}
     check:
       name: done
       from: screen
-      mode: says
+      mode: text
       words:
       - select
       - type
       - of
       - installation
+      rect: [0, 0, 1920, 1080]
+      rect_at: [1920, 1080]
     until:
       fact: done
 - name: installation type
   click:
   - 1482
   - 889
-  wait_after: 16
+  settle: 16
 - name: wait for the confirmation page
   loop:
     max: 30
     do:
-    - wait: 6
-    ocr:
-      name: screen
-      region:
-      - 332
-      - 248
-      - 700
-      - 285
-      region_at:
-      - 1920
-      - 1080
-      scale: 1
-      wait: 0
+    - settle: 6
+    see: {name: screen}
     check:
       name: done
       from: screen
-      mode: says
+      mode: text
       words:
       - final
       - review
+      rect: [0, 0, 1920, 1080]
+      rect_at: [1920, 1080]
     until:
       fact: done
 - name: installation confirmation - start
   click:
   - 1478
   - 889
-  wait_after: 25
+  settle: 25
 - name: dismiss the invalid settings modal if it is up
   click:
   - 1069
   - 583
-  wait_after: 4
+  settle: 4
 - name: wait for the swap file page
   loop:
     max: 40
     do:
-    - wait: 6
-    ocr:
-      name: screen
-      region:
-      - 332
-      - 248
-      - 700
-      - 285
-      region_at:
-      - 1920
-      - 1080
-      scale: 1
-      wait: 0
+    - settle: 6
+    see: {name: screen}
     check:
       name: done
       from: screen
-      mode: says
+      mode: text
       words:
       - create
       - a
       - swap
       - file
+      rect: [0, 0, 1920, 1080]
+      rect_at: [1920, 1080]
     until:
       fact: done
 - name: swap file
   click:
   - 1482
   - 889
-  wait_after: 18
+  settle: 18
 - name: wait for the computer identity page
   loop:
     max: 40
     do:
-    - wait: 6
-    ocr:
-      name: screen
-      region:
-      - 332
-      - 248
-      - 700
-      - 285
-      region_at:
-      - 1920
-      - 1080
-      scale: 1
-      wait: 0
+    - settle: 6
+    see: {name: screen}
     check:
       name: done
       from: screen
-      mode: says
+      mode: text
       words:
       - computer
       - identity
+      rect: [0, 0, 1920, 1080]
+      rect_at: [1920, 1080]
     until:
       fact: done
 - name: computer identity
   click:
   - 1482
   - 889
-  wait_after: 18
+  settle: 18
 - name: wait for the localization page
   loop:
     max: 40
     do:
-    - wait: 6
-    ocr:
-      name: screen
-      region:
-      - 332
-      - 248
-      - 700
-      - 285
-      region_at:
-      - 1920
-      - 1080
-      scale: 1
-      wait: 0
+    - settle: 6
+    see: {name: screen}
     check:
       name: done
       from: screen
-      mode: says
+      mode: text
       words:
       - localization
       - defaults
+      rect: [0, 0, 1920, 1080]
+      rect_at: [1920, 1080]
     until:
       fact: done
 - name: localization defaults
   click:
   - 1482
   - 889
-  wait_after: 18
+  settle: 18
 - name: wait for the account page
   loop:
     max: 30
     do:
-    - wait: 6
-    ocr:
-      name: screen
-      region:
-      - 332
-      - 248
-      - 700
-      - 285
-      region_at:
-      - 1920
-      - 1080
-      scale: 1
-      wait: 0
+    - settle: 6
+    see: {name: screen}
     check:
       name: done
       from: screen
-      mode: says
+      mode: text
       words:
       - default
       - user
       - login
+      rect: [0, 0, 1920, 1080]
+      rect_at: [1920, 1080]
     until:
       fact: done
 - name: account - login name
@@ -346,29 +282,29 @@ steps:
   - 1210
   - 342
   type: '{{ user }}'
-  wait_after: 2
+  settle: 2
 - name: account - password
   click:
   - 1210
   - 377
   type: '{{ password }}'
-  wait_after: 2
+  settle: 2
 - name: account - confirm password
   click:
   - 1210
   - 412
   type: '{{ password }}'
-  wait_after: 3
+  settle: 3
 - name: autologin
   click:
   - 700
   - 561
-  wait_after: 4
+  settle: 4
 - name: default user login
   click:
   - 1482
   - 889
-  wait_after: 25
+  settle: 25
 - name: the installer finishes
   loop:
     max: 90
@@ -376,28 +312,19 @@ steps:
     - click:
       - 420
       - 300
-      wait_after: 20
-    ocr:
-      name: screen
-      region:
-      - 0
-      - 0
-      - 1920
-      - 1080
-      region_at:
-      - 1920
-      - 1080
-      scale: 1
-      wait: 0
+      settle: 20
+    see: {name: screen}
     check:
       name: done
       from: screen
-      mode: says_any
+      mode: text
       words:
       - - congratulations
       - - completed
         - the
         - installation
+      rect: [0, 0, 1920, 1080]
+      rect_at: [1920, 1080]
     until:
       fact: done
 - name: stop the machine
@@ -405,5 +332,3 @@ steps:
   timeout: 120
 - name: publish the disk
   compress: '{{ out }}'
-- name: stop recording
-  record: false

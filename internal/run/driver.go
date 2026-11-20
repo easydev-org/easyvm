@@ -69,6 +69,15 @@ type Machine interface {
 	Reboot() error
 	// IsRunning reports whether qemu is still there.
 	IsRunning() bool
+	// PressPowerButton asks the guest to shut down through ACPI, the way a physical power button
+	// does. It SENDS NOTHING ELSE: the wait is `wait_until: stopped`, so the file can see both halves.
+	PressPowerButton() error
+	// ResetBoot resets the machine through QMP - the same request the ACPI reset pin makes, without
+	// needing a guest-side handler.
+	ResetMachine() error
+	// GuestAgent runs one `qemu-guest-agent` command and returns its output. The commands are the
+	// protocol's own: ping, info, shutdown, exec, file-read, file-write, set-time, interfaces.
+	GuestAgent(command string, args map[string]any) (string, error)
 	// ReleaseDiff deletes the throwaway diff the machine ran on and proves the base it read
 	// through was not written to. It is idempotent: a run that flattened already released it.
 	//
@@ -173,4 +182,35 @@ type BootSpec struct {
 	// CPUs and MemMB are the machine's size.
 	CPUs  int
 	MemMB int
+	// Kernel and Initrd are the guest's kernel, for a microvm: there is no firmware to read a boot
+	// sector, so the host supplies them.
+	Kernel string
+	Initrd string
+	// MicroVM asks for the smallest machine that can boot a modern Linux kernel: NO FIRMWARE, no
+	// emulated devices the guest does not need, and a direct kernel hand-off.
+	//
+	// IT EXISTS BECAUSE MOST OF WHAT THIS REPOSITORY DOES NEEDS A FULL MACHINE AND ALMOST NOTHING
+	// ELSE DOES. A UEFI boot, a virtio disk, a VGA adapter and a USB tablet are all required to
+	// drive a DISTRIBUTION INSTALLER through its GUI; a walkthrough that only has to prove "the
+	// vocabulary drives a guest and the guest answers" pays for every one of them and needs none.
+	// MEASURED on the kubuntu install: 4 GiB of RAM, 128 GiB of disk, and forty minutes, to run
+	// thirty-eight steps.
+	//
+	// A MICROVM IS THE SAME ENGINE AND A SMALLER MACHINE, not a second path: the daemon still owns
+	// one qemu, the dispatcher still reads the screen, and `see:`/`want:` still decide. Only the
+	// qemu arguments differ.
+	MicroVM bool
+	// MicroVMDisplay is serial, terminal or desktop: whether a microvm gets a VGA adapter at all.
+	MicroVMDisplay string
+	// KernelAppend is the guest's OWN kernel command line.
+	//
+	// WITHOUT IT A MICROVM CAN ONLY RUN ALPINE'S DISKLESS NETBOOT. The engine always sent
+	//
+	//	console=ttyS0 modules=loop,squashfs,sd-mod modloop=/dev/vda
+	//
+	// MEASURED: a guest whose root is an EXT4 disk on /dev/vda mounted it, then had `modloop=/dev/vda`
+	// mounted over it, then dropped to `initramfs emergency recovery shell launched` - and the walk
+	// sat in "the console will say login" until its timeout. The default is right for one shape and
+	// wrong for every other.
+	KernelAppend string
 }

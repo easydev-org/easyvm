@@ -24,12 +24,14 @@ import (
 func TestEveryWithoutOnIsRefused(t *testing.T) {
 	s := stepWith(t, map[string]any{
 		"loop": map[string]any{
-			"max": 3,
-			"do":  []any{map[string]any{"wait": 1}},
+			"max":   3,
+			"do":    []any{map[string]any{"wait": 1}},
 			"every": 60,
-			"ocr": map[string]any{"name": "s", "region": []any{0, 0, 10, 10},
-				"region_at": []any{1920, 1080}, "scale": 1, "wait": 0},
-			"check": map[string]any{"name": "d", "from": "s", "mode": "says", "words": []any{"x"}},
+			"see":   map[string]any{"name": "s"},
+			// `mean_between` RATHER THAN `text`: this test is about the CLOCK, and an OCR read of a
+			// 1920x1080 frame costs seconds per attempt for a word that is never there.
+			"check": map[string]any{"name": "d", "from": "s", "mode": "mean_between",
+				"rect": []any{0, 0, 1920, 1080}, "rect_at": []any{1920, 1080}, "range": []any{999, 1000}},
 			"until": map[string]any{"fact": "d"},
 		},
 	})
@@ -45,12 +47,14 @@ func TestEveryWithoutOnIsRefused(t *testing.T) {
 func TestOnWithoutEveryIsRefused(t *testing.T) {
 	s := stepWith(t, map[string]any{
 		"loop": map[string]any{
-			"max": 3,
-			"do":  []any{map[string]any{"wait": 1}},
+			"max":   3,
+			"do":    []any{map[string]any{"wait": 1}},
 			"clock": []any{map[string]any{"wait": 1}},
-			"ocr": map[string]any{"name": "s", "region": []any{0, 0, 10, 10},
-				"region_at": []any{1920, 1080}, "scale": 1, "wait": 0},
-			"check": map[string]any{"name": "d", "from": "s", "mode": "says", "words": []any{"x"}},
+			"see":   map[string]any{"name": "s"},
+			// `mean_between` RATHER THAN `text`: this test is about the CLOCK, and an OCR read of a
+			// 1920x1080 frame costs seconds per attempt for a word that is never there.
+			"check": map[string]any{"name": "d", "from": "s", "mode": "mean_between",
+				"rect": []any{0, 0, 1920, 1080}, "rect_at": []any{1920, 1080}, "range": []any{999, 1000}},
 			"until": map[string]any{"fact": "d"},
 		},
 	})
@@ -95,10 +99,12 @@ func clockStep(every float64) walk.Step {
 			"every": every,
 			"clock": []any{map[string]any{"click": []any{731, 547}}},
 			"do":    []any{map[string]any{"click": []any{1, 2}}},
-			"ocr": map[string]any{"name": "s", "region": []any{0, 0, 10, 10},
-				"region_at": []any{1920, 1080}, "scale": 1, "wait": 0},
+			"see":   map[string]any{"name": "s"},
 			// a condition that is never true, so the loop runs to its ceiling
-			"check": map[string]any{"name": "d", "from": "s", "mode": "says", "words": []any{"x"}},
+			// `mean_between` RATHER THAN `text`: this test is about the CLOCK, and an OCR read of a
+			// 1920x1080 frame costs seconds per attempt for a word that is never there.
+			"check": map[string]any{"name": "d", "from": "s", "mode": "mean_between",
+				"rect": []any{0, 0, 1920, 1080}, "rect_at": []any{1920, 1080}, "range": []any{999, 1000}},
 			"until": map[string]any{"fact": "d"},
 		},
 	}}

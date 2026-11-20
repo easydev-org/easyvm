@@ -1,0 +1,33 @@
+# `see:` AND `check:` ON A MICROVM, which is the half of the vocabulary a console check cannot reach.
+#
+# A microvm has no PCIe and no USB, so `graphics=on` is what puts a VGA adapter back on the ISA bus -
+# 16 MiB and one device - and that is what makes a screen readable here at all. Without it this file
+# could only test `until_console:`, and the measurement primitives are exactly what a walkthrough that
+# proves the vocabulary has to exercise.
+#
+# THE GUEST IS A TEXT CONSOLE, so the assertions are about what a console looks like: nearly black,
+# nearly flat, and saying the words Alpine prints when it is up.
+
+walkthrough "the measurement primitives, on the smallest guest"
+  # THE FRAME IS WHAT `isa-vga` GIVES A MICROVM: 720x400, measured from a real screendump of this
+  # guest. A console has no resolution of its own, so qemu's default is the truth here.
+  resolution 720x400
+  recording_resolution 720x400
+
+  needs alpine.iso alpine-vmlinuz alpine-initramfs
+
+  make a disk "alpine.qcow2" of 1 GiB
+  boot as a microvm from kernel "alpine-vmlinuz" and initramfs "alpine-initramfs" and medium "alpine.iso", waiting up to 300s
+
+  # THE KERNEL PRINTS ON THE SERIAL LINE before a framebuffer exists, so the first fact comes from
+  # the console rather than the screen.
+  wait for the console to say "Welcome to Alpine", waiting up to 180s
+
+  # AND NOW THE SCREEN. One capture, two questions about it: the words, and the colour.
+  see the whole screen as "page"
+  # `want:` COMBINED THREE COMPARISONS INTO ONE BOOLEAN AND WAS USED NOWHERE. A `check:` binds one
+  # boolean from one reading, so this is three steps - each one says which measurement it is about.
+  step "the screen says Alpine"
+    check == {name: page_says_alpine, from: page, mode: text, rect: [0, 0, 720, 400], rect_at: [720, 400], words: [[Alpine]]}
+
+  stop the machine by killing it, waiting up to 60s

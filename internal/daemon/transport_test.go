@@ -382,7 +382,7 @@ func TestTheOldQMPPathIsReleasedBeforeQemuStarts(t *testing.T) {
 //
 // A LOSER MUST WAIT, NOT REFUSE: the winner publishes its connection into the same field within
 // milliseconds, so the "another caller is mid-handshake" case is an ordinary handover.
-func TestABootThatLosesTheQMPRaceWaitsForTheWinner(t *testing.T) {
+func TestQmpSocketHasNoRaceToHandleBecauseItIsExclusive(t *testing.T) {
 	body, err := os.ReadFile("driver.go")
 	if err != nil {
 		t.Fatal(err)
@@ -395,26 +395,38 @@ func TestABootThatLosesTheQMPRaceWaitsForTheWinner(t *testing.T) {
 	}
 	fn := functionBody(code[i:])
 
-	// `ErrBusy` IS THE LOSER'S ANSWER, so it must be recognised...
-	if !strings.Contains(fn, "qmp.ErrBusy") {
-		t.Fatal("`qmpSocket` does not recognise `ErrBusy`. The recorder's sampler takes the socket " +
-			"first on a boot that is millimetres behind it, and the boot then reports a busy socket " +
-			"as a failed boot - measured on CI as `status: starting` forever and a 1-second video")
+	// THE RACE IS GONE BY CONSTRUCTION, NOT BY HANDLING IT - SO THERE MUST BE NOTHING LEFT THAT
+	// HANDLES IT.
+	//
+	// `qmpSocket` used to be callable by any goroutine at once, and each caller did the same
+	// read-modify-write: look at `d.qmp`, maybe `Acquire`, maybe publish. Two callers interleaving
+	// there produced `ErrBusy` for a machine that had just started, and the handling for that - a
+	// ten-second `waitForQMP`, a ghost cleanup, a "another caller won the race, give this connection
+	// back" branch - was a lot of code whose only job was to survive the interleaving.
+	//
+	// The interleaving is now impossible: `qmpRetry` holds `qmpMu` across take-use-repair-retry, and
+	// `qmpSocket` is only reachable from there. So any surviving `ErrBusy` branch would be dead code
+	// that reads like a live race, which is worse than none: a reader would think the connection can
+	// still be contended and go looking for the contention.
+	for _, dead := range []string{"qmp.ErrBusy", "waitForQMP", "another caller won the race"} {
+		if strings.Contains(fn, dead) {
+			t.Fatalf("`qmpSocket` still contains %q. The QMP race is eliminated by `qmpMu`, so a "+
+				"branch that survives a second caller is dead code that reads like a live race", dead)
+		}
 	}
-	// ...AND IT MUST GO SOMEWHERE THAT WAITS, not be returned.
-	if !strings.Contains(fn, "waitForQMP(") {
-		t.Fatal("`qmpSocket` recognises `ErrBusy` but does not wait for the winner's connection, so " +
-			"the loser still fails")
-	}
-	// AND THE WAIT IS BOUNDED BY SOMETHING, or a wedged winner is a hang.
-	j := strings.Index(code, "func (d *Driver) waitForQMP() (*qmp.Conn, error) {")
+	// AND THE EXCLUSION IS REAL: `qmpRetry` must take the lock for the WHOLE transaction.
+	j := strings.Index(code, "func (d *Driver) qmpRetry(fn qmpCommand) error {")
 	if j < 0 {
-		t.Fatal("no `waitForQMP`")
+		t.Fatal("no qmpRetry")
 	}
-	wait := functionBody(code[j:])
-	if !strings.Contains(wait, "Before(deadline)") {
-		t.Fatal("`waitForQMP` waits without a deadline, so a caller that took the socket and threw it " +
-			"away would park the boot forever")
+	retry := functionBody(code[j:])
+	if !strings.Contains(retry, "d.qmpMu.Lock()") || !strings.Contains(retry, "d.qmpMu.Unlock()") {
+		t.Fatal("`qmpRetry` does not hold `qmpMu` for the whole transaction, so two callers can " +
+			"again both decide the connection is dead and both close it")
+	}
+	// THE CAPTURE PATH MUST TAKE IT TOO, or the sampler races the caller that is typing.
+	if !strings.Contains(code, "d.qmpMu.Lock()") {
+		t.Fatal("no qmpMu")
 	}
 }
 
@@ -442,14 +454,19 @@ func TestTheMachineDisablesTheVMwareBackdoorPort(t *testing.T) {
 	}
 	code := dropLineComments(string(body))
 
-	// THE -machine ARGUMENT IS WHERE THIS LIVES, and it must keep the accelerator it also names.
-	i := strings.Index(code, `"-machine", "q35,accel=kvm`)
+	// THE MACHINE TYPE IS BUILT BY `machineType` NOW, because a `microvm:` boot asks qemu for a
+	// different machine and a literal in the argument list could not say two things. So the check
+	// follows it there - and it must still keep the accelerator, and still disable vmport.
+	i := strings.Index(code, "func machineType(")
 	if i < 0 {
-		t.Fatal("no `-machine q35,accel=kvm` argument; the machine's own options have moved")
+		t.Fatal("no `machineType`, so the machine's options have moved again")
 	}
 	line := code[i:]
-	if end := strings.Index(line, "\n"); end > 0 {
+	if end := strings.Index(line, "\n}\n"); end > 0 {
 		line = line[:end]
+	}
+	if !strings.Contains(line, `"q35,accel=kvm`) {
+		t.Fatalf("`machineType` no longer names q35 with its accelerator: %s", line)
 	}
 	if !strings.Contains(line, "vmport=off") {
 		t.Fatalf("the machine is started with %s, and q35's default `vmport=on` binds `vmmouse`, "+

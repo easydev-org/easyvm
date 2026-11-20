@@ -1,0 +1,125 @@
+walkthrough "macos 26 setup (recovery image to setup assistant)"
+  resolution 1920x1080
+  var disk_name == default: main
+  var expected_gb == default: "68"
+  var out == {default: out/macos26.qcow2, from: args.out}
+  var shutdown == {default: kill, from: args.shutdown}
+  header recording_resolution == [1920, 1080]
+
+  needs recovery.dmg boot.img macos.rom macos.vars, named "the media this stage boots from is already on disk"
+  step "create the empty disk"
+    disk == disk.qcow2
+    disk_gb == 128
+  step "boot the recovery image"
+    boot == true
+    memory_mb == 12288
+    os == macos
+    recovery == recovery.dmg
+    timeout == 900
+  step "the recovery menu's rows"
+    see == name: recovery
+  step "wait for the recovery menu"
+    loop == {check: {from: recovery, mode: text, name: done, rect: [760, 200, 1400, 560], rect_at: [1920, 1080], scale: 6, words: [[restore, time, machine], [reinstall, macos], [safari], [disk, utility]]}, do: [{settle: 10}], max: 180, see: {name: recovery}, until: {fact: done}}
+  click "select disk utility" at 800 523, waiting 3s, named "select disk utility"
+  click "open disk utility" at 1148 595, waiting 8s, named "open disk utility"
+  step "make disk utility full screen"
+    at_color == [40, 200, 64]
+    color_region == [0, 30, 700, 400]
+    color_tolerance == 45
+    settle == 6
+  click "select the first disk" at 200 132, waiting 2s, named "select the first disk"
+  step "is the selected disk the uninitialised one"
+    see == name: details
+  step "the first disk is the uninitialised one"
+    check == {from: details, mode: contains, name: uninitialised, rect: [360, 105, 1100, 200], rect_at: [1920, 1080], scale: 4, text: Uninitialized}
+  step "select the second disk, when row 1 was the boot image"
+    else == [{click: [200, 164], name: "click row 2", settle: 2}, {name: "is the second disk the uninitialised one", see: {name: details}}, {check: {from: details, mode: contains, name: uninitialised, rect: [360, 105, 1100, 200], rect_at: [1920, 1080], scale: 4, text: Uninitialized}, name: "the second disk is the uninitialised one"}]
+    if == uninitialised
+  step "erase - open the sheet"
+    loop == {check: {from: sheet, mode: text, name: sheet_up, rect: [720, 425, 1200, 680], rect_at: [1920, 1080], scale: 2, words: [[erase, deleted], [free, space], [security, option], [cancel, erase]]}, do: [{click: [1711, 56]}, {settle: 3}], max: 6, see: {name: sheet}, until: {fact: sheet_up}}
+    settle == 4
+  press meta_l+a, waiting 1s, named "erase - clear the name field"
+  step "erase - name the volume"
+    click == [988, 542]
+    settle == 4
+    type == '{{ disk_name }}'
+  click "erase - confirm" at 1154 650, waiting 5s, named "erase - confirm"
+  step "erase - wait for the report"
+    loop == {check: {from: screen, mode: text, name: done, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1, words: [[erase, complete], [erase, process]]}, do: [{settle: 5}], max: 60, see: {name: screen}, until: {fact: done}}
+  click "erase - done" at 1147 614, waiting 5s, named "erase - done"
+  press meta_l+q, waiting 12s, named "close disk utility"
+  step "the recovery menu is back"
+    loop == {check: {from: screen, mode: text, name: done, rect: [760, 200, 1400, 560], rect_at: [1920, 1080], scale: 2, words: [[reinstall, macos]]}, do: [{settle: 5}], max: 60, see: {name: screen}, until: {fact: done}}
+  click "select reinstall macos" at 837 333, waiting 3s, named "select reinstall macos"
+  click "open the installer" at 1142 586, waiting 20s, named "open the installer"
+  step "wait for the installer to load"
+    loop == {check: {from: instaload, mode: text, name: loaded, rect: [400, 560, 1520, 700], rect_at: [1920, 1080], scale: 2, words: [[agree, to, the, terms], [english, apple], [select, the, disk], [macos]]}, do: [{settle: 10}], max: 24, see: {name: instaload}, until: {fact: loaded}}
+  click welcome at 960 712, waiting 5s, named "welcome continue"
+  step "wait for the licence pane"
+    loop == {check: {from: licence, mode: text, name: licence_up, rect: [660, 430, 1260, 700], rect_at: [1920, 1080], scale: 2, words: [[software, license, agreement], [please, read, this]]}, do: [{settle: 10}], max: 24, see: {name: licence}, until: {fact: licence_up}}
+  click "agree to the licence" at 1005 713, waiting 5s, named "agree to the licence"
+  step "wait for the licence sheet"
+    loop == {check: {from: sheet, mode: text, name: sheet_up, rect: [780, 330, 1140, 560], rect_at: [1920, 1080], scale: 2, words: [[read, and, agree], [disagree, agree]]}, do: [{settle: 5}], max: 12, see: {name: sheet}, until: {fact: sheet_up}}
+  click "agree in the sheet" at 1018 520, waiting 10s, named "agree in the sheet"
+  click "select the destination card" at 850 550, waiting 5s, named "select the destination card"
+  click destination at 1005 712, waiting 10s, named "destination continue"
+  step "the copy runs, look 1 of at most 8"
+    loop == {check: {from: screen, mode: matches, name: done, pattern: "select your country or region|transfer your information to this mac|choose a wireless network|sign in with your apple id|update mac automatically|choose your look", rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1}, clock: [{click: [731, 547], name: "pick macOS Installer in OpenCore's picker, if that is what is up", settle: 15}, {acpi: reset, name: "reset the guest", timeout: 300}, {name: "give it time to come back", settle: 60}], do: [{settle: 20}, {name: "read the pane for the cancel sheet", see: {name: cancelshot}}, {check: {from: cancelshot, mode: text, name: cancel_sheet, rect: [820, 300, 1100, 600], rect_at: [1920, 1080], scale: 1, words: [[continue, installing]]}, name: "classify - the cancel confirmation"}, {if: cancel_sheet, name: "answer the cancel confirmation", then: [{click: [960, 508], name: "continue installing", settle: 10}]}], every: 5400, max: 270, see: {name: screen}, until: {fact: done}}
+  step "reset the guest after look 1, because this installer stalls and a reset is what moves it"
+    acpi == reset
+    timeout == 300
+  step "wait for the guest to be drawing again after reset 1"
+    loop == {check: {from: back1, mode: matches, name: anything1, pattern: ., rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1}, do: [{settle: 10}], max: 40, see: {name: back1}, until: {fact: anything1}}
+  step "the copy runs, look 2 of at most 8"
+    loop == {check: {from: screen, mode: matches, name: done, pattern: "select your country or region|transfer your information to this mac|choose a wireless network|sign in with your apple id|update mac automatically|choose your look", rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1}, clock: [{click: [731, 547], name: "pick macOS Installer in OpenCore's picker, if that is what is up", settle: 15}, {acpi: reset, name: "reset the guest", timeout: 300}, {name: "give it time to come back", settle: 60}], do: [{settle: 20}], every: 600, max: 30, see: {name: screen}, until: {fact: done}}
+  step "reset the guest after look 2, because this installer stalls and a reset is what moves it"
+    acpi == reset
+    timeout == 300
+  step "wait for the guest to be drawing again after reset 2"
+    loop == {check: {from: back2, mode: matches, name: anything2, pattern: ., rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1}, do: [{settle: 10}], max: 40, see: {name: back2}, until: {fact: anything2}}
+  step "the copy runs, look 3 of at most 8"
+    loop == {check: {from: screen, mode: matches, name: done, pattern: "select your country or region|transfer your information to this mac|choose a wireless network|sign in with your apple id|update mac automatically|choose your look", rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1}, clock: [{click: [731, 547], name: "pick macOS Installer in OpenCore's picker, if that is what is up", settle: 15}, {acpi: reset, name: "reset the guest", timeout: 300}, {name: "give it time to come back", settle: 60}], do: [{settle: 20}], every: 600, max: 30, see: {name: screen}, until: {fact: done}}
+  step "reset the guest after look 3, because this installer stalls and a reset is what moves it"
+    acpi == reset
+    timeout == 300
+  step "wait for the guest to be drawing again after reset 3"
+    loop == {check: {from: back3, mode: matches, name: anything3, pattern: ., rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1}, do: [{settle: 10}], max: 40, see: {name: back3}, until: {fact: anything3}}
+  step "the copy runs, look 4 of at most 8"
+    loop == {check: {from: screen, mode: matches, name: done, pattern: "select your country or region|transfer your information to this mac|choose a wireless network|sign in with your apple id|update mac automatically|choose your look", rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1}, clock: [{click: [731, 547], name: "pick macOS Installer in OpenCore's picker, if that is what is up", settle: 15}, {acpi: reset, name: "reset the guest", timeout: 300}, {name: "give it time to come back", settle: 60}], do: [{settle: 20}], every: 600, max: 30, see: {name: screen}, until: {fact: done}}
+  step "reset the guest after look 4, because this installer stalls and a reset is what moves it"
+    acpi == reset
+    timeout == 300
+  step "wait for the guest to be drawing again after reset 4"
+    loop == {check: {from: back4, mode: matches, name: anything4, pattern: ., rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1}, do: [{settle: 10}], max: 40, see: {name: back4}, until: {fact: anything4}}
+  step "the copy runs, look 5 of at most 8"
+    loop == {check: {from: screen, mode: matches, name: done, pattern: "select your country or region|transfer your information to this mac|choose a wireless network|sign in with your apple id|update mac automatically|choose your look", rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1}, clock: [{click: [731, 547], name: "pick macOS Installer in OpenCore's picker, if that is what is up", settle: 15}, {acpi: reset, name: "reset the guest", timeout: 300}, {name: "give it time to come back", settle: 60}], do: [{settle: 20}], every: 600, max: 30, see: {name: screen}, until: {fact: done}}
+  step "reset the guest after look 5, because this installer stalls and a reset is what moves it"
+    acpi == reset
+    timeout == 300
+  step "wait for the guest to be drawing again after reset 5"
+    loop == {check: {from: back5, mode: matches, name: anything5, pattern: ., rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1}, do: [{settle: 10}], max: 40, see: {name: back5}, until: {fact: anything5}}
+  step "the copy runs, look 6 of at most 8"
+    loop == {check: {from: screen, mode: matches, name: done, pattern: "select your country or region|transfer your information to this mac|choose a wireless network|sign in with your apple id|update mac automatically|choose your look", rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1}, clock: [{click: [731, 547], name: "pick macOS Installer in OpenCore's picker, if that is what is up", settle: 15}, {acpi: reset, name: "reset the guest", timeout: 300}, {name: "give it time to come back", settle: 60}], do: [{settle: 20}], every: 600, max: 30, see: {name: screen}, until: {fact: done}}
+  step "reset the guest after look 6, because this installer stalls and a reset is what moves it"
+    acpi == reset
+    timeout == 300
+  step "wait for the guest to be drawing again after reset 6"
+    loop == {check: {from: back6, mode: matches, name: anything6, pattern: ., rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1}, do: [{settle: 10}], max: 40, see: {name: back6}, until: {fact: anything6}}
+  step "the copy runs, look 7 of at most 8"
+    loop == {check: {from: screen, mode: matches, name: done, pattern: "select your country or region|transfer your information to this mac|choose a wireless network|sign in with your apple id|update mac automatically|choose your look", rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1}, clock: [{click: [731, 547], name: "pick macOS Installer in OpenCore's picker, if that is what is up", settle: 15}, {acpi: reset, name: "reset the guest", timeout: 300}, {name: "give it time to come back", settle: 60}], do: [{settle: 20}], every: 600, max: 30, see: {name: screen}, until: {fact: done}}
+  step "reset the guest after look 7, because this installer stalls and a reset is what moves it"
+    acpi == reset
+    timeout == 300
+  step "wait for the guest to be drawing again after reset 7"
+    loop == {check: {from: back7, mode: matches, name: anything7, pattern: ., rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1}, do: [{settle: 10}], max: 40, see: {name: back7}, until: {fact: anything7}}
+  step "the copy runs, look 8 of at most 8"
+    loop == {check: {from: screen, mode: matches, name: done, pattern: "select your country or region|transfer your information to this mac|choose a wireless network|sign in with your apple id|update mac automatically|choose your look", rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1}, clock: [{click: [731, 547], name: "pick macOS Installer in OpenCore's picker, if that is what is up", settle: 15}, {acpi: reset, name: "reset the guest", timeout: 300}, {name: "give it time to come back", settle: 60}], do: [{settle: 20}], every: 600, max: 30, see: {name: screen}, until: {fact: done}}
+  step "the Setup Assistant is on screen, which is what this stage exists to reach"
+    see == name: final
+  step "the Setup Assistant is up, OR THIS STAGE FAILS"
+    until_any == [[select, your, country, or, region], [how, do, you, want, to, connect, to, the, internet], [transfer, your, information, to, this, mac], [choose, a, wireless, network], [sign, in, with, your, apple, id]]
+  step "stop the machine"
+    shutdown == '{{ shutdown }}'
+    timeout == 300
+  step "publish the disk"
+    compress == '{{ out }}'

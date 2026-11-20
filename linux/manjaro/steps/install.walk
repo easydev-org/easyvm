@@ -1,0 +1,87 @@
+walkthrough "manjaro - the Calamares walk"
+  resolution 1920x1080
+  password admin
+  var out == {default: out/distro.qcow2, from: args.out}
+  var user == {default: vmuser, from: args.user}
+  header recording_resolution == [1920, 1080]
+
+  needs manjaro.iso, named "the media this stage boots from is already on disk"
+  step "create the empty disk"
+    disk == disk.qcow2
+    disk_gb == 128
+  step "boot the installer"
+    boot == true
+    iso == manjaro.iso
+    os == linux
+    # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
+    memory_mb == 4096
+    timeout == 1800
+  step "wait for the live desktop"
+    desktop == linux/kde
+    reference == reference/desktop.png
+    range == [0.90, 1.0]
+    # THE TOP 120 ROWS ARE WALLPAPER AND A MENU BAR: a boot splash scores 0.0002
+    # there and every desktop frame 1.0000, including the ones with an installer
+    # window over the middle. The clock sits below this band, which is why 120.
+    rect == [0, 0, 1920, 120]
+    rect_at == [1920, 1080]
+    timeout == 5400
+  settle 15s, named "let the desktop settle"
+  step "open the installer"
+    double == [960, 760]
+    settle == 35
+  step "open the installer - what is on screen"
+    see == name: open_the_installer
+  step "open the installer - the screen says so"
+    check == {from: open_the_installer, mode: text, name: asserted, rect: [438, 296, 963, 385], rect_at: [1920, 1080], words: [[welcome], [location]]}
+  step "open the installer (once more, if it did not)"
+    double == [960, 760]
+    settle == 40
+    when_not == - welcome
+  click welcome at 1325 801, waiting 18s, named "welcome"
+  click location at 1325 801, waiting 18s, named "location"
+  click keyboard at 1325 801, waiting 18s, named "keyboard"
+  click "partitions - erase the disk" at 653 340, waiting 6s, named "partitions - erase the disk"
+  click "open the filesystem list" at 955 396, waiting 5s, named "open the filesystem list"
+  click choose at 933 459, waiting 6s, named "choose ext4"
+  step "the partitions page after choosing ext4"
+    see == name: fs
+  step "the root partition is ext4"
+    check == {from: fs, mode: text, name: ext4, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], words: [ext4]}
+  click partitions at 1325 801, waiting 20s, named "partitions"
+  step "users - full name"
+    click == [741, 320]
+    settle == 2
+    type == '{{ user }}'
+  step "users - login name"
+    click == [741, 385]
+    settle == 2
+    type == '{{ user }}'
+  step "users - password"
+    click == [724, 523]
+    settle == 2
+    type == '{{ password }}'
+  step "users - confirm password"
+    click == [944, 523]
+    settle == 2
+    type == '{{ password }}'
+  step "users - root password"
+    click == [741, 650]
+    settle == 2
+    type == '{{ password }}'
+  step "users - confirm root password"
+    click == [944, 650]
+    settle == 3
+    type == '{{ password }}'
+  click users at 1325 801, waiting 20s, named "users"
+  click "office suite - no office suite" at 700 288, waiting 6s, named "office suite - no office suite"
+  click office at 1334 794, waiting 20s, named "office suite"
+  click "summary - install" at 1318 799, waiting 18s, named "summary - install"
+  click "the install confirmation's install now" at 1055 537, waiting 30s, named "the install confirmation's install now"
+  step "the installer finishes"
+    loop == {check: {from: screen, mode: text, name: done, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], words: [[all, done], [you, may, now], [has, been, installed], [todo, listo], [ya, puede], [reiniciar], [instalación, completada], [instalacion, completada]]}, do: [{click: [420, 300], settle: 20}], max: 180, see: {name: screen}, until: {fact: done}}
+  step "stop the machine"
+    shutdown == kill
+    timeout == 120
+  step "publish the disk"
+    compress == '{{ out }}'

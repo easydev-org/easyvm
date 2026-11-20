@@ -13,7 +13,7 @@
 # and a retry around it restarts every multi-gigabyte transfer at zero.
 set -eu
 
-repo=${DISKS_REPOSITORY:-easydev-org/easyvm}
+repo=${DISKS_REPOSITORY:-easydev-org/easyvm-fork}
 dest=${ARTIFACTS:-/artifacts}
 mkdir -p "$dest/isos"
 

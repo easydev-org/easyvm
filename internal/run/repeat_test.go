@@ -206,12 +206,13 @@ func TestUnlessAnyTakesTheAlternatives(t *testing.T) {
 	if end := strings.Index(rest[1:], "\nfunc "); end > 0 {
 		rest = rest[:end+1]
 	}
-	if !strings.Contains(rest, `wordSetsOf(s, "unless_any")`) {
-		t.Fatal("`doUnless` does not read `unless_any`, so a gate with alternatives is refused")
+	// `when_not` / `when_not_any` ARE THE NAMES; `unless` / `unless_any` were the same gate with a
+	// negation in the name, and they are gone from the vocabulary.
+	if !strings.Contains(rest, `wordSetsOf(s, "when_not_any")`) {
+		t.Fatal("`doUnless` does not read `when_not_any`, so a gate with alternatives is refused")
 	}
-	// AND THE SINGULAR KEY STILL WORKS, unchanged.
-	if !strings.Contains(rest, `wordsOf(s, "unless")`) {
-		t.Fatal("`unless` no longer works on its own")
+	if !strings.Contains(rest, `wordsOf(s, "when_not")`) {
+		t.Fatal("`when_not` no longer works on its own")
 	}
 	// AND IT IS REGISTERED, or every file that uses it is refused as an unknown key - which is exactly
 	// what happened for one build after the reader was written.
@@ -219,9 +220,9 @@ func TestUnlessAnyTakesTheAlternatives(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(keys), `"unless_any": {Name: "unless_any", Kind: KindWordSets,`) {
-		t.Fatal("`unless_any` is not declared in the step vocabulary, so `easyvm check` refuses every " +
-			"file that uses it with `an unknown key used to mean a step that did nothing`")
+	if !strings.Contains(string(keys), `"when_not_any": {Name: "when_not_any"`) {
+		t.Fatal("`when_not_any` is not declared in the step vocabulary, so `easyvm check` refuses " +
+			"every file that uses it with `an unknown key used to mean a step that did nothing`")
 	}
 }
 

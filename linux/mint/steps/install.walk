@@ -1,0 +1,106 @@
+walkthrough "mint - the ubiquity walk"
+  resolution 1920x1080
+  password admin
+  var display_name == Vmuser User
+  var out == {default: out/distro.qcow2, from: args.out}
+  var user == {default: vmuser, from: args.user}
+  header recording_resolution == [1920, 1080]
+
+  needs mint.iso, named "the media this stage boots from is already on disk"
+  step "create the empty disk"
+    disk == disk.qcow2
+    disk_gb == 128
+  step "boot the installer"
+    boot == true
+    iso == mint.iso
+    os == linux
+    # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
+    memory_mb == 4096
+    timeout == 1800
+  step "the medium's GRUB menu is up"
+    see == name: grub
+  step "that menu names mint"
+    check == {from: grub, mode: text, name: is_mint, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1, words: [[start, linux, mint], [linux, mint]]}
+  # THE MENU TAKES THE KEY AND THEN SITS THERE, SO THE KEY IS SENT MORE THAN ONCE.
+  #
+  # MEASURED ON RUN 44471061649, whose recording is the SAME FRAME from 20 seconds to the end -
+  # 2979 seconds of "Press enter to boot the selected OS" with the highlight still on the first
+  # entry. One Return, twenty seconds, and nothing moved: unlike every later step in this file,
+  # which is a click the guest has to answer, this one is a keystroke into a firmware menu that may
+  # not have finished drawing when `see:` captured it.
+  #
+  # THREE, FIVE SECONDS APART, is what the file already does elsewhere for a screen that appears more
+  # than once - and a second Return on a menu that has already gone is harmless, because the live
+  # session ignores it.
+  press Return, waiting 5s, named "answer the menu, which does not count down"
+  press Return, waiting 5s, named "answer it again, because a firmware menu can miss the first key"
+  press Return, waiting 20s, named "and once more, then let the kernel start"
+  step "wait for the live desktop"
+    desktop == linux/cinnamon
+    reference == reference/desktop.png
+    range == [0.90, 1.0]
+    # THE REFERENCE WAS A DESKTOP WITH A TERMINAL WINDOW ON IT, AND THE GATE RUNS BEFORE THAT
+    # TERMINAL IS OPENED. MEASURED ON RUN 44477977288, which spent its whole 1h30m reading 0.0126
+    # and then 0.0166 against a desktop that was plainly up: the reference held a `gnome-terminal`
+    # running the gsettings commands, and `wait for the live desktop` is FOUR STEPS EARLIER than the
+    # step that opens it. No band could have matched both, which is why the top 120 rows were not
+    # the whole story.
+    #
+    # THE REFERENCE IS NOW THIS MEDIUM'S OWN DESKTOP at 400 s, before the terminal.
+    #
+    # THE BAND IS TOP-RIGHT WALLPAPER, x 1500..1900 and y 150..350: clear of the installer icon at
+    # the top left, of the logo in the middle, and of the Cinnamon panel at the bottom.
+    # MEASURED on that recording: boot and splash frames 0.0000, and every desktop frame 1.0000.
+    #
+    # THE SCREENSAVER IS WHY THE WINDOW MATTERS. This guest dims its whole display to 0.29 of its
+    # brightness at about 960 s - every pixel, uniformly - so a gate that is still waiting then
+    # cannot match ANY reference. The desktop is up at 45 s and the dimming is 15 minutes later, and
+    # `poll: 5` means the gate has 180 chances in between.
+    rect == [1500, 150, 1900, 350]
+    rect_at == [1920, 1080]
+    poll == 5
+    timeout == 5400
+  step "disable the screen saver, its lock and the dpms blank"
+    run == gsettings set org.cinnamon.desktop.session idle-delay 0; gsettings set org.cinnamon.desktop.screensaver lock-enabled false; gsettings set org.cinnamon.desktop.screensaver idle-activation-enabled false; xrandr --output Virtual-1 --mode 1920x1080 2>/dev/null || xrandr --output Virtual1 --mode 1920x1080 2>/dev/null || xrandr -s 1920x1080 2>/dev/null || true; xset s off; xset -dpms; xset s noblank; ( for i in $(seq 1 1080); do xdotool mousemove_relative -- 1 0 2>/dev/null; xdotool mousemove_relative -- -1 0 2>/dev/null; sleep 20; done ) >/dev/null 2>&1 & exit
+    settle == 10
+    terminal_wait == 8
+    type_gap == 0.15
+  step "the desktop's install icon is on screen"
+    see == name: desktop
+  step "that icon names the installer"
+    check == {from: desktop, mode: text, name: launcher, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1, words: [[Install]]}
+  click "select the installer's icon" at 114 52, waiting 3s, named "select the installer's icon"
+  press Return, waiting 25s, named "open it with the keyboard, because a double-click does not"
+  step "the installer window is up"
+    loop == {check: {from: installer, mode: text, name: up, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1, words: [[Welcome], [Keyboard], [Multimedia]]}, do: [{settle: 6}], max: 30, see: {name: installer}, until: {fact: up}}
+  click welcome at 1306 727, waiting 12s, named "welcome"
+  click keyboard at 1306 727, waiting 12s, named "keyboard"
+  click multimedia at 1306 727, waiting 12s, named "multimedia codecs"
+  click installation at 1306 727, waiting 15s, named "installation type"
+  step "the dialog names the filesystem it will create"
+    see == name: format
+  step "the root partition will be ext4"
+    check == {from: format, mode: text, name: ext4, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1, words: [[ext4]]}
+  click "write the changes to disks" at 1266 663, waiting 25s, named "write the changes to disks"
+  click "installation type - install now, after the modal" at 1307 726, waiting 30s, named "installation type - install now, after the modal"
+  click "where are you" at 1306 727, waiting 15s, named "where are you"
+  step "who are you - full name"
+    click == [965, 347]
+    settle == 2
+    type == '{{ display_name }}'
+  step "who are you - password"
+    click == [877, 458]
+    settle == 2
+    type == '{{ password }}'
+  step "who are you - confirm password"
+    click == [877, 492]
+    settle == 3
+    type == '{{ password }}'
+  click "who are you" at 1306 727, waiting 20s, named "who are you"
+  step "the install finishes"
+    loop == {check: {from: finished, mode: text, name: done, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1, words: [[restart]]}, do: [{settle: 15}], max: 120, see: {name: finished}, until: {fact: done}}
+  step "stop the machine"
+    shutdown == kill
+    timeout == 120
+  step "publish the disk"
+    compress == '{{ out }}'

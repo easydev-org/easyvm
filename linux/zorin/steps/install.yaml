@@ -1,4 +1,7 @@
 name: zorin - the ubiquity walk
+recording_resolution:
+- 1920
+- 1080
 resolution:
 - 1920
 - 1080
@@ -18,10 +21,8 @@ steps:
   # forty minutes into a run. Every one of these files is declared by this leg's
   # `assets:` in its workflow and placed here by `pull-artifact.sh` before
   # `easyvm run` is called; nothing in this file downloads.
-  require:
+  needs:
   - zorin.iso
-- name: start recording
-  record: zorin-install.mp4
 - name: create the empty disk
   disk: disk.qcow2
   disk_gb: 128
@@ -33,29 +34,16 @@ steps:
 - name: wait for the live desktop
   desktop: linux/gnome
   timeout: 5400
-  poll: 5
-  keep_alive: true
 - name: wait for the installer to put itself up
   loop:
     max: 120
     do:
-    - wait: 5
-    ocr:
-      name: screen
-      region:
-      - 0
-      - 0
-      - 1920
-      - 1080
-      region_at:
-      - 1920
-      - 1080
-      scale: 1
-      wait: 0
+    - settle: 5
+    see: {name: screen}
     check:
       name: done
       from: screen
-      mode: says_any
+      mode: text
       words:
       - - install
         - zorin
@@ -64,108 +52,90 @@ steps:
       - - welcome
       - - false
         - localization
+      rect: [0, 0, 1920, 1080]
+      rect_at: [1920, 1080]
     until:
       fact: done
 - name: install zorin os
-  wait_after: 40
+  settle: 40
   do:
   - click:
     - 1223
     - 586
-    wait_after: 3
+    settle: 3
   - click:
     - 1223
     - 586
-    wait_after: 3
+    settle: 3
 - name: install zorin os (once more, if the wizard is not up)
-  unless:
+  when_not:
   - keyboard
-  wait_after: 40
+  settle: 40
   do:
   - click:
     - 1223
     - 586
-    wait_after: 3
+    settle: 3
   - click:
     - 1223
     - 586
-    wait_after: 3
+    settle: 3
 - name: disable the screen saver and the lock
   run: xrandr --output Virtual-1 --mode 1920x1080 2>/dev/null || xrandr --output Virtual1 --mode 1920x1080 2>/dev/null || xrandr -s 1920x1080 2>/dev/null || true; xset s off; xset -dpms; xset s noblank; gsettings set org.gnome.desktop.session idle-delay
     0; gsettings set org.gnome.desktop.screensaver lock-enabled false; ( for i in $(seq 1 1080); do xdotool mousemove_relative -- 1 0 2>/dev/null; xdotool mousemove_relative -- -1 0 2>/dev/null; sleep 20; done ) >/dev/null 2>&1 & exit
   terminal_wait: 8
   type_gap: 0.15
-  wait_after: 10
+  settle: 10
 - name: welcome
   click:
   - 1361
   - 764
-  wait_after: 15
+  settle: 15
 - name: keyboard - english (us)
   click:
   - 1106
   - 402
-  wait_after: 4
+  settle: 4
 - name: keyboard
   click:
   - 1361
   - 764
-  wait_after: 18
+  settle: 18
 - name: updates and other software, when this build shows it
-  unless_any:
+  when_not_any:
   - - installation
     - type
   click:
   - 1361
   - 764
-  wait_after: 18
+  settle: 18
 - name: the updates pane is done
   loop:
     max: 60
     do:
-    - wait: 3
-    ocr:
-      name: screen
-      region:
-      - 0
-      - 0
-      - 1920
-      - 1080
-      region_at:
-      - 1920
-      - 1080
-      scale: 1
-      wait: 0
+    - settle: 3
+    see: {name: screen}
     check:
       name: done
       from: screen
-      mode: says_any
+      mode: text
       words:
       - - installation
         - type
+      rect: [0, 0, 1920, 1080]
+      rect_at: [1920, 1080]
     until:
       fact: done
 - name: the keyboard pane is done
   loop:
     max: 80
     do:
-    - wait: 3
-    ocr:
-      name: screen
-      region:
-      - 0
-      - 0
-      - 1920
-      - 1080
-      region_at:
-      - 1920
-      - 1080
-      scale: 1
-      wait: 0
+    - settle: 3
+    see: {name: screen}
     check:
       name: done
       from: screen
-      mode: says_any
+      mode: text
       words:
       - - installation
         - type
@@ -173,34 +143,25 @@ steps:
         - and
         - other
         - software
+      rect: [0, 0, 1920, 1080]
+      rect_at: [1920, 1080]
     until:
       fact: done
 - name: installation type - install now
   click:
   - 1361
   - 764
-  wait_after: 18
+  settle: 18
 - name: the disk warning is up
   loop:
     max: 60
     do:
-    - wait: 2
-    ocr:
-      name: screen
-      region:
-      - 0
-      - 0
-      - 1920
-      - 1080
-      region_at:
-      - 1920
-      - 1080
-      scale: 1
-      wait: 0
+    - settle: 2
+    see: {name: screen}
     check:
       name: done
       from: screen
-      mode: says_any
+      mode: text
       words:
       - - write
         - the
@@ -209,6 +170,8 @@ steps:
         - disks
       - - partition
         - tables
+      rect: [0, 0, 1920, 1080]
+      rect_at: [1920, 1080]
     until:
       fact: done
 # THE DIALOG THAT ASKS FOR PERMISSION ALSO NAMES THE FILESYSTEM, AND THAT IS THE ONLY PLACE Ubiquity
@@ -223,93 +186,66 @@ steps:
 # ext4. A walk that accepted the default without reading this could publish a btrfs disk and nothing
 # above would have noticed - the pages before this one do not mention a filesystem.
 - name: the dialog names the filesystem it will create
-  ocr:
-    name: format
-    region:
-    - 0
-    - 0
-    - 1920
-    - 1080
-    region_at:
-    - 1920
-    - 1080
-    scale: 1
-    wait: 0
+  see: {name: format}
 
 - name: the root partition will be ext4
   check:
     name: ext4
     from: format
-    mode: says
+    mode: text
     words:
     - ext4
 
+    rect: [0, 0, 1920, 1080]
+    rect_at: [1920, 1080]
 - name: write the changes to disks
   click:
   - 1293
   - 673
-  wait_after: 20
+  settle: 20
 - name: the disk warning is answered
   loop:
     max: 60
     do:
-    - wait: 3
-    ocr:
-      name: screen
-      region:
-      - 0
-      - 0
-      - 1920
-      - 1080
-      region_at:
-      - 1920
-      - 1080
-      scale: 1
-      wait: 0
+    - settle: 3
+    see: {name: screen}
     check:
       name: done
       from: screen
-      mode: says_any
+      mode: text
       words:
       - - where
         - are
         - you
       - - time
         - zone
+      rect: [0, 0, 1920, 1080]
+      rect_at: [1920, 1080]
     until:
       fact: done
 - name: where are you
   click:
   - 1361
   - 764
-  wait_after: 18
+  settle: 18
 - name: the time zone pane is done
   loop:
     max: 60
     do:
-    - wait: 3
-    ocr:
-      name: screen
-      region:
-      - 0
-      - 0
-      - 1920
-      - 1080
-      region_at:
-      - 1920
-      - 1080
-      scale: 1
-      wait: 0
+    - settle: 3
+    see: {name: screen}
     check:
       name: done
       from: screen
-      mode: says_any
+      mode: text
       words:
       - - who
         - are
         - you
       - - your
         - name
+      rect: [0, 0, 1920, 1080]
+      rect_at: [1920, 1080]
     until:
       fact: done
 - name: who are you - your name
@@ -317,37 +253,34 @@ steps:
   - 975
   - 386
   type: '{{ user }}'
-  wait_after: 2
+  settle: 2
 - name: who are you - username
   click:
   - 859
   - 477
   type: '{{ user }}'
-  wait_after: 2
+  settle: 2
 - name: who are you - password
   click:
   - 873
   - 514
   type: '{{ password }}'
-  wait_after: 2
+  settle: 2
 - name: who are you - confirm password
   click:
   - 883
   - 550
   type: '{{ password }}'
-  wait_after: 3
+  settle: 3
 - name: who are you
   click:
   - 1361
   - 764
-  wait_after: 20
+  settle: 20
 - name: the install runs, as measured
-  wait: 2400
-  keep_alive: true
+  settle: 2400
 - name: stop the machine
   shutdown: kill
   timeout: 120
 - name: publish the disk
   compress: '{{ out }}'
-- name: stop recording
-  record: false

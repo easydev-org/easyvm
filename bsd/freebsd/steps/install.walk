@@ -1,0 +1,154 @@
+walkthrough "freebsd 15.1 - bsdinstall, to an installed system"
+  resolution 1920x1080
+  recording_resolution 1920x1080
+  password admin
+  var out == {default: out/distro.qcow2, from: args.out}
+  var shutdown == {default: kill, from: args.shutdown}
+  var user == {default: vmuser, from: args.user}
+
+  needs freebsd.iso, named "the media this stage boots from is already on disk"
+  step "create the empty disk"
+    disk == disk.qcow2
+    disk_gb == 128
+  step "boot the installer"
+    boot == true
+    iso == freebsd.iso
+    memory_mb == 8192
+    os == bsd
+    timeout == 1800
+  step "wait for the installer menu"
+    loop == {check: {from: pane, mode: text, name: menu_up, words: [[install], [live, system]], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, do: [{settle: 10}], max: 60, see: {name: pane}, until: {fact: menu_up}}
+  press Return, waiting 10s, named "welcome - Install is preselected"
+  press Return, waiting 8s, named "keymap - continue with the default"
+  step hostname
+    settle == 2
+    type == freebsd
+  press Return, waiting 8s, named "accept the hostname"
+  press Return, waiting 10s, named "installation type - packages, which is pkgbase"
+  step "offline, so pkgbase does not reboot before the chroot runs"
+    do == [{key: right, settle: 1}, {key: ret, settle: 10}]
+  settle 12s, named "partitioning - automatic ufs"
+  step "wait for the partitioning menu before choosing on it"
+    loop == {check: {from: partmenu, mode: text, name: part_showing, words: [guided, manual], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, do: [{settle: 6}], max: 25, see: {name: partmenu}, until: {fact: part_showing}}
+  step "choose auto ufs"
+    do == [{key: down, settle: 1}, {key: ret, settle: 10}]
+  press Return, waiting 10s, named "entire disk, not a shared partition"
+  press Return, waiting 10s, named "partition scheme - GPT, which is what makes this disk UEFI bootable"
+  step "wait for the partition editor"
+    loop == {check: {from: parted, mode: text, name: parted_showing, words: [finish, delete], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, do: [{settle: 6}], max: 25, see: {name: parted}, until: {fact: parted_showing}}
+  step "accept the partitioning"
+    do == [{key: tab, settle: 1}, {key: tab, settle: 1}, {key: tab, settle: 1}, {key: tab, settle: 1}, {key: tab, settle: 1}, {key: tab, settle: 1}, {key: ret, settle: 10}]
+  press Return, waiting 15s, named "commit the layout"
+  press Return, waiting 15s, named "distribution select - accept the default set"
+  # THE INSTALL ENDS BY ASKING FOR THE ROOT PASSWORD, AND THAT IS THE SIGNAL THE SCREEN GIVES.
+  #
+  # MEASURED ON RUN 44377971855, WHICH WAITED THE WHOLE 180 ATTEMPTS AND THEN FAILED:
+  #
+  #   status: failed step 20/62 "wait for the install to finish"
+  #   error:  the loop ran 180 attempt(s) and the condition never held
+  #
+  # AND A SECOND RUN SHOWED THE OTHER HALF: the frame at 180 seconds was the package extractor at
+  # 90 of 320 files - "Extracting FreeBSD-kernel-generic-15.1". THIS MEDIUM INSTALLS 320 PACKAGES
+  # OFFLINE and 180 attempts of 15 seconds is 45 minutes, which is not enough for it on a runner.
+  # So the ceiling is 400 attempts (100 minutes) as well as the words being right.
+  #
+  # and the frame from that run is already at the NEXT step - bsdinstall's "Set root password"
+  # dialog, with "Please select a password for the system management account (root)". THE INSTALL
+  # HAD FINISHED AND THE WALK DID NOT NOTICE, because the words it waited for ("installation
+  # completed", "console") never appear on this screen: bsdinstall goes straight to the account
+  # dialog, and the next step in this file types the password into it.
+  #
+  # SO THE DIALOG'S OWN TITLE IS AN ACCEPTED ANSWER. It is what the very next step assumes, so a
+  # loop that ends here is a loop that agrees with the file.
+  step "wait for the install to finish"
+    # THE REGION IS THE DIALOG, BECAUSE A WHOLE FRAME AT SCALE 3 LOSES ITS TEXT.
+    #
+    # MEASURED on the frame from run 44401975665: cropping the dialog and enlarging it 4x reads
+    # "Please select a password for the system management account (root) / Password / Repeat
+    # password" perfectly, while the WHOLE 1920x1080 frame at the default scale 3 reads exactly
+    #
+    #	tesseract: FreeBSD Installer
+    #
+    # and nothing else - 5760x3240 is past the point where the page segmenter finds the small grey
+    # body text inside a large blue field. So the loop waited 100 minutes on a screen that had been
+    # showing the dialog the whole time, and every word it looked for was on it.
+    #
+    # `rect` covers the dialog box; `scale: 4` is the enlargement that was measured to work.
+    loop == {check: {from: done, mode: text, name: finished, words: [[root, password], [please, select, a, password], [installation, completed], [system, management, account], [manual, configuration]], rect: [700, 420, 1200, 640], rect_at: [1920, 1080], scale: 4}, do: [{settle: 15}], max: 400, see: {name: done}, until: {fact: finished}}
+  step "the root password - first field"
+    settle == 2
+    type == '{{ password }}'
+  press tab, waiting 1s, named "the root password - tab to the second field"
+  step "the root password - second field"
+    settle == 2
+    type == '{{ password }}'
+  step "skip the root password pane"
+    do == [{key: tab, settle: 1}, {key: tab, settle: 1}, {key: right, settle: 1}, {key: ret, settle: 8}]
+  press Return, waiting 15s, named "network - auto, which is the interface menu's default button"
+  press Return, waiting 6s, named "time zone - the region list opens on UTC, which is the first entry"
+  press Return, waiting 4s, named "time zone - the date box, skipped"
+  press Return, waiting 4s, named "time zone - the time box, skipped"
+  press Return, waiting 6s, named "services - sshd is already ticked, so accept the list"
+  press Return, waiting 6s, named "hardening - nothing to hide on a throwaway guest, so accept"
+  press Return, waiting 10s, named "firmware - skip it"
+  step "do not add a user here - the chroot shell does it"
+    do == [{key: left, settle: 1}, {key: ret, settle: 8}]
+  press Return, waiting 10s, named "final configuration - Finish is the first entry"
+  step "open a shell in the new system"
+    do == [{key: left, settle: 1}, {key: ret, settle: 12}]
+  step "prove the chroot shell is actually up before typing into it"
+    loop == {check: {from: chroot, mode: text, name: shell_up, words: [chroot], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, do: [{settle: 5}], max: 20, see: {name: chroot}, until: {fact: shell_up}}
+  step "set the root password"
+    do == [{settle: 10, type: "printf '%s' '{{ password }}' | pw usermod root -h0 && echo ROOT_PW_SET"}, {key: ret}]
+  step "create the account"
+    do == [{settle: 10, type: "pw useradd -n {{ user }} -m -s /bin/csh -G wheel"}, {key: ret}, {settle: 10, type: "printf '%s' '{{ password }}' | pw usermod {{ user }} -h0 && echo PASSWORD_SET"}, {key: ret}]
+  step "prove the account exists"
+    do == [{settle: 2, type: "pw usershow {{ user }}"}, {key: ret, settle: 4}]
+  step "allow password authentication over ssh"
+    do == [{settle: 3, type: "sed -i '' 's/^#*PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config"}, {key: ret, settle: 4}]
+  step "prove the setting took"
+    do == [{settle: 2, type: "grep -c '^PasswordAuthentication yes' /etc/ssh/sshd_config"}, {key: ret, settle: 4}]
+  step "make sure sshd starts at every boot"
+    do == [{settle: 2, type: "sysrc sshd_enable=YES"}, {key: ret, settle: 4}]
+  step "give the chroot a resolver, without which pkg cannot reach a mirror"
+    do == [{settle: 2, type: "echo cHJpbnRmICclc1xuJyAnbmFtZXNlcnZlciAxNzIuMzAuMC4xJyA+IC9ldGMvcmVzb2x2LmNvbmY= | base64 -d | sh"}, {key: ret, settle: 3}, {settle: 3, type: "cat /etc/resolv.conf"}, {key: ret, settle: 5}]
+  step "point pkg at the network repository, because the disc has no ports packages"
+    do == [{settle: 5, type: "echo cHJpbnRmICclc1xuJyAnRnJlZUJTRDogeycgJyAgdXJsOiAicGtnK2h0dHBzOi8vcGtnLkZyZWVCU0Qub3JnLyR7QUJJfS9xdWFydGVybHkiLCcgJyAgbWlycm9yX3R5cGU6ICJzcnYiLCcgJyAgZW5hYmxlZDogeWVzJyAnfScgPiAvdXNyL2xvY2FsL2V0Yy9wa2cvcmVwb3MvRnJlZUJTRC5jb25m | base64 -d | sh"}, {key: ret}, {settle: 3, type: "cat /usr/local/etc/pkg/repos/FreeBSD.conf"}, {key: ret}]
+  step "bootstrap pkg, which is a stub until it downloads itself once"
+    do == [{settle: 4, type: "env ASSUME_ALWAYS_YES=yes pkg bootstrap -f"}, {key: ret, settle: 60}, {settle: 3, type: "pkg -vv"}, {key: ret, settle: 6}]
+  step "install the desktop, sudo and their packages while this shell is root"
+    do == [{settle: 4, type: "env ASSUME_ALWAYS_YES=yes pkg install -y sudo xorg xf86-video-scfb xf86-input-libinput xfce lightdm lightdm-gtk-greeter"}, {key: ret, settle: 60}, {settle: 3, type: "sh -c 'i=0; while [ $i -lt 60 ]; do pkg info xfce >/dev/null 2>&1 && pkg info sudo >/dev/null 2>&1 && break; sleep 10; i=$((i+1)); done; pkg info sudo xfce xorg lightdm 2>&1 | grep -E \"^(Name|Version)\" | head -8'"}, {key: ret, settle: 40}]
+  step "prove the desktop actually landed"
+    do == [{settle: 3, type: "ls -l /usr/local/share/xsessions/xfce.desktop /usr/local/bin/Xorg /usr/local/sbin/lightdm"}, {key: ret, settle: 5}, {settle: 2, type: "ls -l /usr/local/bin/sudo"}, {key: ret, settle: 4}]
+  step "let the account escalate without a password"
+    do == [{settle: 2, type: "printf '%s\\n' '{{ user }} ALL=(ALL) NOPASSWD:ALL' > /usr/local/etc/sudoers.d/90-{{ user }}"}, {key: ret, settle: 3}, {settle: 2, type: "chmod 0440 /usr/local/etc/sudoers.d/90-{{ user }}"}, {key: ret, settle: 3}]
+  step "prove sudo works, as the account will use it"
+    do == [{settle: 3, type: "su -m {{ user }} -c 'sudo -n id -un'"}, {key: ret, settle: 6}]
+  step "install the guest agent, which is what lets the host shut this machine down"
+    do == [{settle: 4, type: "env ASSUME_ALWAYS_YES=yes pkg install -y qemu-guest-agent"}, {key: ret, settle: 45}, {settle: 3, type: "sh -c 'i=0; while [ $i -lt 40 ]; do pkg info qemu-guest-agent >/dev/null 2>&1 && break; sleep 5; i=$((i+1)); done; pkg info qemu-guest-agent 2>&1 | grep -E \"^(Name|Version)\"'"}, {key: ret, settle: 20}]
+  step "prove the guest agent's device and enable it at every boot"
+    do == [{settle: 2, type: "sysrc qemu_guest_agent_enable=YES"}, {key: ret, settle: 4}, {settle: 2, type: "ls /usr/local/bin/qemu-ga /usr/local/etc/rc.d/qemu-guest-agent"}, {key: ret, settle: 4}, {settle: 2, type: "grep qemu_guest_agent /etc/rc.conf"}, {key: ret, settle: 4}]
+  step "tell Xorg to draw through the kernel framebuffer"
+    do == [{settle: 1, type: "mkdir -p /usr/local/etc/X11/xorg.conf.d"}, {key: ret, settle: 2}, {settle: 2, type: "sh -c 'printf \"%s\\n\" \"Section \\\"Device\\\"\" \"    Identifier \\\"Card0\\\"\" \"    Driver \\\"scfb\\\"\" \"EndSection\" > /usr/local/etc/X11/xorg.conf.d/10-scfb.conf'"}, {key: ret, settle: 3}, {settle: 2, type: "cat /usr/local/etc/X11/xorg.conf.d/10-scfb.conf"}, {key: ret, settle: 4}]
+  step "enable the desktop at boot"
+    do == [{settle: 2, type: "sysrc dbus_enable=YES"}, {key: ret, settle: 3}, {settle: 2, type: "sysrc lightdm_enable=YES"}, {key: ret, settle: 3}, {settle: 2, type: "sysrc devfs_system_ruleset=desktop"}, {key: ret, settle: 3}]
+  step "log in to the desktop automatically"
+    do == [{settle: 3, type: "sh -c 'printf \"%s\\n\" \"[Seat:*]\" \"greeter-session=lightdm-gtk-greeter\" \"autologin-user={{ user }}\" \"session-wrapper=/usr/local/etc/lightdm/Xsession\" \"autologin-user-timeout=0\" \"user-session=xfce\" > /usr/local/etc/lightdm/lightdm.conf'"}, {key: ret, settle: 4}, {settle: 2, type: "cat /usr/local/etc/lightdm/lightdm.conf"}, {key: ret, settle: 4}]
+  step "let the account reach the display and the video devices"
+    do == [{settle: 2, type: "pw groupmod video -m {{ user }}"}, {key: ret, settle: 4}]
+  step "flush the writes before anything else"
+    do == [{settle: 3, type: sync}, {key: ret, settle: 20}, {settle: 3, type: sync}, {key: ret, settle: 20}]
+  step "prove the disk is the filesystem this file asked for"
+    do == [{settle: 3, type: "sh -c 'df -h / | tail -1; zpool list 2>&1 | head -2'"}, {key: ret, settle: 6}]
+  step "make the installed system talk on the serial console"
+    do == [{settle: 3, type: "printf '%s\\n' 'console=\"comconsole,vidconsole\"' 'boot_multicons=\"YES\"' 'boot_serial=\"YES\"' 'comconsole_speed=\"115200\"' > /boot/loader.conf"}, {key: ret, settle: 4}, {settle: 2, type: "cat /boot/loader.conf"}, {key: ret, settle: 4}]
+  step "give ttyu0 a login prompt, or the console is readable but not usable"
+    do == [{settle: 3, type: "awk 'BEGIN{OFS=\"\\t\"} /^ttyu0/{print \"ttyu0\",\"\\\"/usr/libexec/getty std.115200\\\"\",\"vt100\",\"on\",\"secure\"; next} {print}' /etc/ttys > /tmp/ttys.new && cp /tmp/ttys.new /etc/ttys"}, {key: ret, settle: 4}]
+  step "leave the shell, which finishes the install"
+    do == [{settle: 5, type: exit}, {key: ret, settle: 60}]
+  settle 120s, named "wait for the installer to unmount the disk"
+  step "stop the machine"
+    shutdown == '{{ shutdown }}'
+    timeout == 300
+  step "publish the disk"
+    compress == '{{ out }}'

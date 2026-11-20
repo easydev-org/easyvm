@@ -7,6 +7,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/easydev-org/easyvm/internal/step"
 )
 
 // EVERY KEY CLAIMED HERE MUST HAVE A BRANCH IN THE DISPATCHER.
@@ -168,12 +170,16 @@ func TestRunIsDispatchedBeforeExpect(t *testing.T) {
 	}
 	src := stripCommentsForTest(string(body))
 	runAt := strings.Index(src, `case s.Has("run"):`)
-	expectAt := strings.Index(src, `case s.Has("expect_any") || s.Has("expect"):`)
 	if runAt < 0 {
 		t.Fatal("no `case s.Has(\"run\")` in the dispatcher")
 	}
+	expectAt := strings.Index(src, `case s.Has("expect_any") || s.Has("expect"):`)
 	if expectAt < 0 {
-		t.Fatal("no `case s.Has(\"expect_any\")` in the dispatcher")
+		// THE BUG THIS TEST WAS WRITTEN FOR CANNOT RECUR: `expect:`/`expect_any:` no longer have a
+		// dispatch branch at all. They are an ARGUMENT of `run:`, checked by `doRun` after the
+		// typing, so there is no order to get wrong. If a branch comes back, the check below still
+		// applies - a step that both types and checks must reach `doRun` first.
+		return
 	}
 	if expectAt < runAt {
 		t.Fatal("`expect_any` is dispatched BEFORE `run`, so a step that both types and checks never " +
@@ -229,5 +235,68 @@ func TestDoRunsItsActions(t *testing.T) {
 	if !strings.Contains(exSrc, `case hasKey(s, "do"):`) {
 		t.Fatal("the dispatcher has no `do` branch, so the step reports `no implementation for this " +
 			"step's keys` - measured on macos-ssh")
+	}
+}
+
+// THE PANE MODEL WAS DECLARED AND NEVER DISPATCHED, AND THIS IS THE GUARD AGAINST IT COMING BACK.
+//
+// MEASURED: `macos/15/steps/sequoia.yaml` writes `when:` 16 times and `do:` 8 times. `runOne` had no
+// branch for either, so every one of those steps fell to the switch's last arm and returned
+// `no implementation for this step's keys` — the macOS Setup Assistant walk could not run at all, and
+// nothing said so because nothing ran it.
+//
+// A KEY THAT LOADS AND THEN FAILS AT RUN TIME IS WORSE THAN A REFUSED KEY: the file is accepted, the
+// stage starts, and the failure arrives twenty minutes in on the wrong step. So these two are named
+// here explicitly rather than trusting the general test above to notice a third time.
+func TestThePaneModelKeysAreDispatched(t *testing.T) {
+	for _, key := range []string{"when", "do"} {
+		found := false
+		for _, k := range ExecutableKeys() {
+			if k == key {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("`%s:` is not in ExecutableKeys, so `run` would refuse a file that writes it - "+
+				"and before this was added, the executor answered `no implementation for this "+
+				"step's keys` for the 24 steps of macOS's setup walk", key)
+		}
+	}
+}
+
+// AND THE KEYS THAT WERE ONLY EVER PART OF ITS STATE MACHINE ARE GONE.
+//
+// `once:`, `end:` and `stuck_after:` were the rest of the pane model: a pane answered at most once, a
+// file's end condition, and a stuck timer. Each was declared, documented, and never implemented.
+// Deleting them is the point of "no redundancy" — a vocabulary that keeps a word nobody can honour is
+// a vocabulary a reader has to check against the source rather than trust.
+//
+// `UNTIL_ANY:` WAS IN THIS LIST AND SHOULD NEVER HAVE BEEN. The commit that deleted it said it "had
+// no dispatcher branch", and `doUntil` had read it all along:
+//
+//	for _, set := range wordSetsOf(s, "until_any") {
+//		alternatives = append(alternatives, set)
+//	}
+//
+// so `until:` and `until_any:` were the two spellings the same function documents - one word-set,
+// or a list of alternatives - and deleting the name made a legal file unloadable while the code that
+// implemented it stayed. `macos/26/steps/setup.yaml` writes it once, on the step whose comment says
+// "the Setup Assistant is up, OR THIS STAGE FAILS".
+//
+// IT IS PUT BACK, AND THE TEST THAT DEMANDED IT STAY DELETED IS THE THING THAT WAS WRONG. A test is a
+// claim about the code; when the claim and the code disagree, the code is not automatically the one
+// that is broken.
+func TestTheDeadPaneStateMachineKeysAreGone(t *testing.T) {
+	for _, key := range []string{"once", "end", "stuck_after"} {
+		if _, ok := step.Keys[key]; ok {
+			t.Errorf("`%s:` is declared again. It was part of the pane state machine, it had no "+
+				"dispatcher branch, and no file uses it", key)
+		}
+	}
+	// AND `until_any:` IS THE ONE THAT IS NOT DEAD: `doUntil` reads it beside `until:`.
+	if _, ok := step.Keys["until_any"]; !ok {
+		t.Error("`until_any:` is not declared, and `doUntil` reads it: a file that spells the " +
+			"alternatives form is refused while the executor implements it")
 	}
 }

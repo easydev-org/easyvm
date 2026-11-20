@@ -1,6 +1,6 @@
 // Package adb speaks enough of Android Debug Bridge to run commands in a guest.
 //
-// WHY THIS EXISTS RATHER THAN A `platform-tools` BINARY
+// # WHY THIS EXISTS RATHER THAN A `platform-tools` BINARY
 //
 // The wire protocol is a handful of messages and one socket: CNXN to say hello, OPEN/WRTE/OKAY/CLSE
 // to run a command and read what it says. `platform-tools` is a 10 MiB download, an RSA key the

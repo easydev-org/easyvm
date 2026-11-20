@@ -201,16 +201,34 @@ func machineFromSteps(f *walk.File) (MachineSpec, []walk.Step, error) {
 			path := s.Get("disk")
 			gb, _ := s.Float("disk_gb", 0)
 			m.Disk = &DiskSpec{Path: path, GB: int(gb)}
-		case stepHasAny(s, "asset", "build", "generate"):
-			// ALL THREE ARE PREPARATION: a machine cannot start until its media exists, whether that
-			// media was downloaded, assembled or rendered.
+		case stepHasAny(s, "fetch", "asset", "build", "generate"):
+			// `fetch:` IS THE NAME; the other three are what the older files wrote. ALL FOUR ARE
+			// PREPARATION: a machine cannot start until its media exists, whether that media was
+			// downloaded, assembled or rendered.
+			// A STEP MAY WRITE THE KIND AS A STRING OR AS A MAPPING: `fetch: linux_iso` and
+			// `fetch: {kind: linux_iso, release: ubuntu}` are the same preparation, and only the
+			// second can carry the release and template beside it.
+			kind := firstOf(s, "fetch", "asset", "build", "generate")
+			release := s.Get("release")
+			template := s.Get("template")
+			if m, ok := s.Spec["fetch"].(map[string]any); ok {
+				if v, ok := m["kind"].(string); ok {
+					kind = v
+				}
+				if v, ok := m["release"].(string); ok {
+					release = v
+				}
+				if v, ok := m["template"].(string); ok {
+					template = v
+				}
+			}
 			m.Fetch = append(m.Fetch, FetchSpec{
-				Kind:     firstOf(s, "asset", "build", "generate"),
-				Release:  s.Get("release"),
-				Template: s.Get("template"),
+				Kind:     kind,
+				Release:  release,
+				Template: template,
 				Recovery: s.Get("recovery"),
 			})
-		case s.Has("require"):
+		case s.Has("needs"), s.Has("require"):
 			// `require:` IS PREPARATION THAT DOWNLOADS NOTHING, AND IT MUST NOT END THE SCAN.
 			//
 			// MEASURED, on a macOS 26 resume file whose first step is `require: [recovery.dmg]`:
@@ -276,16 +294,11 @@ func MachineSteps(m MachineSpec) []walk.Step {
 		}})
 	}
 	for _, f := range m.Fetch {
-		// THE KEY THE FILE USED IS NOT PRESERVED HERE, and it does not need to be: `doFetch` reads
-		// whichever of the three is present, so emitting `asset:` for everything is the same
-		// assembly with one spelling. A `machine:` block that wants to say `build:` says it in its
-		// own `fetch:` list and keeps that name through `fetchFrom`.
-		key := "asset"
-		if f.Kind == "opencore" {
-			key = "build"
-		} else if f.Kind == "answer_iso" {
-			key = "generate"
-		}
+		// ONE KEY, ONE SPELLING. This used to emit `asset:`, `build:` or `generate:` depending on
+		// the KIND, so a `machine:` block came out as three different vocabularies for one
+		// operation - and when those three were merged into `fetch:`, this function was emitting
+		// keys the vocabulary no longer accepts.
+		key := "fetch"
 		spec := map[string]any{"name": "prepare " + f.Kind, key: f.Kind}
 		if f.Release != "" {
 			spec["release"] = f.Release

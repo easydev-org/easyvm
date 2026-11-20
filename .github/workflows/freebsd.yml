@@ -34,7 +34,7 @@ on:
     inputs:
       disks_repository:
         description: "the ghcr repository that holds the disks"
-        default: "easydev-org/easyvm"
+        default: "easydev-org/easyvm-fork"
       from_tag:
         description: >-
           start from a PUBLISHED disk: bsd-freebsd-install or bsd-freebsd-ssh or bsd-freebsd-vm. Empty runs the whole chain. A fix to a later stage then costs that stage, not the entire bake.
@@ -73,7 +73,7 @@ jobs:
         [
           {
             "name": "bsd-freebsd-install",
-            "file": "bsd/freebsd/steps/install.yaml",
+            "file": "bsd/freebsd/steps/install.walk",
             "pull": "",
             "assets": ["iso-freebsd:freebsd.iso"],
             "out": "bsd-freebsd-install.qcow2",
@@ -94,7 +94,7 @@ jobs:
         [
           {
             "name": "bsd-freebsd-ssh",
-            "file": "bsd/freebsd/steps/ssh.yaml",
+            "file": "bsd/freebsd/steps/ssh.walk",
             "pull": "bsd-freebsd-install",
             "out": "bsd-freebsd-ssh.qcow2",
             "publish": "bsd-freebsd-ssh",
@@ -114,7 +114,7 @@ jobs:
         [
           {
             "name": "bsd-freebsd-vm",
-            "file": "bsd/freebsd/steps/vm-configure.yaml",
+            "file": "bsd/freebsd/steps/vm-configure.walk",
             "pull": "bsd-freebsd-ssh",
             "out": "bsd-freebsd-vm.qcow2",
             "publish": "bsd-freebsd-vm",

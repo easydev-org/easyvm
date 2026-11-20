@@ -48,7 +48,7 @@ func TestAGoneMachineIsNotCountedAsADroppedTick(t *testing.T) {
 // exist is an artifact a person has to open to discover, and the stage had already reported success.
 func TestEncodingRefusesWhenNoFrameWasCaptured(t *testing.T) {
 	r := &recorder{}
-	err := r.encode(filepath.Join(t.TempDir(), "out.mp4"), func(string) {})
+	err := r.encode(filepath.Join(t.TempDir(), "out.mp4"), 1920, 1080, func(string) {})
 	if err == nil {
 		t.Fatal("`encode` accepted an empty frame list, so a stage with no recording would upload " +
 			"whatever the artifact step found")
@@ -97,11 +97,16 @@ func (d *fakeFrameDriver) Machine() Machine     { return recordingMachine{runnin
 
 type recordingMachine struct{ running bool }
 
-func (m recordingMachine) Boot(BootSpec) error { return nil }
+func (m recordingMachine) Boot(BootSpec) error              { return nil }
 func (m recordingMachine) Stop(string, time.Duration) error { return nil }
-func (m recordingMachine) Reboot() error       { return nil }
-func (m recordingMachine) IsRunning() bool     { return m.running }
-func (m recordingMachine) ReleaseDiff() error  { return nil }
+func (m recordingMachine) Reboot() error                    { return nil }
+func (m recordingMachine) IsRunning() bool                  { return m.running }
+func (m recordingMachine) ReleaseDiff() error               { return nil }
+func (m recordingMachine) PressPowerButton() error          { return nil }
+func (m recordingMachine) ResetMachine() error              { return nil }
+func (m recordingMachine) GuestAgent(string, map[string]any) (string, error) {
+	return "", nil
+}
 
 // noMachineDriver has no machine at all, which is the state every driver is in before a `boot:`.
 type noMachineDriver struct{ fakeFrameDriver }

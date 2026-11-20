@@ -1,0 +1,230 @@
+walkthrough "windows 11 - install to a desktop"
+  resolution 1920x1080
+  recording_resolution 1920x1080
+  user vmuser
+  password admin
+  var boot_timeout == {default: "1800", from: args.boot_timeout}
+  var computer_name == {default: sandbox, from: args.computer_name}
+  var out == {default: out/windows11.qcow2, from: args.out}
+  var user == {default: vmuser, from: args.user}
+  var windows_image_index == {default: "6", from: args.windows_image_index}
+  header ssh_port == 2222
+
+  needs windows.iso virtio-win.iso, named "the media this stage boots from is already on disk"
+  step "create the empty disk"
+    disk == disk.qcow2
+    disk_gb == 128
+  step "build the answer CD"
+    fetch == answer_iso
+    template == windows/11/answer/Autounattend.xml
+  step "boot the installer"
+    answer_cd == answer.iso
+    boot == true
+    driver_cd == virtio-win.iso
+    iso == windows.iso
+    os == windows
+    # FOUR GIBABYTES IS THE ENGINE'S DEFAULT AND IT IS NOT ENOUGH FOR WHAT WINDOWS DOES AFTER THE
+    # INSTALL. MEASURED across two runs that both sat on the same frame for the whole budget:
+    #
+    #	Please keep your computer on. Your computer may restart a few times.
+    #
+    # with `Select C:\WINDOWS\SYSTEM32\netsh.exe` over it, `ratio=0.1x` and `sat=+0.07` - a screen
+    # that never changed for 90 and then 120 minutes. The console log shows the boot loader handing
+    # over to Windows Boot Manager and nothing after it, so the guest is running and its first-boot
+    # work is not finishing.
+    #
+    # EIGHT IS WHAT THIS GUEST'S OWN STAGES ASK FOR: `ssh` and `vm-configure` both boot with the
+    # default and only need sshd, while the install is the one that runs the OOBE.
+    memory_mb == 12288
+    timeout == 1800
+  step "wait for the firmware to offer the DVD"
+    blind_after == 60
+    timeout == 180
+    until == DVD-ROM
+    from == console
+  press Escape, waiting 1s, named "press a key so the loader takes it"
+  press Escape, waiting 1s, named "press it again, because the prompt is emitted more than once"
+  press Escape, waiting 2s, named "and once more, for a loader that was not listening yet"
+  step "Setup is on screen"
+    loop == {check: {from: screen, mode: text, name: done, words: [Windows, Setup], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, do: [{settle: 5}], max: 180, see: {name: screen}, until: {fact: done}}
+  # NINETY MINUTES WAS NOT ENOUGH ON A GITHUB RUNNER, AND THE FRAME SAYS WHY.
+  #
+  # MEASURED ON RUN 44377939172, which spent its whole 1h30m and failed:
+  #
+  #   wait for the desktop: no windows desktop within 1h30m0s; drop=+20.7 (need 15)
+  #     ratio=0.1x (need 2) sat=+0.07 (need 0.10) on a 1920x1080 frame
+  #
+  # THAT FRAME IS "Please keep your computer on. Your computer may restart a few times." - the
+  # installer's own OOBE, still posting. `desktop: windows` is RIGHT to refuse it: a black screen with
+  # one line of white text has no variance and no saturation, which is exactly the two measurements
+  # that failed.
+  #
+  # SO THE BUDGET IS THE THING THAT WAS WRONG, not the predicate. Two hours is the same order as the
+  # install above it (`timeout: 1800` for the boot, then this), and a leg whose guest is slow loses
+  # the whole run to a number chosen before one had been measured on this runner.
+  # THE OOBE STOPS DEAD ON ITS OWN REBOOT NOTICE UNLESS SOMETHING TOUCHES THE KEYBOARD.
+  #
+  # MEASURED TWICE. Run 44377939172 spent its whole 1h30m and run 44410380340 its whole 2h on the
+  # same frame:
+  #
+  #	Please keep your computer on.
+  #	Your computer may restart a few times.
+  #
+  # with a `Select C:\WINDOWS\SYSTEM32\netsh.exe` window over it. The measurements the predicate
+  # uses are on that frame - ratio=0.1x and sat=+0.07, both under what a desktop needs - so
+  # `desktop: windows` was RIGHT every time it refused, for two hours.
+  #
+  # `desktop:` IS A PASSIVE POLL: it takes a frame and decides, and nothing in it presses a key. The
+  # OOBE waits for one. So the keys come first, in a loop that is bounded and ends when the screen is
+  # no longer the notice - `until: {fact: ...}` is not usable here (no mode reports it), so the loop
+  # is a fixed number of nudges and `desktop:` still has the real timeout.
+  # THE PRESSES ARE FURTHER APART AND THERE ARE FEWER OF THEM, BECAUSE THE FIRST SET MEASURED NO
+  # EFFECT. Ten Returns twenty seconds apart, then two hours of the same frame: `netsh.exe` is
+  # sysprep's own window and it does not read the keyboard. A key pressed into a busy sysprep is at
+  # best ignored and at worst queued into whatever runs next.
+  #
+  # SO THEY ARE A GENTLE PERIODIC NUDGE - a minute apart, six of them - for the case where the OOBE
+  # really is waiting on the "press any key" line, and the memory above is the actual fix for the
+  # stall that was measured.
+  #
+  # AND SIX RETURNS INTO A RUNNING INSTALL IS SIX CHANCES TO PRESS SOMETHING THAT IS NOT A NUDGE.
+  # MEASURED ON RUN 44468093359, whose recording ends on this exact frame after 2h07m:
+  #
+  #	Installing Windows 11        54% complete
+  #	[ Windows 11 Setup ]  Are you sure you want to quit?   [Yes]  [No]
+  #
+  # The installer had reached 54% and was working, and the sixth Return landed on its `Cancel`
+  # button, which carries the FOCUS on that page. The "are you sure" dialog then sat there until
+  # the budget ran out. The nudge was written for an OOBE that waits on "press any key", and NOTHING
+  # IN IT COULD TELL THAT SCREEN FROM AN INSTALL THAT IS 54% DONE.
+  #
+  # AND THE ANSWER IS GATED ON THE DIALOG ITSELF, NOT ON THE PROGRESS LINE.
+  #
+  # THE FIRST ATTEMPT AT THIS GATE WAS `when_not: [complete]` AND IT FAILED FOR A REASON THAT IS IN
+  # THE ENGINE: `doUnless` treats an unreadable screen as an ERROR, because "the words are absent"
+  # and "nobody looked" are different facts. MEASURED ON RUN 44490615000, which died at step 10:
+  #
+  #	nudge the first boot along, once - unless: 0 word(s):
+  #	status: failed step 10/22 "nudge the first boot along, once"
+  #
+  # The band was the progress line and the screen at that moment was "We're getting a few things
+  # ready", which has none. So the gate refused, and a guard against cancelling an install became a
+  # way to lose one.
+  #
+  # `when:` READS, AND A MISSING READING IS A SKIP. That is the behaviour this needs: press the key
+  # ONLY when the quit dialog is on screen, and do nothing at all on every other frame.
+  #
+  # WHY THE DIALOG AND NOT "press any key": MEASURED on the 2h07m recording, where the progress line
+  # reads 28% at 200 s, 54% at 600 s, and 54% again at 1200, 1800, 2400 and 3000 - the install had
+  # stopped, and the quit dialog is up from about 520 s. The dialog is what has to be answered.
+  step "answer a quit dialog, if one is up"
+    key == Escape
+    rect == [820, 460, 1520, 660]
+    rect_at == [1920, 1080]
+    # SCALE 2, BECAUSE SCALE 1 DOES NOT READ THE WORD THIS GATE NEEDS. Read back from the recording:
+    # scale 1 gives "yeusureyouwantto au?" - no "quit" in it, so the gate would never open - and
+    # scale 2 gives "Are you sure you want to quit?". Escape is not Enter: on this page the focused
+    # control is `Cancel`, and Escape does not activate a focused button.
+    scale == 2
+    settle == 15
+    when == [quit]
+  # THE SAME ANSWER ONCE MORE, because a dialog that has been dismissed can come back: the first
+  # one appeared only because a stray Return had pressed Cancel, and no Return is sent any more.
+  step "answer it again, if it came back"
+    key == Escape
+    rect == [820, 460, 1520, 660]
+    rect_at == [1920, 1080]
+    scale == 2
+    settle == 15
+    when == [quit]
+  # THE DESKTOP IS DECIDED BY THE REFERENCE IMAGE, NOT BY THREE BRIGHTNESS THRESHOLDS.
+  #
+  # MEASURED ON THIS GUEST'S OWN RECORDINGS. `desktop: windows` wanted drop>=15, ratio>=2x and
+  # sat>=0.10 - three numbers within a few percent of each other - and the OOBE frames failed them
+  # with `ratio=0.1x sat=+0.07` for TWO HOURS while the console log showed Windows Boot Manager had
+  # started.
+  #
+  # THE SAME QUESTION, ASKED WITH A REFERENCE, SEPARATES CLEANLY. Measured on one ubuntu recording
+  # frame by frame against the reference that file ships:
+  #
+  #	 30s   similarity 0.0004   boot splash
+  #	 90s   similarity 0.0041   still splashing
+  #	120s   similarity 0.9909   the desktop
+  #	1600s  similarity 0.9767   the desktop, later
+  #
+  # "not a desktop" tops out at 0.0043 and "a desktop" bottoms out at 0.9669 - two orders of
+  # magnitude - where the thresholds gave 0.1x against a floor of 2.
+  #
+  # THE REFERENCE IS THE ONE THE `check:` BELOW ALREADY USES, so there is one picture of this desktop
+  # in the repository rather than two that could drift apart.
+  step "wait for the desktop"
+    desktop == windows
+    reference == reference/desktop.png
+    rect == [0, 0, 1920, 120]
+    rect_at == [1920, 1080]
+    range == [0.90, 1.0]
+    timeout == 7200
+  # THE DESKTOP IS THE PICTURE, NOT ONLY THE NUMBERS. `desktop:` decides on seven measurements -
+  # brightness drop, variance ratio, saturation - and several panes can share all seven. This step
+  # says the screen is THE ONE THIS FILE WAS MEASURED ON, by comparing pixels to a frame taken from
+  # this repository's own recording of this leg.
+  #
+  # 3% IS THE CEILING AND THE MEASUREMENT IS WHY: the same screen a second later differs by 0.5-0.9%,
+  # and two different screens by 98-100%, so the gap is three orders of magnitude wide.
+  # A FIRST LOGIN LEAVES THINGS OPEN THAT A DESKTOP DOES NOT HAVE LATER.
+  #
+  # MEASURED ON RUN 44341011692, which failed here at 0.7092 similar with the reference at 0.9700:
+  # the frame the walk captured had the START MENU open and a "Screen resolution" notification in the
+  # corner, and the reference - taken from this same leg's own recording - was the clean desktop.
+  # `desktop: windows` had passed because it decides on brightness, variance and saturation, and a
+  # menu over a wallpaper moves none of them past its thresholds.
+  #
+  # SO THE SCREEN IS SETTLED BEFORE IT IS COMPARED, which is the same reason every later step in this
+  # file starts with an Escape: the desktop is the state, the menu is the leftover.
+  # A CLICK ON THE WALLPAPER, NOT ONLY AN ESCAPE. Escape closes the START PANEL; the notification
+  # in the corner is a separate window and the click is what dismisses it - measured on the frame
+  # this comparison rejected, where both were up at once.
+  click "the desktop, to dismiss anything a first login left open" at 960 540, waiting 3s, named "click the empty desktop"
+  press Escape, waiting 2s, named "and an Escape in case a panel was the thing that took it"
+  # A NOTIFICATION IS NOT DISMISSED BY A CLICK ON THE WALLPAPER. MEASURED ON RUN 44377939172, after
+  # the click and the Escape had been added: 0.9088 similar, and the frame is a clean Windows desktop
+  # with ONE "Settings / Searching for Display Driver" panel in the bottom-right corner. The click
+  # went to the desktop; a toast belongs to the shell.
+  #
+  # IT EXPIRES ON ITS OWN in about thirty seconds, which is what this settles for. Waiting is the
+  # honest fix: the alternative is a reference that contains a transient toast, and then the compare
+  # is measuring how fast the runner is rather than whether the desktop came up.
+  settle 45s
+  step "the desktop is the one this file was written against"
+    see == shot
+  step "the screen is the one this file was written against"
+    # THE TASKBAR IS EXCLUDED, BECAUSE EVERY RUN PUTS DIFFERENT ICONS IN IT.
+    #
+    # MEASURED: two clean Windows desktops from two runs score 0.9555 over the whole frame and
+    # 0.9999 over everything above the taskbar. The wall paper, the two desktop icons and the
+    # notification area are identical; the PINNED ICONS AND THE CLOCK ARE NOT - one run had Firefox
+    # and Explorer pinned, the other did not, and the clocks read 9:52 and 11:13.
+    #
+    # A COMPARISON THAT FAILS ON A CHANGING CLOCK IS MEASURING THE CLOCK. What this step is for is
+    # "the desktop came up and it is this system", and the region above the taskbar says exactly that
+    # while the taskbar says what was pinned at the time.
+    #
+    # `rect` as a PIXEL pair with `rect_at`, rather than a fraction, because 1000/1080 is the edge of
+    # a taskbar that is 40 px tall at this resolution - a fraction would move with the guest's size
+    # and the taskbar's edge is what has to be excluded.
+    check == {name: matched, must: true, from: shot, mode: like, rect: [0, 0, 1920, 1000], rect_at: [1920, 1080], reference: reference/desktop.png, range: [0.97, 1.0]}
+  step "reboot into the installed system"
+    boot == true
+    os == windows
+    timeout == 900
+  step "the installed system reaches a desktop"
+    desktop == windows
+    timeout == 1800
+  step "shut the installed system down"
+    acpi == power
+    timeout == 300
+  step "wait for the machine to stop"
+    wait_until == stopped
+    timeout == 300
+  step "publish the disk"
+    compress == '{{ out }}'

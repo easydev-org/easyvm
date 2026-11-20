@@ -1,0 +1,95 @@
+walkthrough "windows 11 - ssh"
+  resolution 1920x1080
+  recording_resolution 1920x1080
+  user vmuser
+  password admin
+  var boot_timeout == {default: "900", from: args.boot_timeout}
+  var out == {default: out/windows11-ssh.qcow2, from: args.out}
+  var user == {default: vmuser, from: args.user}
+  header boot_disk == from_caller
+  header ssh_port == 2222
+
+  step "take the input disk"
+    disk == disk.qcow2
+  step "boot the disk"
+    boot == true
+    os == windows
+    # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
+    memory_mb == 12288
+    timeout == 900
+  step "wait for the desktop"
+    desktop == windows
+    timeout == '{{ boot_timeout }}'
+  press Escape, waiting 5s, named "wake the screen"
+  press Escape, waiting 3s, named "wake the screen again"
+  press meta_l+r, waiting 3s, named "open the run dialog"
+  step "type powershell"
+    settle == 2
+    type == powershell
+    type_gap == 0.15
+  press Return, waiting 14s, named "open powershell"
+  step "keep the screen on before ssh exists"
+    settle == 2
+    type == powercfg /change monitor-timeout-ac 0; powercfg /change monitor-timeout-dc 0; powercfg /change standby-timeout-ac 0; powercfg /change standby-timeout-dc 0; 'SCREEN=kept-on'
+    type_gap == 0.15
+  press Return, waiting 3s, named "run the screen setting"
+  step "install openssh"
+    settle == 2
+    type == winget install --id Microsoft.OpenSSH.Preview --exact --source winget --accept-source-agreements --accept-package-agreements --disable-interactivity; 'WINGET_EXIT=' + $LASTEXITCODE; 'WINGET_LOW=' + ($LASTEXITCODE -band 0xFF)
+    type_gap == 0.3
+  press Return, waiting 120s, named "run the install"
+  step "sshd starts automatically"
+    run == Set-Service sshd -StartupType Automatic; (Get-Service sshd).StartType
+    settle == 4
+    type_gap == 0.15
+  step "sshd takes passwords and port 22"
+    run == $f = Join-Path $env:ProgramData 'ssh/sshd_config'; Add-Content -Path $f -Value 'PasswordAuthentication yes'; (Select-String -Path $f -Pattern PasswordAuthentication).Line
+    settle == 4
+    type_gap == 0.15
+  step "sshd is running"
+    run == Start-Service sshd; (Get-Service sshd).Status
+    settle == 4
+    type_gap == 0.15
+  step "the firewall allows 22"
+    run == New-NetFirewallRule -Name sshd22 -DisplayName OpenSSH22 -Enabled True -Direction Inbound -Protocol TCP -Action Allow -LocalPort 22 -ErrorAction SilentlyContinue; Test-NetConnection localhost -Port 22 -InformationLevel Quiet
+    settle == 4
+    type_gap == 0.15
+  step "wait for sshd"
+    require_ssh == true
+    ssh_probe == echo ok
+    timeout == 600
+  step "do not blank the screen"
+    ssh == powershell -Command "powercfg /change monitor-timeout-ac 0; powercfg /change monitor-timeout-dc 0; powercfg /change standby-timeout-ac 0; powercfg /change standby-timeout-dc 0"
+    timeout == 120
+  step "no hibernation file"
+    ssh == powershell -Command "powercfg -h off"
+    timeout == 120
+  step "hold windows update"
+    ssh == powershell -Command "New-Item -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU' -Force | Out-Null; Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU' -Name NoAutoRebootWithLoggedOnUsers -Value 1 -Type DWord -Force; Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU' -Name NoAutoUpdate -Value 1 -Type DWord -Force"
+    timeout == 120
+  step "turn off restore points"
+    ssh == powershell -Command "Disable-ComputerRestore -Drive 'C:\' -ErrorAction SilentlyContinue"
+    timeout == 180
+  step "compact the component store"
+    ssh == DISM /Online /Cleanup-Image /StartComponentCleanup
+    timeout == 3600
+  step "prove the power settings took"
+    ssh == powershell -Command "$m = (powercfg /query SCHEME_CURRENT SUB_VIDEO VIDEOIDLE 2>$null | Select-String 'Current AC Power Setting').ToString().Split(':')[-1].Trim(); $s = (powercfg /query SCHEME_CURRENT SUB_SLEEP STANDBYIDLE 2>$null | Select-String 'Current AC Power Setting').ToString().Split(':')[-1].Trim(); 'MONITOR=' + $m + ' STANDBY=' + $s + ' HIBER=' + (Test-Path C:\hiberfil.sys)"
+    timeout == 180
+  step "prove sshd is automatic"
+    ssh == powershell -Command "(Get-Service sshd).StartupType"
+    timeout == 180
+  step "prove sshd is listening"
+    ssh == netstat -ano | findstr LISTENING | findstr ":22 "
+    timeout == 180
+  step "prove the account can log in"
+    ssh == whoami
+    timeout == 60
+  step "prove the build"
+    ssh == powershell -Command "[System.Environment]::OSVersion.Version.ToString()"
+    timeout == 180
+  step "stop the machine"
+    shutdown == kill
+    timeout == 120
+  step "publish the disk"
+    compress == '{{ out }}'

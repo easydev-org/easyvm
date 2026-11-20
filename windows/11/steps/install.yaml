@@ -1,4 +1,7 @@
 name: windows 11 - install to a desktop
+recording_resolution:
+- 1920
+- 1080
 resolution:
 - 1920
 - 1080

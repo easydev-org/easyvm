@@ -49,6 +49,83 @@ type State struct {
 	SSH string `json:"ssh,omitempty"`
 	// Started is when this run began.
 	Started time.Time `json:"started"`
+
+	// --- THE FACTS A STEP MAY WAIT ON ------------------------------------------------
+	//
+	// EVERY ONE OF THESE IS ALSO A `wait_until:` CONDITION, and that is why they are in the state
+	// rather than computed where they are used: a file that waits needs the same answer a person
+	// reading `/api/state` does, and two implementations of "is sshd up" is how they come to disagree.
+	//
+	// A NIL POINTER MEANS "NOT ASKED YET OR NOT APPLICABLE" - there is no machine, so there is no
+	// qemu to be running. The alternative, a zero value, cannot tell "stopped" from "never started".
+	QEMU *QEMUState `json:"qemu,omitempty"`
+	// SSH is whether sshd accepted a connection, not whether the port is forwarded.
+	SSHReady *bool `json:"ssh_ready,omitempty"`
+	// QGA is whether the guest agent answered `guest-ping`.
+	QGAReady *bool `json:"qga_ready,omitempty"`
+	// Console is the serial log's own state.
+	Console *ConsoleState `json:"console,omitempty"`
+	// Disk is the disk this machine runs on, when there is one.
+	Disk *DiskState `json:"disk,omitempty"`
+	// Recording is whether a sampler is writing frames.
+	Recording *bool `json:"recording,omitempty"`
+	// Share is whether the HTTP share answers.
+	ShareReady *bool `json:"share_ready,omitempty"`
+	// Frame is the last screendump this daemon knows about.
+	Frame *FrameState `json:"frame,omitempty"`
+
+	// Guest is the highest-order thing a walkthrough can wait for: did the guest finish starting?
+	// It is derived, not measured - `booting` until the framebuffer changes size, then `up`.
+	Guest *GuestState `json:"guest,omitempty"`
+}
+
+// QEMUState is the machine process.
+type QEMUState struct {
+	Running bool `json:"running"`
+	// PID is the process's own pid, or 0 when nothing runs.
+	PID int `json:"pid,omitempty"`
+	// Phase is the daemon's slot phase: absent, starting, running, stopping.
+	Phase string `json:"phase"`
+}
+
+// ConsoleState is the guest's serial log.
+type ConsoleState struct {
+	// Path is where the log is, on the host.
+	Path string `json:"path,omitempty"`
+	// Bytes is how big it is now, which is what "is it still being written" needs.
+	Bytes int64 `json:"bytes"`
+	// IdleSeconds is how long since it last grew. A console that has stopped is the only evidence
+	// a boot with no prompt offers.
+	IdleSeconds float64 `json:"idle_seconds"`
+}
+
+// DiskState is the file the machine writes to.
+type DiskState struct {
+	Path string `json:"path,omitempty"`
+	// AllocatedMB is what the qcow2 has actually written, not its virtual size. An install grows
+	// this; a disk that has stopped growing is an install that has stopped.
+	AllocatedMB int64 `json:"allocated_mb"`
+	// GrowRateMBps is how fast it grew over the last sample, 0 when it is quiet.
+	GrowRateMBps float64 `json:"grow_rate_mbps"`
+}
+
+// FrameState is the last screendump.
+type FrameState struct {
+	Width  int `json:"width"`
+	Height int `json:"height"`
+	// AgeSeconds is how long since the frame was captured.
+	AgeSeconds float64 `json:"age_seconds"`
+	// Changed is whether the pixels differ from the previous frame - the cheapest "is anything
+	// happening" there is, and the one a blanked screen and a frozen guest disagree about.
+	Changed bool `json:"changed"`
+}
+
+// GuestState is the boot, as a name rather than a measurement.
+type GuestState struct {
+	// Phase is booting, or up.
+	Phase string `json:"phase"`
+	// Since is how long it has been in that phase.
+	Since float64 `json:"since_seconds"`
 }
 
 type Request struct {

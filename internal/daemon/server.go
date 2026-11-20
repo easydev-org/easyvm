@@ -24,9 +24,11 @@ package daemon
 import (
 	"errors"
 	"fmt"
+	"github.com/easydev-org/easyvm/internal/journal"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -57,7 +59,10 @@ func SocketPath(work string) string {
 
 // Daemon is the owner.
 type Daemon struct {
-	mu sync.Mutex
+	// jdb is the run's journal: the structured record of every step and every external call, which
+	// `/api/journal` reads. Nil until a run has opened one.
+	jdb *journal.DB
+	mu  sync.Mutex
 	// st is the current state, guarded by mu.
 	st State
 	// ex is the executor of the run in progress, nil when idle.
@@ -70,6 +75,9 @@ type Daemon struct {
 	shutdown chan struct{}
 	// work is this daemon's directory: its socket, its frames and its disks.
 	work string
+	// lastProbe is the newest ssh and guest-agent answer. See probe.go: measuring them inside
+	// `/api/state` made every poll slower than the poller's own timeout on a real run.
+	lastProbe probeState
 
 	// --- THE ONE MACHINE ---------------------------------------------------------------
 	//
@@ -404,6 +412,12 @@ func (d *Daemon) Serve(opts ServeOptions) error {
 	}
 	defer lock.Release()
 
+	// THE PROBES RUN BESIDE THE DAEMON, NOT INSIDE A REQUEST. See probe.go for the measurement: a
+	// snapshot that asked them made every `/api/state` slower than the poller's own timeout.
+	probesStop := make(chan struct{})
+	defer close(probesStop)
+	go d.runProbes(probesStop)
+
 	// SIGTERM STOPS THE MACHINE AND THE DAEMON, in that order, so a container stop does not leave
 	// qemu behind holding /dev/kvm.
 	sigs := make(chan os.Signal, 1)
@@ -512,13 +526,17 @@ func (d *Daemon) handle(req Request) Response {
 		if err != nil {
 			return Response{OK: false, Error: err.Error()}
 		}
-		return d.withQMP("click", func(c *qmp.Conn) error { return c.Click(x, y) })
+		// THROUGH THE DRIVER'S OWN METHOD, NOT A QMP CALL, so the click is AUDITED. The driver is the
+		// one place a pointer press is recorded; a `withQMP` call here would send the event and leave
+		// no trace of it, which is how a person's own clicks came to be missing from the record of
+		// their own run.
+		return d.withDriver("click", func(drv *Driver) error { return drv.Click(x, y) })
 	case protocol.CommandDouble:
 		x, y, err := xyOf("double-click", req)
 		if err != nil {
 			return Response{OK: false, Error: err.Error()}
 		}
-		return d.withQMP("double-click", func(c *qmp.Conn) error { return c.DoubleClick(x, y) })
+		return d.withDriver("double-click", func(drv *Driver) error { return drv.DoubleClick(x, y) })
 	case protocol.CommandKey:
 		if req.Key == "" {
 			return Response{OK: false, Error: "`key` needs a key, for example ret or ctrl+alt+t"}
@@ -527,9 +545,10 @@ func (d *Daemon) handle(req Request) Response {
 		if err != nil {
 			return Response{OK: false, Error: err.Error()}
 		}
-		return d.withQMP("key", func(c *qmp.Conn) error {
+		// AND THE SAME RULE FOR A KEY: `drv.Stroke` is where a keystroke is written down.
+		return d.withDriver("key", func(drv *Driver) error {
 			for _, stroke := range strokes {
-				if err := c.Stroke(stroke.Modifiers, stroke.Key); err != nil {
+				if err := drv.Stroke(stroke.Modifiers, stroke.Key); err != nil {
 					return err
 				}
 			}
@@ -677,6 +696,122 @@ func (d *Daemon) snapshot() State {
 	// THE CONSOLE HAS NO PORT OF ITS OWN ANY MORE. The page, its assets and the WebSocket are served
 	// by the daemon's listener on :8080, so a person opens the Service URL - there is no second port to
 	// report, and no URL that can point at something that is not listening.
+	st = d.withMeasuredFacts(st)
+	return st
+}
+
+// withMeasuredFacts adds the things a step may WAIT ON, measured now.
+//
+// THEY ARE MEASURED RATHER THAN REMEMBERED because every one of them is a question about the world
+// that changes without anybody telling this struct: a guest agent starts answering, a disk stops
+// growing, a console goes quiet. A cached boolean would be right at the moment it was set and wrong
+// afterwards, which is exactly the failure mode `share_mount:` had.
+//
+// EACH ONE IS CHEAP AND BOUNDED. Nothing here waits: `wait_until:` polls this snapshot, so a
+// measurement that blocked would make the wait unable to see its own condition.
+func (d *Daemon) withMeasuredFacts(st State) State {
+	// THE PROBED FACTS ARE REPORTED WHATEVER THE MACHINE'S STATE IS. They are the last observation,
+	// and `probeOnce` CLEARS them the moment there is no machine - so a stopped guest shows nil
+	// rather than the previous one's success, which is what keeps `wait_until: ssh` honest.
+	st.SSHReady = d.lastProbe.sshAnswer()
+	st.QGAReady = d.lastProbe.qgaAnswer()
+
+	slot := d.machine
+	if slot == nil || slot.driver == nil {
+		// NO MACHINE IS NOT "EVERYTHING IS FALSE". A nil pointer says "not applicable", which is
+		// what lets `wait_until: ssh` refuse a file that never booted instead of waiting 30 minutes
+		// for a port that could never open.
+		return st
+	}
+	drv := slot.driver
+
+	// --- qemu -----------------------------------------------------------------------------
+	phase := "absent"
+	running := false
+	pid := 0
+	if m := drv.Machine(); m != nil {
+		running = m.IsRunning()
+		if running {
+			phase = "running"
+		} else {
+			phase = "stopping"
+		}
+	}
+	st.QEMU = &protocol.QEMUState{Running: running, PID: pid, Phase: phase}
+
+	// --- the console ----------------------------------------------------------------------
+	path := run.ConsolePath(d.work)
+	var size int64
+	var idle float64
+	if fi, err := os.Stat(path); err == nil {
+		size = fi.Size()
+		idle = time.Since(fi.ModTime()).Seconds()
+	}
+	st.Console = &protocol.ConsoleState{Path: path, Bytes: size, IdleSeconds: idle}
+
+	// --- the disk -------------------------------------------------------------------------
+	if m := drv.Machine(); m != nil {
+		if dsk, ok := m.(interface{ Disk() string }); ok {
+			if p := dsk.Disk(); p != "" {
+				mb := int64(0)
+				if fi, err := os.Stat(p); err == nil {
+					mb = fi.Size() / (1 << 20)
+				}
+				st.Disk = &protocol.DiskState{Path: p, AllocatedMB: mb}
+			}
+		}
+	}
+
+	// --- ssh and qga, FROM A BACKGROUND PROBE AND NEVER FROM THIS CALL --------------------
+	//
+	// MEASURED: PROBING HERE BROKE `/api/state` ON A REAL RUN. `log-stream` polls it every ten
+	// seconds, and a probe that waited - a TCP dial that could take two seconds, a guest-agent
+	// handshake that could take sixty - made every request slower than the poller's own timeout:
+	//
+	//	FAILED: GET http://127.0.0.1:8080/api/state: context deadline exceeded
+	//
+	// repeated for the whole install, so the run could not be watched at all.
+	//
+	// A SNAPSHOT MUST BE INSTANT. What it reports is a FACT SOMEBODY ELSE LAST OBSERVED, with the age
+	// of that observation beside it - `probeTicker` refreshes it, and a caller that needs the current
+	// answer is a `wait_until:` step, which polls this same state.
+	// --- recording -----------------------------------------------------------------------
+	recording := false
+	if rec, ok := drv.(interface{ Recording() bool }); ok {
+		recording = rec.Recording()
+	}
+	st.Recording = &recording
+
+	// --- the share -----------------------------------------------------------------------
+	//
+	// IT IS ALWAYS ON NOW, so this is a fact about the DIRECTORY rather than about a server: a share
+	// whose directory does not exist answers 503, and a step that waits for it would wait forever.
+	shareUp := false
+	if sv, ok := drv.(interface{ ShareDir() string }); ok {
+		shareUp = sv.ShareDir() != ""
+	}
+	st.ShareReady = &shareUp
+
+	// --- the last frame, and the guest phase it implies ------------------------------------
+	//
+	// A GUEST IS `up` WHEN THE FRAMEBUFFER HAS SETTLED AT A DESKTOP SIZE. The console is not enough:
+	// a guest with `-serial null` writes nothing and one that is installing writes constantly, so the
+	// console alone cannot tell "still booting" from "working". The frame size is the boot's actual
+	// milestone - the firmware's mode is small and the desktop's is not.
+	booted := "booting"
+	if f, err := drv.Frame(); err == nil {
+		w, h := f.Size()
+		age := 0.0
+		if fi, err := os.Stat(f.Path()); err == nil {
+			age = time.Since(fi.ModTime()).Seconds()
+		}
+		st.Frame = &protocol.FrameState{Width: w, Height: h, AgeSeconds: age}
+		if w >= 800 && h >= 600 {
+			booted = "up"
+		}
+	}
+	st.Guest = &protocol.GuestState{Phase: booted, Since: 0}
+
 	return st
 }
 
@@ -695,11 +830,25 @@ var (
 // what does the state look like now. A browser polling `status` while clicking must not be told a
 // click worked when there was no machine to click.
 func (d *Daemon) withQMP(what string, op func(*qmp.Conn) error) Response {
-	conn, err := d.interactiveConn()
+	// THE COMMAND GOES THROUGH THE DRIVER'S REPAIR, NOT THROUGH A CONNECTION TAKEN AND USED ONCE.
+	//
+	// MEASURED on the pod: `api/state` reported a frame captured 0.2 seconds earlier - the recorder's
+	// sampler was working - while `POST /api/command {"command":"key"}` answered `the qmp connection
+	// is closed`, every time. Both use the same `*Driver` and the same one connection; the sampler
+	// recovers through `qmpRetry` and this path did not, because `interactiveConn` handed out the
+	// cached connection and the command ran on it exactly once.
+	err := d.withMachine(func(drv run.Driver) error {
+		concrete, ok := drv.(*Driver)
+		if !ok {
+			return fmt.Errorf("this driver does not expose QMP")
+		}
+		if concrete.audit != nil {
+			concrete.audit.setOrigin(journal.OriginAPI)
+			defer concrete.audit.setOrigin(journal.OriginWalk)
+		}
+		return concrete.QMPCommand(op)
+	})
 	if err != nil {
-		return Response{OK: false, Error: err.Error()}
-	}
-	if err := op(conn); err != nil {
 		return Response{OK: false, Error: fmt.Sprintf("%s: %v", what, err)}
 	}
 	st := d.snapshot()
@@ -708,11 +857,20 @@ func (d *Daemon) withQMP(what string, op func(*qmp.Conn) error) Response {
 
 // withDriver is `withQMP` for the operations that need the DRIVER rather than the connection -
 // `type` paces its keystrokes, and that loop lives on the driver.
+//
+// IT MARKS THE AUDIT AS `api` FOR THE DURATION, and that is what makes a person's own clicks
+// distinguishable from the file's. The driver's methods are the ONE place a keystroke is recorded, so
+// an HTTP click that went straight to QMP was not recorded at all - MEASURED: before this, a run's
+// journal held the walkthrough's 7 clicks and none of the operator's.
 func (d *Daemon) withDriver(what string, op func(*Driver) error) Response {
 	runErr := d.withMachine(func(drv run.Driver) error {
 		concrete, ok := drv.(*Driver)
 		if !ok {
 			return fmt.Errorf("this driver cannot type")
+		}
+		if concrete.audit != nil {
+			concrete.audit.setOrigin(journal.OriginAPI)
+			defer concrete.audit.setOrigin(journal.OriginWalk)
 		}
 		return op(concrete)
 	})
@@ -789,20 +947,67 @@ func (d *Daemon) screenshot() Response {
 		Screen: &Screen{Path: f.Path, Width: f.Width, Height: f.Height}}
 }
 
-// xyOf reads the two coordinates a pointer command needs, and says which one is missing.
+// Facts reports the measurements a `wait_until:` step polls, as strings.
 //
-// BOTH ARE REQUIRED AND NEITHER HAS A DEFAULT: a click is a point on a screen somebody measured, and
-// there is no coordinate this program could choose for a caller who did not send one.
-func xyOf(what string, req protocol.Request) (int, int, error) {
-	if req.X == nil && req.Y == nil {
-		return 0, 0, fmt.Errorf("%s needs both \"x\" and \"y\": the body was {\"x\": <int>, "+
-			"\"y\": <int>} and neither arrived, so this request names no point on the screen", what)
+// IT IS THE SAME MEASUREMENT `/api/state` SERVES, not a second implementation: the snapshot is built
+// first and this reads it. Two sources for "is sshd up" is how a step comes to wait on one answer
+// while the log shows another.
+//
+// A MISSING FACT IS ABSENT FROM THE MAP rather than empty, so a condition that needs it can say so
+// instead of comparing "" to a number.
+func (d *Daemon) Facts() (map[string]string, error) {
+	st := d.snapshot()
+	out := map[string]string{}
+	if st.QEMU != nil {
+		out["qemu_running"] = strconv.FormatBool(st.QEMU.Running)
+		out["qemu_phase"] = st.QEMU.Phase
 	}
-	if req.X == nil {
-		return 0, 0, fmt.Errorf("%s needs \"x\": the body carried \"y\": %d and no \"x\"", what, *req.Y)
+	if st.SSHReady != nil {
+		out["ssh_ready"] = strconv.FormatBool(*st.SSHReady)
 	}
-	if req.Y == nil {
-		return 0, 0, fmt.Errorf("%s needs \"y\": the body carried \"x\": %d and no \"y\"", what, *req.X)
+	if st.QGAReady != nil {
+		out["qga_ready"] = strconv.FormatBool(*st.QGAReady)
 	}
-	return *req.X, *req.Y, nil
+	if st.Console != nil {
+		out["console_bytes"] = strconv.FormatInt(st.Console.Bytes, 10)
+		out["console_idle"] = fmt.Sprintf("%.1f", st.Console.IdleSeconds)
+	}
+	if st.Disk != nil {
+		out["disk_allocated_mb"] = strconv.FormatInt(st.Disk.AllocatedMB, 10)
+		out["disk_grow_rate"] = fmt.Sprintf("%.2f", st.Disk.GrowRateMBps)
+	}
+	if st.Recording != nil {
+		out["recording"] = strconv.FormatBool(*st.Recording)
+	}
+	if st.ShareReady != nil {
+		out["share_ready"] = strconv.FormatBool(*st.ShareReady)
+	}
+	if st.Frame != nil {
+		out["frame_age"] = fmt.Sprintf("%.1f", st.Frame.AgeSeconds)
+		out["frame_size"] = fmt.Sprintf("%dx%d", st.Frame.Width, st.Frame.Height)
+	}
+	if st.Guest != nil {
+		out["guest_phase"] = st.Guest.Phase
+	}
+	return out, nil
+}
+
+// fileExistsDaemon is one stat, named so the snapshot reads as a question.
+func fileExistsDaemon(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+// currentStep is the step a picture or a call belongs to, for the audit and the library.
+func (d *Daemon) currentStep() string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.st.Step
+}
+
+// currentStepIndex places that step.
+func (d *Daemon) currentStepIndex() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.st.StepIndex
 }

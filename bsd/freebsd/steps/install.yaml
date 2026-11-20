@@ -1,4 +1,7 @@
 name: freebsd 15.1 - bsdinstall, to an installed system
+recording_resolution:
+- 1920
+- 1080
 resolution:
 - 1920
 - 1080

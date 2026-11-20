@@ -27,6 +27,12 @@ type File struct {
 	Name string
 	// Resolution is the guest screen size the coordinates were measured at.
 	Resolution [2]int
+	// RecordingResolution is the video's size, named separately from `Resolution:` and REQUIRED.
+	//
+	// IT IS NOT DERIVED FROM `Resolution:` because the two answer different questions: one is where
+	// a number was measured, the other is how big the artifact should be. A 1280x800 guest recorded
+	// into a 1920x1080 frame is 60% padding, and nothing in the file would have said so.
+	RecordingResolution [2]int
 	// SSHPort and SSHUser are the file's own defaults; a command-line flag wins over them,
 	// because a port conflict is a fact about the runner while the file describes the guest.
 	SSHPort int
@@ -138,7 +144,16 @@ func Load(path string, overrides map[string]string) (*File, error) {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
 	var doc map[string]any
-	if err := yaml.Unmarshal(raw, &doc); err != nil {
+	// A `.walk` FILE IS CONVERTED TO THE SAME DOCUMENT THE YAML DECODER WOULD PRODUCE, so everything
+	// below this line - validation, the dispatcher, the measurements - is unaware of the format. The
+	// extension decides, and it is the only place the two differ.
+	if isWalkFile(path) {
+		converted, err := WalkToYAML(string(raw))
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
+		doc = converted
+	} else if err := yaml.Unmarshal(raw, &doc); err != nil {
 		// A DUPLICATE KEY IS A WORKFLOW THE RUNNER REFUSES TO LOAD, and `yaml.Unmarshal` keeps the
 		// last one silently. That happened: a second `outputs:` block made GitHub reject the
 		// whole workflow while every local check passed. yaml.v3 reports it, so the error is
@@ -178,6 +193,33 @@ func Load(path string, overrides map[string]string) (*File, error) {
 		}
 	}
 	f.Notes, _ = doc["notes"].(string)
+	// THE RECORDING'S SIZE IS ITS OWN, AND IT IS REQUIRED.
+	//
+	// `resolution:` IS WHERE THE COORDINATES WERE MEASURED, which is a fact about the file's numbers.
+	// The video's size is a fact about the ARTIFACT - a reviewer watching a 1280x800 guest does not
+	// need it letterboxed into 1920x1080, and a CI artifact does not need to be 60% padding.
+	//
+	// SO IT IS NAMED SEPARATELY AND NOT DEFAULTED. A default would be a number nobody chose, and the
+	// failure would be silent: every video would be 1920x1080 whether or not the guest was, with the
+	// guest's own screen floating in the middle of a black frame.
+	v, ok := doc["recording_resolution"].([]any)
+	if !ok {
+		return nil, fmt.Errorf("%s: every walkthrough must say `recording_resolution:` - the "+
+			"VIDEO's size, as in `recording_resolution: [1280, 800]`. It is not derived from "+
+			"`resolution:`: one is where a coordinate was measured and the other is how big the "+
+			"artifact should be, and a silent 1920x1080 letterboxes a 720x400 guest into a black "+
+			"field", path)
+	}
+	if len(v) != 2 {
+		return nil, fmt.Errorf("%s: `recording_resolution:` is [width, height]", path)
+	}
+	x, okx := toInt(v[0])
+	y, oky := toInt(v[1])
+	if !okx || !oky || x <= 0 || y <= 0 {
+		return nil, fmt.Errorf("%s: `recording_resolution: %v` is not two positive whole "+
+			"numbers", path, v)
+	}
+	f.RecordingResolution = [2]int{x, y}
 
 	// `work` IS ALWAYS DEFINED, because it is a fact about where the file IS rather than about the
 	// run. A file that says `{{ work }}/Xcode.xip` means "beside me" when nobody named a directory,
@@ -230,10 +272,10 @@ func Load(path string, overrides map[string]string) (*File, error) {
 		// A REFUSAL RATHER THAN A DISPATCH ORDER THAT HAPPENS TO WORK: silently running both would
 		// make the file mean something the dispatcher's shape decided, and the next reader would
 		// have to know that order to read the file.
-		if has(mapping, "ocr") && has(mapping, "check") {
-			return nil, fmt.Errorf("%s: step %q says both `ocr:` and `check:`; one step does one "+
-				"thing, and the check would never run - the dispatcher reads `ocr:` and returns. "+
-				"Split it into two steps", path, name)
+		if (has(mapping, "see") || has(mapping, "ocr")) && has(mapping, "check") {
+			return nil, fmt.Errorf("%s: step %q says both a reading and a `check:`; one step does "+
+				"one thing, and the check would never run - the dispatcher takes the reading and "+
+				"returns. Split it into two steps", path, name)
 		}
 		substituted, err := substitute(mapping, f.Vars)
 		if err != nil {
@@ -382,9 +424,12 @@ var documentKeys = map[string]string{
 	"name":       "what the log calls this walkthrough",
 	"notes":      "the file's prose header, echoed into the log; where the measurements behind its numbers live",
 	"resolution": "[width, height] the coordinates were measured at",
-	"ssh_port":   "the port the guest's sshd is forwarded to",
-	"ssh_user":   "the account the walk logs in as",
-	"vars":       "the file's own variables, some of which name command-line arguments",
+	"recording_resolution": "[width, height] the VIDEO's size - required, and not derived from " +
+		"`resolution:`, because one is where a number was measured and the other is how big the " +
+		"artifact should be",
+	"ssh_port": "the port the guest's sshd is forwarded to",
+	"ssh_user": "the account the walk logs in as",
+	"vars":     "the file's own variables, some of which name command-line arguments",
 	"machine": "HOW THIS GUEST IS BUILT AND STARTED, separately from what is done to it. " +
 		"A file may say `machine: {disk_gb: 128, fetch: {...}, boot: {...}}` and then keep " +
 		"`steps:` for the panes, typing and waiting - so a sandbox can start the machine " +
@@ -425,4 +470,13 @@ func validateDocument(doc map[string]any) error {
 func has(mapping map[string]any, key string) bool {
 	_, ok := mapping[key]
 	return ok
+}
+
+// isWalkFile reports whether a path is the sentence format rather than YAML.
+//
+// THE EXTENSION IS THE ONLY SWITCH, and it is deliberately unambiguous: `.walk` or nothing. A file
+// named `.yaml` is parsed as YAML even if it happens to read like prose, because a loader that
+// guessed would make every parse error a question about which grammar it was in.
+func isWalkFile(path string) bool {
+	return strings.HasSuffix(path, ".walk")
 }

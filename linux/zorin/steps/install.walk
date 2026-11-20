@@ -1,0 +1,101 @@
+walkthrough "zorin - the ubiquity walk"
+  resolution 1920x1080
+  password admin
+  var out == {default: out/distro.qcow2, from: args.out}
+  var user == {default: vmuser, from: args.user}
+  header recording_resolution == [1920, 1080]
+
+  needs zorin.iso, named "the media this stage boots from is already on disk"
+  step "create the empty disk"
+    disk == disk.qcow2
+    disk_gb == 128
+  step "boot the installer"
+    boot == true
+    iso == zorin.iso
+    os == linux
+    # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
+    memory_mb == 4096
+    timeout == 1800
+  step "wait for the live desktop"
+    desktop == linux/gnome
+    reference == reference/desktop.png
+    range == [0.90, 1.0]
+    # THE TOP 120 ROWS ARE WALLPAPER AND A MENU BAR: a boot splash scores 0.0002
+    # there and every desktop frame 1.0000, including the ones with an installer
+    # window over the middle. The clock sits below this band, which is why 120.
+    rect == [0, 0, 1920, 120]
+    rect_at == [1920, 1080]
+    timeout == 5400
+  # THE LIVE SESSION OPENS A WELCOME DIALOG, AND `desktop: linux/gnome` CAN PASS BEFORE IT IS DRAWN.
+  #
+  # MEASURED ON RUN 44350350968: after ninety minutes the frame was the bare Zorin wallpaper - no
+  # installer window, no welcome dialog - and the loop below had asked 120 times whether one was up.
+  # The desktop predicate decides on brightness, variance and saturation; a wall paper satisfies all
+  # three, so it passed while the session was still starting.
+  #
+  # SO THE FIRST STRETCH OF THE WAIT PRESSES RETURN, because the welcome dialog is modal and takes
+  # the key: that is how the same live session is driven by hand. Then the text check decides.
+  press Return, waiting 20s, named "wake the live session, whose welcome dialog takes a key"
+  press Return, waiting 20s, named "wake it again"
+  press Return, waiting 20s, named "wake it again"
+  step "wait for the installer to put itself up"
+    loop == {check: {from: screen, mode: text, name: done, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 2, words: [[install, zorin], [try, zorin], [welcome], [false, localization]]}, do: [{settle: 5}, {key: ret}, {settle: 5}], max: 120, see: {name: screen}, until: {fact: done}}
+  step "install zorin os"
+    do == [{click: [1223, 586], settle: 3}, {click: [1223, 586], settle: 3}]
+    settle == 40
+  step "install zorin os (once more, if the wizard is not up)"
+    do == [{click: [1223, 586], settle: 3}, {click: [1223, 586], settle: 3}]
+    settle == 40
+    when_not == - keyboard
+  step "disable the screen saver and the lock"
+    run == xrandr --output Virtual-1 --mode 1920x1080 2>/dev/null || xrandr --output Virtual1 --mode 1920x1080 2>/dev/null || xrandr -s 1920x1080 2>/dev/null || true; xset s off; xset -dpms; xset s noblank; gsettings set org.gnome.desktop.session idle-delay 0; gsettings set org.gnome.desktop.screensaver lock-enabled false; ( for i in $(seq 1 1080); do xdotool mousemove_relative -- 1 0 2>/dev/null; xdotool mousemove_relative -- -1 0 2>/dev/null; sleep 20; done ) >/dev/null 2>&1 & exit
+    settle == 10
+    terminal_wait == 8
+    type_gap == 0.15
+  click welcome at 1361 764, waiting 15s, named "welcome"
+  click "keyboard - english (us)" at 1106 402, waiting 4s, named "keyboard - english (us)"
+  click keyboard at 1361 764, waiting 18s, named "keyboard"
+  step "updates and other software, when this build shows it"
+    click == [1361, 764]
+    settle == 18
+    when_not_any == [[installation, type]]
+  step "the updates pane is done"
+    loop == {check: {from: screen, mode: text, name: done, rect: [488, 285, 707, 355], rect_at: [1920, 1080], words: [[installation, type]]}, do: [{settle: 3}], max: 60, see: {name: screen}, until: {fact: done}}
+  step "the keyboard pane is done"
+    loop == {check: {from: screen, mode: text, name: done, rect: [488, 285, 707, 355], rect_at: [1920, 1080], words: [[installation, type], [updates, and, other, software]]}, do: [{settle: 3}], max: 80, see: {name: screen}, until: {fact: done}}
+  click "installation type - install now" at 1361 764, waiting 18s, named "installation type - install now"
+  step "the disk warning is up"
+    loop == {check: {from: screen, mode: text, name: done, rect: [585, 421, 1073, 580], rect_at: [1920, 1080], words: [[write, the, changes, to, disks], [partition, tables]]}, do: [{settle: 2}], max: 60, see: {name: screen}, until: {fact: done}}
+  step "the dialog names the filesystem it will create"
+    see == name: format
+  step "the root partition will be ext4"
+    check == {from: format, mode: text, name: ext4, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], words: [ext4]}
+  click "write the changes to disks" at 1293 673, waiting 20s, named "write the changes to disks"
+  step "the disk warning is answered"
+    loop == {check: {from: screen, mode: text, name: done, rect: [487, 285, 702, 355], rect_at: [1920, 1080], words: [[where, are, you], [time, zone]]}, do: [{settle: 3}], max: 60, see: {name: screen}, until: {fact: done}}
+  click "where are you" at 1361 764, waiting 18s, named "where are you"
+  step "the time zone pane is done"
+    loop == {check: {from: screen, mode: text, name: done, rect: [487, 285, 803, 416], rect_at: [1920, 1080], words: [[who, are, you], [your, name]]}, do: [{settle: 3}], max: 60, see: {name: screen}, until: {fact: done}}
+  step "who are you - your name"
+    click == [975, 386]
+    settle == 2
+    type == '{{ user }}'
+  step "who are you - username"
+    click == [859, 477]
+    settle == 2
+    type == '{{ user }}'
+  step "who are you - password"
+    click == [873, 514]
+    settle == 2
+    type == '{{ password }}'
+  step "who are you - confirm password"
+    click == [883, 550]
+    settle == 3
+    type == '{{ password }}'
+  click "who are you" at 1361 764, waiting 20s, named "who are you"
+  settle 2400s, named "the install runs, as measured"
+  step "stop the machine"
+    shutdown == kill
+    timeout == 120
+  step "publish the disk"
+    compress == '{{ out }}'

@@ -205,26 +205,28 @@ func TestProbeUnixSocketOnAMissingPath(t *testing.T) {
 	}
 }
 
-// TEST 4: A DEAD CLAIM IN THE QMP REGISTRY IS CLEANED UP, NOT ONLY DESCRIBED.
+// TEST 4: A DEAD CLAIM IN THE QMP REGISTRY MUST NOT WEDGE THE NEXT MACHINE.
+//
+// THE MECHANISM THAT USED TO HANDLE THIS IS GONE - `waitForQMP` cleaned the ghost after a ten-second
+// wait - BECAUSE THE RACE THAT PRODUCED THE GHOST IS GONE. What still has to be true is the property
+// it was protecting: a registry entry whose connection has been closed, left behind by a caller that
+// exited, must not make every later boot fail with `ErrBusy` for the life of the process.
 //
 // MEASURED BEFORE THE FIX:
 //
 //	boot: another caller has held the qmp socket for 10s and never published a connection;
 //	that caller is stuck, and it has to be found rather than waited for
 //
-// and there was nothing to find: the registry held a connection whose owner had exited. Every later
-// run on that daemon failed the same way until the container was restarted.
-func TestWaitForQMPRecoversFromADeadHold(t *testing.T) {
+// and there was nothing to find: the registry held a connection whose owner had exited.
+//
+// `Release` is what establishes the property now, and it is what a boot performs before starting
+// qemu - so this asserts it directly rather than through the removed wait.
+func TestAReleasedClaimDoesNotWedgeTheNextBoot(t *testing.T) {
 	dir := t.TempDir()
 	d := &Daemon{}
 	d.work = dir
-	// BOTH ARE SET, because `NewDriver` sets both and `qmpSocket` reads the DRIVER's copy. A test
-	// that set only the daemon's produced `qmp drive.sock.qmp` - a relative path - and the failure
-	// looked like a dead socket rather than like the test's own mistake.
-	drv := &Driver{daemon: d, work: dir, qmpWait: 500 * time.Millisecond}
+	drv := &Driver{daemon: d, work: dir}
 
-	// A REAL QMP-ISH LISTENER, because the recovery path ends in a successful Acquire and that needs
-	// a peer that speaks the greeting. `qmp.Open` reads one JSON line before it returns.
 	path := filepath.Join(dir, "drive.sock.qmp")
 	ln, err := net.Listen("unix", path)
 	if err != nil {
@@ -239,9 +241,6 @@ func TestWaitForQMPRecoversFromADeadHold(t *testing.T) {
 			}
 			go func(c net.Conn) {
 				defer c.Close()
-				// THE GREETING QEMU SENDS, and then the reply to `qmp_capabilities`. Those two
-				// exchanges are all `dialLine` performs before it hands back a connection: it
-				// decodes the greeting, writes `qmp_capabilities`, and decodes `{"return":{}}`.
 				_, _ = c.Write([]byte(`{"QMP":{"version":{"qemu":{"major":9,"minor":0,"micro":0},` +
 					`"package":""},"capabilities":[]}}` + "\n"))
 				dec := json.NewDecoder(c)
@@ -251,8 +250,6 @@ func TestWaitForQMPRecoversFromADeadHold(t *testing.T) {
 				if err := dec.Decode(&req); err == nil && req.Execute == "qmp_capabilities" {
 					_, _ = c.Write([]byte(`{"return":{}}` + "\n"))
 				}
-				// AND IT STAYS OPEN: a `Release` that closes a connection whose peer has already
-				// gone is a different test, and this one is about the registry's memory.
 				time.Sleep(20 * time.Second)
 			}(c)
 		}
@@ -265,15 +262,16 @@ func TestWaitForQMPRecoversFromADeadHold(t *testing.T) {
 	}
 	_ = ghost.Close() // closed, but the MAP still claims the path
 
-	// `waitForQMP` WAITS OUT ITS BOUND FIRST, which is the designed behaviour for a healthy race.
-	// The test is about what happens AFTER that, so `qmpWait` is set to half a second: the code
-	// under test is identical, and the case does not spend ten seconds proving it.
-	conn, err := drv.waitForQMP()
+	// THE BOOT RELEASES THE PATH BEFORE IT STARTS QEMU, and that is what makes the ghost harmless.
+	if err := drv.qmpRegistry().Release(path); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	conn, err := drv.qmpRegistry().Acquire(path, "easyvm", 2*time.Second)
 	if err != nil {
-		t.Fatalf("a dead claim in the registry must be cleaned up and retried; got %v", err)
+		t.Fatalf("a released claim must not refuse the next caller; got %v", err)
 	}
 	if conn == nil {
-		t.Fatal("the recovery must return a usable connection")
+		t.Fatal("the acquire must return a usable connection")
 	}
 	_ = drv.qmpRegistry().Release(path)
 }

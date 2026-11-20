@@ -1,0 +1,70 @@
+walkthrough "linux-mx - configure the vm (name, share, guest agent)"
+  resolution 1920x1080
+  user vmuser
+  password admin
+  var boot_timeout == {default: "1800", from: args.boot_timeout}
+  var host == {default: "172.30.0.1", from: args.host}
+  var hostname == {default: easyvm-vm, from: args.hostname}
+  var out == {default: out/vm-configure.qcow2, from: args.out}
+  var user == {default: vmuser, from: args.user}
+  header recording_resolution == [1920, 1080]
+  header ssh_port == 2222
+
+  step "take the input disk"
+    disk == disk.qcow2
+  step "boot the disk"
+    boot == true
+    os == linux
+    # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
+    memory_mb == 4096
+    timeout == '{{ boot_timeout }}'
+  step "wait for sshd"
+    require_ssh == true
+    timeout == '{{ boot_timeout }}'
+  step "announce the machine's name"
+    ssh == echo "this machine will be named '{{ hostname }}'"
+    timeout == 60
+  step "set the machine's name"
+    ssh == "printf '%s\\n' '{{ password }}' | sudo -S -p '' sh -c '\n  printf \"%s\\n\" \"{{ hostname }}\" > /etc/hostname\n  hostname \"{{ hostname }}\"'\n"
+    timeout == 120
+  step "point the loopback line at that name"
+    ssh == "printf '%s\\n' '{{ password }}' | sudo -S -p '' sh -c '\n  if grep -q \"^127\\.0\\.1\\.1\" /etc/hosts; then\n    sed -i \"s/^127\\.0\\.1\\.1.*/127.0.1.1\\t{{ hostname }}/\" /etc/hosts\n  else\n    printf \"127.0.1.1\\t%s\\n\" \"{{ hostname }}\" >> /etc/hosts\n  fi'\n"
+    timeout == 120
+  step "prove the name"
+    ssh == "set -e\necho \"file:   $(cat /etc/hostname)\"\necho \"kernel: $(hostname)\"\necho \"hosts:  $(grep -c '{{ hostname }}' /etc/hosts) line(s)\"\ntest \"$(cat /etc/hostname)\" = \"{{ hostname }}\"\ntest \"$(hostname)\" = \"{{ hostname }}\"\ngrep -q '{{ hostname }}' /etc/hosts\n"
+    timeout == 60
+  step "refresh the package index"
+    ssh == "printf '%s\\n' '{{ password }}' | sudo -S -p '' sh -c 'DEBIAN_FRONTEND=noninteractive apt-get update -o DPkg::Lock::Timeout=600' 2>&1 | tail -3\n"
+    timeout == 600
+  step "install the guest agent"
+    ssh == "printf '%s\\n' '{{ password }}' | sudo -S -p '' DEBIAN_FRONTEND=noninteractive apt-get install -y qemu-guest-agent 2>&1 | tail -5\n"
+    timeout == 600
+  step "enable the guest agent"
+    ssh == "# `update-rc.d` AND `service`, NOT `systemctl`: this is the same SysVinit fact as the name\n# above. `systemctl enable` would write a symlink and refuse `--now`, leaving nothing\n# running - which is exactly what mx/steps/ssh.yaml measured for sshd.\nprintf '%s\\n' '{{ password }}' | sudo -S -p '' sh -c 'update-rc.d qemu-guest-agent defaults 2>&1; service qemu-guest-agent start 2>&1' | tail -3\n"
+    timeout == 120
+  step "prove the guest agent is running"
+    ssh == "ls -l /dev/virtio-ports/org.qemu.guest_agent.0 2>&1 &&\npgrep -af 'qemu-ga'\n"
+    timeout == 120
+  step "prove the guest can fetch from the host share"
+    ssh == sh -c 'curl -fsS --max-time 20 http://172.30.0.1:8080/shared/ || wget -qO- --timeout=20 http://172.30.0.1:8080/shared/'
+    timeout == 180
+  step "show what the guest sees at the share"
+    ssh == sh -c 'curl -fsS --max-time 20 http://172.30.0.1:8080/shared/ 2>&1 | head -20; echo "fetch exit = $?"'
+    timeout == 120
+  step "copy the launcher in"
+    scp == {template: launcher, to: /tmp/bootstrap-launcher.sh}
+    timeout == 300
+  step "install the launcher"
+    ssh == "set -e\ninstall -m 0755 /tmp/bootstrap-launcher.sh ~/bootstrap-launcher.sh\nmkdir -p ~/.config/autostart\ncat > ~/.config/autostart/org.vm.bootstrap.desktop <<'DESKTOP'\n[Desktop Entry]\nType=Application\nName=vm bootstrap\nComment=Run ~/shared/bootstrap.sh at login\nExec=%h/bootstrap-launcher.sh\nTerminal=false\nNoDisplay=true\nX-GNOME-Autostart-enabled=true\nDESKTOP\necho INSTALLED_FOR_NEXT_LOGIN\n"
+    timeout == 300
+  step "prove the launcher is installed"
+    ssh == "set -e\nls -l ~/bootstrap-launcher.sh ~/.config/autostart/org.vm.bootstrap.desktop\ngrep -q bootstrap-launcher.sh ~/.config/autostart/org.vm.bootstrap.desktop\ngrep -q '^Exec=' ~/.config/autostart/org.vm.bootstrap.desktop\necho enabled\n"
+    timeout == 60
+  step "ask the guest to power off"
+    ssh == printf '%s\n' '{{ password }}' | sudo -S -p '' poweroff
+    timeout == 300
+  step "wait for the machine to stop"
+    timeout == 300
+    wait_until == stopped
+  step "publish the disk"
+    compress == '{{ out }}'

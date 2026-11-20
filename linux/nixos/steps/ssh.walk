@@ -1,0 +1,207 @@
+walkthrough "linux-nixos - sshd"
+  resolution 1920x1080
+  password admin
+  var out == {default: out/distro.qcow2, from: args.out}
+  var user == {default: vmuser, from: args.user}
+  header recording_resolution == [1920, 1080]
+
+  step "boot the disk"
+    boot == true
+    os == linux
+    # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
+    memory_mb == 4096
+    timeout == 900
+  # THE GREETER IS ASKED FOR BEFORE ANYTHING IS CLICKED, BECAUSE IT IS NOT THERE YET.
+  #
+  # MEASURED ON RUN 44550525354, whose ssh stage logged every greeter step and then sat on
+  # "Not listed?" - the user chooser - for the whole budget:
+  #
+  #	=== greeter - the user tile
+  #	=== greeter - the password box      typed 5 character(s)
+  #	=== greeter - submit                key ret
+  #	=== skip the welcome dialog
+  #	=== the desktop is up               done = false (none of "Dashboard" or "Activities" in
+  #	                                    "Nov 19 10:49 m= 4) (c) Not listed?")
+  #
+  # The typed password went nowhere because the click and the type: landed while GDM was still
+  # drawing. Same fault as cachyos's, same cure: wait for the greeter's own words first.
+  #
+  # THE BAND IS THE GREETER'S MIDDLE - the user tile and the password field. cachyos reads
+  # "Password vmuser" here at scale 2; nixos draws the same GDM, so the same band applies.
+  step "the greeter is drawn"
+    loop == {check: {from: greeter, mode: text, name: up, rect: [740, 470, 1340, 770], rect_at: [1920, 1080], scale: 2, words: [[password], [vmuser]]}, do: [{settle: 5}], max: 60, see: {name: greeter}, until: {fact: up}}
+  press Escape, waiting 5s, named "greeter - wake the screen"
+  click "greeter - the user tile" at 960 488, waiting 4s, named "greeter - the user tile"
+  step "greeter - the password box"
+    clear == false
+    click == [936, 628]
+    settle == 4
+    type == '{{ password }}'
+  press Return, waiting 12s, named "greeter - submit"
+  settle 240s, named "let the session finish starting"
+  # THE WELCOME DIALOG IS CLICKED ONLY ONCE THE DESKTOP HAS PAINTED IT, AND THE CLICK REPEATS.
+  #
+  # MEASURED ON RUN 44557723577's successor: at 150 s the desktop is complete - dock, background,
+  # 'Welcome to NixOS 26.05 (Yarara)' with its Skip button at 857,751 - while the stage was on
+  # 'wait for sshd' with nothing typed. The single click this file made came BEFORE the dialog
+  # existed, so the window stayed and took the keyboard from the terminal the walk opened next.
+  #
+  # The wait gives it time to appear; three clicks give it the same number of chances the retries
+  # elsewhere use; Escape after them closes whatever is left.
+  step "the welcome dialog is up, when this desktop shows one"
+    loop == {check: {from: welcome, mode: text, name: showing, rect: [740, 600, 1180, 700], rect_at: [1920, 1080], scale: 1, words: [[welcome, to, nixos]]}, do: [{settle: 5}], max: 20, see: {name: welcome}, until: {fact: showing}}
+    optional == true
+  # THE DIALOG IS DISMISSED BY KEYBOARD, AND SO IS THE TERMINAL OPENED.
+  #
+  # MEASURED ON RUN a8a0c0d's nixos ssh: three clicks at Skip's own coordinates logged "clicked
+  # (857, 751)" three times, and the recording at 260 s is STILL 'Welcome to NixOS 26.05 (Yarara)'
+  # with its Skip and Take Tour buttons - so the clicks did not take here any more than they did in
+  # fedora's wizard.
+  #
+  # AND `ctrl+alt+t` DOES NOT OPEN A TERMINAL ON THIS GNOME: after it, the recording at 400 s is the
+  # plain desktp with no window at all, and every `run:` after it typed into nothing.
+  #
+  # SO BOTH USE THE KEYBOARD THAT IS KNOWN TO WORK ON THIS DESKTOP: Escape closes the dialog (it is
+  # a GTK dialog with a close action), and the terminal comes from the overview, which is where this
+  # stage opened one successfully before - meta_l, type "terminal", Return on the result.
+  press Escape, waiting 2s, named "close the welcome dialog"
+  press Escape, waiting 2s, named "and clear anything it left behind"
+  # NO WORD AND NO PICTURE DECIDES THIS DESKTOP, SO THE SHELL DOES.
+  #
+  # MEASURED TWICE ON RUNS 44548647796 AND 44554888731:
+  #
+  #	the desktop is up [check]: done = false (none of "Dashboard" or "Activities" in "iS")
+  #
+  # while the recording ends on a COMPLETE nixos desktop - blue wall paper, top bar, clock. This
+  # GNOME draws neither string. A reference image was tried next and scored 0.6968, because install's
+  # desktop.png has an installer window on it and this one does not; and the desk top itself is bare
+  # wall paper, so there is no panel or dock to key on either.
+  #
+  # SO THE PROOF IS THE THING THE STAGE ACTUALLY NEEDS: a shell. The greeter has already been
+  # answered above, so the session is starting; `run:` needs a window to type into, and it gets one
+  # from ctrl+alt+t. `settle` gives Plasma/GNOME the time the words could not be measured against.
+  settle 60s, named "let the session finish starting, which no band can confirm"
+  # ctrl+alt+t FIRST, BECAUSE THE WELCOME WINDOW IS STILL THERE AND THE OVERVIEW SEARCH LANDS BEHIND IT.
+  #
+  # MEASURED ON RUN 44583894320, whose ssh recording at 200 s is 'Welcome to NixOS 26.05 (Yarara)'
+  # with its Skip and Take Tour buttons - and NO TERMINAL ANYWHERE. The meta-then-search path put its
+  # results behind that window, so the click at 960,160 hit the dialog.
+  #
+  # The chord opens a terminal over whatever is up, and this desktop honours it; the search path
+  # stays below as a fallback for a GNOME that does not.
+  # THE TERMINAL COMES FROM THE OVERVIEW, NOT A CHORD: `ctrl+alt+t` leaves no window on this GNOME.
+  press meta_l, waiting 4s, named "open the overview"
+  step "search for the terminal"
+    settle == 3
+    type == terminal
+    type_gap == 0.08
+  step "the result list has had time to draw"
+    settle == 4
+  press Return, waiting 25s, named "open the terminal on the first result"
+  # NO `terminal_wait:` HERE, AND THAT IS THE FIX RATHER THAN AN OMISSION.
+  #
+  # `terminal_wait:` OPENS A TERMINAL (ctrl+alt+t) AND THEN TYPES. The step above has already
+  # opened one, so a second ctrl+alt+t starts a NEW terminal window and the keys that follow go to
+  # it - while the command already typed into the first one is never submitted.
+  #
+  # MEASURED ON RUN 44545555943's kubuntu ssh recording, whose terminal shows exactly that:
+  #
+  #	vmuser@kubuntu:~$ xset s off; xset -dpms; xset s noblank; echo screen_kept_onECHO ADMIN | sudo ...
+  #	server does not have extension for -dpms option
+  #	[sudo: authenticate] Password:
+  #
+  # `SCREEN_KEPT_ON` runs straight into `ECHO ADMIN` with no line break: the Return after the first
+  # command went to the OTHER window. And the `xset -dpms` failure - "server does not have extension
+  # for -dpms option" - is harmless; the screen is still kept awake by `s off` and `s noblank`.
+  step "keep the screen on, because a blanked screen takes no keys"
+    run == xset s off; xset s noblank; echo screen_kept_on
+    settle == 5
+  # UBUNTU'S SHAPE: unlock sudo ONCE, then plain sudo - the password stops travelling in commands.
+  #
+  # MEASURED: this stage's `nixos-rebuild switch` ran with the password inside its command line and
+  # `wait for sshd` then spent ten minutes on 'connection refused' - the same fault as every other
+  # distribution in this session, in the file that had the longest commands and so the most to lose
+  # from a dropped keystroke.
+  step "unlock sudo once for this session"
+    run == printf '%s\n' {{ password }} | sudo -S -v
+    settle == 5
+    terminal_wait == 0
+    type_gap == 0.15
+  # THE CONFIG EDIT IS INSERTED BEFORE THE CLOSING BRACE AND THEN PRINTED BACK.
+  #
+  # THE OLD LINE DELETED THE LAST LINE AND APPENDED A NEW BLOCK, which cannot be seen in a
+  # recording: whatever it did to that file, the stage's next output was a rebuild. MEASURED ON RUN
+  # 44611943331's nixos predecessor: the machine rebooted (SDDM at 300 s) and came back WITHOUT
+  # sshd, and nothing in the log says whether configuration.nix ever named it.
+  #
+  # `/^}/i` inserts before the FIRST line that is just `}`, which is the attribute set's closing
+  # brace in the file nix ships. `grep -n openssh` after it prints the three new lines with their
+  # numbers, so the recording answers the question rather than leaving it to the rebuild.
+  step "declare openssh in configuration.nix"
+    run == sudo sed -i "/^}/i\\  services.openssh.enable = true;\\n  services.openssh.settings.PasswordAuthentication = true;\\n  networking.firewall.enable = false;" /etc/nixos/configuration.nix; grep -n "openssh\|firewall" /etc/nixos/configuration.nix; sudo nixos-rebuild dry-build 2>&1 | tail -3
+    settle == 30
+    terminal_wait == 0
+    type_gap == 0.15
+  # `nixos-rebuild switch` HERE, BECAUSE IT IS THE ONE THAT STARTS SSHD WITHOUT A REBOOT.
+  #
+  # THE EARLIER LINE WAS `nixos-rebuild boot; sudo reboot` - chosen because `switch` restarts the
+  # display manager and the terminal it was typed into goes away. That is true, and it does not
+  # matter: the thing this stage needs afterwards is the PORT, and `wait for sshd` dials it from the
+  # host. What does matter is that `boot` only writes the profile for the next start, so a machine
+  # that reboots into a profile that was never built has no sshd - MEASURED ON THE RUN BEFORE THIS
+  # ONE: SDDM came back at 300 s and 22 answered nothing for fifteen minutes.
+  #
+  # `switch` builds, activates, starts the unit, and THEN the session dies. Nothing more is typed,
+  # so nothing is typed into a login screen.
+  step "build and activate the new profile"
+    run == sudo nixos-rebuild switch
+    settle == 420
+    terminal_wait == 0
+    type_gap == 0.15
+  # NOTHING IS TYPED AFTER THE SWITCH, BECAUSE THE SESSION IT WAS TYPED INTO GOES AWAY.
+  #
+  # MEASURED ON RUN 44600196595, whose recording at 900 s is SDDM ITSELF - 'vmuser' in the middle of
+  # the screen with an EMPTY 'Password' field - while this stage was still on its later steps. The
+  # rebuild restarts the display manager, so the desktop that owned the terminal goes away and any
+  # command after it is typed into a login screen's password box.
+  #
+  # SO THE PORT IS THE ONLY THING ASKED FOR FROM HERE. `wait for sshd` dials 2222 on the HOST - it
+  # needs no key, no terminal and no session - and the port is what the next stage actually uses.
+  # An `is-active` report is NOT asked for: a report from a shell that no longer exists can only
+  # fail a stage that is otherwise finished.
+  step "wait for sshd"
+    require_ssh == true
+    timeout == 900
+  step "prove the kernel over ssh"
+    ssh == uname -a
+    timeout == 120
+  step "prove the account over ssh"
+    ssh == id -un; hostname
+    timeout == 120
+  # `poweroff` CUTS THE CONNECTION IT WAS SENT OVER, SO SSH REPORTS "exited without exit status".
+  #
+  # MEASURED ON RUN aca5d8b's nixos ssh: the stage reached step 23 of 25 and failed with
+  #
+  #	ask the guest to power off: ssh: wait: remote command exited without exit status or exit signal
+  #
+  # - which is what a successful poweroff looks like from the client's side: the machine goes down
+  # mid-command and the channel closes without a status. The daemon at this point is `systemd-poweroff`,
+  # which kills the session before the shell can report.
+  #
+  # `poweroff &` RETURNS FIRST AND LETS THE SHELL EXIT CLEANLY, and the step is optional so a clean
+  # exit and a cut connection both count; `wait for the machine to stop` is the real assertion, and
+  # it is what the next stage depends on.
+  step "ask the guest to power off"
+    # `optional` IS GONE AND THE TOLERANCE IS IN THE COMMAND, WHERE THE LOG SHOWS IT.
+    #
+    # poweroff cuts the connection carrying it, so the client sees "exited without exit status" for a
+    # shutdown that WORKED. Writing `|| true` says that in the command; `optional` said it by
+    # swallowing whatever happened, including a shutdown that never started. `wait for the machine to
+    # stop` is the assertion, and it runs either way.
+    ssh == printf '%s\n' '{{ password }}' | sudo -S -p '' sh -c 'nohup poweroff >/dev/null 2>&1 &' || true
+    timeout == 300
+  step "wait for the machine to stop"
+    timeout == 300
+    wait_until == stopped
+  step "publish the disk"
+    compress == '{{ out }}'

@@ -3,11 +3,11 @@ package run
 import (
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/easydev-org/easyvm/internal/guest"
+	"github.com/easydev-org/easyvm/internal/journal"
 	"github.com/easydev-org/easyvm/internal/keys"
 	"github.com/easydev-org/easyvm/internal/walk"
 )
@@ -26,6 +26,14 @@ type Executor struct {
 	// StartAt and StopBefore narrow the run, for re-running from the middle.
 	StartAt    string
 	StopBefore string
+	// startedAt is when this run began, for the recording's name.
+	startedAt time.Time
+	// `ManualAfter` WAS HERE AND HAD NO CALLER.
+	//
+	// The intent was "this run prepares a machine for a person to drive, so do not record it". Nothing
+	// sets it: `create` starts a sandbox WITHOUT running a walkthrough, so it never reaches `Run` at
+	// all. A field that says a run can hand the machine over, on a code path that cannot, is the same
+	// shape as `requires:` - a claim no code makes. It comes back when there is a caller.
 
 	// rec is the recording in progress. recDone stops its sampler and recStopped is closed by the
 	// goroutine on its way out, so stopping it is a JOIN rather than a hope - a tick in flight can
@@ -42,6 +50,28 @@ type Executor struct {
 	// madeDisk is true once a `disk_gb:` step has created the target, so a later `boot:` knows the
 	// disk is this run's rather than one from somewhere else. See BootSpec.FreshDisk.
 	madeDisk bool
+	// bootBudget is the `timeout:` a `boot:` step carried, for the wait that follows it.
+	//
+	// `timeout:` ON A BOOT STEP WAS WRITTEN 53 TIMES IN THIS TREE AND READ BY NOTHING. `doBoot`
+	// starts qemu and returns; the waiting is the NEXT step's, and every waiting step had its own
+	// hard-coded default - `untilConsole` 180 seconds. So a file that wrote
+	//
+	//	boot == true
+	//	os == macos
+	//	timeout == 900
+	//
+	// was saying "this guest may take fifteen minutes" to a step that never looked, and the wait
+	// that did matter was budgeted at three. MEASURED on a loaded runner: a NixOS guest whose boot
+	// needed longer than the following step's 180 seconds failed at that step, whose name says
+	// nothing about a boot.
+	//
+	// SO THE NUMBER IS CARRIED FORWARD rather than dropped: a waiting step that does NOT name its
+	// own `timeout:` uses the boot's. A step that names one still wins, because a per-step budget
+	// is more specific than the one a boot declared.
+	bootBudget time.Duration
+	// bootBudgetSet distinguishes a boot that said `timeout == 0` from no boot at all, so the
+	// inheritance is opt-in and a run with no boot behaves exactly as it did before.
+	bootBudgetSet bool
 	// adb is the Android Debug Bridge connection, when a step asked for one.
 	//
 	// IT IS A FIELD BESIDE THE ssh ONE AND NOT A Driver METHOD: adb is one family's transport, not
@@ -57,6 +87,21 @@ type Executor struct {
 	// assetExtras is the other files one `fetch:` produced, in its own order - the three OpenCore
 	// outputs are a boot image, a ROM and a variables file, and a boot step names all three.
 	assetExtras map[string][]string
+	// Library is the content-addressed store a run's named pictures go into.
+	Library ArtifactLibrary
+
+	// OnImage is told about each named picture, so the daemon can write its row.
+	OnImage func(name, sha, kind, step string, index, w, h int, rect []int, note string)
+
+	// Journal receives one structured record per step - what it decided, what it read, and the
+	// pictures it decided from. IT IS OPTIONAL: a nil satisfies it, and a test that builds an
+	// Executor by value gets a silent no-op.
+	//
+	// IT IS NOT `OnStep`. `OnStep` is one callback with three arguments, enough for "where is it
+	// now"; this carries the EVIDENCE, which is what a person asking "why did this fail" needs and
+	// the log prints as a sentence they then have to decode.
+	Journal Journal
+
 	// OnStep is called as each step begins, for a daemon that must answer "where is it now".
 	//
 	// IT IS NOT LOGGING. The log is a stream a human reads; this is the one fact a client needs to
@@ -97,6 +142,39 @@ type Executor struct {
 	// what makes them separate steps: a loop can check two different questions of one reading, and a
 	// failure names WHICH question came back false.
 	facts map[string]bool
+
+	// numbers is what a `see:` step MEASURED, by `<readname>.<measurement>` - `bottom.spread`,
+	// `body.mean`. It is the fourth store, and the one that makes a picture a VALUE rather than a Go
+	// function: a `want:` compares these without touching the screen, and a number that is not here
+	// is a typo rather than a zero.
+	//
+	// THE ZERO VALUE IS USABLE, like `seen` and `facts` above.
+	numbers map[string]float64
+
+	// evidence is what the current step measured, filled in as it runs and consumed by `decorate`
+	// into the journal record. It is per-step state, reset at each step boundary.
+	evidence *evidence
+
+	// attempts are a `loop:`'s passes, for the journal. A loop is the one step whose most useful
+	// evidence is its HISTORY rather than its verdict: eight identical log lines say nothing about
+	// which attempt came closest.
+	attempts []journal.Attempt
+
+	// skipped is set by a gate (`when:`/`unless:`) that decided the step does not apply, so the
+	// journal can say "skipped" rather than "passed". A STEP THAT DID NOT RUN IS NOT A PASS, and a
+	// report that cannot tell them apart is the same lie `optional:` used to tell.
+	skipped bool
+
+	// shots is the FRAME a `see:` step captured, by the name it was given.
+	//
+	// THIS IS WHAT MAKES `check:` ABLE TO DECIDE ON PIXELS WITHOUT READING THE SCREEN. `see:` names a
+	// frame once; every `check:` that follows measures THAT frame, with its own `rect` - so one
+	// capture serves any number of questions, and a `loop:` that re-asks a boolean pays nothing.
+	//
+	// MEASURED over the tree when this was added: 43 `see:` steps, every one of them followed by AT
+	// MOST ONE `check:` - so the vocabulary had a store for text, a store for numbers and no store
+	// for the picture, which is the thing a screen actually is.
+	shots map[string]string
 }
 
 // Result is the whole walkthrough's outcome.
@@ -126,7 +204,26 @@ func (e *Executor) Run(steps []walk.Step) (Result, error) {
 	//
 	// A FAILING RUN IS THE ONE THAT NEEDS THE RECORDING. The frames are on disk; only the encode was
 	// skipped, and the encode is what turns them into the file a person can watch.
+	e.startedAt = time.Now()
 	defer e.finishRecording()
+
+	// THE RECORDING STARTS WITH THE WALK, NOT WITH A STEP.
+	//
+	// `record: <name>.mp4` AND `record: false` WERE BOTH STEPS, and both were bookkeeping: the first
+	// said "start now" and the second said "stop at the end", which is what the run itself already
+	// knows. Measured over the tree: 74 `record:` uses, of which 36 are the `false` half - and a walk
+	// that failed before its `record: false` was the case `finishRecording` was added for, so the
+	// stop was already not the step's doing.
+	//
+	// THE NAME IS DERIVED, because `work/*.mp4` is what the workflow uploads and nothing reads the
+	// name. The sixteen handwritten ones disagreed with each other - `install.mp4`, `ubuntu-install.mp4`,
+	// `vm-configure.mp4` - so a stage could not tell from a filename which leg it belonged to.
+	if err := e.startAutomaticRecording(); err != nil {
+		// NOT FATAL. A machine that cannot be photographed is a broken stage, but a recording that
+		// cannot be started is a missing artifact - and the steps that follow are the ones that find
+		// out whether the machine works.
+		e.Driver.Log(fmt.Sprintf("  recording NOT started: %v", err))
+	}
 
 	started := e.StartAt == ""
 
@@ -189,8 +286,25 @@ func (e *Executor) Run(steps []walk.Step) (Result, error) {
 		}
 
 		e.Driver.Log("=== " + s.Name)
+		// THE STEP IS ANNOUNCED BEFORE IT RUNS, so a reader following a long step sees WHICH step the
+		// time is going into. The finished record replaces it by ordinal, which is how a step that
+		// hangs still appears in the report rather than vanishing from it.
+		began := time.Now()
+		kind := kindOf(s)
+		e.journStep(s, i+1, len(steps), kind, journal.StatusRunning, time.Time{})
 		err := e.runOne(s)
+		// WHAT THE STEP MEASURED IS ATTACHED HERE, while `e.lastEvidence` still describes this step.
+		finished := e.journStep(s, i+1, len(steps), kind, journal.StatusPassed, began)
+		finished = e.decorate(finished, s)
 		if err == nil {
+			// A GATED STEP THAT DID NOT RUN IS NOT A PASS, and saying "passed" for it makes a stage
+			// that skipped its own verification look complete. `when:`/`unless:` set this.
+			if e.skipped {
+				finished.Status = journal.StatusSkipped
+				finished.Message = "the step's `when:`/`unless:` did not hold, so it did not run"
+				e.skipped = false
+			}
+			e.journ(finished)
 			res.Answered = append(res.Answered, s.Name)
 			continue
 		}
@@ -198,9 +312,17 @@ func (e *Executor) Run(steps []walk.Step) (Result, error) {
 			// AN OPTIONAL FAILURE IS SAID OUT LOUD. A step that failed and was passed over
 			// silently is indistinguishable, in the log, from one that worked.
 			e.Driver.Log(fmt.Sprintf("  %s: failed and the step is optional: %v", s.Name, err))
+			// AND IT IS ITS OWN STATUS IN THE JOURNAL, not a pass with a note. A stage that stepped
+			// over a failure is exactly what a reader of this report most needs to see.
+			finished.Status = journal.StatusOptional
+			finished.Message = err.Error()
+			e.journ(finished)
 			res.Answered = append(res.Answered, s.Name)
 			continue
 		}
+		finished.Status = journal.StatusFailed
+		finished.Message = err.Error()
+		e.journ(finished)
 		res.Err = err
 		return res, err
 	}
@@ -250,42 +372,47 @@ func (e *Executor) runOne(s walk.Step) error {
 		return nil
 	case s.Has("shutdown"):
 		return e.doShutdown(s)
-	case s.Has("reboot"):
-		return e.doReboot(s)
 	case s.Has("disk"):
 		return e.doDisk(s)
-	case hasKey(s, "record"):
-		// `s.Has` IS FALSE FOR `record: false`, AND THAT IS THE POINT OF THE KEY. Stopping a
-		// recording is an ACTION, not the absence of one: run 43035390408 failed at step 29 of 29 -
-		// after the machine had shut down and the disk had been published - with
-		//
-		//     stop recording: no implementation for this step's keys
-		//
-		// because the step's only key was a boolean false and every dispatcher branch tests `Has`.
-		return e.doRecord(s)
 	case s.Has("compress"):
 		return e.doCompress(s)
-	case s.Has("snapshot"):
-		return e.doSnapshot(s)
 	// THE THREE-STEP MODEL, IN DISPATCH ORDER. `ocr:` reads ONE region and names it; `check:` answers
 	// from that name without touching the screen. Both are separate steps on purpose - see ocr.go.
-	case s.Has("ocr"):
-		return e.doOCR(s)
+	case s.Has("see"):
+		// `see:` MEASURES AND BINDS - a word list when `of: [text]`, numbers otherwise. It replaced
+		// `ocr:`, which was the same operation restricted to text: MEASURED 118 uses of one and 0 of
+		// the other once they were one key, and `ocr: {name: X}` and `see: {name: X, of: [text]}`
+		// produced identical readings.
+		return e.doSee(s)
+
 	case s.Has("check"):
 		return e.doCheck(s)
 	case s.Has("loop"):
 		return e.doLoop(s)
 	case s.Has("if"):
 		return e.doIf(s)
-	case s.Has("require"):
+	case s.Has("needs"), s.Has("require"):
+		// `needs:` IS THE NAME; `require:` IS THE OLD ONE AND IS READ SO AN UNMIGRATED FILE RUNS.
+		//
+		// THE RENAME IS ABOUT ONE LETTER. `require:` names the FILES that must be on disk before a
+		// stage starts; `requires:` names the CAPABILITIES the machine must answer (ssh, qga, share).
+		// Two keys one letter apart, two completely different assertions, and 43 uses between them -
+		// a reader had to count the `s`. MEASURED: `require:` 22, `requires:` 21.
 		return e.doRequire(s)
 	case s.Has("require_ssh"):
 		return e.doRequireSSH(s)
 	case s.Has("ssh"):
 		return e.doSSH(s)
-	case s.Has("repeat_until"):
-		return e.doRepeatUntil(s)
-	case s.Has("unless"), s.Has("unless_any"):
+	case s.Has("when"):
+		// A GATE, like `unless:` and its mirror: it reads the screen, then re-enters the dispatcher
+		// with the gate removed so the step's own action runs.
+		return e.doWhen(s)
+	// `do:` IS THE PANE MODEL'S ACTION LIST, and it is an ORDINARY STEP SHAPE - a list run in order
+	// under one name, which is what a `loop:`'s `do:` and a `then:` branch already are. It had no
+	// dispatcher branch at all, so 8 macOS steps that write it did nothing.
+	case s.Has("do"):
+		return e.doActionList(s)
+	case s.Has("when_not"), s.Has("when_not_any"):
 		if err := e.doUnless(s); err != nil {
 			// THE GATE IS SHUT - THE WORDS WERE ON THE SCREEN - SO THE ACTION IS NOT RUN.
 			//
@@ -293,13 +420,19 @@ func (e *Executor) runOne(s walk.Step) error {
 			// ssh stage, a step that said `skipped: the screen already shows "allow full disk
 			// access"` then pressed Cmd+F and Return anyway and closed the panel.
 			if errors.Is(err, errUnlessAlready) {
+				// AND THE REPORT SAYS SO. `doWhen`'s shut gate sets the same flag directly, because
+				// it dispatches the rest of the step itself and a plain `return nil` there really
+				// does mean "nothing ran". This arm is different: returning nil from here ends the
+				// step, and the journal would otherwise record it as `passed` - a stage that skipped
+				// its own verification and still looked complete.
+				e.skipped = true
 				return nil
 			}
 			return err
 		}
 		return e.dispatchRest(s)
-	case s.Has("until_console"):
-		return e.doUntilConsole(s)
+	// `until:` IS ONE KEY AND TWO SOURCES: the screen (a single reading) or the serial log (a file
+	// that grows, so it polls). See doUntil's `from:` branch.
 	case s.Has("until") || s.Has("until_any"):
 		return e.doUntil(s)
 	// `run` BEFORE `expect`, AND THAT ORDER IS THE FIX RATHER THAN A PREFERENCE.
@@ -351,39 +484,31 @@ func (e *Executor) runOne(s walk.Step) error {
 	// the wrong side of the line.
 	case s.Has("at_color"):
 		return e.doAtColor(s)
+	case hasKey(s, "at_bottom"):
+		return e.doAtBottom(s)
 	case hasKey(s, "at_button"):
 		return e.doAtButton(s)
-	case s.Has("expect_any") || s.Has("expect"):
-		return e.doExpectAny(s)
 	case s.Has("disk_settle"):
 		return e.doDiskSettle(s)
-	case hasKey(s, "host_log"):
-		return e.doHostLog(s)
 	case hasKey(s, "do"):
 		return e.doActions(s)
-	case s.Has("wait_for"):
-		return e.doWaitFor(s)
 	case s.Has("screenshot"):
 		return e.doScreenshot(s)
-	case s.Has("demo_script"):
-		return e.doDemoScript(s)
 	case s.Has("write"):
 		return e.doWrite(s)
 	// THE THREE PREPARATION KINDS ARE ONE DISPATCHER, because they are one operation with three
 	// names: a file is obtained, assembled, or rendered, and all three end as a path in the work
 	// directory that a later step names. `doFetch` reads whichever key is present.
-	case s.Has("asset"), s.Has("build"), s.Has("generate"):
+	case s.Has("fetch"), s.Has("asset"), s.Has("build"), s.Has("generate"):
 		return e.doFetch(s)
 	case s.Has("scp"):
 		return e.doSCP(s)
-	case s.Has("script"):
-		return e.doScript(s)
 	case s.Has("desktop"):
 		return e.doDesktop(s)
-	case s.Has("share_serve"):
-		return e.doShareServe(s)
-	case s.Has("share_mount"):
-		return e.doShareMount(s)
+	// THE TWO `share_*` BRANCHES WERE HERE. The share is always on now
+	// (internal/daemon/share.go), and proving a guest can read from it is an `ssh:` step with a
+	// URL in it - which is what windows/vm-configure already wrote by hand three lines below its
+	// `share_mount:`.
 	case s.Has("type"):
 		return e.doType(s)
 	case s.Has("key"):
@@ -392,7 +517,17 @@ func (e *Executor) runOne(s walk.Step) error {
 		return e.doDoubleClick(s)
 	case s.Has("click"):
 		return e.doClick(s)
-	case s.Has("wait"):
+	// `settle:` IS A STEP OF ITS OWN AS WELL AS A MODIFIER, and it is the one name for what `wait:`
+	// and `wait_after:` both meant. MEASURED: `wait_after` 627 uses and `wait` 118 - the same idea
+	// under two names. A file can now say `settle:` either way, and the old names keep working so
+	// the migration is per-file.
+	case s.Has("acpi"):
+		return e.doACPI(s)
+	case s.Has("qga"):
+		return e.doQGA(s)
+	case s.Has("wait_until"):
+		return e.doWaitUntil(s)
+	case s.Has("wait"), s.Has("settle"):
 		return e.doWait(s)
 	}
 	return fail(s.Name, "no implementation for this step's keys")
@@ -407,7 +542,8 @@ func (e *Executor) dispatchRest(s walk.Step) error {
 	// A COPY WITHOUT THE GATE, so dispatchRest cannot recurse.
 	rest := walk.Step{Index: s.Index, Name: s.Name, Spec: make(map[string]any, len(s.Spec))}
 	for k, v := range s.Spec {
-		if k == "unless" || k == "unless_any" || k == "region" || k == "region_at" || k == "scale" {
+		if k == "when_not" || k == "when_not_any" || k == "when" ||
+			k == "region" || k == "region_at" || k == "scale" {
 			continue
 		}
 		rest.Spec[k] = v
@@ -529,9 +665,17 @@ func (e *Executor) doType(s walk.Step) error {
 }
 
 func (e *Executor) doWait(s walk.Step) error {
-	seconds, err := s.Float("wait", 0)
+	// `settle:` AND `wait:` ARE THE SAME OPERATION. `settle:` is the name the vocabulary keeps;
+	// `wait:` is what the newer step shape used for the same thing, and it stays readable so a file
+	// written against either still runs.
+	seconds, err := s.Float("settle", 0)
 	if err != nil {
 		return err
+	}
+	if seconds <= 0 {
+		if seconds, err = s.Float("wait", 0); err != nil {
+			return err
+		}
 	}
 	e.Driver.Log(fmt.Sprintf("  waiting %.0fs, as measured", seconds))
 	deadline := time.Now().Add(time.Duration(seconds * float64(time.Second)))
@@ -564,7 +708,7 @@ func (e *Executor) doWait(s walk.Step) error {
 // --- ssh ------------------------------------------------------------------------------
 
 func (e *Executor) doRequireSSH(s walk.Step) error {
-	timeout := seconds(s, "timeout", 900)
+	timeout := e.budget(s, "timeout", 900)
 	probe := s.Get("ssh_probe")
 	if probe == "" {
 		probe = "echo ok"
@@ -640,7 +784,7 @@ func (e *Executor) doRequireSSH(s walk.Step) error {
 
 func (e *Executor) doSSH(s walk.Step) error {
 	command := s.Get("ssh")
-	timeout := seconds(s, "timeout", 900)
+	timeout := e.budget(s, "timeout", 900)
 
 	var res guest.Result
 	run := func(client *guest.Client) error {
@@ -657,6 +801,16 @@ func (e *Executor) doSSH(s walk.Step) error {
 	// command's own output, because the retry is the connection's business and not the step's.
 	err := e.withGuest(run)
 	e.Driver.Log(fmt.Sprintf("  ssh: %s -> %d", oneLine(command), res.Status))
+	// THE COMMAND AND ITS EXIT STATUS, recorded: an `ssh:` step is one command in the guest, and a
+	// report that names the step but not the command cannot be checked against the machine.
+	if e.evidence == nil {
+		e.evidence = &evidence{}
+	}
+	e.evidence.Command = []string{command}
+	if err == nil {
+		okNow := res.Status == 0
+		e.evidence.OK = &okNow
+	}
 	for _, line := range headAndTail(res.Combined(), 18, 6) {
 		e.Driver.Log("    " + line)
 	}
@@ -729,16 +883,84 @@ func (e *Executor) target() guest.Target {
 
 // --- small helpers --------------------------------------------------------------------
 
+// settle waits out a step's own pause — the time between an action and the screen being ready.
+//
+// `settle:` IS THE NAME AND `wait_after:` IS THE OLD ONE, and both are read here rather than in two
+// places. MEASURED across the 57 walkthroughs: `wait_after` 627 uses and `wait` 118, the same idea
+// under two names, and one step in three carried a guess. `docs/PRIMITIVES.md` records the
+// retirement; this function is why the migration is per-file and cannot break a walkthrough — an old
+// file keeps working while a migrated one says `settle:`.
+//
+// A STEP THAT CAN WAIT ON A FACT SHOULD. The validator reports a `settle:` followed by a `check:` of
+// the same region, because a timed guess is what failed cachyos and endeavouros on CI: the number was
+// right on the measuring machine and wrong on the runner.
+// settle waits out a step's own pause — the time between an action and the screen being ready.
+//
+// `settle:` IS A MODIFIER AND NOT A WAIT, AND THE DIFFERENCE IS MEASURED RATHER THAN STYLISTIC.
+//
+// A `settle:` is a SHORT pause after an action, and a blind `time.Sleep` is right for it: 640 of the
+// 738 pauses in these 57 files ride on an action step, and 534 are ten seconds or less. There is
+// nothing to interrupt and nothing to measure - the action just happened and the pane needs a moment.
+//
+// `wait:` IS A STEP OF ITS OWN AND MUST STAY ONE when the pause is long, because `doWait` is the
+// thing that listens for `easyvm stop`: it polls `ShouldStop` every five seconds. A `settle:` of
+// 2400 seconds - which `ghostbsd`'s `installation runs` really is - would be a WALL, and the files
+// record what that cost:
+//
+//	status: running step 22/25 "installation runs"
+//	REFUSED: a run is already in progress (step "installation runs"); stop it first
+//
+// and the only way out was to kill PID 1 and restart the container, throwing away the machine with
+// it. SO THE RULE IS:
+//
+//	`settle: N` on an action step   N is short, and there is nothing to wait FOR
+//	`- settle: N` as its own step   long, and interruptible through `doWait`
+//
+// THE NAME IS THE SAME IN BOTH POSITIONS so a file does not have to know which is which, and this
+// function is why: a step whose only key is `settle:` is dispatched to `doWait`, which polls. A
+// `settle:` beside a `click:` never reaches here for longer than the pause it asked for.
 func (e *Executor) settle(s walk.Step) error {
-	value, err := s.Float("wait_after", 0)
+	value, err := s.Float("settle", 0)
 	if err != nil {
 		return err
 	}
 	if value <= 0 {
+		if value, err = s.Float("wait_after", 0); err != nil {
+			return err
+		}
+	}
+	if value <= 0 {
 		return nil
 	}
-	time.Sleep(time.Duration(value * float64(time.Second)))
+	// A MODIFIER'S PAUSE IS STILL INTERRUPTIBLE. `time.Sleep` here made `easyvm stop` a suggestion
+	// for the length of the pause, and this repository has already paid for that: a 1800-second
+	// `wait:` was a wall and the only way out was to kill PID 1.
+	//
+	// SO THIS POLLS, in five-second steps, exactly as `doWait` does. The cost is a few more wakeups;
+	// the difference is that a stop between two of them is honoured. That is why the validator can
+	// allow a `settle:` beside an action at all.
+	deadline := time.Now().Add(time.Duration(value * float64(time.Second)))
+	for time.Now().Before(deadline) {
+		if e.ShouldStop != nil && e.ShouldStop() {
+			e.Driver.Log("  stopping the pause as asked")
+			return errStopped
+		}
+		time.Sleep(minDuration(5*time.Second, time.Until(deadline)))
+	}
 	return nil
+}
+
+// budget is `seconds` for the waits that FOLLOW a boot, so a step that says nothing inherits the
+// patience the file already declared for its guest.
+//
+// A STEP THAT NAMES ITS OWN `timeout:` STILL WINS - a per-step budget is more specific than the one
+// a boot step declared - and a run with no `boot:` behaves exactly as it did before, because
+// `bootBudgetSet` is only true once a boot carried a number.
+func (e *Executor) budget(s walk.Step, key string, fallback float64) time.Duration {
+	if _, named := s.Spec[key]; !named && e != nil && e.bootBudgetSet && e.bootBudget > 0 {
+		return e.bootBudget
+	}
+	return seconds(s, key, fallback)
 }
 
 func seconds(s walk.Step, key string, fallback float64) time.Duration {
@@ -815,33 +1037,44 @@ func notImplemented(s walk.Step, key string) error {
 	return fmt.Errorf("%w: step %q needs %q", errNotImplemented, s.Name, key)
 }
 
-// scriptName is the file a `script:` body is written as.
-func scriptName(s walk.Step) string {
-	if v := s.Get("script_name"); v != "" {
-		return v
-	}
-	base := strings.Map(func(r rune) rune {
-		switch {
-		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
-			return r
-		}
-		return '-'
-	}, strings.ToLower(s.Name))
-	return filepath.Base(base) + ".ps1"
-}
-
 // errStopped is returned when a `stop` request ended the walk at a step boundary.
 var errStopped = errors.New("stopped as asked")
 
 // stepNeedsAGuest reports whether a step expects something to ANSWER.
 //
 // IT IS AN ALLOWLIST OF THE OPPOSITE: the steps that work on FILES are listed, and everything else is
-// assumed to need the machine. That way a key added to the vocabulary without a thought here is refused
-// after a shutdown - noisy and correct - rather than silently writing into a guest that is not there.
+// assumed to need the machine. That way a key added to the vocabulary without a thought here is
+// refused after a shutdown - noisy and correct - rather than silently writing into a guest that is
+// not there.
 func stepNeedsAGuest(s walk.Step) bool {
 	switch {
 	// the ending of a walk, and anything that turns files into other files
 	case s.Has("shutdown"), s.Has("compress"), s.Has("publish"), s.Has("snapshot"):
+		return false
+	// A `boot:` IS THE ONE STEP THAT DOES NOT NEED A GUEST TO BE THERE, because it is what PUTS one
+	// there. THE "the guest is gone" GUARD IS RIGHT FOR EVERY OTHER STEP and wrong for this one: a
+	// walk that stops a guest and starts another - which is how one recording shows two operating
+	// systems - was refused at its second `boot:` with
+	//
+	//	boot linux: the guest is no longer running, so this step cannot be done
+	//
+	// which is a true sentence about the step before the one that starts a machine.
+	case s.Has("boot"), s.Has("boot_from"):
+		return false
+	// AND `wait_until:` IS THE OTHER ONE, FOR THE SAME REASON IN THE OTHER DIRECTION.
+	//
+	// `step "stop the machine"` is followed by `step "wait for the machine to stop"` with
+	// `wait_until: stopped` - and the FIRST of those succeeds, so the guest is gone when the second
+	// begins. THE GUARD SAW A DEAD GUEST AND REFUSED THE STEP THAT WAS WAITING FOR IT TO DIE:
+	//
+	//	status: failed step 29/31 "stop the machine"
+	//	error:   wait for the machine to stop: the guest is no longer running, so this step cannot
+	//	         be done. The machine exited during the step before it
+	//
+	// measured on macos 15 ssh, run 44461859215, on the step whose whole purpose is to confirm the
+	// shutdown that had just worked. `wait_until:` asks ABOUT the machine rather than asking it
+	// something, so it must be allowed to run when the answer is "gone".
+	case s.Has("wait_until"):
 		return false
 	// AND ANYTHING THAT EDITS A DISK RATHER THAN ASKS A GUEST. `esp_fallback:` opens the qcow2 with
 	// qemu-io and rewrites FAT structures at byte offsets; the machine it belongs to has usually
@@ -859,4 +1092,12 @@ func stepNeedsAGuest(s walk.Step) bool {
 		return true
 	}
 	return true
+}
+
+// ArtifactLibrary is the content-addressed store a run's named pictures go into.
+//
+// IT IS AN INTERFACE FOR THE SAME REASON `Journal` IS: `Executor` is built by value in 340 tests and
+// the zero value has to work. `Put` returns the content address the picture is known by.
+type ArtifactLibrary interface {
+	Put(path string) (string, error)
 }

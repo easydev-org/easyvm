@@ -24,8 +24,8 @@ func TestACoordinateOutsideTheFrameIsRefusedNotClamped(t *testing.T) {
 	outside := [][2]int{
 		{-1, 10},
 		{10, -1},
-		{1920, 10},   // one past the last column
-		{10, 1080},   // one past the last row
+		{1920, 10}, // one past the last column
+		{10, 1080}, // one past the last row
 		{99999, 10},
 		{10, 99999},
 	}

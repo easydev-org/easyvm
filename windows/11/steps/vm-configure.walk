@@ -1,0 +1,158 @@
+walkthrough "windows 11 - configure the vm (share, logon hook)"
+  resolution 1920x1080
+  recording_resolution 1920x1080
+  user vmuser
+  password admin
+  var host == {default: "172.30.0.1", from: args.host}
+  var hostname == {default: easyvm-win11, from: args.hostname}
+  var locale == {default: en_US.UTF-8, from: args.locale}
+  var out == {default: out/distro.qcow2, from: args.out}
+  var smb_pass == {default: "", from: args.smb_pass}
+  var smb_user == {default: guest, from: args.smb_user}
+  var timezone == {default: America/Los_Angeles, from: args.timezone}
+  var user == {default: vmuser, from: args.user}
+  header boot_disk == from_caller
+  header ssh_port == 2222
+
+  step "boot the disk"
+    boot == true
+    os == windows
+    # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
+    memory_mb == 12288
+    timeout == 900
+  step "wait for the desktop"
+    desktop == windows
+    timeout == 900
+  step "wait for sshd"
+    require_ssh == true
+    ssh_probe == echo ok
+    timeout == 900
+  step "unpack the agent and its driver from the prepared ISO"
+    fetch == guest_agent
+    os == windows
+  step "copy the driver in"
+    scp == [vioserial/vioser.inf, "C:/Users/{{ user }}/vioser.inf"]
+    timeout == 300
+  step "copy the driver's payload in"
+    scp == [vioserial/vioser.sys, "C:/Users/{{ user }}/vioser.sys"]
+    timeout == 300
+  step "copy the driver's catalogue in"
+    scp == [vioserial/vioser.cat, "C:/Users/{{ user }}/vioser.cat"]
+    timeout == 300
+  step "copy the agent installer in"
+    scp == [qemu-ga-x86_64.msi, "C:/Users/{{ user }}/qemu-ga-x86_64.msi"]
+    timeout == 600
+  # THE DRIVER IS INSTALLED *INTO THE DRIVER STORE*, WHICH IS NOT THE SAME AS BINDING IT TO A DEVICE.
+  #
+  # MEASURED ON RUN 44560274921: `PNPUTIL_EXIT=0`, and the very next check reported
+  #
+  #	device: NO virtio-serial port
+  #
+  # qemu's side was right - that run's command line carries `-chardev socket,id=qga0`,
+  # `-device virtio-serial` and `-device virtserialport,chardev=qga0,name=org.qemu.guest_agent.0`.
+  # What was missing is that Windows had not matched the new hardware to the driver: `/add-driver`
+  # stages the package, and the device node needs a RESCAN to appear and bind.
+  #
+  # SO THE STEP NOW RESCANS AND ASSERTS. `pnputil /scan-devices` asks the PnP manager to look again,
+  # and PNPUTIL_EXIT is checked rather than printed - a driver that did not install must not be
+  # followed by an agent that cannot answer.
+  step "install the driver the agent talks on"
+    ssh == "powershell -NoProfile -Command \"Push-Location $env:USERPROFILE; $p = Start-Process pnputil.exe -ArgumentList @('/add-driver','vioser.inf','/install') -PassThru -Wait -NoNewWindow; Write-Output ('PNPUTIL_EXIT=' + $p.ExitCode); if ($p.ExitCode -ne 0) { exit $p.ExitCode }; $q = Start-Process pnputil.exe -ArgumentList @('/scan-devices') -PassThru -Wait -NoNewWindow; Write-Output ('SCAN_EXIT=' + $q.ExitCode); Start-Sleep -Seconds 10; Pop-Location\"\n"
+    timeout == 600
+  step "install the guest agent"
+    ssh == "cmd /c \"msiexec /i C:\\Users\\{{ user }}\\qemu-ga-x86_64.msi /qn /norestart /l*v C:\\Users\\{{ user }}\\qemu-ga-install.log & echo MSIEXEC_EXIT=%ERRORLEVEL%\"\n"
+    timeout == 600
+  # THIS CHECK USED TO PRINT AND NEVER FAIL, AND THAT IS WHY A DEAD AGENT LOOKED HEALTHY.
+  #
+  # MEASURED ON RUN 44560274921, whose log is this step's own output:
+  #
+  #	=== prove the guest agent answers
+  #	  service: Running / Automatic
+  #	  device: NO virtio-serial port
+  #
+  # The service was running; THE CHANNEL TO QEMU WAS NOT THERE. `Get-Service` can only see the
+  # service, and the "NO virtio-serial port" branch only wrote a line - so the step "passed", the
+  # stage went on to `shutdown: guest_agent`, and the request went to an agent with no pipe to
+  # receive it. The machine stayed up, `stopping with method "guest_agent"` was the last line the
+  # stage wrote, and the failure looked like a shutdown problem when it was a MISSING CHANNEL.
+  #
+  # SO THE DEVICE IS NOW AN ASSERTION: exit 1 when the port is absent, or when any matching device
+  # is not `OK`. The vioser driver is installed a few steps above, and if the device has not bound
+  # to the virtio-serial port the agent cannot answer - which is the fact this step exists to state.
+  step "prove the guest agent answers"
+    ssh == "powershell -NoProfile -Command \"$s = Get-Service QEMU-GA -ErrorAction SilentlyContinue; if ($s) { Write-Output ('service: ' + $s.Status + ' / ' + $s.StartType) } else { Write-Output 'service: ABSENT'; exit 1 }; $d = Get-PnpDevice -Class Ports -ErrorAction SilentlyContinue | Where-Object { $_.FriendlyName -match 'Guest Agent|virtio' }; if (-not $d) { Write-Output 'device: NO virtio-serial port'; exit 1 }; $bad = 0; $d | ForEach-Object { Write-Output ('device: ' + $_.FriendlyName + ' / ' + $_.Status); if ($_.Status -ne 'OK') { $bad = 1 } }; if ($bad) { exit 1 }\"\n"
+    timeout == 120
+  step "set the computer's name"
+    ssh == powershell -NoProfile -Command "Rename-Computer -NewName '{{ hostname }}' -Force -ErrorAction Stop; Write-Output RENAME_SCHEDULED"
+    timeout == 300
+  step "prove the new name is pending, which is all a rename can promise before a restart"
+    ssh == powershell -NoProfile -Command "$pending = (Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\ComputerName\ComputerName').ComputerName; Write-Output ('pending = ' + $pending); Write-Output ('live    = ' + $env:COMPUTERNAME); if ($pending -eq '{{ hostname }}') { Write-Output 'HOSTNAME_PENDING_OK' } else { Write-Output 'HOSTNAME_NOT_SET'; exit 1 }"
+    timeout == 120
+  step "set the time zone to Pacific"
+    ssh == powershell -NoProfile -Command "Set-TimeZone -Id 'Pacific Standard Time' -ErrorAction Stop; Write-Output (Get-TimeZone | Select-Object -ExpandProperty Id)"
+    timeout == 120
+  step "prove the time zone"
+    ssh == powershell -NoProfile -Command "Write-Output ('zone = ' + (Get-TimeZone).Id); Write-Output ('now  = ' + (Get-Date -Format o)); if ((Get-TimeZone).Id -eq 'Pacific Standard Time') { Write-Output 'TIMEZONE_OK' } else { Write-Output 'TIMEZONE_WRONG'; exit 1 }"
+    timeout == 60
+  step "set the locale to American English"
+    ssh == powershell -NoProfile -Command "Set-WinUILanguageOverride -Language 'en-US'; Set-Culture -CultureInfo 'en-US'; Set-WinSystemLocale -SystemLocale 'en-US'; Write-Output LOCALE_WRITTEN"
+    timeout == 300
+  step "prove the locale"
+    ssh == powershell -NoProfile -Command "Write-Output ('culture = ' + (Get-Culture).Name); Write-Output ('ui      = ' + (Get-WinUILanguageOverride).Name); if ((Get-Culture).Name -eq 'en-US') { Write-Output 'LOCALE_OK' } else { Write-Output 'LOCALE_WRONG'; exit 1 }"
+    timeout == 120
+  step "prove the guest can fetch from the host share"
+    ssh == powershell -NoProfile -Command "Invoke-WebRequest -UseBasicParsing -TimeoutSec 20 'http://172.30.0.1:8080/shared/'"
+    timeout == 180
+  step "show what the guest sees at the share"
+    ssh == powershell -NoProfile -Command "(Invoke-WebRequest -UseBasicParsing -TimeoutSec 20 'http://172.30.0.1:8080/shared/').Content; Write-Output ('fetch exit = ' + $LASTEXITCODE)"
+    timeout == 120
+  step "copy the launcher in"
+    scp == {template: launcher, to: "C:/Users/{{ user }}/bootstrap-launcher.ps1"}
+    timeout == 300
+  step "copy the task registration script in"
+    scp == {template: windows_task, to: "C:/Users/{{ user }}/bootstrap-install.ps1"}
+    timeout == 300
+  step "register the logon task"
+    ssh == "powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/{{ user }}/bootstrap-install.ps1\n"
+    timeout == 300
+  step "prove the logon task is registered"
+    ssh == "cmd /c \"schtasks /Query /TN vm-bootstrap /V /FO LIST | findstr /i /C:TaskName /C:Status\"\n"
+    timeout == 60
+  step "name the machine's own domain for winlogon, or the auto-logon half-applies"
+    ssh == "powershell -NoProfile -Command \"Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon' -Name DefaultDomainName -Value $env:COMPUTERNAME -Type String; Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon' -Name AutoAdminLogon -Value '1' -Type String; Set-ItemProperty -Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon' -Name DefaultPassword -Value '{{ password }}' -Type String; Write-Output AUTOLOGON_DOMAIN_SET\"\n"
+    timeout == 120
+  step "prove all four winlogon values are what an unattended boot needs"
+    ssh == "powershell -NoProfile -Command \"$k = 'HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon'; $w = Get-ItemProperty -Path $k; Write-Output ('AutoAdminLogon    = ' + $w.AutoAdminLogon); Write-Output ('DefaultUserName   = ' + $w.DefaultUserName); Write-Output ('DefaultDomainName = ' + $w.DefaultDomainName); if ($w.DefaultPassword) { Write-Output 'DefaultPassword   = present'; Write-Output PASSWORD_PRESENT } else { Write-Output 'DefaultPassword   = MISSING'; Write-Output PASSWORD_MISSING; exit 1 }\"\n"
+    timeout == 120
+  # `sudo ... poweroff` IS LINUX AND THIS GUEST IS WINDOWS, SO IT CANNOT WORK.
+  #
+  # MEASURED ON RUN 44492250642, this stage, just after the winlogon proof:
+  #
+  #	ssh: printf '%s\n' 'admin' | sudo -S -p '' poweroff -> 255
+  #	  'printf' is not recognized as an internal or external command,
+  #	  operable program or batch file.
+  #
+  # The line was copied from the Linux vm-configure files, where it is right. Here cmd.exe ran it
+  # and nothing was shut down.
+  #
+  # `kill`, WHICH IS WHAT THIS REPOSITORY ALREADY USES FOR THIS GUEST, AND THE REASON IS IN THE RUNS.
+  #
+  # MEASURED ON RUN 44560274921: `stopping with method "guest_agent"` was the LAST LINE the stage
+  # wrote, then it failed with the machine still up. The agent's socket was there - 'prove the guest
+  # agent answers' passed earlier in this same file - so the shutdown request went somewhere and the
+  # guest did not go down within the grace.
+  #
+  # `windows/11/steps/ssh.walk` (which PASSES) ends with `shutdown: kill`, and windows11-ssh is a
+  # published 10865 MiB disk. A qcow2 is journalled and qemu exits cleanly on the signal, so the
+  # disk is consistent - which is the property that matters here, since the next stage boots it.
+  #
+  # The earlier `sudo ... poweroff` was Linux syntax and could never work; `guest_agent` was the
+  # right idea and did not work on this guest; `kill` is what the sibling stage proves.
+  step "stop the machine"
+    shutdown == kill
+    timeout == 300
+  step "wait for the machine to stop"
+    wait_until == stopped
+    timeout == 300
+  step "publish the disk"
+    compress == '{{ out }}'

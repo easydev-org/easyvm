@@ -1,0 +1,174 @@
+walkthrough "linux-manjaro - sshd"
+  resolution 1920x1080
+  password admin
+  var out == {default: out/distro.qcow2, from: args.out}
+  # THE ACCOUNT ON THIS DISK IS `vmuservmuser`, AND THAT IS WHAT HAS TO LOG IN.
+  #
+  # MEASURED ON RUN 44599025471: Calamares fills the login name from the full name as it is
+  # typed, so the installer's second `type:` APPENDED to the field instead of replacing it and
+  # the account was created as `vmuservmuser`. The ssh and vm stages then logged in as `vmuser`,
+  # which does not exist - hence sudo asking for a password it could never accept.
+  #
+  # The install is not being changed: this stage logs in as the account the disk actually has.
+  # `ssh_user` IS THE HEADER KEY THE SSH CLIENT READS - `var user` IS NOT.
+  #
+  # MEASURED ON RUN 44611943331 (manjaro), whose failure was NOT a refused port but
+  #
+  #	wait for sshd: the port is open but no shell answers: ssh: handshake failed: ssh: unable to
+  #	authenticate, attempted methods [none password], no supported methods remain
+  #
+  # - the daemon reached the guest and offered the WRONG NAME. `require_ssh:` and every `ssh ==`
+  # step authenticate as `File.SSHUser`, which is parsed from a top-level `ssh_user:` key
+  # (internal/walk/walk.go) and defaults to `vmuser`. Setting `var user` changes what gets TYPED on
+  # the console; it does not change who the client logs in as.
+  header ssh_user == vmuservmuser
+  var user == {default: vmuservmuser, from: args.user}
+  header recording_resolution == [1920, 1080]
+
+  step "boot the disk"
+    boot == true
+    os == linux
+    # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
+    memory_mb == 4096
+    timeout == 900
+  # THE DISK COMES UP ON GRUB AND WAITS FOR A KEY, AS endeavour's DOES.
+  #
+  # MEASURED ON RUN 44557318104's SUCCESSOR, whose ssh recording ends on
+  #
+  #	[ manjaro ]
+  #	Manjaro Linux
+  #	Advanced options for Manjaro Linux
+  #	UEFI Firmware Settings
+  #	Memory Tester (memtest86+)
+  #	E = Edit Boot Options   C = GRUB Commandline
+  #
+  # and stays there. The greeter wait below then pressed Escape into it sixty times.
+  # The first entry is already highlighted; Return boots it.
+  step "the disk's boot menu, when it has one"
+    loop == {check: {from: grubmenu, mode: text, name: at_menu, rect: [300, 300, 1640, 480], rect_at: [1920, 1080], scale: 1, words: [[manjaro], [advanced, options], [uefi, firmware, settings]]}, do: [{settle: 5}], max: 12, see: {name: grubmenu}, until: {fact: at_menu}}
+    optional == true
+  press Return, waiting 25s, named "boot the highlighted entry, which is the installed system"
+  # THE GREETER IS ASKED FOR BEFORE IT IS CLICKED, AND THE WAIT WAKES THE SCREEN.
+  #
+  # MEASURED ON RUN 44557318104, whose ssh recording at 150 s is SDDM's login screen with the
+  # password field still showing its 'Password' PLACEHOLDER - the click and the five characters had
+  # not reached it - and the stage then spent ten minutes on 'connection refused'.
+  #
+  # The Escape is inside the loop for the reason the same wait needed it on endeavour and mint:
+  # SDDM blanks to a clock-only screen, and a wait cannot succeed until something wakes it.
+  step "the greeter is drawn"
+    loop == {check: {from: greeter, mode: text, name: up, rect: [740, 470, 1340, 770], rect_at: [1920, 1080], scale: 2, words: [[password], [vmuser]]}, do: [{key: esc, settle: 3}], max: 60, see: {name: greeter}, until: {fact: up}}
+  # THE GREETER IS LOGGED IN WHERE IT STANDS, BECAUSE THE VIRTUAL CONSOLE DOES NOT SWITCH HERE.
+  #
+  # MEASURED ON RUN 44585841497: 'ctrl+alt+f2' left the screen ON SDDM - the console-tail read
+  # 'Virtual Keyboard', which is SDDM's own on-screen keyboard footer, not a getty. So the chord is
+  # not reaching a virtual console on this guest.
+  #
+  # The greeter this file already waited for IS a usable login: 'vmuser', an empty password field
+  # at 936,628, and an arrow button beside it. Click the field, type, Return - which is what every
+  # other KDE stage here does.
+  click "greeter - the password box" at 936 628, waiting 3s, named "greeter - the password box"
+  step "greeter - log in"
+    settle == 3
+    type == '{{ password }}'
+  # THE PASSWORD IS IN THE FIELD AND RETURN MUST BE PRESSED MORE THAN ONCE.
+  #
+  # MEASURED ON RUN 44594136209, whose ssh recording at 120 s is SDDM with FIVE DOTS IN THE PASSWORD
+  # FIELD - the characters arrived - and no session. One Return a second after the last character
+  # is not enough for SDDM to accept it.
+  press Return, waiting 8s, named "greeter - submit"
+  press Return, waiting 20s, named "greeter - submit again, because SDDM can miss the first"
+  step "the desktop is up after the login"
+    desktop == linux/kde
+    timeout == 600
+  press ctrl+alt+t, waiting 20s, named "open the terminal"
+  # NO PROBE COMMAND. MEASURED ON endeavour AND mx: a lone 'echo XXX' right after the chord loses
+  # its Return, the next command is appended to it, and every character arrives in capitals. The
+  # first thing typed after the chord is the command that matters.
+  step "unlock sudo once for this session"
+    run == printf '%s\n' {{ password }} | sudo -S -v
+    settle == 4
+    terminal_wait == 0
+  step "install openssh"
+    run == sudo pacman -Sy --noconfirm --needed openssh 2>&1 | tail -5
+    settle == 60
+    terminal_wait == 0
+  step "allow password authentication"
+    run == sudo sh -c 'mkdir -p /etc/ssh/sshd_config.d; printf "PasswordAuthentication yes\n" > /etc/ssh/sshd_config.d/99-vm.conf; sed -i "s/^#\?\s*PasswordAuthentication.*/PasswordAuthentication yes/" /etc/ssh/sshd_config; grep -q "^PasswordAuthentication yes" /etc/ssh/sshd_config || printf "PasswordAuthentication yes\n" >> /etc/ssh/sshd_config' 2>&1 | tail -3
+    settle == 3
+    terminal_wait == 0
+  step "enable sshd at boot"
+    run == sudo systemctl enable sshd 2>&1 | tail -3
+    settle == 8
+    terminal_wait == 0
+  step "start sshd"
+    run == sudo systemctl restart sshd 2>&1 | tail -3
+    settle == 10
+    terminal_wait == 0
+  step "prove sshd is active"
+    run == systemctl is-active sshd
+    settle == 5
+    terminal_wait == 0
+  # sshd IS ACTIVE AND PORT 22 STILL ANSWERS WITH A RESET - AND THIS MEDIUM HAS NO FIREWALL AT ALL.
+  #
+  # MEASURED ON RUN 44594136209's successor, whose terminal reads, in full:
+  #
+  #	$ sudo systemctl is-active sshd
+  #	active
+  #	$ sudo firewall-cmd --permanent --add-service=ssh; ...
+  #	firewall-cmd: command not found
+  #	firewall-cmd: command not found
+  #	firewall-cmd: command not found
+  #
+  # So the earlier guess - "firewalld refuses the port" - is wrong: firewalld is not even installed
+  # here. `active` plus a REFUSED connection means sshd is listening somewhere that is not 22, or
+  # not listening on the forwarded address. The next line asks the guest instead of guessing: it
+  # pins `Port 22` and `ListenAddress 0.0.0.0` in the drop-in, restarts, and prints the listening
+  # sockets and the unit's own state so the answer is in the recording either way.
+  step "pin port 22 and show what the guest is actually listening on"
+    run == sudo sh -c 'printf "Port 22\nListenAddress 0.0.0.0\n" > /etc/ssh/sshd_config.d/98-port.conf'; sudo systemctl restart sshd; sleep 3; sudo ss -ltnp; sudo systemctl is-active sshd; sudo sshd -T 2>/dev/null | grep -iE "^(port|listenaddress)"
+    settle == 12
+    terminal_wait == 0
+  step "wait for sshd"
+    require_ssh == true
+    timeout == 600
+  step "prove the kernel over ssh"
+    ssh == uname -a
+    timeout == 120
+  step "prove the account over ssh"
+    ssh == id -un; hostname
+    timeout == 120
+  step "make sure the host keys exist"
+    ssh == "set -e\nprintf '%s\\n' '{{ password }}' | sudo -S -p '' mkdir -p /etc/ssh\nprintf '%s\\n' '{{ password }}' | sudo -S -p '' ssh-keygen -A 2>&1 | tail -4\necho \"--- the keys ---\"\nls -l /etc/ssh/ssh_host_*_key | head -8\necho \"--- and the one sshd needs first ---\"\nprintf '%s\\n' '{{ password }}' | sudo -S -p '' test -s /etc/ssh/ssh_host_ed25519_key\n"
+    timeout == 120
+  step "restart sshd now that the keys are on disk"
+    ssh == "printf '%s\\n' '{{ password }}' | sudo -S -p '' systemctl restart sshd 2>&1 | tail -3\nsleep 2\nsystemctl is-active sshd\nss -lnt 2>/dev/null | grep ':22 ' || apt-get --version >/dev/null 2>&1 || true\n"
+    timeout == 180
+  step "enable sshd again, over ssh, where the exit status is readable"
+    ssh == "printf '%s\\n' '{{ password }}' | sudo -S -p '' systemctl enable --now sshd 2>&1 | tail -3\nsystemctl is-enabled sshd\ntest \"$(systemctl is-enabled sshd)\" = \"enabled\"\n"
+    timeout == 180
+  step "prove sshd will start at boot"
+    ssh == "set -e\necho \"is-enabled: $(systemctl is-enabled sshd)\"\necho \"is-active:  $(systemctl is-active sshd)\"\necho \"wants:      $(ls /etc/systemd/system/multi-user.target.wants/sshd.service 2>&1)\"\ntest \"$(systemctl is-enabled sshd)\" = \"enabled\"\ntest -L /etc/systemd/system/multi-user.target.wants/sshd.service\n"
+    timeout == 120
+  # `optional` IS GONE AND THE TOLERANCE IS IN THE COMMAND. A reboot that works also closes this
+  # connection, so the client reports a failure for a machine that is rebooting exactly as asked -
+  # writing `|| true` says that where the log shows it, and `come back up with sshd answering` below
+  # is the assertion. `optional` would have swallowed a reboot that never started too.
+  step "restart the machine"
+    ssh == "printf '%s\\n' '{{ password }}' | sudo -S -p '' systemctl reboot || true\n"
+    timeout == 60
+  step "come back up with sshd answering"
+    require_ssh == true
+    ssh_after_reboot == true
+    timeout == 900
+  step "read what this boot did"
+    ssh == "set -e\necho \"--- identity, over a connection that did not exist when sshd was installed ---\"\nid -un; hostname\necho \"--- is-enabled / is-active ---\"\nsystemctl is-enabled sshd; systemctl is-active sshd\necho \"--- the unit's own account of this start ---\"\njournalctl -b -u sshd --no-pager 2>&1 | tail -12\ntest \"$(systemctl is-enabled sshd)\" = \"enabled\"\ntest \"$(systemctl is-active sshd)\" = \"active\"\n"
+    timeout == 120
+  step "ask the guest to power off"
+    ssh == printf '%s\n' '{{ password }}' | sudo -S -p '' poweroff
+    timeout == 300
+  step "wait for the machine to stop"
+    timeout == 300
+    wait_until == stopped
+  step "publish the disk"
+    compress == '{{ out }}'

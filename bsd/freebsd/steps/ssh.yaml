@@ -1,4 +1,7 @@
 name: freebsd 15.1 - sshd, XFCE, and a desktop
+recording_resolution:
+- 1920
+- 1080
 resolution:
 - 1920
 - 1080

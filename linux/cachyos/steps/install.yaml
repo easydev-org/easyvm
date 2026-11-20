@@ -1,4 +1,7 @@
 name: cachyos - install to ext4, then the power button
+recording_resolution:
+- 1920
+- 1080
 resolution:
 - 1920
 - 1080

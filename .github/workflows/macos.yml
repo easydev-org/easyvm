@@ -25,7 +25,7 @@ on:
     inputs:
       disks_repository:
         description: "the ghcr repository that holds the disks"
-        default: "easydev-org/easyvm"
+        default: "easydev-org/easyvm-fork"
       from_tag:
         description: >-
           start from a PUBLISHED disk: macos15 or macos15-ssh or macos15-vm-configure or macos15-dev. Empty runs the whole chain. A fix to a later stage then costs that stage, not the entire bake.
@@ -61,7 +61,7 @@ jobs:
         [
           {
             "name": "macos-setup",
-            "file": "macos/15/steps/setup.yaml",
+            "file": "macos/15/steps/setup.walk",
             "pull": "",
             "assets": ["macos-recovery-sequoia:recovery.dmg", "macos-asset-boot:boot.img", "macos-asset-rom:macos.rom", "macos-asset-vars:macos.vars"],
             "out": "macos15.qcow2",
@@ -96,7 +96,7 @@ jobs:
         [
           {
             "name": "macos-ssh",
-            "file": "macos/15/steps/ssh.yaml",
+            "file": "macos/15/steps/ssh.walk",
             "pull": "macos15",
             "assets": ["macos-asset-boot:boot.img", "macos-asset-rom:macos.rom", "macos-asset-vars:macos.vars"],
             "out": "macos15-ssh.qcow2",
@@ -117,7 +117,7 @@ jobs:
         [
           {
             "name": "macos-vm-configure",
-            "file": "macos/15/steps/vm-configure.yaml",
+            "file": "macos/15/steps/vm-configure.walk",
             "pull": "macos15-ssh",
             "assets": ["macos-asset-boot:boot.img", "macos-asset-rom:macos.rom", "macos-asset-vars:macos.vars", "macos-asset-mac-guest-agent:mac-guest-agent"],
             "out": "macos15-vm-configure.qcow2",
@@ -138,7 +138,7 @@ jobs:
         [
           {
             "name": "macos-dev",
-            "file": "macos/15/steps/dev.yaml",
+            "file": "macos/15/steps/dev.walk",
             "pull": "macos15-vm-configure",
             "assets": ["macos-asset-boot:boot.img", "macos-asset-rom:macos.rom", "macos-asset-vars:macos.vars", "macos-asset-xcode-26.3:Xcode_26.3_Universal.xip", "dev-node-pkg:node.pkg", "dev-python-pkg:python.pkg"],
             "out": "macos15-dev.qcow2",

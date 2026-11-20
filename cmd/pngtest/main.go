@@ -11,7 +11,10 @@ import (
 
 func main() {
 	nc, err := net.DialTimeout("unix", os.Args[1], 5*time.Second)
-	if err != nil { fmt.Println("dial:", err); os.Exit(1) }
+	if err != nil {
+		fmt.Println("dial:", err)
+		os.Exit(1)
+	}
 	defer nc.Close()
 	r := bufio.NewReader(nc)
 	r.ReadString('\n')
@@ -20,10 +23,14 @@ func main() {
 		nc.Write(append(b, '\n'))
 		for {
 			out, err := r.ReadString('\n')
-			if err != nil { return "" }
+			if err != nil {
+				return ""
+			}
 			var probe map[string]any
 			if json.Unmarshal([]byte(out), &probe) == nil {
-				if _, ok := probe["event"]; ok { continue }
+				if _, ok := probe["event"]; ok {
+					continue
+				}
 			}
 			return out
 		}
@@ -31,7 +38,7 @@ func main() {
 	send(map[string]any{"execute": "qmp_capabilities"})
 	// PNG format, which qemu 9+ supports for screendump.
 	fmt.Println("png:", send(map[string]any{
-		"execute": "screendump",
+		"execute":   "screendump",
 		"arguments": map[string]any{"filename": "/tmp/frame-test.png", "format": "png"},
 	}))
 }

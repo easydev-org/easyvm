@@ -1,4 +1,7 @@
 name: linux-opensuse-tumbleweed - sshd
+recording_resolution:
+- 1920
+- 1080
 resolution:
 - 1920
 - 1080
@@ -13,8 +16,6 @@ vars:
     from: args.out
     default: out/distro.qcow2
 steps:
-- name: start recording
-  record: opensuse-tumbleweed-ssh.mp4
 - name: boot the disk
   boot: true
   os: linux
@@ -24,47 +25,46 @@ steps:
   - 960
   - 640
   optional: true
-  wait_after: 2
+  settle: 2
 - name: greeter - log in
   type: '{{ password }}'
   optional: true
-  wait_after: 3
+  settle: 3
 - name: greeter - submit
   key: ret
   optional: true
-  wait_after: 12
+  settle: 12
 - name: wait for the desktop
   desktop: linux
   timeout: 900
-  poll: 5
 - name: open the terminal
   key: ctrl+alt+t
-  wait_after: 20
+  settle: 20
 - name: install openssh
   run: echo {{ password }} | sudo -S zypper --non-interactive --no-gpg-checks install openssh 2>&1 | tail -5
   terminal_wait: 0
-  wait_after: 60
+  settle: 60
 - name: allow password authentication
   run: echo {{ password }} | sudo -S -p '' sh -c 'mkdir -p /etc/ssh/sshd_config.d; printf "PasswordAuthentication yes\n" > /etc/ssh/sshd_config.d/99-vm.conf; sed -i "s/^#\?\s*PasswordAuthentication.*/PasswordAuthentication yes/" /etc/ssh/sshd_config; grep
     -q "^PasswordAuthentication yes" /etc/ssh/sshd_config || printf "PasswordAuthentication yes\n" >> /etc/ssh/sshd_config' 2>&1 | tail -3
   terminal_wait: 0
-  wait_after: 3
+  settle: 3
 - name: enable sshd at boot
   run: echo {{ password }} | sudo -S systemctl enable sshd 2>&1 | tail -3
   terminal_wait: 0
-  wait_after: 8
+  settle: 8
 - name: start sshd
   run: echo {{ password }} | sudo -S systemctl restart sshd 2>&1 | tail -3
   terminal_wait: 0
-  wait_after: 10
+  settle: 10
 - name: prove sshd is active
   run: systemctl is-active sshd
   terminal_wait: 0
-  wait_after: 5
+  settle: 5
 - name: open the firewall for ssh
   run: echo {{ password }} | sudo -S sh -c "firewall-cmd --add-service=ssh --permanent; firewall-cmd --reload; firewall-cmd --list-services" 2>&1 | tail -5
   terminal_wait: 0
-  wait_after: 8
+  settle: 8
 - name: wait for sshd
   require_ssh: true
   timeout: 600
@@ -157,10 +157,11 @@ steps:
 
     '
   timeout: 120
-- name: stop the machine
-  shutdown: ssh
+- name: ask the guest to power off
+  ssh: printf '%s\n' '{{ password }}' | sudo -S -p '' poweroff
+  timeout: 300
+- name: wait for the machine to stop
+  wait_until: stopped
   timeout: 300
 - name: publish the disk
   compress: '{{ out }}'
-- name: stop recording
-  record: false

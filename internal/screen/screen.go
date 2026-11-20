@@ -29,7 +29,7 @@ import (
 	// THE PPM DECODER THAT USED TO SIT HERE IS GONE: `Screendump` writes PNG and has no fallback, because
 	// this image pins qemu (see `qmp.PinnedQEMU`). One format in, one decoder registered, and a frame
 	// that does not decode is a broken frame rather than a format this build forgot to register.
-	_ "image/png"
+	"image/png"
 )
 
 // The Windows test: a bright top band over a dark, varied bottom band.
@@ -1216,4 +1216,49 @@ func rowSpread(img image.Image, y int) float64 {
 // the top - and mint's XFCE sibling and mx both draw it. Measured on mx's medium.
 func IsXFCEDesktop(img image.Image) (bool, Stats) {
 	return IsLinuxDesktop(img)
+}
+
+// SavePNG writes a PNG. It exists for the JOURNAL: a frame kept as evidence is read by a browser,
+// and PNG is the one format both ends already handle - the daemon's frames are PNG and every check
+// decodes them.
+func SavePNG(img image.Image, path string) error {
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return png.Encode(f, img)
+}
+
+// MarkDifference renders WHERE two images disagree: grey where they agree within tolerance, red
+// where they do not.
+//
+// IT ANSWERS THE QUESTION A SIMILARITY NUMBER CANNOT. "0.7093 similar, wanted 0.78" on a page that
+// looks correct to a person is exactly the case where the answer is a few pixels in a corner or a
+// whole pane; a single number cannot tell those apart, and the picture can.
+//
+// THE IMAGES MUST BE THE SAME SIZE, for the reason `Compare` gives: two screens of different sizes
+// are not two views of one screen.
+func MarkDifference(frame, reference image.Image, tolerance int) (image.Image, error) {
+	fw, fh := frame.Bounds().Dx(), frame.Bounds().Dy()
+	rw, rh := reference.Bounds().Dx(), reference.Bounds().Dy()
+	if fw != rw || fh != rh {
+		return nil, fmt.Errorf("the frame is %dx%d and the reference is %dx%d", fw, fh, rw, rh)
+	}
+	out := image.NewRGBA(image.Rect(0, 0, fw, fh))
+	fb, rb := frame.Bounds(), reference.Bounds()
+	for y := 0; y < fh; y++ {
+		for x := 0; x < fw; x++ {
+			d := pixelDelta(frame.At(fb.Min.X+x, fb.Min.Y+y), reference.At(rb.Min.X+x, rb.Min.Y+y))
+			if d > tolerance {
+				out.Set(x, y, color.RGBA{R: 220, G: 30, B: 30, A: 255})
+				continue
+			}
+			// A FADED COPY OF THE REFERENCE, so the red has something to be read against. A diff on
+			// a black field is unreadable where nothing changed - there is no shape to orient by.
+			r, g, b := rgb8(reference.At(rb.Min.X+x, rb.Min.Y+y))
+			out.Set(x, y, color.RGBA{R: r / 3, G: g / 3, B: b / 3, A: 255})
+		}
+	}
+	return out, nil
 }

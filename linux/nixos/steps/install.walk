@@ -1,0 +1,74 @@
+walkthrough "nixos - the Calamares walk"
+  resolution 1920x1080
+  password admin
+  var out == {default: out/distro.qcow2, from: args.out}
+  var user == {default: vmuser, from: args.user}
+  header recording_resolution == [1920, 1080]
+
+  needs nixos.iso, named "the media this stage boots from is already on disk"
+  step "create the empty disk"
+    disk == disk.qcow2
+    disk_gb == 128
+  step "boot the installer"
+    boot == true
+    iso == nixos.iso
+    os == linux
+    # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
+    memory_mb == 4096
+    timeout == 1800
+  step "wait for the live desktop"
+    desktop == linux/gnome
+    reference == reference/desktop.png
+    range == [0.90, 1.0]
+    # THE BAND IS TOP-RIGHT WALLPAPER: the clock is at the top centre and the search bar
+    # sits under it, and an installer window covers the middle from y=295 down. Measured on this
+    # medium's own recording: the boot splash scores 0.0000 here and every desktop frame 1.0000.
+    rect == [1500, 120, 1900, 280]
+    rect_at == [1920, 1080]
+    poll == 5
+    timeout == 5400
+  step "open the installer"
+    do == [{click: [960, 640], settle: 3}, {click: [960, 640], settle: 3}]
+    settle == 8
+  step "calamares is up"
+    loop == {check: {from: screen, mode: text, name: done, rect: [810, 361, 978, 495], rect_at: [1920, 1080], scale: 3, words: [[welcome], [language], [keyboard]]}, do: [{click: [420, 300], settle: 10}], max: 30, see: {name: screen}, until: {fact: done}}
+  click "the language combo, opened and taken" at 1050 736, waiting 3s, named "the language combo, opened and taken"
+  press Return, waiting 3s, named "take the current entry"
+  step "next through the pages, until the users page is up"
+    loop == {check: {from: at_users, mode: text, name: here, rect: [637, 384, 1146, 526], rect_at: [1920, 1080], scale: 3, words: [[name], [Password]]}, do: [{click: [1330, 828], settle: 8}], max: 8, see: {name: at_users}, until: {fact: here}}
+  step "the full name field"
+    loop == {check: {from: name_field, mode: text, name: took, rect: [626, 362, 829, 389], rect_at: [1920, 1080], scale: 8, words: [["{{ user }}"]]}, do: [{clear: true, click: [727, 375], settle: 2, type: "{{ user }}"}], max: 4, see: {name: name_field}, until: {fact: took}}
+  click "users - allow a short password" at 645 537, waiting 3s, named "users - allow a short password"
+  step "users - password"
+    click == [741, 495]
+    settle == 2
+    type == '{{ password }}'
+  step "users - repeat password"
+    click == [959, 495]
+    settle == 2
+    type == '{{ password }}'
+  step "users - administrator password"
+    click == [741, 609]
+    settle == 2
+    type == '{{ password }}'
+  step "users - administrator repeat password"
+    click == [959, 609]
+    settle == 3
+    type == '{{ password }}'
+  step "next to the partitions page"
+    loop == {check: {from: at_partitions, mode: text, name: here, rect: [680, 360, 860, 469], rect_at: [1920, 1080], scale: 3, words: [[partitioning], [erase]]}, do: [{click: [1330, 828], settle: 6}], max: 8, see: {name: at_partitions}, until: {fact: here}}
+  click "partitions - erase the disk" at 633 390, waiting 6s, named "partitions - erase the disk"
+  step "partitions -> summary"
+    loop == {check: {from: at_summary, mode: text, name: here, rect: [662, 322, 763, 377], rect_at: [1920, 1080], scale: 3, words: [[overview]]}, do: [{click: [1330, 828], settle: 6}], max: 6, see: {name: at_summary}, until: {fact: here}}
+  step "summary - install"
+    loop == {check: {from: summary_after, mode: text, name: begun, rect: [602, 809, 703, 870], rect_at: [1920, 1080], scale: 3, words: [[Installing]]}, do: [{click: [1328, 857], settle: 12}], max: 6, see: {name: summary_after}, until: {fact: begun}}
+  step "the install is written"
+    disk_min_mb == 1024
+    disk_settle == 180
+    poll == 20
+    timeout == 3600
+  step "stop the machine"
+    shutdown == kill
+    timeout == 120
+  step "publish the disk"
+    compress == '{{ out }}'

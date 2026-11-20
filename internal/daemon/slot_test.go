@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -112,7 +113,7 @@ func TestARefusalNamesTheHolder(t *testing.T) {
 	}
 	msg := err.Error()
 	for _, want := range []string{"macos", "create", "destroy"} {
-		if !contains(msg, want) {
+		if !strings.Contains(msg, want) {
 			t.Errorf("the refusal %q does not mention %q; a reader needs the guest, the holder and "+
 				"the way out", msg, want)
 		}
@@ -224,12 +225,17 @@ type fakeOSMachine struct {
 	running bool
 }
 
-func (m fakeOSMachine) Boot(run.BootSpec) error { return nil }
+func (m fakeOSMachine) Boot(run.BootSpec) error          { return nil }
 func (m fakeOSMachine) Stop(string, time.Duration) error { return nil }
-func (m fakeOSMachine) Reboot() error           { return nil }
-func (m fakeOSMachine) IsRunning() bool         { return m.running }
-func (m fakeOSMachine) ReleaseDiff() error      { return nil }
-func (m fakeOSMachine) OS() string              { return m.os }
+func (m fakeOSMachine) Reboot() error                    { return nil }
+func (m fakeOSMachine) IsRunning() bool                  { return m.running }
+func (m fakeOSMachine) ReleaseDiff() error               { return nil }
+func (m fakeOSMachine) PressPowerButton() error          { return nil }
+func (m fakeOSMachine) ResetMachine() error              { return nil }
+func (m fakeOSMachine) GuestAgent(string, map[string]any) (string, error) {
+	return "", nil
+}
+func (m fakeOSMachine) OS() string { return m.os }
 
 func (d *fakeOSDriver) Frame() (run.Frame, error)                  { return nil, errors.New("fake") }
 func (d *fakeOSDriver) Click(int, int) error                       { return errors.New("fake") }

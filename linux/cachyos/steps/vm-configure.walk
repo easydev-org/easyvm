@@ -1,0 +1,70 @@
+walkthrough "linux-cachyos - configure the vm (name, share, guest agent)"
+  resolution 1920x1080
+  user vmuser
+  password admin
+  var boot_timeout == {default: "1800", from: args.boot_timeout}
+  var host == {default: "172.30.0.1", from: args.host}
+  var hostname == {default: easyvm-vm, from: args.hostname}
+  var out == {default: out/vm-configure.qcow2, from: args.out}
+  var user == {default: vmuser, from: args.user}
+  header recording_resolution == [1920, 1080]
+  header ssh_port == 2222
+
+  step "take the input disk"
+    disk == disk.qcow2
+  step "boot the disk"
+    boot == true
+    os == linux
+    # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
+    memory_mb == 4096
+    timeout == '{{ boot_timeout }}'
+  step "wait for sshd"
+    require_ssh == true
+    timeout == '{{ boot_timeout }}'
+  step "announce the machine's name"
+    ssh == echo "this machine will be named '{{ hostname }}'"
+    timeout == 60
+  step "set the machine's name"
+    ssh == "printf '%s\\n' '{{ password }}' | sudo -S -p '' hostnamectl set-hostname {{ hostname }}\n"
+    timeout == 120
+  step "point the loopback line at that name"
+    ssh == "printf '%s\\n' '{{ password }}' | sudo -S -p '' sh -c '\n  if grep -q \"^127\\.0\\.1\\.1\" /etc/hosts; then\n    sed -i \"s/^127\\.0\\.1\\.1.*/127.0.1.1\\t{{ hostname }}/\" /etc/hosts\n  else\n    printf \"127.0.1.1\\t%s\\n\" \"{{ hostname }}\" >> /etc/hosts\n  fi'\n"
+    timeout == 120
+  step "prove the name"
+    ssh == "sh -c '\n  set -e\n  echo \"static: $(hostnamectl --static)\"\n  echo \"kernel: $(hostname)\"\n  echo \"hosts:  $(grep -c \"{{ hostname }}\" /etc/hosts) line(s)\"\n  test \"$(hostnamectl --static)\" = \"{{ hostname }}\"\n  test \"$(hostname)\" = \"{{ hostname }}\"\n  grep -q \"{{ hostname }}\" /etc/hosts'\n"
+    timeout == 60
+  step "refresh the package index"
+    ssh == "printf '%s\\n' '{{ password }}' | sudo -S -p '' pacman -Sy 2>&1 | tail -3\n"
+    timeout == 600
+  step "install the guest agent"
+    ssh == "printf '%s\\n' '{{ password }}' | sudo -S -p '' pacman -S --noconfirm qemu-guest-agent 2>&1 | tail -5\n"
+    timeout == 600
+  step "enable the guest agent"
+    ssh == "printf '%s\\n' '{{ password }}' | sudo -S -p '' systemctl enable --now qemu-guest-agent 2>&1 | tail -3\n"
+    timeout == 120
+  step "prove the guest agent is running"
+    ssh == "systemctl is-active qemu-guest-agent &&\nls -l /dev/virtio-ports/org.qemu.guest_agent.0 2>&1 &&\nsystemctl show -p MainPID --value qemu-guest-agent\n"
+    timeout == 120
+  step "prove the guest can fetch from the host share"
+    ssh == sh -c 'curl -fsS --max-time 20 http://172.30.0.1:8080/shared/ || wget -qO- --timeout=20 http://172.30.0.1:8080/shared/'
+    timeout == 180
+  step "show what the guest sees at the share"
+    ssh == sh -c 'curl -fsS --max-time 20 http://172.30.0.1:8080/shared/ 2>&1 | head -20; echo "fetch exit = $?"'
+    timeout == 120
+  step "copy the launcher in"
+    scp == {template: launcher, to: /tmp/bootstrap-launcher.sh}
+    timeout == 300
+  step "install the launcher"
+    ssh == "sh -c '\n  set -e\n  install -m 0755 /tmp/bootstrap-launcher.sh \"$HOME/bootstrap-launcher.sh\"\n  mkdir -p \"$HOME/.config/systemd/user\"\n  UNIT=\"$HOME/.config/systemd/user/org.vm.bootstrap.service\"\n  printf \"%s\\n\" \\\n    \"[Unit]\" \\\n    \"Description=Run ~/shared/bootstrap.sh at login\" \\\n    \"\" \\\n    \"[Service]\" \\\n    \"Type=oneshot\" \\\n    \"ExecStart=%h/bootstrap-launcher.sh\" \\\n    \"\" \\\n    \"[Install]\" \\\n    \"WantedBy=default.target\" > \"$UNIT\"\n  systemctl --user daemon-reload\n  systemctl --user enable org.vm.bootstrap.service\n  echo INSTALLED_FOR_NEXT_LOGIN'\n"
+    timeout == 300
+  step "prove the launcher is installed"
+    ssh == "sh -c '\n  set -e\n  ls -l \"$HOME/bootstrap-launcher.sh\" \"$HOME/.config/systemd/user/org.vm.bootstrap.service\"\n  grep -q bootstrap-launcher.sh \"$HOME/.config/systemd/user/org.vm.bootstrap.service\"\n  systemctl --user is-enabled org.vm.bootstrap.service\n  test \"$(systemctl --user is-enabled org.vm.bootstrap.service)\" = \"enabled\"'\n"
+    timeout == 60
+  step "ask the guest to power off"
+    ssh == printf '%s\n' '{{ password }}' | sudo -S -p '' poweroff
+    timeout == 300
+  step "wait for the machine to stop"
+    timeout == 300
+    wait_until == stopped
+  step "publish the disk"
+    compress == '{{ out }}'

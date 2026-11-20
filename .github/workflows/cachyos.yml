@@ -25,7 +25,7 @@ on:
     inputs:
       disks_repository:
         description: "the ghcr repository that holds the disks"
-        default: "easydev-org/easyvm"
+        default: "easydev-org/easyvm-fork"
       from_tag:
         description: >-
           start from a PUBLISHED disk: linux-cachyos or linux-cachyos-ssh. Empty runs the whole chain.
@@ -71,7 +71,7 @@ jobs:
         [
           {
             "name": "linux-cachyos-install",
-            "file": "linux/cachyos/steps/install.yaml",
+            "file": "linux/cachyos/steps/install.walk",
             "pull": "",
             "assets": ["iso-cachyos-desktop:cachyos.iso"],
             "out": "linux-cachyos.qcow2",
@@ -92,7 +92,7 @@ jobs:
         [
           {
             "name": "linux-cachyos-ssh",
-            "file": "linux/cachyos/steps/ssh.yaml",
+            "file": "linux/cachyos/steps/ssh.walk",
             "pull": "linux-cachyos",
             "out": "linux-cachyos-ssh.qcow2",
             "publish": "linux-cachyos-ssh",
@@ -112,7 +112,7 @@ jobs:
         [
           {
             "name": "linux-cachyos-vm",
-            "file": "linux/cachyos/steps/vm-configure.yaml",
+            "file": "linux/cachyos/steps/vm-configure.walk",
             "pull": "linux-cachyos-ssh",
             "out": "linux-cachyos-vm.qcow2",
             "publish": "linux-cachyos-vm",

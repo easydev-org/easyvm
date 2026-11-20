@@ -1,0 +1,44 @@
+walkthrough "mint 22.3 cinnamon (ubiquity)"
+  resolution 1920x1080
+  password admin
+  var user == {default: vmuser, from: args.user}
+  header recording_resolution == [1920, 1080]
+
+  step "boot the installer"
+    boot == true
+    os == linux
+    # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
+    memory_mb == 4096
+    timeout == 1800
+  step "disable the screen saver and the lock"
+    run == gsettings set org.cinnamon.desktop.session idle-delay 0; gsettings set org.cinnamon.desktop.screensaver lock-enabled false; gsettings set org.cinnamon.desktop.screensaver idle-activation-enabled false; xset s off; xset -dpms; xset s noblank; ( for i in $(seq 1 1080); do xdotool mousemove_relative -- 1 0 2>/dev/null; xdotool mousemove_relative -- -1 0 2>/dev/null; sleep 20; done ) >/dev/null 2>&1 & exit
+    settle == 10
+    terminal_wait == 8
+    type_gap == 0.15
+  step "open the installer"
+    double == [114, 47]
+    settle == 25
+  step "open the installer - what is on screen"
+    see == name: open_the_installer
+  step "open the installer - the screen says so"
+    check == {from: open_the_installer, mode: text, name: asserted, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], words: [welcome]}
+  click welcome at 1306 727, waiting 12s, named "welcome"
+  click keyboard at 1306 727, waiting 12s, named "keyboard layout"
+  click multimedia at 1306 727, waiting 12s, named "multimedia codecs"
+  click installation at 1306 727, waiting 15s, named "installation type"
+  click "write the changes to disks" at 1269 659, waiting 20s, named "write the changes to disks"
+  click time at 1306 727, waiting 15s, named "time zone"
+  step "full name"
+    click == [965, 347]
+    type == '{{ user }}'
+  step "host name"
+    click == [877, 375]
+    type == '{{ user }}'
+  step password
+    click == [877, 458]
+    type == '{{ password }}'
+  step "confirm password"
+    click == [877, 492]
+    type == '{{ password }}'
+  click "create the account" at 1306 727, waiting 20s, named "create the account"
+  settle 2400s, named "install"

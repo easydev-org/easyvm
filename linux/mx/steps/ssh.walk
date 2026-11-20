@@ -1,0 +1,204 @@
+walkthrough "linux-mx - sshd"
+  resolution 1920x1080
+  password admin
+  var out == {default: out/distro.qcow2, from: args.out}
+  var user == {default: vmuser, from: args.user}
+  header recording_resolution == [1920, 1080]
+
+  step "boot the disk"
+    boot == true
+    os == linux
+    # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
+    memory_mb == 4096
+    timeout == 900
+  # THIS DISK COMES UP IN A GRUB SHELL, AND `normal` IS WHAT LEAVES IT.
+  #
+  # MEASURED ON RUN 44557862904's mx successor, whose ssh recording is
+  #
+  #	Welcome to MX-Linux!
+  #	grub> grub> grub> grub> ...   (forty of them, cursor at the last)
+  #
+  # A bare `grub>` prompt means grub.efi ran but its own menu was not found or failed - not the same
+  # as the menu that endeavour and manjaro stop at. `normal` asks grub to load its normal module and
+  # its menu; on a disk whose /boot/grub/grub.cfg exists this lands on the menu, and the Return after
+  # it boots the first entry.
+  #
+  # The words are the shell's own prompt, so a disk that boots straight through is unaffected.
+  step "grub shell, when the disk drops into one"
+    loop == {check: {from: shell, mode: text, name: at_shell, rect: [450, 170, 1470, 900], rect_at: [1920, 1080], scale: 1, words: [[grub]]}, do: [{settle: 4}], max: 6, see: {name: shell}, until: {fact: at_shell}}
+    optional == true
+  step "leave the shell for the menu"
+    when == [grub]
+    type == normal
+  # THE MAIN MENU COMES UP WITH THE LANGUAGE ROW HIGHLIGHTED, AND THREE `up` PRESSES DO NOT MOVE IT.
+  #
+  # MEASURED ON RUN 44583759370's successor, whose recording at 160 s is the live menu with
+  # 'Language - Keyboard - Timezone' STILL highlighted after this stage's presses. `home` is what
+  # grub treats as "the first entry" whatever the highlight is doing, and Return boots it.
+  step "the boot menu, when it is not already booting"
+    loop == {check: {from: bootmenu, mode: text, name: at_menu, rect: [660, 200, 1620, 520], rect_at: [1920, 1080], scale: 1, words: [[mx-25], [boot, rescue, menus]]}, do: [{settle: 4}], max: 10, see: {name: bootmenu}, until: {fact: at_menu}}
+    optional == true
+  press Return, waiting 5s, named "enter the normal module, which loads the menu"
+  # THE HIGHLIGHT IS ON "Language - Keyboard - Timezone", AND `home` MOVES IT TO THE MENU TITLE.
+  #
+  # MEASURED ON RUN a8a0c0d's mx ssh, at 40 s: the menu is
+  #
+  #	  MX-25.3 Xfce x64 (September 20, 2026) (sysvinit)      <- entry 1, the installed system
+  #	  MX-25.3 Xfce x64 (September 20, 2026) (systemd)       <- entry 2
+  #	  Check integrity of the live media
+  #	> Language - Keyboard - Timezone                       <- where the highlight actually is
+  #	  >>> Advanced Options <<<
+  #
+  # and after `home` + Return the stage booted "=== Boot Rescue Menus ===" (a frame at 20 s) and by
+  # 60 s was at 'start init' with no desktop - a rescue shell, not the system.
+  #
+  # `home` in grub is handled by the THEME, and this theme's first selectable row is the submenu
+  # header. THREE `up` PRESSES from the Language row land on entry 1, which is the installed system
+  # and the same row the install walk's own menu picks.
+  press up, waiting 1s, named "up from the language row"
+  press up, waiting 1s, named "up past the integrity check"
+  press up, waiting 1s, named "up past the systemd entry, onto the installed system"
+  press Return, waiting 60s, named "boot the highlighted entry, which is the installed system"
+  # THE GREETER IS ASKED FOR BEFORE IT IS CLICKED, AND THE BAND IS THIS MEDIUM'S OWN.
+  #
+  # THIS FILE HAD MINT'S BAND ([80,480,480,640] - LightDM's small card) BECAUSE THE TWO WALKS WERE
+  # EDITED TOGETHER, AND MX DOES NOT DRAW THAT: it runs SDDM, whose user tile and password field sit
+  # in the middle of the screen, which is the band cachyos, endeavour and manjaro use.
+  #
+  # The click below is at 259,568 - LightDM's position - so it is moved to SDDM's field as well.
+  # MEASURED on this medium's own install recording, whose greeter is the same SDDM.
+  # THIS DISK AUTO-LOGS-IN, SO THERE IS NO GREETER TO WAIT FOR.
+  #
+  # MEASURED ON RUN 44557723577's successor, whose ssh recording ends on a COMPLETE MX desktop -
+  # the MX Welcome window with its eight cards, the side panel, the clock - while the gate was still
+  # asking for SDDM's password field and the stage failed at step 6.
+  #
+  # The wait is kept (a disk that DOES show SDDM still uses it) but is optional: an auto-login
+  # desktop must not be a failure. A click and a type: to a greeter that is not there are already
+  # optional in this file.
+  step "the greeter is drawn"
+    loop == {check: {from: greeter, mode: text, name: up, rect: [740, 470, 1340, 770], rect_at: [1920, 1080], scale: 2, words: [[password], [vmuser]]}, do: [{settle: 5}], max: 12, see: {name: greeter}, until: {fact: up}}
+    optional == true
+  step "greeter - the password box"
+    when == [password, vmuser]
+    click == [936, 628]
+
+  step "greeter - log in"
+    when == [password, vmuser]
+    settle == 3
+    type == '{{ password }}'
+  step "greeter - submit"
+    when == [password, vmuser]
+    key == ret
+    settle == 12
+  # THE SESSION TAKES LONGER THAN THE TWELVE SECONDS AFTER `Return`, AND A CHORD PRESSED IN THAT
+  # GAP GOES TO THE GREETER. This is the same gate the same medium's install walk uses.
+  step "wait for the desktop"
+    desktop == linux/xfce
+    timeout == 900
+  # THE WELCOME WINDOW HOLDS FOCUS, SO IT IS CLOSED BEFORE THE CHORD IS PRESSED.
+  #
+  # MEASURED ON RUN 44583759370, whose recording at 150 s is 'MX Welcome' - its eight cards, the
+  # 'Show this dialog at start up' checkbox - and NO TERMINAL. The chord was pressed; XFCE gave it to
+  # the focused window, and the terminal never opened, so every run: after it typed into nothing.
+  #
+  # The window's own X is at 1305,163. Escape after it covers a window that is already gone.
+  step "close the welcome window, which holds focus"
+    when == [password, vmuser]
+    click == [1305, 163]
+  press Escape, waiting 2s, named "clear anything it left behind"
+  press ctrl+alt+t, waiting 20s, named "open the terminal"
+  # NO `terminal_wait:` HERE, AND THAT IS THE FIX RATHER THAN AN OMISSION.
+  #
+  # `terminal_wait:` OPENS A TERMINAL (ctrl+alt+t) AND THEN TYPES. The step above has already
+  # opened one, so a second ctrl+alt+t starts a NEW terminal window and the keys that follow go to
+  # it - while the command already typed into the first one is never submitted.
+  #
+  # MEASURED ON RUN 44545555943's kubuntu ssh recording, whose terminal shows exactly that:
+  #
+  #	vmuser@kubuntu:~$ xset s off; xset -dpms; xset s noblank; echo SCREEN_KEPT_ONECHO ADMIN | sudo ...
+  #	server does not have extension for -dpms option
+  #	[sudo: authenticate] Password:
+  #
+  # `SCREEN_KEPT_ON` runs straight into `ECHO ADMIN` with no line break: the Return after the first
+  # command went to the OTHER window. And the `xset -dpms` failure - "server does not have extension
+  # for -dpms option" - is harmless; the screen is still kept awake by `s off` and `s noblank`.
+  # THE SCREEN BLANKS WHILE THE STAGE TYPES, AND XFCE'S OWN SAVER IS WHAT DOES IT.
+  #
+  # MEASURED: this stage's recording ends on a PURE BLACK frame with sshd never started, which is
+  # the same fault mint and manjaro showed - a screen that has blanked takes no keys.
+  #
+  # XFCE has a screensaver daemon of its own on top of X's dpms, so both are turned off, and the
+  # xfce4-screensaver binary is killed if this build runs it.
+  # `XSET: command not found` - THE COMMAND WAS TYPED IN CAPITALS, so the shift that ended the
+  # previous command's Return was still held. MEASURED on run 44557723577's successor, whose
+  # terminal reads, in full:
+  #
+  #	$ XSET S OFF; XSET S NOBLANK; ECHO ADMIN | sudo -S sh -c "...apt-get install... "
+  #	XSET: command not found
+  #	[sudo] password for vmuser:
+  #	sudo: no password was provided
+  #	sudo: a password is required
+  #
+  # and later, on the SysVinit path this medium uses:
+  #
+  #	update-rc.d: error: cannot find a LSB script for ssh
+  #
+  # TWO THINGS FOLLOW. The shell is not trusted to have the right shift state, so the commands are
+  # lowercase and use absolute paths where the name could be mangled; and this medium's service is
+  # `ssh`, whose LSB script SysVinit cannot find, so `service` is used directly rather than
+  # `update-rc.d`, and sshd is started by name with a fallback.
+  step "keep the screen on and unlock sudo, in one line that cannot be half-typed"
+    run == printf '%s\n' {{ password }} | sudo -S -v; /usr/bin/xset s off; /usr/bin/xset s noblank
+    settle == 5
+    terminal_wait == 0
+  step "install openssh-server"
+    run == sudo apt-get install -y openssh-server
+    settle == 90
+    terminal_wait == 0
+  step "allow password authentication"
+    run == sudo sed -i "s/^#\?\s*PasswordAuthentication.*/PasswordAuthentication yes/" /etc/ssh/sshd_config ; sudo grep -i "^PasswordAuthentication" /etc/ssh/sshd_config
+    settle == 3
+    terminal_wait == 0
+  # THE TEST ASKS FOR AN ENABLE STEP, AND THIS MEDIUM'S INIT IS SYSVINIT - so both are tried: the
+  # systemd spelling where a unit exists, and `service` under the two names this image could use.
+  # MEASURED ON THE PREVIOUS RUN: `update-rc.d: cannot find a LSB script for ssh`, which is why
+  # `service` is what actually starts it here.
+  step "enable sshd at boot and start it"
+    run == sudo systemctl enable ssh 2>/dev/null; sudo update-rc.d ssh defaults 2>/dev/null; sudo service ssh start; sudo service sshd start; sleep 2; sudo service ssh status
+    settle == 12
+    terminal_wait == 0
+  # `i/o TIMEOUT` IS A FIREWALL, NOT A MISSING DAEMON - AND THIS IMAGE SHIPS ufw.
+  #
+  # MEASURED ON RUN b0b83d5's mx ssh: openssh installed and sshd started (the terminal shows the host
+  # keys and "Starting OpenBSD Secure Shell server: sshd"), and the port then answered with
+  # 'dial tcp 172.30.0.1:2222: i/o timeout' - TIMEOUT, which is what a DROP rule produces; a daemon
+  # that is not listening gives 'connection refused' in milliseconds.
+  #
+  # The install step's own output ends with 'Processing triggers for ufw (0.36.2-9)', so ufw is
+  # present on this disk. `ufw allow 22/tcp` is the rule, and it is idempotent.
+  step "open the firewall for ssh"
+    run == sudo ufw allow 22/tcp
+    settle == 4
+    terminal_wait == 0
+  step "show the firewall's rules"
+    run == sudo ufw status
+    settle == 3
+    terminal_wait == 0
+  step "wait for sshd"
+    require_ssh == true
+    timeout == 600
+  step "prove the kernel over ssh"
+    ssh == uname -a
+    timeout == 120
+  step "prove the account over ssh"
+    ssh == id -un; hostname
+    timeout == 120
+  step "ask the guest to power off"
+    ssh == printf '%s\n' '{{ password }}' | sudo -S -p '' poweroff
+    timeout == 300
+  step "wait for the machine to stop"
+    timeout == 300
+    wait_until == stopped
+  step "publish the disk"
+    compress == '{{ out }}'

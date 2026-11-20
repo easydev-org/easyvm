@@ -1,4 +1,10 @@
 name: macos 26 - start the disk that is already there
+# THE DISK IS THIS STAGE'S INPUT, NOT SOMETHING IT MAKES. `--boot-disk` names it, and without this
+# line a `boot:` with no `disk:` above it reads as a structural mistake rather than a resume.
+boot_disk: from_caller
+recording_resolution:
+- 1920
+- 1080
 resolution:
 - 1920
 - 1080
@@ -44,7 +50,7 @@ steps:
   # nothing below reaches the network. That is the same rule the install stages follow, and it is why
   # there is no `asset:` here - a walk that downloads is a walk whose duration a file cannot describe.
   - name: the recovery image this boot reads is already on disk
-    require:
+    needs:
     - recovery.dmg
 
   - name: boot the disk that is already there

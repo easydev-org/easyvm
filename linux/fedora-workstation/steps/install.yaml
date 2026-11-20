@@ -1,4 +1,7 @@
 name: fedora-workstation - anaconda and the first boot
+recording_resolution:
+- 1920
+- 1080
 resolution:
 - 1920
 - 1080

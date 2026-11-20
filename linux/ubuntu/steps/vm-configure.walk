@@ -1,0 +1,99 @@
+walkthrough "linux-ubuntu - configure the vm (name, share, guest agent)"
+  resolution 1920x1080
+  recording_resolution 1920x1080
+  user vmuser
+  password admin
+  var boot_timeout == {default: "1800", from: args.boot_timeout}
+  var host == {default: "172.30.0.1", from: args.host}
+  var hostname == {default: easyvm-ubuntu, from: args.hostname}
+  var locale == {default: en_US.UTF-8, from: args.locale}
+  var out == {default: out/vm-configure.qcow2, from: args.out}
+  var timezone == {default: America/Los_Angeles, from: args.timezone}
+  var user == {default: vmuser, from: args.user}
+  header ssh_port == 2222
+
+  step "take the input disk"
+    disk == disk.qcow2
+  step "boot the disk"
+    boot == true
+    os == linux
+    # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
+    memory_mb == 4096
+    timeout == '{{ boot_timeout }}'
+  step "wait for sshd"
+    require_ssh == true
+    timeout == '{{ boot_timeout }}'
+  step "announce the machine's name"
+    ssh == echo "this machine will be named '{{ hostname }}'"
+    timeout == 60
+  step "set the machine's name"
+    ssh == "printf '%s\\n' '{{ password }}' | sudo -S -p '' hostnamectl set-hostname {{ hostname }}\n"
+    timeout == 120
+  step "point the loopback line at that name"
+    ssh == "printf '%s\\n' '{{ password }}' | sudo -S -p '' sh -c '\n  if grep -q \"^127\\.0\\.1\\.1\" /etc/hosts; then\n    sed -i \"s/^127\\.0\\.1\\.1.*/127.0.1.1\\t{{ hostname }}/\" /etc/hosts\n  else\n    printf \"127.0.1.1\\t%s\\n\" \"{{ hostname }}\" >> /etc/hosts\n  fi'\n"
+    timeout == 120
+  step "prove the name"
+    ssh == "set -e\necho \"static: $(hostnamectl --static)\"\necho \"kernel: $(hostname)\"\necho \"hosts:  $(grep -c '{{ hostname }}' /etc/hosts) line(s)\"\ntest \"$(hostnamectl --static)\" = \"{{ hostname }}\"\ntest \"$(hostname)\" = \"{{ hostname }}\"\ngrep -q '{{ hostname }}' /etc/hosts\n"
+    timeout == 60
+  step "set the time zone"
+    ssh == printf '%s\n' '{{ password }}' | sudo -S -p '' timedatectl set-timezone {{ timezone }} && timedatectl show -p Timezone --value
+    timeout == 120
+  step "prove the time zone"
+    ssh == sh -c 'echo "systemd = $(timedatectl show -p Timezone --value)"; echo "etc = $(readlink -f /etc/localtime)"; test "$(timedatectl show -p Timezone --value)" = "{{ timezone }}" && echo TIMEZONE_OK'
+    timeout == 60
+  step "set the locale"
+    ssh == printf '%s\n' '{{ password }}' | sudo -S -p '' sh -c 'locale-gen {{ locale }} 2>/dev/null || true; update-locale LANG={{ locale }} LC_ALL={{ locale }}' && echo LOCALE_WRITTEN
+    timeout == 180
+  step "prove the locale in a new login shell"
+    ssh == sh -lc 'printf "LANG=%s\nLC_ALL=%s\n" "$LANG" "$LC_ALL"'
+    timeout == 60
+  step "refresh the package index"
+    ssh == "printf '%s\\n' '{{ password }}' | sudo -S -p '' sh -c 'DEBIAN_FRONTEND=noninteractive apt-get update -o DPkg::Lock::Timeout=600' 2>&1 | tail -3\n"
+    timeout == 600
+  step "install the guest agent"
+    ssh == "printf '%s\\n' '{{ password }}' | sudo -S -p '' DEBIAN_FRONTEND=noninteractive apt-get install -y qemu-guest-agent 2>&1 | tail -5\n"
+    timeout == 600
+  step "enable the guest agent"
+    ssh == "printf '%s\\n' '{{ password }}' | sudo -S -p '' systemctl enable --now qemu-guest-agent 2>&1 | tail -3\n"
+    timeout == 120
+  step "prove the guest agent is running"
+    ssh == "systemctl is-active qemu-guest-agent &&\nls -l /dev/virtio-ports/org.qemu.guest_agent.0 2>&1 &&\nsystemctl show -p MainPID --value qemu-guest-agent\n"
+    timeout == 120
+  step "turn on automatic login, because an unattended client cannot type a password"
+    ssh == "printf '%s\\n' '{{ password }}' | sudo -S -p '' sh -c 'sed -i \"s/^#*AutomaticLoginEnable=.*/AutomaticLoginEnable=true/\" /etc/gdm3/custom.conf; sed -i \"s/^#*AutomaticLogin=.*/AutomaticLogin={{ user }}/\" /etc/gdm3/custom.conf' 2>&1 | tail -3\n"
+    timeout == 120
+  step "make sure those two lines exist even if gdm shipped neither"
+    ssh == "printf '%s\\n' '{{ password }}' | sudo -S -p '' sh -c 'grep -q \"^AutomaticLoginEnable=\" /etc/gdm3/custom.conf || printf \"AutomaticLoginEnable=true\\n\" >> /etc/gdm3/custom.conf; grep -q \"^AutomaticLogin=\" /etc/gdm3/custom.conf || printf \"AutomaticLogin={{ user }}\\n\" >> /etc/gdm3/custom.conf' 2>&1 | tail -3\n"
+    timeout == 120
+  step "prove automatic login is configured"
+    ssh == grep -E "^AutomaticLogin(Enable)?=" /etc/gdm3/custom.conf
+    timeout == 60
+  step "turn off the idle lock screen"
+    ssh == "dbus-run-session -- gsettings set org.gnome.desktop.session idle-delay 0 && dbus-run-session -- gsettings set org.gnome.desktop.screensaver idle-activation-enabled false && dbus-run-session -- gsettings set org.gnome.desktop.screensaver lock-enabled false && dbus-run-session -- gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-type nothing && echo LOCK_DISABLED\n"
+    timeout == 180
+  step "prove the idle lock is off"
+    ssh == "dbus-run-session -- sh -c 'gsettings get org.gnome.desktop.session idle-delay; gsettings get org.gnome.desktop.screensaver lock-enabled; gsettings get org.gnome.desktop.screensaver idle-activation-enabled'\n"
+    timeout == 120
+  step "prove the guest can fetch from the host share"
+    ssh == sh -c 'curl -fsS --max-time 20 http://172.30.0.1:8080/shared/ || wget -qO- --timeout=20 http://172.30.0.1:8080/shared/'
+    timeout == 180
+  step "show what the guest sees at the share"
+    ssh == sh -c 'curl -fsS --max-time 20 http://172.30.0.1:8080/shared/ 2>&1 | head -20; echo "fetch exit = $?"'
+    timeout == 120
+  step "copy the launcher in"
+    scp == {template: launcher, to: /tmp/bootstrap-launcher.sh}
+    timeout == 300
+  step "install the launcher"
+    ssh == "set -e\ninstall -m 0755 /tmp/bootstrap-launcher.sh ~/bootstrap-launcher.sh\nmkdir -p ~/.config/systemd/user\ncat > ~/.config/systemd/user/org.vm.bootstrap.service <<'UNIT'\n[Unit]\nDescription=Run ~/shared/bootstrap.sh at login\n\n[Service]\nType=oneshot\nExecStart=%h/bootstrap-launcher.sh\n\n[Install]\nWantedBy=default.target\nUNIT\nsystemctl --user daemon-reload\nsystemctl --user enable org.vm.bootstrap.service\necho INSTALLED_FOR_NEXT_LOGIN\n"
+    timeout == 300
+  step "prove the launcher is installed"
+    ssh == "set -e\nls -l ~/bootstrap-launcher.sh ~/.config/systemd/user/org.vm.bootstrap.service\ngrep -q bootstrap-launcher.sh ~/.config/systemd/user/org.vm.bootstrap.service\nsystemctl --user is-enabled org.vm.bootstrap.service\ntest \"$(systemctl --user is-enabled org.vm.bootstrap.service)\" = \"enabled\"\n"
+    timeout == 60
+  step "ask the guest to power off"
+    ssh == printf '%s\n' '{{ password }}' | sudo -S -p '' poweroff
+    timeout == 300
+  step "wait for the machine to stop"
+    wait_until == stopped
+    timeout == 300
+  step "publish the disk"
+    compress == '{{ out }}'

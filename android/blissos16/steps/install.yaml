@@ -1,4 +1,7 @@
 name: android 13 (blissos 16.9.7) - install onto a disk this file makes
+recording_resolution:
+- 1920
+- 1080
 resolution:
 - 1920
 - 1080
@@ -66,10 +69,9 @@ steps:
     # forty minutes into a run. Every one of these files is declared by this leg's
     # `assets:` in its workflow and placed here by `pull-artifact.sh` before
     # `easyvm run` is called; nothing in this file downloads.
-    require:
+    needs:
     - blissos-16.9.7.iso
   - name: start recording
-    record: blissos16-install.mp4
 
   # =======================================================================================
   # 1. THE DISK, BEFORE THE MACHINE
@@ -105,29 +107,20 @@ steps:
   # photographed a black frame. 20 s is inside the window with both edges accounted for, and the
   # check below is what proves the frame really is the menu.
   - name: let the menu draw
-    wait: 20
+    settle: 20
 
   - name: read the menu
-    ocr:
-      name: menu
-      region:
-      - 0
-      - 0
-      - 1920
-      - 270
-      region_at:
-      - 1920
-      - 1080
-      scale: 1
-      wait: 0
+    see: {name: menu}
   - name: the menu offers Installation
     check:
       name: has_install
       from: menu
-      mode: says
+      mode: text
       words:
       - installation
 
+      rect: [0, 0, 1920, 1080]
+      rect_at: [1920, 1080]
   # "BlissOS-16.9.7 2024-10-11 Installation" is the fifth row under UEFI's graphical menu; the four
   # above it are the Live entries. THE ROW COUNT IS THE UEFI MENU'S, measured on that menu.
   # `key:` TAKES ONE QCODE, NOT A LIST - measured: `key: [down, down, down, down]` fails with
@@ -136,19 +129,19 @@ steps:
   # draw is a picture and each step is one row.
   - name: down to the second row
     key: down
-    wait_after: 1
+    settle: 1
   - name: down to the third row
     key: down
-    wait_after: 1
+    settle: 1
   - name: down to the fourth row
     key: down
-    wait_after: 1
+    settle: 1
   - name: down to Installation
     key: down
-    wait_after: 1
+    settle: 1
   - name: start the installer
     key: ret
-    wait_after: 45
+    settle: 45
 
   # =======================================================================================
   # 3. THE PANES, WHICH ARE THE SAME TEN EASYdiskbake MEASURED
@@ -160,56 +153,56 @@ steps:
   # "Choose Partition / UEFI System detected !" with vda1 on a solid bar.
   - name: open the ESP's filesystem question
     key: ret
-    wait_after: 15
+    settle: 15
 
   # "Please select a filesystem to format vda1: Do not re-format / Fat32 (CAREFUL)". The default is
   # Do not re-format, which would leave the table's bytes with no filesystem on them - and an ESP
   # with no FAT is one the firmware cannot read.
   - name: choose FAT32
     key: f
-    wait_after: 3
+    settle: 3
   - name: confirm the filesystem
     key: ret
-    wait_after: 10
+    settle: 10
   # The label field already holds ESP; Return keeps it.
   - name: keep the ESP label
     key: ret
-    wait_after: 12
+    settle: 12
   # "Are you sure to format the partition vda1?" with <Yes> <No> and NO preselection.
   - name: select Yes for the ESP format
     key: left
-    wait_after: 2
+    settle: 2
   - name: format the ESP
     key: ret
-    wait_after: 30
+    settle: 30
 
   # The same window, now listing the formatted ESP as vfat/ESP and asking for the system partition.
   - name: move to the system partition
     key: down
-    wait_after: 3
+    settle: 3
   - name: open vda2
     key: ret
-    wait_after: 15
+    settle: 15
   # Six rows; `e` is ext4, the first row starting with e, and dialog takes the first match.
   - name: choose ext4
     key: e
-    wait_after: 3
+    settle: 3
   - name: confirm the filesystem for vda2
     key: ret
-    wait_after: 10
+    settle: 10
   - name: keep the system volume label
     key: ret
-    wait_after: 12
+    settle: 12
   - name: select Yes for the system format
     key: left
-    wait_after: 2
+    settle: 2
 
   # THE LONGEST SETTLE IN THIS FILE. This formats the data partition and then copies 2.25 GB into it
   # - measured a little over four minutes on the disk that produced the numbers below, and the copy
   # keeps running after the pane advances, which is why the bootloader step's settle is generous too.
   - name: format vda2 and copy the system
     key: ret
-    wait_after: 300
+    settle: 300
 
   # "This operation will double the system size" - declining keeps one copy. The default is Yes and
   # `right` is what says No; a second copy of a 2.25 GiB system is not what this artifact is for.
@@ -217,10 +210,10 @@ steps:
   # `right, ret` and got an OTA-prepared disk anyway because the pane had not drawn yet.
   - name: decline the OTA preparation
     key: right
-    wait_after: 3
+    settle: 3
   - name: confirm the OTA answer
     key: ret
-    wait_after: 40
+    settle: 40
 
   # =======================================================================================
   # 4. THE BOOTLOADER
@@ -239,32 +232,23 @@ steps:
   # without a loader - measured, on two runs of that path.
   - name: write Grub2 into the ESP
     key: ret
-    wait_after: 200
+    settle: 200
 
   # "Congratulations! BlissOS-16.9.7 is installed successfully." It is read rather than assumed,
   # because every pane above reports nothing when it fails.
   - name: read the result
-    ocr:
-      name: done
-      region:
-      - 480
-      - 380
-      - 1440
-      - 460
-      region_at:
-      - 1920
-      - 1080
-      scale: 2
-      wait: 0
+    see: {name: done}
   - name: it says the install succeeded
     check:
       name: installed
       from: done
-      mode: says_any
+      mode: text
       words:
       - - congratulations
       - - successfully
 
+      rect: [0, 0, 1920, 1080]
+      rect_at: [1920, 1080]
   # =======================================================================================
   # 5. THE UEFI FALLBACK PATH, WHICH THE INSTALLER CANNOT WRITE
   # =======================================================================================
@@ -295,8 +279,7 @@ steps:
     timeout: 120
 
   - name: copy the loader to the UEFI fallback path
-    esp_fallback: disk
-    esp_from: /EFI/BLISSOS
+    esp_fallback: {disk: disk, from: /EFI/BLISSOS}
 
   # =======================================================================================
   # 6. THE VERDICT IS READ OFF THE DISK
@@ -306,4 +289,3 @@ steps:
     compress: '{{ out }}'
 
   - name: stop recording
-    record: false

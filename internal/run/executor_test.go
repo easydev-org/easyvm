@@ -2,7 +2,10 @@ package run
 
 import (
 	"fmt"
+	"image"
+	"image/png"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -15,13 +18,16 @@ import (
 // a machine. The Python implementation had no such seam: its drivers opened sockets in their
 // constructors, so every test of the step loop needed qemu running.
 type fakeDriver struct {
-	log      []string
+	log []string
+	// machine is the ONE machine this driver hands out; see Machine().
+	machine  *fakeMachine
 	clicks   [][2]int
 	doubles  [][2]int
 	keys     []string
 	strokes  [][2]string
 	typed    []string
 	started  int
+	halted   bool
 	boot     *BootSpec
 	released bool
 	stopped  []string
@@ -60,12 +66,57 @@ func (f *fakeDriver) Guest() *guest.Client {
 	}
 	return nil
 }
-func (f *fakeDriver) Machine() Machine { return &fakeMachine{d: f} }
-func (f *fakeDriver) Log(msg string)   { f.log = append(f.log, msg) }
+
+// Machine returns ONE fakeMachine for the driver's lifetime, which is what a real driver does.
+//
+// IT USED TO BUILD A NEW ONE PER CALL, so `halted` was forgotten between steps: a test that stopped a
+// guest and asked whether it was still running got a fresh machine that had never stopped. Two of the
+// four tests about switching guests passed on that accident.
+func (f *fakeDriver) Machine() Machine {
+	if f.machine == nil {
+		f.machine = &fakeMachine{d: f}
+	}
+	return f.machine
+}
+func (f *fakeDriver) Log(msg string) { f.log = append(f.log, msg) }
+
+// Facts is what a `wait_until:` reads, and a fake without it answers the question with an error:
+//
+//	wait for the machine to stop: this driver cannot report the facts a `wait_until:` waits on
+//
+// so a test that stops a machine and waits for it was testing that error rather than the wait.
+func (f *fakeDriver) Facts() (map[string]string, error) {
+	running := f.started > 0 && !f.halted
+	return map[string]string{
+		"qemu_running": fmt.Sprintf("%t", running),
+		"ssh_ready":    "false",
+		"qga_ready":    "false",
+		"guest_phase":  "",
+	}, nil
+}
 
 type stubFrame struct{}
 
-func (stubFrame) Path() string     { return "/dev/null" }
+// Path is a REAL PNG, because a `check:` that measures the captured frame has to be able to load it.
+//
+// IT USED TO BE `/dev/null`, which was enough while a `see:` did the measuring and a `check:` only
+// compared what it bound. Now the frame IS the thing compared, so a fake that cannot be decoded makes
+// every frame-based check fail with "image: unknown format" - a test failure that says nothing about
+// the code under test.
+func (stubFrame) Path() string {
+	const onePixel = "stub-frame.png"
+	p := filepath.Join(os.TempDir(), onePixel)
+	if _, err := os.Stat(p); err != nil {
+		// SMALL, BECAUSE ONLY THE DECODE MATTERS: a `rect` larger than the frame is an error from
+		// `Crop`, and the tests that need a full-frame region say so in their own step.
+		img := image.NewRGBA(image.Rect(0, 0, 1920, 1080))
+		if f, err := os.Create(p); err == nil {
+			_ = png.Encode(f, img)
+			_ = f.Close()
+		}
+	}
+	return p
+}
 func (stubFrame) Size() (int, int) { return 1920, 1080 }
 func (stubFrame) Words() []string  { return nil }
 
@@ -77,15 +128,43 @@ func (m *fakeMachine) Boot(spec BootSpec) error {
 	// THE SPEC IS RECORDED, so a test can assert what a `boot:` step asked for without a machine.
 	m.d.boot = &spec
 	m.d.started++
+	m.d.halted = false
 	return nil
 }
 func (m *fakeMachine) Stop(method string, grace time.Duration) error {
 	m.d.stopped = append(m.d.stopped, method)
 	m.d.graces = append(m.d.graces, grace)
+	// A STOPPED MACHINE IS NOT A MACHINE, and the fake has to say so or it answers a question about
+	// `doBoot`'s "one daemon holds one machine" guard that the code never asked it.
+	//
+	// MEASURED AS A TEST FAILURE: with `IsRunning` returning `started > 0` forever, a walk that
+	// stopped one guest and started another saw the second boot as "already running" - and every test
+	// that could have noticed the real behaviour was answered by the fake instead.
+	m.d.halted = true
 	return nil
 }
-func (m *fakeMachine) Reboot() error   { return nil }
-func (m *fakeMachine) IsRunning() bool { return m.d.started > 0 }
+func (m *fakeMachine) Reboot() error { return nil }
+
+// OS is what `doBoot` compares against a step's `os:` when a machine is already running.
+//
+// WITHOUT IT THE FAKE HAD NO OS AND THE GUARD COULD NOT FIRE: a test that asked "is a second guest on
+// a running machine refused" was answered by a machine whose family was unknown, which is the one
+// answer that skips the check.
+func (m *fakeMachine) OS() string {
+	if m.d.boot == nil {
+		return ""
+	}
+	return m.d.boot.OS
+}
+func (m *fakeMachine) IsRunning() bool { return m.d.started > 0 && !m.d.halted }
+func (m *fakeMachine) PressPowerButton() error {
+	m.d.stopped = append(m.d.stopped, "acpi")
+	return nil
+}
+func (m *fakeMachine) ResetMachine() error { return nil }
+func (m *fakeMachine) GuestAgent(string, map[string]any) (string, error) {
+	return "", nil
+}
 
 func newExec(d Driver, steps ...map[string]any) (*Executor, []walk.Step) {
 	var docs []walk.Step
@@ -221,9 +300,17 @@ func TestEveryClaimedKeyIsHandled(t *testing.T) {
 		// default and the whole package's test run timed out at ninety seconds. The list is the
 		// thing that has to grow when a waiting key is added, which is why it sits here rather than
 		// being derived: derived-from-nothing would never have caught it either.
+		//
+		// `adb_connect` BELONGS HERE AND WAS MISSING, and the cost was five minutes of every run:
+		// MEASURED, the package's tests were 331 seconds and 320 of them were this one key waiting
+		// out its own 300-second default for an adbd that no fake driver has. The list is a
+		// statement about WHICH KEYS WAIT, so a key that waits without being on it is invisible -
+		// the step does not fail, it is slow, and a slow test reads as a large package.
 		if key == "require_ssh" || key == "desktop" || key == "until_console" ||
 			key == "until" || key == "until_any" || key == "expect" || key == "expect_any" ||
-			key == "repeat_until" || key == "wait_for" || key == "wait" {
+			key == "repeat_until" || key == "wait_for" || key == "wait" ||
+			key == "adb_connect" || key == "adb" || key == "adb_privileged" ||
+			key == "ssh" || key == "ssh_probe" {
 			steps[0].Spec["timeout"] = 1
 		}
 		_, err := ex.Run(steps)
@@ -278,39 +365,15 @@ func probeValue(key string) any {
 	return true
 }
 
-// A STEP WHOSE ONLY KEY IS A BOOLEAN FALSE STILL HAS TO DISPATCH.
+// `record: false` WAS THE CASE THIS TEST EXISTED FOR, AND THE KEY IS GONE.
 //
-// `record: false` STOPS A RECORDING, and `Step.Has` is false for it because `Has` answers "is this
-// key present AND true". Every dispatcher branch tests `Has`, so the step matched nothing and fell
-// through to "no implementation for this step's keys".
+// It was a step whose only key was a boolean false, and `Step.Has` answers "present AND true", so
+// every dispatcher branch ignored it and the step fell through to "no implementation". The fix was
+// `hasKey`, which asks only about presence - and `hasKey` stays, because a key whose `false` is a
+// statement is a shape the vocabulary still allows.
 //
-// THE COST WAS THE LAST STEP OF A STAGE THAT HAD ALREADY SUCCEEDED. Run 43035390408 passed the
-// shutdown, published the disk and then failed:
-//
-//	status: failed step 29/29 "stop recording"
-//	error:   stop recording: no implementation for this step's keys
-//
-// A run that did everything it was asked and then reported failure, one line from the end.
-func TestBooleanFalseIsAnActionRatherThanAnAbsence(t *testing.T) {
-	d := &fakeDriver{}
-	ex, steps := newExec(d, map[string]any{"name": "stop recording", "record": false})
-	ex.Work = t.TempDir()
-	_, err := ex.Run(steps)
-	if err != nil && strings.Contains(err.Error(), "no implementation") {
-		t.Fatalf("`record: false` reached no branch: %v. It is an ACTION - stopping a recording - "+
-			"and `Has` treats a false boolean as the key being absent", err)
-	}
-	// AND IT IS NOT SILENTLY COUNTED AS DONE. Nothing was recording, so the step has a real
-	// complaint - and that complaint proves the branch ran rather than the dispatcher skipping it.
-	if err == nil {
-		t.Fatal("`record: false` with nothing recording must say so; a silent success is " +
-			"indistinguishable from a dispatcher that never ran the step")
-	}
-	if strings.Contains(err.Error(), "no implementation") {
-		t.Fatalf("the branch ran but reported no implementation: %v", err)
-	}
-}
-
+// The step itself cannot exist now: the recording starts with the run and `finishRecording` encodes
+// it however the walk ended, so nothing writes a false-only step to dispatch.
 // `disk_gb:` IS A COUNT, NOT A DURATION, AND THE TWO ARE EASY TO CONFUSE.
 //
 // `seconds()` RETURNS A time.Duration. Reading `disk_gb` through it turned 128 into 128e9 and qemu-img
@@ -758,15 +821,20 @@ func TestActionsAreDispatchedBeforeTheirChecks(t *testing.T) {
 	atWindow := pos(`case s.Has("at_color"):`)
 	atButton := pos(`case hasKey(s, "at_button"):`)
 	expect := pos(`case s.Has("expect_any") || s.Has("expect"):`)
-	if atWindow < 0 || atButton < 0 || expect < 0 {
+	if atWindow < 0 || atButton < 0 {
 		t.Fatal("a branch this test looks for is missing, so it would pass vacuously")
 	}
-	if atWindow > expect {
-		t.Error("`at_color` is dispatched AFTER `expect`, so a step with both clicks NOTHING and " +
-			"reports that the thing it was meant to open did not open")
-	}
-	if atButton > expect {
-		t.Error("`at_button` is dispatched AFTER `expect`, for the same reason")
+	// `expect:` HAS NO BRANCH ANY MORE, so the misordering it caused cannot recur: it is an argument
+	// of `run:` and `doRun` calls the check after the typing. If a top-level branch returns, the two
+	// assertions below apply again.
+	if expect >= 0 {
+		if atWindow > expect {
+			t.Error("`at_color` is dispatched AFTER `expect`, so a step with both clicks NOTHING and " +
+				"reports that the thing it was meant to open did not open")
+		}
+		if atButton > expect {
+			t.Error("`at_button` is dispatched AFTER `expect`, for the same reason")
+		}
 	}
 }
 
@@ -801,7 +869,7 @@ func TestAStepThatNeedsNoGuestSurvivesAShutdown(t *testing.T) {
 		{"a click", map[string]any{"name": "x", "click": []any{1, 2}}, true},
 		{"a reading", map[string]any{"name": "x", "ocr": map[string]any{"name": "s"}}, true},
 		{"a key", map[string]any{"name": "x", "key": "ret"}, true},
-		{"a wait", map[string]any{"name": "x", "wait": 5}, true},
+		{"a wait", map[string]any{"name": "x", "settle": 5}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := walk.Step{Name: tc.name, Spec: tc.spec}

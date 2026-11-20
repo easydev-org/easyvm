@@ -47,8 +47,12 @@ on:
           - recovery
         default: all
       disks_repository:
-        description: The ghcr repository artifacts are mirrored INTO and built FOR
-        default: easydev-org/easyvm
+        description: >-
+          The ghcr package the pinned inputs are MIRRORED INTO. Defaults to THIS repository rather
+          than the upstream one, because this job PUSHES and a token can only write to the package
+          its own repository holds. Point it at `easydev-org/easyvm` and every push here is a 403 -
+          and worse, a fork that got the credentials would be writing over the product's inputs.
+        default: ""
       which:
         description: >-
           One exact tag, overriding `group`. Empty publishes the group. The comment on each entry
@@ -59,8 +63,21 @@ on:
         type: boolean
         default: false
 
+# A RE-RUN OF ONE ARTIFACT MUST NOT WAIT FOR ANOTHER ARTIFACT'S SLOW MIRROR.
+#
+# THE GROUP WAS `${{ github.ref }}` ALONE, so every dispatch queued behind the previous one no matter
+# what it asked for. MEASURED: `-f which=iso-blissos-16.9.7` sat in `download and verify` for forty
+# minutes on a 2.34 GiB mirror, and a `-f which=macos-asset-ovmf-code` dispatched to check a one-line
+# fix waited behind it the whole time - a 1.9 MB download blocked by an unrelated 2.34 GiB one.
+#
+# SO THE REQUEST IS PART OF THE GROUP NAME. Two runs that name DIFFERENT things are different work and
+# may proceed at once; two that name the same thing still queue, which is the property worth keeping -
+# a double dispatch of one tag must not write the same tag twice.
+#
+# `cancel-in-progress` STAYS FALSE. Cancelling a half-finished 7.7 GiB download to start an identical
+# one costs the transfer and gains nothing.
 concurrency:
-  group: artifacts-publish-${{ github.ref }}
+  group: artifacts-publish-${{ github.ref }}-${{ inputs.which }}-${{ inputs.group }}
   cancel-in-progress: false
 
 jobs:
@@ -103,7 +120,7 @@ jobs:
           - { tag: "iso-mx-xfce", group: "linux", url: "https://netix.dl.sourceforge.net/project/mx-linux/Final/Xfce/MX-25.3_Xfce_x64.iso", sha: "25b5ce20caeee1b0e50507291df5ac8a8211b1b9999d8dd7416da9b66ed9fbf9", size: "2927624192" }
           - { tag: "iso-popos-desktop", group: "linux", url: "https://iso.pop-os.org/24.04/amd64/intel/10/pop-os_24.04_amd64_intel_10.iso", sha: "a5b7321babdef75d86c688d3429fbd5525689d80a1a8b94bc393eea84f372b62", size: "2583691264" }
           - { tag: "iso-nixos-graphical", group: "linux", url: "https://releases.nixos.org/nixos/26.05/nixos-26.05.13627.c56a87d8e41c/nixos-graphical-26.05.13627.c56a87d8e41c-x86_64-linux.iso", sha: "62900e47b6bea0917c491ac0a8e18dd4e3b7579d9b60ee8e0bbbd8945162256d", size: "3888513024" }
-          # FREEBDS 15.1, THE MEDIUM `bsd/freebsd/steps/install.yaml` FETCHES AS `release: freebsd`.
+          # FREEBDS 15.1, THE MEDIUM `bsd/freebsd/steps/install.walk` FETCHES AS `release: freebsd`.
           #
           # THIS ROW IS NOT OPTIONAL, AND `TestEveryFetchedTagIsPublishedAndEveryPublishedTagIsFetched`
           # IS WHY: `release: freebsd` resolves to the tag `iso-freebsd` through `linuxISOTag`, and a
@@ -117,7 +134,7 @@ jobs:
           #
           # disc1 RATHER THAN bootonly OR dvd1: `usr.sbin/bsdinstall` on disc1 is a PKGBASE image, so
           # `bsdinstall script` installs the base system from the 328 packages under
-          # /usr/freebsd-packages/offline with no network at all. See `bsd/freebsd/steps/install.yaml`
+          # /usr/freebsd-packages/offline with no network at all. See `bsd/freebsd/steps/install.walk`
           # for why that choice is what makes this stage work.
           - { tag: "iso-freebsd", group: "linux", url: "https://download.freebsd.org/releases/amd64/amd64/ISO-IMAGES/15.1/FreeBSD-15.1-RELEASE-amd64-disc1.iso", sha: "fa27646f05a1440fd26ffbb85e06a50bc86e128242a4e9cb7bb3ea76e1aa5fd9", size: "1352255488" }
           # BLISSOS 16.9.7 (Android 13, x86_64), THE MEDIUM android/blissos16 FETCHES.
@@ -143,15 +160,16 @@ jobs:
           - { tag: "macos-asset-ovmf-code", group: "macos", url: "https://raw.githubusercontent.com/kholia/OSX-KVM/326053dd61f49375d5dfb28ee715d38b04b5cd8e/OVMF_CODE.fd", sha: "52a625db5a45329bf8005232db33e94781787d92ae8d088f2f73332dd4ded3a9", size: "1966080" }
           - { tag: "macos-asset-ovmf-vars-1920x1080", group: "macos", url: "https://raw.githubusercontent.com/kholia/OSX-KVM/326053dd61f49375d5dfb28ee715d38b04b5cd8e/OVMF_VARS-1920x1080.fd", sha: "6ed987af3a3c155be71665f510eae3e007eda9b8b94afd59d45e91c4a11565cc", size: "131072" }
           - { tag: "macos-asset-xcode-26.3", group: "macos", url: "https://archive.org/download/xcode-26.3/Xcode_26.3_Universal.xip", sha: "cebf05ec2920111830af5e08a45f07961e36bfd6", size: "2871807039" }
-          # 26.6 IS THE NEWEST XCODE AN INTEL MAC CAN RUN, AND 26.3 IS THE NEWEST SEQUOIA 15 CAN.
+          # 26.3 IS THE NEWEST SEQUOIA 15 CAN RUN AND 26.6 THE NEWEST TAHOE 26 CAN, and the two
+          # chains differ on purpose.
           #
-          # MEASURED FROM APPLE'S OWN REQUIREMENTS TABLE, which is why the two differ:
+          # MEASURED FROM APPLE'S OWN REQUIREMENTS TABLE:
           #
-          #	Xcode 26.3   macOS Sequoia 15.6 - Tahoe 26.x    <- the one 15 keeps
-          #	Xcode 26.4.1 macOS Tahoe 26.2 - 26.x
-          #	Xcode 26.5   macOS Tahoe 26.2 - 26.x
-          #	Xcode 26.6   macOS Tahoe 26.2 - 26.x            <- the newest 26.x, and the newest for Intel
-          #	Xcode 27     macOS Tahoe 26.6+, APPLE SILICON ONLY
+          #	Xcode 26.3    macOS Sequoia 15.6 - Tahoe 26.x    <- the one macos15 keeps
+          #	Xcode 26.4.1  macOS Tahoe 26.2 - 26.x
+          #	Xcode 26.5    macOS Tahoe 26.2 - 26.x
+          #	Xcode 26.6    macOS Tahoe 26.2 - 26.x            <- the newest 26.x, and the newest Intel
+          #	Xcode 27      macOS Tahoe 26.6+, APPLE SILICON ONLY
           #
           # The Xcode 27 release notes say it outright - "Xcode 27 will only install and run on Apple
           # silicon Macs" - and Apple's September 2026 post says "macOS 26 is the final release
@@ -180,7 +198,45 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # A ROW THAT WAS NOT ASKED FOR EXITS BEFORE IT DOWNLOADS ANYTHING.
+      #
+      # THE COMMENT ABOVE THIS JOB USED TO SAY A RE-RUN OF ONE ARTIFACT WAS `-f which=iso-windows11`
+      # "because the matrix then holds one row". IT DID NOT: the matrix is a literal list written
+      # into this file, nothing reads `which` or `group`, and `-f which=iso-freebsd` started
+      # SEVENTEEN DOWNLOADS AND FIFTY-ONE GIBABYTES - measured on run 44298764450, cancelled after
+      # the jobs came up. A selection input that is declared and never read is worse than none: it
+      # reads like a filter and behaves like "everything".
+      #
+      # THE GUARD IS A STEP RATHER THAN A JOB `if:` FOR THE REASON THE COMMENT BELOW ALREADY GIVES:
+      # GitHub evaluates a job's `if:` BEFORE the matrix is expanded, so `matrix.artifact.tag` is
+      # empty there and every row would read as false.
+      - name: is this row wanted
+        id: wanted
+        env:
+          WHICH: ${{ inputs.which }}
+          GROUP_INPUT: ${{ inputs.group }}
+          ROW_TAG: ${{ matrix.artifact.tag }}
+          ROW_GROUP: ${{ matrix.artifact.group }}
+        run: |
+          set -eu
+          if [ -n "${WHICH:-}" ]; then
+            if [ "$ROW_TAG" = "$WHICH" ]; then
+              echo "wanted=yes" >> "$GITHUB_OUTPUT"
+            else
+              echo "wanted=no" >> "$GITHUB_OUTPUT"
+              echo "skipped: asked for $WHICH, this row is $ROW_TAG"
+            fi
+            exit 0
+          fi
+          if [ "${GROUP_INPUT:-all}" = "all" ] || [ "$ROW_GROUP" = "$GROUP_INPUT" ]; then
+            echo "wanted=yes" >> "$GITHUB_OUTPUT"
+          else
+            echo "wanted=no" >> "$GITHUB_OUTPUT"
+            echo "skipped: asked for group $GROUP_INPUT, this row is $ROW_GROUP"
+          fi
+
       - name: prepare the runner
+        if: steps.wanted.outputs.wanted == 'yes'
         # THE DISK IS THE POINT: the largest single input is 7.7 GiB and its hash pass reads it again,
         # so a runner with a 14 GiB volume fails halfway through the Windows image.
         uses: easydev-org/easyactions/runner-check@main
@@ -190,13 +246,17 @@ jobs:
           token: ${{ github.token }}
 
       - name: download and verify
+        if: steps.wanted.outputs.wanted == 'yes'
         # THE PER-ARTIFACT RULE LIVES IN ONE SCRIPT, because it is fifteen comments long and a matrix
         # row should be readable. It downloads, checks the pin by ITS OWN LENGTH, and fails with the
         # numbers when they differ.
         id: fetch
         env:
           GROUP: ${{ matrix.artifact.group }}
-          DISKS_REPOSITORY: ${{ inputs.disks_repository }}
+          # EMPTY HERE IS NOT "NO OPINION": `internal/asset` falls back to `easydev-org/easyvm` when
+          # this is unset, which is the product's package and not writable with this token. So the
+          # default is spelled out as this repository rather than left to the fallback.
+          DISKS_REPOSITORY: ${{ inputs.disks_repository || github.repository }}
         run: |
           set -eu
           path=$(sh scripts/mirror-one.sh \
@@ -207,13 +267,14 @@ jobs:
           echo "path=$path" >> "$GITHUB_OUTPUT"
 
       - name: push
+        if: steps.wanted.outputs.wanted == 'yes'
         # THE TRANSFER IS THE ACTION THAT KNOWS THE REGISTRY: it installs oras idempotently, logs in
         # explicitly, and refuses a push whose bytes are identical to an earlier artifact.
         uses: easydev-org/easyactions/oci-push@main
         with:
           path: ${{ steps.fetch.outputs.path }}
           tag: ${{ matrix.artifact.tag }}
-          repository: ${{ inputs.disks_repository }}
+          repository: ${{ inputs.disks_repository || github.repository }}
           media-type: application/vnd.easydev.artifact
           token: ${{ github.token }}
           check-name: mirror-${{ matrix.artifact.tag }}
@@ -304,7 +365,7 @@ jobs:
         with:
           path: ${{ runner.temp }}/recovery/${{ matrix.tag }}
           tag: ${{ matrix.tag }}
-          repository: ${{ inputs.disks_repository }}
+          repository: ${{ inputs.disks_repository || github.repository }}
           token: ${{ github.token }}
           check-name: recovery-mirror-${{ matrix.tag }}
 
@@ -362,11 +423,11 @@ jobs:
         # are named by release (`macos/26`) and the recovery tag is the one that needs a code name.
         include:
           - release: "15"
-            walk: macos/15/steps/firmware.yaml
+            walk: macos/15/steps/firmware.walk
             recovery: macos-recovery-sequoia
             suffix: ""
           - release: "26"
-            walk: macos/26/steps/firmware.yaml
+            walk: macos/26/steps/firmware.walk
             recovery: macos-recovery-tahoe
             suffix: "-26"
     if: github.event_name != 'workflow_dispatch' || (inputs.which == '' && (inputs.group == 'all' || inputs.group == 'macos'))
@@ -374,7 +435,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: pull the recovery image the build reads
-        # THE BUILD DOES NOT DOWNLOAD. `macos/15/steps/firmware.yaml` requires `recovery.dmg` in its
+        # THE BUILD DOES NOT DOWNLOAD. `macos/15/steps/firmware.walk` requires `recovery.dmg` in its
         # work directory and fails in the first second without it - the same rule every install stage
         # follows. What the build still does is extract Apple's APFS driver out of that image, which
         # is local work on a local file.
@@ -388,8 +449,21 @@ jobs:
         run: |
           set -eu
           mkdir -p "$GITHUB_WORKSPACE/work"
+          # THE SOURCE IS WHERE THE IMAGE IS PRODUCED, NOT WHERE THE LEG PULLS ITS DISKS.
+          #
+          # THIS SAID `inputs.disks_repository`, AND THAT BROKE IN TWO DIRECTIONS AT ONCE. The `recovery`
+          # job above mirrors these images from `easydiskbake` into this repository, but this job has no
+          # `needs: recovery`, so it cannot rely on that copy existing. And with the input's default
+          # emptied - which is what makes a fork write to its own package - the name arrived as the
+          # EMPTY STRING:
+          #
+          #	ghcr.io "" "macos-recovery-sequoia" ...
+          #	/home/runner/.../pull-artifact.sh: 31: 2: repository
+          #
+          # MEASURED on run 44309909257, where both opencore jobs failed at step 3 and the build that
+          # produces boot.img never ran.
           sh "$GITHUB_WORKSPACE/.github/pull-artifact.sh" \
-            ghcr.io "$(printf '%s' "${{ inputs.disks_repository }}" | tr '[:upper:]' '[:lower:]')" \
+            ghcr.io easydev-org/easydiskbake \
             "${{ matrix.recovery }}" "$GITHUB_WORKSPACE/work/recovery.dmg"
           ls -l "$GITHUB_WORKSPACE/work/recovery.dmg"
 
@@ -422,7 +496,7 @@ jobs:
             -v "$GITHUB_WORKSPACE/work:/work" \
             -v "$GITHUB_WORKSPACE:/repo:ro" \
             --entrypoint /bin/sh \
-            ghcr.io/easydev-org/easyvm:latest -c '
+            ghcr.io/${{ github.repository }}:latest -c '
               set -eu
               easyvm serve --work /work --http :8080 > /tmp/daemon.log 2>&1 &
               i=0
@@ -501,7 +575,7 @@ jobs:
         with:
           path: ${{ github.workspace }}/work/boot.img
           tag: macos-asset-boot${{ matrix.suffix }}
-          repository: ${{ inputs.disks_repository }}
+          repository: ${{ inputs.disks_repository || github.repository }}
           token: ${{ github.token }}
           check-name: opencore-boot${{ matrix.suffix }}
 
@@ -510,7 +584,7 @@ jobs:
         with:
           path: ${{ github.workspace }}/work/macos.rom
           tag: macos-asset-rom${{ matrix.suffix }}
-          repository: ${{ inputs.disks_repository }}
+          repository: ${{ inputs.disks_repository || github.repository }}
           token: ${{ github.token }}
           check-name: opencore-rom${{ matrix.suffix }}
 
@@ -519,6 +593,6 @@ jobs:
         with:
           path: ${{ github.workspace }}/work/macos.vars
           tag: macos-asset-vars${{ matrix.suffix }}
-          repository: ${{ inputs.disks_repository }}
+          repository: ${{ inputs.disks_repository || github.repository }}
           token: ${{ github.token }}
           check-name: opencore-vars${{ matrix.suffix }}

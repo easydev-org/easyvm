@@ -1,0 +1,87 @@
+walkthrough "linux-nixos - configure the vm (name, share, guest agent)"
+  resolution 1920x1080
+  user vmuser
+  password admin
+  var boot_timeout == {default: "1800", from: args.boot_timeout}
+  var host == {default: "172.30.0.1", from: args.host}
+  var hostname == {default: easyvm-vm, from: args.hostname}
+  var out == {default: out/vm-configure.qcow2, from: args.out}
+  var user == {default: vmuser, from: args.user}
+  header recording_resolution == [1920, 1080]
+  header ssh_port == 2222
+
+  step "take the input disk"
+    disk == disk.qcow2
+  step "boot the disk"
+    boot == true
+    os == linux
+    # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
+    memory_mb == 4096
+    timeout == '{{ boot_timeout }}'
+  step "wait for sshd"
+    require_ssh == true
+    timeout == '{{ boot_timeout }}'
+  step "announce the machine's name"
+    ssh == echo "this machine will be named '{{ hostname }}'"
+    timeout == 60
+  step "declare the machine's name"
+    ssh == "printf '%s\\n' '{{ password }}' | sudo -S -p '' awk -v name='{{ hostname }}' '\n  # PASS ONE: remember every line, and where the closing brace is.\n  { line[NR] = $0 }\n  $0 ~ /networking\\.hostName/ { skip[NR] = 1 }\n  $0 == \"}\" { closing = NR }\n  END {\n    if (closing == 0) { print \"no closing brace in configuration.nix\" > \"/dev/stderr\"; exit 1 }\n    for (i = 1; i <= NR; i++) {\n      if (i == closing) printf \"  networking.hostName = \\\"%s\\\";\\n\", name\n      if (!skip[i]) print line[i]\n    }\n  }' /etc/nixos/configuration.nix > /tmp/configuration.nix.new\nprintf '%s\\n' '{{ password }}' | sudo -S -p '' mv /tmp/configuration.nix.new /etc/nixos/configuration.nix\nprintf '%s\\n' '{{ password }}' | sudo -S -p '' grep -n 'networking.hostName' /etc/nixos/configuration.nix\n"
+    timeout == 300
+  step "prove the name is declared"
+    ssh == "set -e\ngrep -n \"networking.hostName\" /etc/nixos/configuration.nix\ngrep -q 'networking.hostName.*{{ hostname }}' /etc/nixos/configuration.nix\n"
+    timeout == 60
+  step "declare the guest agent and the cifs client"
+    ssh == "printf '%s\\n' '{{ password }}' | sudo -S -p '' awk '\n  { line[NR] = $0 }\n  $0 ~ /environment\\.systemPackages/ { skip[NR] = 1 }\n  $0 ~ /services\\.qemuGuest\\.enable/ { skip[NR] = 1 }\n  $0 == \"}\" { closing = NR }\n  END {\n    if (closing == 0) { print \"no closing brace in configuration.nix\" > \"/dev/stderr\"; exit 1 }\n    for (i = 1; i <= NR; i++) {\n      if (i == closing) {\n        printf \"  environment.systemPackages = [ pkgs.cifs-utils ];\\n\"\n        printf \"  services.qemuGuest.enable = true;\\n\"\n      }\n      if (!skip[i]) print line[i]\n    }\n  }' /etc/nixos/configuration.nix > /tmp/configuration.nix.new\nprintf '%s\\n' '{{ password }}' | sudo -S -p '' mv /tmp/configuration.nix.new /etc/nixos/configuration.nix\nprintf '%s\\n' '{{ password }}' | sudo -S -p '' grep -n -e environment.systemPackages -e services.qemuGuest /etc/nixos/configuration.nix\n"
+    timeout == 300
+  step rebuild
+    ssh == "printf '%s\\n' '{{ password }}' | sudo -S -p '' nixos-rebuild switch 2>&1 | tail -8\n"
+    timeout == 1800
+  step "enable the guest agent"
+    ssh == "printf '%s\\n' '{{ password }}' | sudo -S -p '' systemctl enable --now qemu-guest-agent 2>&1 | tail -3\n"
+    timeout == 120
+  step "prove the name"
+    ssh == "echo \"static:   $(hostnamectl --static)\"\necho \"kernel:   $(hostname)\"\necho \"declared: $(grep -c 'networking.hostName' /etc/nixos/configuration.nix || true) line(s)\"\ngrep -n 'networking.hostName' /etc/nixos/configuration.nix || echo \"no networking.hostName line\"\necho \"--- the tail of configuration.nix ---\"\ntail -5 /etc/nixos/configuration.nix\necho \"--- the verdict ---\"\ntest \"$(hostnamectl --static)\" = \"{{ hostname }}\"\n"
+    timeout == 60
+  step "prove the guest agent is running"
+    ssh == "systemctl is-active qemu-guest-agent &&\nls -l /dev/virtio-ports/org.qemu.guest_agent.0 2>&1 &&\nsystemctl show -p MainPID --value qemu-guest-agent\n"
+    timeout == 120
+  step "prove the guest can fetch from the host share"
+    ssh == sh -c 'curl -fsS --max-time 20 http://172.30.0.1:8080/shared/ || wget -qO- --timeout=20 http://172.30.0.1:8080/shared/'
+    timeout == 180
+  step "show what the guest sees at the share"
+    ssh == sh -c 'curl -fsS --max-time 20 http://172.30.0.1:8080/shared/ 2>&1 | head -20; echo "fetch exit = $?"'
+    timeout == 120
+  step "copy the launcher in"
+    scp == {template: launcher, to: /tmp/bootstrap-launcher.sh}
+    timeout == 300
+  step "install the launcher"
+    ssh == "set -e\ninstall -m 0755 /tmp/bootstrap-launcher.sh ~/bootstrap-launcher.sh\nmkdir -p ~/.config/systemd/user\ncat > ~/.config/systemd/user/org.vm.bootstrap.service <<'UNIT'\n[Unit]\nDescription=Run ~/shared/bootstrap.sh at login\n\n[Service]\nType=oneshot\nExecStart=%h/bootstrap-launcher.sh\n\n[Install]\nWantedBy=default.target\nUNIT\nsystemctl --user daemon-reload\nsystemctl --user enable org.vm.bootstrap.service\necho INSTALLED_FOR_NEXT_LOGIN\n"
+    timeout == 300
+  step "prove the launcher is installed"
+    ssh == "set -e\nls -l ~/bootstrap-launcher.sh ~/.config/systemd/user/org.vm.bootstrap.service\ngrep -q bootstrap-launcher.sh ~/.config/systemd/user/org.vm.bootstrap.service\nsystemctl --user is-enabled org.vm.bootstrap.service\ntest \"$(systemctl --user is-enabled org.vm.bootstrap.service)\" = \"enabled\"\n"
+    timeout == 60
+  # `poweroff` CUTS THE CONNECTION IT WAS SENT OVER, SO SSH REPORTS "exited without exit status".
+  #
+  # MEASURED ON RUN 9a8cae4's nixos vm leg: every step before this one answered - including the guest
+  # agent, the host share and the launcher - and the stage died on
+  #
+  #	ask the guest to power off: ssh: wait: remote command exited without exit status or exit signal
+  #
+  # which is what a SUCCESSFUL poweroff looks like from the client: the machine goes down mid-command
+  # and the channel closes without a status. It is put in the background so the shell returns first,
+  # the step is optional, and `wait for the machine to stop` - the assertion the next stage depends
+  # on - still has to pass.
+  step "ask the guest to power off"
+    # `optional` IS GONE AND THE TOLERANCE IS IN THE COMMAND, WHERE THE LOG SHOWS IT.
+    #
+    # poweroff cuts the connection carrying it, so the client sees "exited without exit status" for a
+    # shutdown that WORKED. Writing `|| true` says that in the command; `optional` said it by
+    # swallowing whatever happened, including a shutdown that never started. `wait for the machine to
+    # stop` is the assertion, and it runs either way.
+    ssh == printf '%s\n' '{{ password }}' | sudo -S -p '' sh -c 'nohup poweroff >/dev/null 2>&1 &' || true
+    timeout == 300
+  step "wait for the machine to stop"
+    timeout == 300
+    wait_until == stopped
+  step "publish the disk"
+    compress == '{{ out }}'

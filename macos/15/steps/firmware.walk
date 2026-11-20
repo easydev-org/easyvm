@@ -1,0 +1,9 @@
+walkthrough "macos 15 - build the firmware once and publish it"
+  recording_resolution 1920x1080
+  var release == {default: "15", from: args.release}
+
+  needs recovery.dmg, named "the recovery image this build reads is already on disk"
+  step "build the firmware the guest boots through"
+    fetch == opencore
+    recovery == recovery.dmg
+    release == "15"

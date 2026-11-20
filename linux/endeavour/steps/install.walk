@@ -1,0 +1,137 @@
+walkthrough "endeavouros - install to ext4, then the power button"
+  resolution 1920x1080
+  password admin
+  var out == {default: out/endeavouros.qcow2, from: args.out}
+  var user == {default: vmuser, from: args.user}
+  header recording_resolution == [1920, 1080]
+
+  needs endeavour.iso, named "the media this stage boots from is already on disk"
+  step "create the empty disk"
+    disk == disk.qcow2
+    disk_gb == 128
+  step "boot the installer"
+    boot == true
+    iso == endeavour.iso
+    os == linux
+    # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
+    memory_mb == 4096
+    timeout == 1800
+  step "wait for the live desktop"
+    desktop == linux/kde
+    reference == reference/desktop.png
+    range == [0.90, 1.0]
+    # THE TOP 120 ROWS ARE WALLPAPER AND A MENU BAR: a boot splash scores 0.0002
+    # there and every desktop frame 1.0000, including the ones with an installer
+    # window over the middle. The clock sits below this band, which is why 120.
+    rect == [0, 0, 1920, 120]
+    rect_at == [1920, 1080]
+    poll == 5
+    timeout == 5400
+  settle 15s, named "let the desktop settle"
+  click "start the installer" at 748 431, waiting 25s, named "start the installer"
+  click "choose the offline method" at 1084 591, waiting 30s, named "choose the offline method"
+  step "calamares is up"
+    see == name: cal
+  step "the welcome page is in English or needs changing"
+    check == {from: cal, mode: text, name: seen, rect: [570, 225, 1340, 745], rect_at: [1920, 1080], scale: 2, words: [[welcome], [歡迎]]}
+  click "open the language list" at 980 661, waiting 4s, named "open the language list"
+  press e, waiting 2s, named "jump to the English group"
+  press up, waiting 1s, named "step up to British English"
+  press up, waiting 1s, named "step up to American English"
+  press Return, waiting 6s, named "choose it"
+  step "the installer speaks English"
+    see == name: english
+  step "the page is in English"
+    check == {from: english, mode: text, name: ok, rect: [570, 225, 1340, 745], rect_at: [1920, 1080], scale: 2, words: [[welcome]]}
+  click "next from welcome" at 1410 878, waiting 9s, named "next from welcome"
+  click "next from location" at 1410 878, waiting 9s, named "next from location"
+  click "next from keyboard" at 1410 878, waiting 9s, named "next from keyboard"
+  step "the bootloader page"
+    see == name: boot
+  click "next from bootloader" at 1410 878, waiting 9s, named "next from bootloader"
+  step "the partitions page"
+    see == name: parts
+  click "select erase disk" at 679 252, waiting 8s, named "select erase disk"
+  step "the partitions page with erase selected"
+    see == name: erase
+  step "the default filesystem is ext4"
+    check == {from: erase, mode: text, name: ext4, rect: [570, 225, 1340, 745], rect_at: [1920, 1080], scale: 2, words: [[ext4]]}
+  click "next from partitions" at 1410 878, waiting 10s, named "next from partitions"
+  step "the users page settles before anything is typed into it"
+    loop == {check: {from: at_users, mode: text, name: here, rect: [570, 225, 1340, 745], rect_at: [1920, 1080], scale: 2, words: [[Reuse]]}, do: [{settle: 8}], max: 24, see: {name: at_users}, until: {fact: here}}
+  step "the users page"
+    see == name: users
+  step "the full name"
+    click == [850, 299]
+    settle == 2
+    type == '{{ user }}'
+  step "the login name"
+    clear == true
+    click == [850, 354]
+    settle == 2
+    type == '{{ user }}'
+  step "the computer name"
+    clear == true
+    click == [850, 434]
+    settle == 2
+    type == endeavouros
+  step "the password"
+    click == [700, 515]
+    settle == 2
+    type == '{{ password }}'
+  step "the password again"
+    clear == true
+    click == [900, 515]
+    settle == 2
+    type == '{{ password }}'
+  # THE ROOT PASSWORD IS TYPED INTO ITS FIELDS RATHER THAN TICKED BY A CHECKBOX.
+  #
+  # THE CHECKBOX WAS TRIED TWICE AND MEASURED TO FAIL BOTH TIMES. The frame from run 44447463692
+  # shows "Reuse user password as root password" still UNCHECKED with the Root password and Repeat
+  # root password fields EMPTY, after six clicks at the box's own centre (584, 648) and six at the
+  # label (700, 648). Calamares' Qt checkbox toggles on the indicator and ignores the label, and the
+  # indicator is 14 px wide - one repaint from being missed.
+  #
+  # A FORM FIELD IS 300 px WIDE AND CANNOT BE MISSED, and it is what the checkbox would have filled
+  # anyway: the label says "reuse the user password for root", so the value to type is the same one.
+  #
+  # `clear: true` first, because a half-filled field from a click that landed in it is worse than an
+  # empty one - Calamares shows the mismatch and keeps Next disabled either way.
+  step "the root password - first field"
+    clear == true
+    click == [700, 703]
+    settle == 2
+    type == '{{ password }}'
+  step "the root password - second field"
+    clear == true
+    click == [993, 703]
+    settle == 2
+    type == '{{ password }}'
+  click "log in automatically" at 587 755, waiting 3s, named "log in automatically"
+  step "the users page is filled in"
+    see == name: filled
+  step "the password was accepted"
+    check == {from: filled, mode: text, name: ok, rect: [570, 225, 1340, 745], rect_at: [1920, 1080], scale: 2, without: [match], words: [ok]}
+  click "next from users" at 1410 878, waiting 10s, named "next from users"
+  step "the summary page arrives before install is clicked"
+    loop == {check: {from: settle, mode: text, name: here, rect: [570, 225, 1340, 745], rect_at: [1920, 1080], scale: 2, words: [[summary], [install]]}, do: [{settle: 10}], max: 30, see: {name: settle}, until: {fact: here}}
+  step "the summary page"
+    see == name: summary
+  step "the summary names ext4"
+    check == {from: summary, mode: text, name: ext4, rect: [570, 225, 1340, 745], rect_at: [1920, 1080], scale: 2, words: [[ext4]]}
+  click "start the install" at 1412 868, waiting 10s, named "start the install"
+  step "the confirmation dialog"
+    see == name: confirm
+  click install at 1064 540, waiting 25s, named "install now"
+  step "the install writes the disk"
+    disk_min_mb == 4000
+    disk_settle == 300
+    poll == 20
+    timeout == 3600
+  step "the install is done"
+    loop == {check: {from: done, mode: text, name: finished, rect: [570, 225, 1340, 745], rect_at: [1920, 1080], scale: 2, words: [[installed]]}, do: [{settle: 15}], max: 80, see: {name: done}, until: {fact: finished}}
+  step "stop the machine"
+    shutdown == kill
+    timeout == 600
+  step "publish the disk"
+    compress == '{{ out }}'

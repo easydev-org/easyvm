@@ -2,10 +2,13 @@ package daemon
 
 import (
 	"bytes"
+	"encoding/json"
 	"net/http"
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/easydev-org/easyvm/internal/protocol"
 )
 
 // A REFUSAL MUST NOT LOOK LIKE A SUCCESS, AND A BAD FIELD MUST NOT BE IGNORED.
@@ -115,4 +118,33 @@ func daemonAddr(t *testing.T) string {
 		t.Fatal("EASYVM_HTTP is empty; startDaemon sets it")
 	}
 	return strings.TrimPrefix(v, "http://")
+}
+
+// A COORDINATE OF ZERO IS A PLACE, AND ITS ABSENCE IS NOT THE SAME VALUE.
+//
+// THE STRUCT USED `int` WITH `omitempty`, so `(0, 0)` - the top-left pixel, which a walkthrough may
+// name - was DROPPED from the wire and arrived as "the caller sent nothing". A pointer makes `&0` and
+// `nil` different values, which is what lets one be a click and the other a 400.
+func TestACoordinateOfZeroIsCarriedAndAMissingOneIsNil(t *testing.T) {
+	zero := 0
+	wire, err := json.Marshal(protocol.Request{Command: protocol.CommandClick, X: &zero, Y: &zero})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(wire), `"x":0`) || !strings.Contains(string(wire), `"y":0`) {
+		t.Fatalf("`x: 0` was omitted from %s - the daemon cannot tell the corner from nothing", wire)
+	}
+
+	// AND AN ABSENT ONE DECODES TO nil, not to zero.
+	var req protocol.Request
+	if err := json.Unmarshal([]byte(`{"command":"click"}`), &req); err != nil {
+		t.Fatal(err)
+	}
+	if req.X != nil || req.Y != nil {
+		t.Fatalf("an absent coordinate decoded to %v/%v, so it is indistinguishable from (0, 0)",
+			req.X, req.Y)
+	}
+	if _, _, err := xyOf("click", req); err == nil {
+		t.Fatal("a request with no x or y was accepted")
+	}
 }

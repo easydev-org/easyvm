@@ -403,7 +403,6 @@ func TestEachOperatingSystemHasItsOwnGroupAndOneSharedMechanism(t *testing.T) {
 	}
 }
 
-
 // THE PULL IS RESUMABLE, AND IT IS A SHELL SCRIPT BECAUSE IT HAS TO SURVIVE A RESET STREAM.
 //
 // `oras pull` HAS NO RESUME, AND A RETRY AROUND IT DOES NOT HELP. MEASURED, from the reference

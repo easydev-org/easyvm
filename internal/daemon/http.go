@@ -128,6 +128,25 @@ func (d *Daemon) ServeHTTP(opts HTTPServeOptions) error {
 	// browser has no use for `run`, but a CLI talking over HTTP needs all eleven commands and a route
 	// per command would be eleven lines of nothing.
 	mux.HandleFunc("/api/command", d.handleCommand)
+	// THE JOURNAL IS READ-ONLY, AND THAT IS A DESIGN DECISION RATHER THAN AN UNFINISHED EDGE.
+	//
+	// There is no endpoint that runs a check or advances a step. A `check:` answers from a frame a
+	// `see:` CAPTURED AND NAMED, and that binding lives in the running walkthrough; and its verdict
+	// is control flow, so a request that could set it could forge the condition a loop waits on.
+	// What a page needs is to SEE what happened, and that is what these six do.
+	mux.HandleFunc("/api/journal", d.handleJournal)
+	mux.HandleFunc("/api/journal/step", d.handleJournalStep)
+	mux.HandleFunc("/api/journal/events", d.handleJournalEvents)
+	mux.HandleFunc("/api/journal/summary", d.handleJournalSummary)
+	mux.HandleFunc("/api/journal/library", d.handleJournalLibrary)
+	mux.HandleFunc("/api/journal/runs", d.handleJournalRuns)
+	mux.HandleFunc("/api/artifact", d.handleArtifact)
+	// THE REPORT, AS A PAGE. The same HTML `easyvm report` writes, rendered on request.
+	mux.HandleFunc("/report", d.handleReport)
+	// THE LIVE PAGE: every call as it happens, the screen, and a click that reaches the guest.
+	// It is the one place a person can watch a run AND drive it, and both are recorded.
+	mux.HandleFunc("/console", d.handleConsole)
+	mux.HandleFunc("/api/journal/stream", d.handleJournalStream)
 	// THE SHARED DIRECTORY, ON THIS SAME PORT. It used to be SMB on 445 with a per-family client -
 	// and FreeBSD's client could not connect at all, because netsmb speaks SMB1 on NetBIOS 139 while
 	// smbd serves SMB3 on 445. HTTP is the transport every guest already has, needs no package, no
@@ -174,6 +193,10 @@ func (d *Daemon) handleScreenJSON(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d *Daemon) handleScreenPNG(w http.ResponseWriter, r *http.Request) {
+	// A LIVE VIEW POLLS THIS ONCE A SECOND, so a cached response shows the first frame for ever and
+	// the page looks frozen on a machine that is working. MEASURED as the console's screen panel not
+	// moving while the guest's own recording showed it working.
+	w.Header().Set("Cache-Control", "no-store, must-revalidate")
 	resp := d.screenshot()
 	if !resp.OK || resp.Screen == nil {
 		http.Error(w, resp.Error, http.StatusConflict)

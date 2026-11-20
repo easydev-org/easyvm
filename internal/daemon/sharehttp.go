@@ -88,6 +88,11 @@ func (d *Daemon) handleShare(w http.ResponseWriter, r *http.Request) {
 
 	// THE DIRECTORY IS ASKED OF THE MACHINE THAT IS SERVING IT, so a daemon with no machine answers
 	// 503 rather than serving whatever a previous run left behind.
+	//
+	// THE MESSAGE NO LONGER TELLS A READER TO WRITE A `share_serve:` STEP. That key is gone: the
+	// share is always on, so "no directory" now means one of two things a reader can act on - there
+	// is no machine in this daemon yet, or the directory could not be created (a permission problem,
+	// which `ShareDir` logs with the underlying error).
 	var dir string
 	if err := d.withMachine(func(dr run.Driver) error {
 		if sv, ok := dr.(interface{ ShareDir() string }); ok {
@@ -95,12 +100,12 @@ func (d *Daemon) handleShare(w http.ResponseWriter, r *http.Request) {
 		}
 		return nil
 	}); err != nil {
-		http.Error(w, "no directory is being shared; a `share_serve:` step must run first",
+		http.Error(w, "no machine is running, so there is nothing to serve a share from",
 			http.StatusServiceUnavailable)
 		return
 	}
 	if dir == "" {
-		http.Error(w, "no directory is being shared; a `share_serve:` step must run first",
+		http.Error(w, "the shared directory could not be prepared; see the daemon log",
 			http.StatusServiceUnavailable)
 		return
 	}

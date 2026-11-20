@@ -1,0 +1,84 @@
+walkthrough "opensuse-leap-16.1 - Agama, the storage editor, and ext4"
+  resolution 1920x1080
+  password Qz7vLp2w
+  var desktop_password == {default: Qz7vLp2w, from: args.password}
+  var out == {default: out/distro.qcow2, from: args.out}
+  var user == {default: vmuser, from: args.user}
+  header notes == "Its installer is a form-only installer: Agama is a WEB UI the live session opens straight into, with no panel at any point. MEASURED, the two frames before the product chooser give `drop` 0.0 and 6.9 where `IsLinuxDesktop` wants more than 15 - see TestAnInstallerIsWaitedForTheWayItAppears.\n"
+  header recording_resolution == [1920, 1080]
+
+  needs opensuse-leap-16.1.iso, named "the media this stage boots from is already on disk"
+  step "create the empty disk"
+    disk == disk.qcow2
+    disk_gb == 128
+  step "boot the installer"
+    boot == true
+    iso == opensuse-leap-16.1.iso
+    os == linux
+    # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
+    memory_mb == 4096
+    timeout == 1800
+  step "wait for the installer's product chooser to draw"
+    loop == {check: {from: chooser, mode: text, name: up, rect: [45, 125, 242, 561], rect_at: [1920, 1080], scale: 1, words: [[Select], [mode]]}, do: [{settle: 6}], max: 40, see: {name: chooser}, until: {fact: up}}
+  click "choose the product" at 66 199, waiting 5s, named "choose the product"
+  click "choose the Standard system" at 94 324, waiting 3s, named "choose the Standard system"
+  click "accept the licence" at 47 420, waiting 3s, named "accept the licence"
+  click select at 160 470, waiting 20s, named "select it"
+  step "wait for the installer's summary to draw"
+    loop == {check: {from: summary, mode: text, name: up, rect: [43, 71, 434, 593], rect_at: [1920, 1080], scale: 1, words: [[Installation], [Storage]]}, do: [{settle: 6}], max: 40, see: {name: summary}, until: {fact: up}}
+  click "open the storage section" at 120 387, waiting 10s, named "open the storage section"
+  click "open the mount list" at 455 330, waiting 6s, named "open the mount list"
+  click "the root row's menu" at 850 420, waiting 5s, named "the root row's menu"
+  click edit at 792 458, waiting 8s, named "edit it"
+  click "open the filesystem list" at 87 502, waiting 6s, named "open the filesystem list"
+  click choose at 79 744, waiting 6s, named "choose ext4"
+  click "accept the partition" at 61 632, waiting 8s, named "accept the partition"
+  click "back to the summary" at 72 29, waiting 10s, named "back to the summary"
+  click "open the authentication section" at 758 390, waiting 3s, named "open the authentication section"
+  click "define an administrator user" at 73 275, waiting 6s, named "define an administrator user"
+  step "the full name"
+    click == [207, 366]
+    settle == 2
+    type == '{{ user }}'
+  step "the user name"
+    click == [207, 460]
+    settle == 2
+    type == '{{ user }}'
+  step "the password"
+    click == [207, 553]
+    settle == 2
+    type == '{{ password }}'
+  step "the password again"
+    click == [207, 673]
+    settle == 3
+    type == '{{ password }}'
+  press tab, waiting 1s, named "scroll the form to its buttons, by tabbing focus down it"
+  press tab, waiting 1s, named "tab 1 of the scroll"
+  press tab, waiting 1s, named "tab 2 of the scroll"
+  press tab, waiting 1s, named "tab 3 of the scroll"
+  press tab, waiting 1s, named "tab 4 of the scroll"
+  press tab, waiting 1s, named "tab 5 of the scroll"
+  press tab, waiting 1s, named "tab 6 of the scroll"
+  press tab, waiting 1s, named "tab 7 of the scroll"
+  press tab, waiting 1s, named "tab 8 of the scroll"
+  press tab, waiting 2s, named "tab to Accept, which scrolls it into view"
+  click "accept the account" at 92 1016, waiting 10s, named "accept the account"
+  step "the changes are applied"
+    see == name: auth_applied
+  step "changes were applied"
+    check == {from: auth_applied, mode: text, name: applied, rect: [132, 73, 338, 138], rect_at: [1920, 1080], scale: 1, words: [[applied], [successfully]]}
+  click "back to the summary, where install is now enabled" at 177 129, waiting 10s, named "back to the summary, where install is now enabled"
+  click "start the install" at 110 515, waiting 20s, named "start the install"
+  click "confirm, because this medium asks" at 756 669, waiting 30s, named "confirm, because this medium asks"
+  step "the install is written"
+    disk_min_mb == 2000
+    disk_settle == 300
+    poll == 20
+    timeout == 3600
+  step "the install finishes"
+    loop == {check: {from: done, mode: text, name: finished, rect: [600, 500, 1300, 620], rect_at: [1920, 1080], scale: 1, words: [[complete], [reboot]]}, do: [{settle: 15}], max: 120, see: {name: done}, until: {fact: finished}}
+  step "stop the machine"
+    shutdown == kill
+    timeout == 600
+  step "publish the disk"
+    compress == '{{ out }}'

@@ -1,4 +1,7 @@
 name: android 13 (blissos 16.9.7) - configure the vm
+recording_resolution:
+- 1920
+- 1080
 resolution:
 - 1920
 - 1080
@@ -42,7 +45,6 @@ vars:
 
 steps:
   - name: start recording
-    record: blissos16-vm-configure.mp4
 
   - name: boot the installed disk
     boot: true
@@ -205,7 +207,7 @@ steps:
   # MEASURED: ten seconds after `am start` the answer is there; the wait is longer because a loaded
   # runner is slower, not because ten was wrong.
   - name: give the launcher time to come to the front
-    wait: 20
+    settle: 20
 
   - name: Taskbar is the window in front
     # THE WINDOW MANAGER'S OWN ANSWER. `mCurrentFocus` names the window that receives input, and a
@@ -225,8 +227,6 @@ steps:
     adb: dumpsys window windows | grep -c com.farmerbb.taskbar
     timeout: 60
 
-  - name: photograph the screen
-    screenshot: screen.png
 
   - name: stop the machine
     shutdown: kill
@@ -236,4 +236,3 @@ steps:
     compress: '{{ out }}'
 
   - name: stop recording
-    record: false

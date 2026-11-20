@@ -1,4 +1,7 @@
 name: macos 15 - build the firmware once and publish it
+recording_resolution:
+- 1920
+- 1080
 # THIS FILE NEVER STARTS A GUEST. It exists so the OpenCore build runs ONCE PER RELEASE instead of
 # once per stage, and so that a booting stage RECEIVES `boot.img`, `macos.rom` and `macos.vars` as
 # prepared inputs instead of producing them in the middle of its own run.

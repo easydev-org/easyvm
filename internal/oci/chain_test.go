@@ -66,6 +66,9 @@ func TestEachLegContinuesTheStageBeforeIt(t *testing.T) {
 		if len(legs) == 0 {
 			continue
 		}
+		// A CHAINED FILE HAS MORE THAN ONE `stages: |` BLOCK - one per job, joined by `needs:` -
+		// which is what tells this test whether a fallback can ever matter here.
+		chained := strings.Count(string(body), "stages: |") > 1
 		// WHICH CHAIN THIS FILE IS, by matching the leg names that carry a prefix.
 		var base string
 		var stages []string
@@ -118,9 +121,19 @@ func TestEachLegContinuesTheStageBeforeIt(t *testing.T) {
 				t.Errorf("%s: %q pulls %q, and the stage before it published %q",
 					filepath.Base(name), leg.name, leg.pull, want)
 			}
-			// AND A FALLBACK, so a fresh package can still start: the legs run at the same time, so
-			// the stage before may not have published yet.
-			if idx >= 2 && !strings.HasPrefix(leg.fallback, tagForStage(base, stages[0])) {
+			// A FALLBACK IS NEEDED ONLY WHEN THE LEGS CAN RUN AT ONCE.
+			//
+			// IT WAS ALWAYS REQUIRED, because every leg used to be a row in ONE matrix - so the stage
+			// before might not have published when a later one asked, and the fallback let it
+			// continue the installed disk instead of failing with a 404.
+			//
+			// THE LEGS ARE JOBS WITH `needs:` NOW, in the same file: a `-vm` leg of a chained
+			// workflow starts only after its `-ssh` published. Demanding a fallback there is asking
+			// for a second code path that can never run - and it would hide the case the fallback
+			// exists for, which is a `from_tag:` re-run that starts the chain in the middle.
+			//
+			// SO THE RULE FOLLOWS THE SHAPE: chained legs need no fallback, a matrix does.
+			if idx >= 2 && !chained && !strings.HasPrefix(leg.fallback, tagForStage(base, stages[0])) {
 				t.Errorf("%s: %q has no fallback to %q, so on a package where the previous stage "+
 					"has not published yet this leg fails with a 404 instead of continuing the "+
 					"installed disk", filepath.Base(name), leg.name, tagForStage(base, stages[0]))
@@ -164,50 +177,60 @@ type leg struct {
 // legsOf reads the `stages:` JSON block out of one workflow.
 func legsOf(t *testing.T, body []byte) []leg {
 	t.Helper()
+	// EVERY `stages: |` BLOCK IN THE FILE, NOT ONLY THE FIRST.
+	//
+	// A WORKFLOW CAN PASS ITS LEGS IN ONE MATRIX OR IN ONE BLOCK PER JOB. `ubuntu.yml` and
+	// `cachyos.yml` use one per job (`install`, `ssh`, `vm`, each with `needs:`), and the single
+	// matrix is the shape that BROKE: three legs starting at once, the second asking for the tag the
+	// first had not published. This test did not see the chained form at all - it read the first
+	// block and stopped - so it reported "no legs with a `pull:` were found" about a file full of
+	// them.
 	src := string(body)
-	const key = "stages: |"
-	i := strings.Index(src, key)
-	if i < 0 {
-		return nil
-	}
-	rest := src[i+len(key):]
-	// THE BLOCK ENDS AT THE NEXT LINE THAT IS NOT INDENTED AS FAR AS ITS OWN FIRST LINE.
-	lines := strings.Split(rest, "\n")
-	var block []string
-	depth := -1
-	for _, ln := range lines {
-		if strings.TrimSpace(ln) == "" {
-			if depth >= 0 {
-				block = append(block, ln)
-			}
-			continue
-		}
-		indent := len(ln) - len(strings.TrimLeft(ln, " "))
-		if depth < 0 {
-			depth = indent
-		}
-		if indent < depth {
+	out := []leg{}
+	rest := src
+	for {
+		i := strings.Index(rest, "stages: |")
+		if i < 0 {
 			break
 		}
-		block = append(block, strings.TrimPrefix(ln, strings.Repeat(" ", depth)))
-	}
-	var raw []map[string]any
-	if err := yaml.Unmarshal([]byte(strings.Join(block, "\n")), &raw); err != nil {
-		return nil
-	}
-	out := make([]leg, 0, len(raw))
-	for _, m := range raw {
-		str := func(k string) string {
-			if v, ok := m[k].(string); ok {
-				return v
+		rest = rest[i+len("stages: |"):]
+		// THE BLOCK ENDS AT THE NEXT LINE THAT IS NOT INDENTED AS FAR AS ITS OWN FIRST LINE.
+		lines := strings.Split(rest, "\n")
+		var block []string
+		depth := -1
+		for _, ln := range lines {
+			if strings.TrimSpace(ln) == "" {
+				if depth >= 0 {
+					block = append(block, ln)
+				}
+				continue
 			}
-			return ""
+			indent := len(ln) - len(strings.TrimLeft(ln, " "))
+			if depth < 0 {
+				depth = indent
+			}
+			if indent < depth {
+				break
+			}
+			block = append(block, strings.TrimPrefix(ln, strings.Repeat(" ", depth)))
 		}
-		out = append(out, leg{
-			name: str("name"), pull: str("pull"),
-			fallback: str("fallback"), publish: str("publish"),
-			out: str("out"),
-		})
+		var raw []map[string]any
+		if err := yaml.Unmarshal([]byte(strings.Join(block, "\n")), &raw); err != nil {
+			continue
+		}
+		for _, m := range raw {
+			str := func(k string) string {
+				if v, ok := m[k].(string); ok {
+					return v
+				}
+				return ""
+			}
+			out = append(out, leg{
+				name: str("name"), pull: str("pull"),
+				fallback: str("fallback"), publish: str("publish"),
+				out: str("out"),
+			})
+		}
 	}
 	return out
 }

@@ -22,6 +22,10 @@ on:
       platforms:
         description: "Platforms to build"
         default: "linux/amd64"
+      no_cache:
+        description: "Rebuild every layer (use when the image is stale but the push said success)"
+        type: boolean
+        default: false
   push:
     branches: [main]
     paths:
@@ -211,6 +215,26 @@ jobs:
           # kept because the RUN that carries them also carries the apt install.
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          # `no_cache` EXISTS BECAUSE A GREEN BUILD CAN PUBLISH A STALE BINARY, AND IT DID.
+          #
+          # MEASURED: run 44691416157 reported binary/image/behaviour all SUCCESS and pushed
+          # `latest` = sha256:07ad3ff4..., and the pod that pulled that digest still had an
+          # /usr/local/bin/easyvm that could not read a `.walk` file -
+          #
+          #	FAILED: /tmp/made.walk: yaml: unmarshal errors:
+          #	  line 1: cannot unmarshal !!str `walkthr...` into map[string]interface {}
+          #
+          # while the SAME commit built locally answers
+          #
+          #	linux-fedora-workstation - sshd, 39 step(s)
+          #
+          # So the artifact was right and the LAYER was old: `COPY dist/easyvm` is cached by content
+          # and the build cache decided it had seen that path before. The step that checks the image
+          # (`easyvm versions`) cannot catch this - it only proves SOME working binary is in there.
+          #
+          # `-f no_cache=true` rebuilds every layer. It costs four minutes of apt and is worth it
+          # exactly when a push reported success and the binary did not change.
+          no-cache: ${{ inputs.no_cache || false }}
 
       - name: the image runs, and its binary does
         # THE BUILD SUCCEEDING IS NOT THE SAME AS THE IMAGE WORKING. This starts the built image and

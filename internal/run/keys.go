@@ -9,23 +9,31 @@ package run
 func ExecutableKeys() []string {
 	return []string{
 		// acted on by runOne's switch
-		"boot", "boot_from", "shutdown", "reboot",
+		"boot", "boot_from", "shutdown", "acpi", "qga", "wait_until",
 		"disk",
-		"record", "compress", "snapshot",
-		"require", "require_ssh", "ssh", "scp", "script", "write", "asset", "build", "generate",
+		"compress",
+		"needs", "require", "require_ssh", "ssh", "scp", "write", "fetch", "asset", "build", "generate",
 		"desktop",
-		"share_serve", "share_mount",
 		"type", "key", "double", "click",
-		"wait_for", "screenshot",
+		"screenshot",
 		// THE THREE-STEP MODEL. `ocr:` reads one region and names it; `check:` answers from that
 		// name; `loop:` is the three parts written down. ONLY THESE THREE ARE DISPATCHED: `says`,
 		// `says_any` and `max` are sub-keys of `check:` and `loop:` - a sub-key is not a step, and
 		// claiming it here is what the dispatch test exists to refuse.
-		"ocr", "check", "loop", "if",
-		"unless", "unless_any", "until", "until_any", "until_console", "expect", "expect_any", "at_color",
-		"at_button", "host_log", "run", "disk_settle", "do",
-		"repeat_until",
-		"demo_script",
+		"check", "loop", "if",
+		// `see:` MEASURES and `want:` DECIDES - the pair that makes a screen test data rather than a
+		// function in the binary. Both have a branch in runOne.
+		"see",
+		// `settle:` IS BOTH A STEP AND A MODIFIER - it absorbs `wait:` and `wait_after:`, which the
+		// files use 745 times between them.
+		"settle",
+		"when", "when_not", "when_not_any", "do",
+		// `expect:`/`expect_any:` ARE NOT HERE ON PURPOSE: they have no branch of their own. They
+		// are an ARGUMENT of `run:` and `doRun` calls `doExpectAny` after the typing, because a
+		// branch at the top level would take a step that both types and checks and run only the
+		// check.
+		"until", "until_any", "at_color",
+		"at_button", "at_bottom", "run", "disk_settle", "do",
 		// A DISK EDIT, NOT A GUEST ACTION. It has its own branch because the guest it belongs to has
 		// usually just been shut down - qemu holds the qcow2's write lock while it runs.
 		"esp_fallback",

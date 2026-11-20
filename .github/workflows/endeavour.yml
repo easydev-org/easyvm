@@ -25,7 +25,11 @@ on:
     inputs:
       disks_repository:
         description: "the ghcr repository that holds the disks"
-        default: "easydev-org/easyvm"
+        default: "easydev-org/easyvm-fork"
+      from_tag:
+        description: >-
+          start from a PUBLISHED disk: linux-endeavour or linux-endeavour-ssh. Empty runs the whole chain.
+        default: ""
 
 concurrency:
   group: endeavour
@@ -50,36 +54,73 @@ permissions:
   # live log is a check run, and publishing one needs `checks: write`.
   checks: write
 
+# THE LEGS ARE JOBS THAT DEPEND ON EACH OTHER, NOT A MATRIX.
+#
+# THIS FILE USED TO PASS ALL THREE LEGS AS ONE `stages:` MATRIX, so they STARTED AT ONCE - and the
+# ssh leg asks for the tag the install leg publishes, which does not exist yet. MEASURED on run
+# 44346623094: `linux-manjaro-install` finished 32 of 32 steps and pushed its disk, while
+# `linux-manjaro-ssh` failed at step 5 with
+#
+#	linux-manjaro-ssh is not in the package
+#
+# because it was pulling a tag ANOTHER LEG IN ITS OWN MATRIX had not written. `needs:` is the fix,
+# and `cachyos.yml` already had it.
 jobs:
-  stages:
+  install:
+    if: github.event_name != 'workflow_dispatch' || inputs.from_tag == ''
     uses: ./.github/workflows/stage.yml
     secrets: inherit
     with:
       group: endeavour
       disks_repository: ${{ inputs.disks_repository }}
-      # THE LEGS, AS JSON. `fromJSON` in the called workflow turns this back into a matrix.
+      stages: |
+        [
+          {
+            "name": "linux-endeavour-install",
+            "file": "linux/endeavour/steps/install.walk",
+            "pull": "",
+            "assets": [
+              "iso-endeavouros:endeavour.iso"
+            ],
+            "out": "linux-endeavour.qcow2",
+            "publish": "linux-endeavour",
+            "timeout": 90
+          }
+        ]
+
+  ssh:
+    needs: [install]
+    if: always() && !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.from_tag == 'linux-endeavour')
+    uses: ./.github/workflows/stage.yml
+    secrets: inherit
+    with:
+      group: endeavour
+      disks_repository: ${{ inputs.disks_repository }}
       stages: |
         [
           {
             "name": "linux-endeavour-ssh",
-            "file": "linux/endeavour/steps/ssh.yaml",
+            "file": "linux/endeavour/steps/ssh.walk",
             "pull": "linux-endeavour",
             "out": "linux-endeavour-ssh.qcow2",
             "timeout": 60,
             "publish": "linux-endeavour-ssh"
-          },
-          {
-            "name": "linux-endeavour-install",
-            "file": "linux/endeavour/steps/install.yaml",
-            "pull": "",
-            "assets": ["iso-endeavouros:endeavour.iso"],
-            "out": "linux-endeavour.qcow2",
-            "publish": "linux-endeavour",
-            "timeout": 90
-          },
+          }
+        ]
+
+  vm:
+    needs: [ssh]
+    if: always() && !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.from_tag == 'linux-endeavour' || inputs.from_tag == 'linux-endeavour-ssh')
+    uses: ./.github/workflows/stage.yml
+    secrets: inherit
+    with:
+      group: endeavour
+      disks_repository: ${{ inputs.disks_repository }}
+      stages: |
+        [
           {
             "name": "linux-endeavour-vm",
-            "file": "linux/endeavour/steps/vm-configure.yaml",
+            "file": "linux/endeavour/steps/vm-configure.walk",
             "pull": "linux-endeavour-ssh",
             "fallback": "linux-endeavour",
             "out": "linux-endeavour-vm.qcow2",

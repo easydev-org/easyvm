@@ -57,10 +57,10 @@ func TestEveryFetchedTagIsPublishedAndEveryPublishedTagIsFetched(t *testing.T) {
 	// boots. Moving them out is the same change as the ISOs and is not done yet - naming them here
 	// is what makes that debt visible instead of silent.
 	stillInAWalk := map[string]bool{
-		"macos-asset-xcode-26.3":   true,
+		"macos-asset-xcode-26.3":      true,
 		"macos-asset-mac-guest-agent": true,
-		"dev-node-pkg":            true,
-		"dev-python-pkg":          true,
+		"dev-node-pkg":                true,
+		"dev-python-pkg":              true,
 	}
 	// AND THE TAGS PUBLISHED AHEAD OF A CONSUMER, ON PURPOSE AND BY NAME.
 	//
@@ -157,7 +157,6 @@ func tagsTheBuildAsksFor(t *testing.T) map[string]bool {
 //	                 rather than mirrors. The OpenCore firmware is the one case: four pinned
 //	                 downloads, an APFS driver out of the recovery image, and a 256 MiB FAT32 image.
 //	                 Its INPUTS are catalogue rows; its OUTPUT is published under a tag no row names.
-//
 func tagsThePublisherWrites(t *testing.T, src string) (catalogue, mirrored map[string]bool) {
 	t.Helper()
 	catalogue = map[string]bool{}

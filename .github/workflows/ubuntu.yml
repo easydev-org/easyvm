@@ -25,7 +25,7 @@ on:
     inputs:
       disks_repository:
         description: "the ghcr repository that holds the disks"
-        default: "easydev-org/easyvm"
+        default: "easydev-org/easyvm-fork"
       from_tag:
         description: >-
           start from a PUBLISHED disk: linux-ubuntu or linux-ubuntu-ssh or linux-ubuntu-vm. Empty runs the whole chain. A fix to a later stage then costs that stage, not the entire bake.
@@ -62,7 +62,7 @@ jobs:
         [
           {
             "name": "linux-ubuntu-install",
-            "file": "linux/ubuntu/steps/install.yaml",
+            "file": "linux/ubuntu/steps/install.walk",
             "pull": "",
             "assets": ["iso-ubuntu-desktop:ubuntu.iso"],
             "out": "linux-ubuntu.qcow2",
@@ -83,7 +83,7 @@ jobs:
         [
           {
             "name": "linux-ubuntu-ssh",
-            "file": "linux/ubuntu/steps/ssh.yaml",
+            "file": "linux/ubuntu/steps/ssh.walk",
             "pull": "linux-ubuntu",
             "out": "linux-ubuntu-ssh.qcow2",
             "publish": "linux-ubuntu-ssh",
@@ -103,7 +103,7 @@ jobs:
         [
           {
             "name": "linux-ubuntu-vm",
-            "file": "linux/ubuntu/steps/vm-configure.yaml",
+            "file": "linux/ubuntu/steps/vm-configure.walk",
             "pull": "linux-ubuntu-ssh",
             "out": "linux-ubuntu-vm.qcow2",
             "publish": "linux-ubuntu-vm",

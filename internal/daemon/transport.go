@@ -3,7 +3,10 @@ package daemon
 import (
 	"fmt"
 	"path/filepath"
+	"time"
 
+	"github.com/easydev-org/easyvm/internal/artifact"
+	"github.com/easydev-org/easyvm/internal/journal"
 	"github.com/easydev-org/easyvm/internal/run"
 	"github.com/easydev-org/easyvm/internal/walk"
 )
@@ -156,6 +159,38 @@ func (d *Daemon) runWalkthroughFile(req Request, work string, done chan struct{}
 		return
 	}
 
+	// THE JOURNAL AND THE LIBRARY ARE OPENED PER RUN, and a failure to open either is a LOG LINE
+	// rather than a refusal: a run without a report is still a run, and the walkthrough is what the
+	// machine is for.
+	//
+	// THE RUN ID IS THE RECORDING'S NAME, which is already a timestamp - so a person looking at
+	// `2026-11-20T10-30-21.mp4` and at the report's URL is looking at the same run, spelled once.
+	runID := time.Now().Format("2006-01-02T15-04-05")
+	recJD, evErr := journal.Open(work, runID)
+	if evErr != nil {
+		fmt.Printf("[easyvm] journal: could not open the run's journal (%v); this run will not "+
+			"have a report\n", evErr)
+	}
+	var lib *artifact.Store
+	if evErr == nil {
+		lib, evErr = artifact.Open(filepath.Join(work, "artifact"))
+		if evErr != nil {
+			fmt.Printf("[easyvm] journal: could not open the picture library (%v); this run's "+
+				"pictures will not be kept\n", evErr)
+		}
+	}
+	// THE DRIVER GETS BOTH, so its call sites can audit without knowing about a journal.
+	if drv, ok := driver.(*Driver); ok && evErr == nil {
+		drv.audit = newAudit(recJD)
+		drv.lib = lib
+	}
+	// AND THE DAEMON KEEPS IT, because `/api/journal` answers from it.
+	if evErr == nil {
+		d.mu.Lock()
+		d.jdb = recJD
+		d.mu.Unlock()
+	}
+
 	// THE HOOK IS HOW `stop` REACHES A RUN THAT IS MID-STEP. Without it, `stop` could only set a
 	// flag the executor never reads, and a run blocked in a 900-second ssh wait would ignore it.
 	ex := &run.Executor{
@@ -164,6 +199,16 @@ func (d *Daemon) runWalkthroughFile(req Request, work string, done chan struct{}
 		Work:     work,
 		SSHPort:  file.SSHPort,
 		Password: req.Password,
+		Journal:  journalWriter(recJD),
+		Library:  artifactStore(lib),
+		OnImage: func(name, sha, kind, step string, index, w, h int, rect []int, note string) {
+			if recJD == nil {
+				return
+			}
+			_ = recJD.Image(journal.Image{
+				Name: name, Sha: sha, Label: kind, W: w, H: h, Rect: rect, Note: note,
+			}, d.currentStep(), d.currentStepIndex())
+		},
 		OnStep: func(index int, total int, name string) {
 			d.mu.Lock()
 			d.st.Status = "running"
@@ -171,6 +216,10 @@ func (d *Daemon) runWalkthroughFile(req Request, work string, done chan struct{}
 			d.st.StepIndex = index
 			d.st.StepCount = total
 			d.mu.Unlock()
+			// THE AUDIT NEEDS THE STEP TOO, so every call that follows is filed under it.
+			if drv, ok := driver.(*Driver); ok && drv.audit != nil {
+				drv.audit.setStep(name, index)
+			}
 		},
 		ShouldStop: func() bool {
 			d.mu.Lock()
@@ -273,4 +322,27 @@ func fileOS(f *walk.File) string {
 		}
 	}
 	return ""
+}
+
+// journalWriter adapts the journal to the Executor's sink, tolerating a nil database.
+//
+// THE INTERFACE IS IN `run` AND THE IMPLEMENTATION IS HERE, so a test of the executor needs neither a
+// database nor a work directory - the same reason `ArtifactLibrary` is an interface.
+func journalWriter(db *journal.DB) run.Journal {
+	if db == nil {
+		return nil
+	}
+	return db
+}
+
+// artifactStore adapts the picture library the same way.
+//
+// A NIL *artifact.Store IN AN INTERFACE IS A TRAP, and this is where it is avoided: assigning a typed
+// nil would make `e.Library == nil` false and every `Put` would panic on the nil receiver. The
+// interface is therefore only ever non-nil when the store is real.
+func artifactStore(store *artifact.Store) run.ArtifactLibrary {
+	if store == nil {
+		return nil
+	}
+	return store
 }

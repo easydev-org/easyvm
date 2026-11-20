@@ -39,7 +39,7 @@ func (e *Executor) doLoop(s walk.Step) error {
 	}
 	for k := range raw {
 		switch k {
-		case "max", "do", "ocr", "check", "until", "every", "clock":
+		case "max", "do", "see", "check", "until", "every", "clock", "on":
 		default:
 			return fail(s.Name, "`loop:` has unknown key %q; it takes max, do, ocr, check, until, "+
 				"every and on", k)
@@ -72,9 +72,26 @@ func (e *Executor) doLoop(s walk.Step) error {
 	if !ok || len(action) == 0 {
 		return fail(s.Name, "`loop:` must say `do:` - the action it repeats")
 	}
-	ocrRaw, ok := raw["ocr"].(map[string]any)
+	// `see:` IS THE READING, and `ocr:` is the name every file wrote before the two were merged:
+	// `see: {of: [text]}` is exactly what `ocr:` did, so one key covers a word list and a set of
+	// numbers. The old spelling is read so a file that has not been migrated runs.
+	//
+	// THE KEY IT ARRIVED UNDER IS KEPT, because the two spellings are parsed by two functions with
+	// different vocabularies: `see:` takes `of: [text]` and binds a word list, `ocr:` takes a region
+	// and nothing else. MEASURED on run 44083524097, after the mapping was handed over as `ocr:`:
+	//
+	//	wait for the installer window [ocr]: `ocr:` has unknown key "of"
+	//
+	// - on a loop whose `see:` was correct. Canonicalising the key LOST information rather than
+	// gaining it, so the loop now runs the same step the file wrote.
+	readingKey := "see"
+	ocrRaw, ok := raw["see"].(map[string]any)
 	if !ok {
-		return fail(s.Name, "`loop:` must say `ocr:` - the reading its condition is answered from. "+
+		readingKey = "ocr"
+		ocrRaw, ok = raw["ocr"].(map[string]any)
+	}
+	if !ok {
+		return fail(s.Name, "`loop:` must say `see:` - the reading its condition is answered from. "+
 			"A condition with no reading is a condition that reads the screen itself, which is the "+
 			"coupling this shape exists to remove")
 	}
@@ -94,31 +111,19 @@ func (e *Executor) doLoop(s walk.Step) error {
 			"into a boolean. Three parts: do:, ocr:, check:, and `until:` tests the boolean")
 	}
 
-	// THE PARTS ARE STEPS, built once and run through the ordinary dispatcher.
-	// THE SUB-STEP CARRIES THE `ocr:` KEY, NOT ITS CONTENTS.
+	// THE PARTS ARE STEPS, BUILT BY `loopParts` AND RUN THROUGH THE ORDINARY DISPATCHER.
 	//
-	// `parseOCRStep` reads `s.Spec["ocr"]`, because a top-level `ocr:` step is written
-	//
-	//	- name: read the pane
-	//	  ocr: {name: screen, region: [...]}
-	//
-	// so the mapping has to sit UNDER that key. The first version copied the contents straight into
-	// the spec, so the parser looked for an `ocr` key that was not there and every loop in every
-	// walkthrough failed on its first attempt with
-	//
-	//	wait for the installer window [ocr]: `ocr:` must be a mapping
-	//
-	// WHICH READ AS A MISTAKE IN THE FILE, and it was a mistake in this function.
-	ocrStep := walk.Step{Index: s.Index, Name: s.Name + " [ocr]",
-		Spec: map[string]any{"ocr": ocrRaw}}
-	if _, err := parseOCRStep(ocrStep); err != nil {
+	// IT IS A FUNCTION RATHER THAN FOUR LINES HERE so that a test can call THE SAME CODE that runs.
+	// The test that exists built its own correctly-shaped sub-step and asserted on that, which is a
+	// test of the test: when this function handed `parseOCRStep` the wrong key, the test still
+	// passed and every loop in every walkthrough failed in a real run. MEASURED on 44078798458.
+	readingStep, checkStep, untilStep := loopParts(s, readingKey, ocrRaw, checkRaw, untilRaw)
+	// THE READING IS VALIDATED BY RUNNING ITS OWN PARSER PATH, so a `see:` mapping is checked
+	// against `see:`'s vocabulary and an `ocr:` mapping against `ocr:`'s. Both answer "is this a
+	// reading this vocabulary can take", and the alternative is a second copy of those rules here.
+	if err := e.checkReading(readingStep); err != nil {
 		return err
 	}
-	untilSpec := map[string]any{"until_fact": untilRaw["fact"]}
-	untilStep := walk.Step{Index: s.Index, Name: s.Name + " [until]", Spec: untilSpec}
-	// THE SAME SHAPE FOR `check:` - its mapping sits under its own key.
-	checkStep := walk.Step{Index: s.Index, Name: s.Name + " [check]",
-		Spec: map[string]any{"check": checkRaw}}
 
 	// `every:` IS A CLOCK, NOT A READING, AND THAT IS WHY IT EXISTS.
 	//
@@ -159,7 +164,6 @@ func (e *Executor) doLoop(s walk.Step) error {
 
 	e.Driver.Log(fmt.Sprintf("  loop: up to %.0f attempt(s) of %d action(s), then read %q",
 		max, len(action), ocrRaw["name"]))
-
 
 	for attempt := 1; attempt <= int(max); attempt++ {
 		if e.ShouldStop != nil && e.ShouldStop() {
@@ -218,7 +222,7 @@ func (e *Executor) doLoop(s walk.Step) error {
 		//
 		// THE ATTEMPT CEILING STILL BOUNDS IT: a guest whose frames never become readable runs out of
 		// attempts and fails with the last read error.
-		if err := e.doOCR(ocrStep); err != nil {
+		if err := e.runOne(readingStep); err != nil {
 			e.Driver.Log(fmt.Sprintf("  loop: attempt %d could not read the screen (%v); trying again",
 				attempt, err))
 			if attempt == int(max) {
@@ -248,4 +252,37 @@ func (e *Executor) doLoop(s walk.Step) error {
 		time.Sleep(2 * time.Second)
 	}
 	return nil
+}
+
+// loopParts assembles a loop's three sub-steps, each carrying its mapping under the key its own
+// parser reads.
+//
+// THE KEYS ARE `ocr`, `check` AND `until_fact`, and they are NOT the keys the file writes: the file
+// says `see:`, `check:` and `until: {fact: ...}` because that is the vocabulary, and these are the
+// three steps that vocabulary is turned into. Getting one of them wrong produces an error message
+// that names the walkthrough, which is why this is a named function with a caller-shaped test.
+func loopParts(s walk.Step, readingKey string, ocrRaw, checkRaw, untilRaw map[string]any) (readingStep, checkStep, untilStep walk.Step) {
+	readingStep = walk.Step{Index: s.Index, Name: s.Name + " [" + readingKey + "]",
+		Spec: map[string]any{readingKey: ocrRaw}}
+	checkStep = walk.Step{Index: s.Index, Name: s.Name + " [check]",
+		Spec: map[string]any{"check": checkRaw}}
+	untilStep = walk.Step{Index: s.Index, Name: s.Name + " [until]",
+		Spec: map[string]any{"until_fact": untilRaw["fact"]}}
+	return readingStep, checkStep, untilStep
+}
+
+// checkReading validates a loop's reading WITHOUT capturing a frame.
+//
+// IT ASKS THE PARSER, which is the same code the step will hit when it runs - so a mapping that passes
+// here cannot be refused a second later for a reason the loop did not mention. `see:` validates by its
+// own rules and `ocr:` through `parseOCRStep`, because a loop may hold either.
+func (e *Executor) checkReading(step walk.Step) error {
+	if _, ok := step.Spec["see"]; ok {
+		if seeName(step) == "" {
+			return fail(step.Name, "`see:` must name the frame: `see: {name: shot}`")
+		}
+		return refuseLegacySee(step)
+	}
+	_, err := parseOCRStep(step)
+	return err
 }

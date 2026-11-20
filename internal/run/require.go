@@ -33,16 +33,20 @@ import (
 //
 // THE KEYS ARE `require:` AND EVERY ENTRY IS A FILENAME, relative to the work directory or absolute.
 func (e *Executor) doRequire(s walk.Step) error {
-	raw, ok := s.Spec["require"]
+	raw, ok := s.Spec["needs"]
 	if !ok {
-		return fail(s.Name, "`require:` needs a list of files")
+		raw, ok = s.Spec["require"]
+	}
+	if !ok {
+		return fail(s.Name, "`needs:` needs a list of files that must be on disk before this stage "+
+			"runs")
 	}
 	items, ok := raw.([]any)
 	if !ok {
-		return fail(s.Name, "`require:` must be a list, not %T", raw)
+		return fail(s.Name, "`needs:` must be a list of file names, not %T", raw)
 	}
 	if len(items) == 0 {
-		return fail(s.Name, "`require:` names no files, so it would pass by checking nothing")
+		return fail(s.Name, "`needs:` names no files, so it would pass by checking nothing")
 	}
 
 	var problems []string

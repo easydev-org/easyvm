@@ -25,7 +25,7 @@ on:
     inputs:
       disks_repository:
         description: "the ghcr repository that holds the disks"
-        default: "easydev-org/easyvm"
+        default: "easydev-org/easyvm-fork"
       from_tag:
         description: >-
           start from a PUBLISHED disk: linux-kubuntu or linux-kubuntu-ssh. Empty runs the whole chain. A fix to a later stage then costs that stage, not the entire bake.
@@ -75,7 +75,7 @@ jobs:
         [
           {
             "name": "linux-kubuntu-install",
-            "file": "linux/kubuntu/steps/install.yaml",
+            "file": "linux/kubuntu/steps/install.walk",
             "pull": "",
             "assets": ["iso-kubuntu-desktop:kubuntu.iso"],
             "out": "linux-kubuntu.qcow2",
@@ -96,7 +96,7 @@ jobs:
         [
           {
             "name": "linux-kubuntu-ssh",
-            "file": "linux/kubuntu/steps/ssh.yaml",
+            "file": "linux/kubuntu/steps/ssh.walk",
             "pull": "linux-kubuntu",
             "out": "linux-kubuntu-ssh.qcow2",
             "publish": "linux-kubuntu-ssh",
@@ -116,7 +116,7 @@ jobs:
         [
           {
             "name": "linux-kubuntu-vm",
-            "file": "linux/kubuntu/steps/vm-configure.yaml",
+            "file": "linux/kubuntu/steps/vm-configure.walk",
             "pull": "linux-kubuntu-ssh",
             "out": "linux-kubuntu-vm.qcow2",
             "publish": "linux-kubuntu-vm",

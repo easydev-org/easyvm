@@ -1,0 +1,121 @@
+walkthrough "cachyos - install to ext4, then the power button"
+  resolution 1920x1080
+  password admin
+  var out == {default: out/cachyos.qcow2, from: args.out}
+  var user == {default: vmuser, from: args.user}
+  header recording_resolution == [1920, 1080]
+
+  needs cachyos.iso, named "the media this stage boots from is already on disk"
+  step "create the empty disk"
+    disk == disk.qcow2
+    disk_gb == 128
+  step "boot the installer"
+    boot == true
+    iso == cachyos.iso
+    os == linux
+    # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
+    memory_mb == 4096
+    timeout == 1800
+  step "wait for the live desktop"
+    desktop == linux/kde
+    reference == reference/desktop.png
+    range == [0.90, 1.0]
+    # THE TOP 120 ROWS ARE WALLPAPER AND A MENU BAR: a boot splash scores 0.0002
+    # there and every desktop frame 1.0000, including the ones with an installer
+    # window over the middle. The clock sits below this band, which is why 120.
+    rect == [0, 0, 1920, 120]
+    rect_at == [1920, 1080]
+    poll == 5
+    timeout == 5400
+  settle 15s, named "let the desktop settle"
+  click "open the installer" at 960 743, waiting 1s, named "open the installer"
+  click "open the installer, second click" at 960 743, waiting 25s, named "open the installer, second click"
+  step "the installer is on screen"
+    loop == {check: {from: cal, mode: text, name: up, rect: [792, 301, 1032, 774], rect_at: [1920, 1080], scale: 1, words: [[welcome, installer], [欢迎], [cachyos, 安装]]}, do: [{settle: 5}], max: 40, see: {name: cal}, until: {fact: up}}
+  step "choose English, retrying until the page says so"
+    loop == {check: {from: english, mode: text, name: ok, rect: [718, 369, 991, 428], rect_at: [1920, 1080], scale: 1, words: [[program], [questions]]}, do: [{click: [980, 661], settle: 4}, {key: e, settle: 2}, {key: up, settle: 1}, {key: up, settle: 1}, {key: ret, settle: 6}], max: 6, see: {name: english}, until: {fact: ok}}
+  click "next from welcome" at 1356 751, waiting 8s, named "next from welcome"
+  step "the location page arrives after welcome"
+    loop == {check: {from: at_location, mode: text, name: here, rect: [399, 639, 1036, 699], rect_at: [1920, 1080], scale: 1, words: [[Region], [zone]]}, do: [{settle: 10}], max: 30, see: {name: at_location}, until: {fact: here}}
+  click "next from location" at 1356 791, waiting 8s, named "next from location"
+  step "the keyboard page arrives after location"
+    loop == {check: {from: at_keyboard, mode: text, name: here, rect: [393, 511, 497, 572], rect_at: [1920, 1080], scale: 1, words: [[Keyboard], [Layout]]}, do: [{settle: 10}], max: 30, see: {name: at_keyboard}, until: {fact: here}}
+  click "next from keyboard" at 1360 792, waiting 8s, named "next from keyboard"
+  step "the bootloader page arrives after keyboard"
+    loop == {check: {from: at_bootloader, mode: text, name: here, rect: [797, 713, 1456, 774], rect_at: [1920, 1080], scale: 1, words: [[snapshot], [chainloading]]}, do: [{settle: 10}], max: 30, see: {name: at_bootloader}, until: {fact: here}}
+  step "the bootloader page"
+    see == name: boot
+  click choose at 500 305, waiting 5s, named "choose grub"
+  step "grub is selected"
+    see == name: grub
+  step "the bootloader is grub"
+    check == {from: grub, mode: text, name: ok, rect: [401, 285, 483, 342], rect_at: [1920, 1080], scale: 1, words: [[grub]]}
+  click "next from bootloader" at 1356 791, waiting 10s, named "next from bootloader"
+  step "the partitions page arrives after the bootloader"
+    loop == {check: {from: at_partitions, mode: text, name: here, rect: [483, 288, 606, 450], rect_at: [1920, 1080], scale: 1, words: [[storage], [Erase], [Manual]]}, do: [{settle: 10}], max: 30, see: {name: at_partitions}, until: {fact: here}}
+  click "select erase disk" at 427 366, waiting 8s, named "select erase disk"
+  step "the partitions page with erase selected"
+    see == name: parts
+  click "open the filesystem list" at 543 425, waiting 5s, named "open the filesystem list"
+  click choose at 527 517, waiting 6s, named "choose ext4"
+  step "the partitions page settles after the filesystem list closes"
+    loop == {check: {from: at_partitions_again, mode: text, name: here, rect: [483, 288, 606, 450], rect_at: [1920, 1080], scale: 1, words: [[storage], [Erase], [Manual]]}, do: [{settle: 10}], max: 24, see: {name: at_partitions_again}, until: {fact: here}}
+  step "the page after choosing ext4"
+    see == name: fs
+  step "the root partition is ext4"
+    check == {from: fs, mode: text, name: ext4, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1, words: [[ext4]]}
+  click "next from partitions" at 1356 793, waiting 10s, named "next from partitions"
+  step "the desktop page"
+    see == name: desk
+  click "next from desktop" at 1356 793, waiting 12s, named "next from desktop"
+  step "the packages page"
+    see == name: pkgs
+  click "next from packages" at 1356 793, waiting 12s, named "next from packages"
+  step "the users page arrives before anything is typed into it"
+    loop == {check: {from: at_users, mode: text, name: here, rect: [401, 453, 696, 579], rect_at: [1920, 1080], scale: 1, words: [[Computer], [Repeat], [Password]]}, do: [{settle: 10}], max: 30, see: {name: at_users}, until: {fact: here}}
+  step "the users page"
+    see == name: users
+  step "the full name"
+    click == [515, 341]
+    settle == 3
+    type == '{{ user }}'
+  step "the login name"
+    clear == true
+    click == [515, 412]
+    settle == 3
+    type == '{{ user }}'
+  step "the password"
+    click == [515, 550]
+    settle == 2
+    type == '{{ password }}'
+  step "the password again"
+    click == [720, 552]
+    settle == 3
+    type == '{{ password }}'
+  step "the users page is filled in"
+    see == name: filled
+  step "the password was accepted"
+    check == {from: filled, mode: text, name: ok, rect: [396, 306, 494, 452], rect_at: [1920, 1080], scale: 1, without: [match], words: [vmuser]}
+  click "next from users" at 1356 793, waiting 10s, named "next from users"
+  step "the summary page arrives before install is clicked"
+    loop == {check: {from: at_summary, mode: text, name: here, rect: [452, 279, 676, 340], rect_at: [1920, 1080], scale: 1, words: [[overview], [happen]]}, do: [{settle: 10}], max: 30, see: {name: at_summary}, until: {fact: here}}
+  step "the summary page"
+    see == name: summary
+  step "the summary names ext4"
+    check == {from: summary, mode: text, name: ext4, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1, words: [[ext4]]}
+  click "start the install" at 1362 872, waiting 10s, named "start the install"
+  step "the confirmation dialog"
+    see == name: confirm
+  click install at 1055 617, waiting 25s, named "install now"
+  step "the install writes the disk"
+    disk_min_mb == 4000
+    disk_settle == 300
+    poll == 20
+    timeout == 3600
+  step "the install is done"
+    loop == {check: {from: done, mode: text, name: finished, rect: [912, 549, 1009, 607], rect_at: [1920, 1080], scale: 1, words: [[installed]]}, do: [{settle: 15}], max: 80, see: {name: done}, until: {fact: finished}}
+  step "stop the machine"
+    shutdown == kill
+    timeout == 600
+  step "publish the disk"
+    compress == '{{ out }}'

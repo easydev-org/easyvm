@@ -1,0 +1,159 @@
+walkthrough "linux-endeavour - sshd"
+  resolution 1920x1080
+  password admin
+  var out == {default: out/distro.qcow2, from: args.out}
+  var user == {default: vmuser, from: args.user}
+  header recording_resolution == [1920, 1080]
+
+  step "boot the disk"
+    boot == true
+    os == linux
+    # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
+    memory_mb == 4096
+    timeout == 900
+  # THE DISK COMES UP ON GRUB AND WAITS FOR A KEY, SO THE KEY IS PRESSED FIRST.
+  #
+  # MEASURED ON RUN 44557720029, whose ssh log reads this same screen over and over:
+  #
+  #	EndeavourOS (7.1.8-arch1-3)
+  #	EndeavourOS (7.1.8-arch1-3-fallback)
+  #	Reboot Into Firmware Interface
+  #	Press Enter to ...
+  #
+  # and the greeter wait then pressed Escape into it sixty times. This walk had no boot step at all:
+  # it went from `boot: true` straight to a greeter wait, so on a medium whose disk shows GRUB the
+  # stage never reached the system.
+  #
+  # The gate is the menu's own words; Return picks the highlighted first entry.
+  step "the disk's boot menu, when it has one"
+    loop == {check: {from: grubmenu, mode: text, name: at_menu, rect: [400, 300, 1520, 780], rect_at: [1920, 1080], scale: 1, words: [[endeavour], [reboot, into, firmware]]}, do: [{settle: 5}], max: 12, see: {name: grubmenu}, until: {fact: at_menu}}
+    optional == true
+  # THE MENU COUNTS ITSELF DOWN ("Boot in 3s"), SO RETURN MAY ARRIVE AFTER IT ALREADY BOOTED.
+  #
+  # MEASURED ON RUN 44557723577's successor: `at_menu = true (read "reboot into firmware")` and then
+  # `key ret`, and the next frames are BLANK - the kernel's own boot takes longer than the twenty
+  # seconds this step waited, so the greeter wait that follows saw an empty screen and its Escapes
+  # went into the bootsplash.
+  #
+  # Sixty seconds, then the greeter wait gets a screen instead of a splash.
+  press Return, waiting 60s, named "boot the highlighted entry, which is the installed system"
+  # THE GREETER IS ASKED FOR, AND THE DESKTOP IS WAITED FOR, AND NEITHER WAS HERE.
+  #
+  # MEASURED ON RUN 44557514172, whose ssh recording at 90 s is SDDM's login screen with a password
+  # field holding SIXTEEN dots - this walk types five characters once - and no session. Then every
+  # `run:` of the stage produced no output at all, because there was no terminal to type into: the
+  # screen never left the greeter.
+  #
+  # TWO THINGS WERE MISSING, BOTH OF WHICH THE OTHER KDE STAGE (cachyos) HAS:
+  #
+  #   1. A WAIT FOR THE GREETER. `click ... at 936 628` was the first thing after boot, so it could
+  #      land before SDDM had drawn - and a click into nothing leaves the password typed into
+  #      whatever has focus.
+  #   2. A WAIT FOR THE DESKTOP. `ctrl+alt+t` came 12 s after Return, which is not long enough for
+  #      Plasma to start, and a chord pressed during that gap goes to the greeter.
+  #
+  # The band and scale are the ones cachyos reads 'Password vmuser' from on the same SDDM.
+  # ESCAPE IS PART OF THE WAIT, NOT A STEP AFTER IT.
+  #
+  # MEASURED ON RUN 44556277158, whose ssh recording's last frame is SDDM's CLOCK-ONLY SCREEN - the
+  # wall paper, '11:09 AM', 'Thursday, November 19, 2026', 'Desktop Session: Plasma (Wayland)' - and
+  # no login box at all. The stage read '— t a ely —' from the password band sixty times.
+  #
+  # THAT SCREEN IS SDDM'S SCREEN SAVER, and Escape is what dismisses it - which is what cachyos's
+  # file does first, and what this one had in a different order: a wait that cannot succeed until
+  # the screen is woken, followed by the wake. A wait whose action does nothing is a wait that
+  # expires.
+  #
+  # The action is `key: esc` now, so the loop wakes the screen and looks again, up to sixty times.
+  # THE GREETER IS WOKEN FIRST, THEN WAITED FOR - AND THE ORDER IS THE FIX.
+  #
+  # MEASURED ON RUN 44557723577's successor: at 200 s the screen is SDDM's SCREEN SAVER - the wall
+  # paper, '12:19 PM', 'Desktop Session: Plasma (Wayland)', no login box - and from 200 s to the end
+  # it is BLACK. A wait that begins on a blanked screen cannot succeed, and this one had no wake in
+  # it at all (the Escape was removed when mx needed the opposite).
+  #
+  # Escape ONCE before the wait, and once inside it, covers both the saver and the full blank:
+  #   - the pre-Escape wakes a screen saver;
+  #   - the in-loop Escape repeats it, since SDDM re-blanks on its own timer.
+  # THE GREETER IS LOGGED IN WHERE IT STANDS. THE VIRTUAL CONSOLE DOES NOT SWITCH ON THIS GUEST.
+  #
+  # MEASURED ON RUN 44585827654: after 'ctrl+alt+f2' the console-tail read ZERO WORDS - a black
+  # screen, not a getty. The chord does not reach a virtual console here, and manjaro's run showed
+  # the same thing with SDDM's 'Virtual Keyboard' still on screen.
+  #
+  # The greeter this file already waited for IS a usable login - 'vmuser' with a password field -
+  # so the click, the password and Return are what this stage does, and the desktop gate confirms
+  # the session started before anything is typed.
+  click "greeter - the password box" at 936 628, waiting 3s, named "greeter - the password box"
+  step "greeter - log in"
+    settle == 3
+    type == '{{ password }}'
+  press Return, waiting 20s, named "greeter - submit"
+  step "the desktop is up after the login"
+    desktop == linux/kde
+    timeout == 600
+  press ctrl+alt+t, waiting 20s, named "open the terminal"
+  # NO PROBE COMMAND FIRST. MEASURED ON RUN 44586147027, whose terminal reads
+  #
+  #	$ echo TERMINAL_READYXSET S OFF; XSET S NOBLANK; ECHO ADMIN | sudo S pacman ...
+  #	[sudo] password for vmuser:
+  #
+  # - the probe's Return was lost, so the NEXT step's command was appended to it, and every
+  # character of that command arrived in capitals (the shift state again). The probe cost nothing to
+  # remove and removes the seam: the first thing typed after the chord is the command that matters.
+  step "keep the screen on and unlock sudo"
+    run == printf '%s\n' {{ password }} | sudo -S -v; /usr/bin/xset s off; /usr/bin/xset s noblank
+    settle == 6
+    terminal_wait == 0
+  # NO `terminal_wait:` HERE, AND THAT IS THE FIX RATHER THAN AN OMISSION.
+  #
+  # `terminal_wait:` OPENS A TERMINAL (ctrl+alt+t) AND THEN TYPES. The step above has already
+  # opened one, so a second ctrl+alt+t starts a NEW terminal window and the keys that follow go to
+  # it - while the command already typed into the first one is never submitted.
+  #
+  # MEASURED ON RUN 44545555943's kubuntu ssh recording, whose terminal shows exactly that:
+  #
+  #	vmuser@kubuntu:~$ xset s off; xset -dpms; xset s noblank; echo SCREEN_KEPT_ONECHO ADMIN | sudo ...
+  #	server does not have extension for -dpms option
+  #	[sudo: authenticate] Password:
+  #
+  # `SCREEN_KEPT_ON` runs straight into `ECHO ADMIN` with no line break: the Return after the first
+  # command went to the OTHER window. And the `xset -dpms` failure - "server does not have extension
+  # for -dpms option" - is harmless; the screen is still kept awake by `s off` and `s noblank`.
+  step "install openssh"
+    run == xset s off; xset s noblank; echo {{ password }} | sudo -S pacman -Sy --noconfirm --needed openssh 2>&1 | tail -5
+    settle == 45
+    terminal_wait == 0
+  step "allow password authentication"
+    run == echo {{ password }} | sudo -S -p '' sh -c 'mkdir -p /etc/ssh/sshd_config.d; printf "PasswordAuthentication yes\n" > /etc/ssh/sshd_config.d/99-vm.conf; sed -i "s/^#\?\s*PasswordAuthentication.*/PasswordAuthentication yes/" /etc/ssh/sshd_config; grep -q "^PasswordAuthentication yes" /etc/ssh/sshd_config || printf "PasswordAuthentication yes\n" >> /etc/ssh/sshd_config' 2>&1 | tail -3
+    settle == 3
+    terminal_wait == 0
+  step "enable sshd at boot"
+    run == echo {{ password }} | sudo -S systemctl enable sshd 2>&1 | tail -3
+    settle == 8
+    terminal_wait == 0
+  step "start sshd"
+    run == echo {{ password }} | sudo -S systemctl restart sshd 2>&1 | tail -3
+    settle == 10
+    terminal_wait == 0
+  step "prove sshd is active"
+    run == systemctl is-active sshd
+    settle == 5
+    terminal_wait == 0
+  step "wait for sshd"
+    require_ssh == true
+    timeout == 600
+  step "prove the kernel over ssh"
+    ssh == uname -a
+    timeout == 120
+  step "prove the account over ssh"
+    ssh == id -un; hostname
+    timeout == 120
+  step "ask the guest to power off"
+    ssh == printf '%s\n' '{{ password }}' | sudo -S -p '' poweroff
+    timeout == 300
+  step "wait for the machine to stop"
+    timeout == 300
+    wait_until == stopped
+  step "publish the disk"
+    compress == '{{ out }}'

@@ -861,11 +861,11 @@ func TestTheUSBControllerIsNamedOnce(t *testing.T) {
 //
 // TWO PROPERTIES ARE ASSERTED AND BOTH ARE LOAD-BEARING:
 //
-//	- ORDER: `-audiodev` must precede the device that names it. qemu's failure is
-//	  `audiodev snd0 not found`, which reads like a missing option rather than a sequencing mistake.
-//	- macOS: `usb-audio`, because AppleHDA loads against an ICH9 controller and then never enumerates
-//	  the CODEC - measured, with `IOHDACodecDevice` having no children and `AppleHDAEngine` never
-//	  instantiated, while CoreAudio reported zero devices.
+//   - ORDER: `-audiodev` must precede the device that names it. qemu's failure is
+//     `audiodev snd0 not found`, which reads like a missing option rather than a sequencing mistake.
+//   - macOS: `usb-audio`, because AppleHDA loads against an ICH9 controller and then never enumerates
+//     the CODEC - measured, with `IOHDACodecDevice` having no children and `AppleHDAEngine` never
+//     instantiated, while CoreAudio reported zero devices.
 func TestEveryGuestGetsASoundCard(t *testing.T) {
 	pos := func(args []string, want string) int {
 		for i, a := range args {
@@ -976,5 +976,42 @@ func TestTheDaemonAsksForTheSoundCard(t *testing.T) {
 		t.Fatal("`AudioArgs()` is appended before `StorageArgs()`. macOS's `usb-audio` names " +
 			"`bus=xhci.0`, and that bus is created by StorageArgs - qemu refuses with " +
 			"`Bus 'xhci.0' not found`")
+	}
+}
+
+// A MICROVM IS A SMALLER MACHINE, NOT A SECOND PATH, AND THE ARGUMENTS ARE WHERE THAT SHOWS.
+//
+// The claim this test makes checkable: a `microvm:` boot asks qemu for the small machine type, gets
+// NO firmware, and is handed its kernel directly. Those three together are what makes a guest boot
+// in a minute on 512 MiB instead of forty minutes on 4 GiB.
+func TestAMicroVMBootAsksForTheSmallMachine(t *testing.T) {
+	small := Boot{OS: Linux, MicroVM: true, Kernel: "/w/vmlinuz", Initrd: "/w/initramfs"}
+
+	// NO FIRMWARE: there is no boot sector to read, because there is no firmware to read one.
+	if got := small.FirmwareArgs("/usr/share/OVMF/OVMF_CODE_4M.fd", "/w/vars.fd"); len(got) != 0 {
+		t.Fatalf("a microvm asked for firmware: %v. It boots a kernel the host hands it, and a "+
+			"pflash device is a machine that cannot start", got)
+	}
+
+	// THE KERNEL AND ITS INITRAMFS, and the console on the serial line - without `console=ttyS0` a
+	// microvm writes to a VGA adapter it does not have and the console stays empty, which reads as
+	// "the guest never booted".
+	args := small.KernelArgs()
+	joined := strings.Join(args, " ")
+	for _, want := range []string{"-kernel /w/vmlinuz", "-initrd /w/initramfs", "console=ttyS0"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("a microvm's arguments do not carry %q: %v", want, args)
+		}
+	}
+
+	// A FULL MACHINE IS UNCHANGED: it still gets its firmware, and it gets no kernel.
+	full := Boot{OS: Linux}
+	if got := full.FirmwareArgs("/code.fd", "/vars.fd"); len(got) == 0 {
+		t.Fatal("a full Linux boot lost its firmware, so every distribution installer here stops " +
+			"booting")
+	}
+	if got := full.KernelArgs(); len(got) != 0 {
+		t.Fatalf("a full machine was handed a kernel: %v. Its firmware reads the disk's own boot "+
+			"sector, and a host-supplied kernel would skip the boot chain the install is proving", got)
 	}
 }

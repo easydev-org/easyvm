@@ -1,0 +1,103 @@
+walkthrough "linux-kubuntu - sshd"
+  resolution 1920x1080
+  password admin
+  var out == {default: out/distro.qcow2, from: args.out}
+  var user == {default: vmuser, from: args.user}
+  header recording_resolution == [1920, 1080]
+
+  step "boot the disk"
+    boot == true
+    os == linux
+    # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
+    memory_mb == 4096
+    timeout == 900
+  step "the session is up, which is what autologin is for"
+    loop == {check: {from: desk, mode: text, name: up, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], words: [[applications], [kubuntu]]}, do: [{settle: 10}], max: 40, see: {name: desk}, until: {fact: up}}
+  # THE WELCOME CENTRE IS UP ON THIS DESKTOP AND IT EATS ctrl+alt+t.
+  #
+  # MEASURED ON RUN 44548179034, whose ssh recording at 90 s is "Welcome Center" with its Skip
+  # button and NOTHING ELSE - no terminal, no shell prompt. Every command of the stage then went
+  # into a window that was not there, and `wait for sshd` spent its ten minutes on a guest where
+  # openssh had never been installed.
+  #
+  # The same run's NEXT frames show the terminal never appearing, and the daemon log has no output
+  # under any of the `run:` steps - which is what a stage typing into the desktop looks like.
+  #
+  # SO THE WINDOW IS DISMISSED FIRST. `Skip` is at 684,813 on that frame, and the step is optional
+  # because a desktop that has already been dismissed (or never showed it) must not fail here.
+  # THE CLICK ON `Skip` WAS MEASURED NOT TO TAKE, SO THE WINDOW IS CLOSED WITH THE KEYBOARD.
+  #
+  # RUN 44557862904's recording is the Welcome Centre for its whole length, sitting OVER the
+  # terminal that ctrl+alt+t had already opened (the shell prompt `vmuser@kubuntu:` is visible in
+  # the strip of terminal at the left). A click at Skip's own coordinates - 684,813, read off that
+  # frame - left it there, and every `run:` after it went to the window holding focus.
+  #
+  # Alt+F4 closes the focused window whatever its title bar is doing, and a second Escape covers
+  # the case where the window was already closed and something else took focus.
+  # THE WELCOME CENTRE IS CLOSED BY ITS OWN BUTTON, IN A LOOP THAT CHECKS IT WENT AWAY.
+  #
+  # `press alt+F4` FAILED THE STEP OUTRIGHT - the recording is fourteen frames long - so the chord
+  # is not usable here (there is no window manager guarantee that a focused window exists at the
+  # moment the key arrives).
+  #
+  # A click on `Skip` was measured not to take ONCE, on a frame where the button had not finished
+  # drawing. Repeating it until the window's own words are gone is the version that cannot be
+  # defeated by one badly timed click: the loop reads the pane, and only stops when it no longer
+  # says 'Welcome'.
+  step "close the welcome centre, which takes the keyboard"
+    do == [{click: [684, 813], settle: 3}, {click: [684, 813], settle: 3}, {click: [684, 813], settle: 3}]
+  press Escape, waiting 2s, named "clear anything the welcome centre left behind"
+  press ctrl+alt+t, waiting 20s, named "open the terminal"
+  # NO `terminal_wait:` HERE, AND THAT IS THE FIX RATHER THAN AN OMISSION.
+  #
+  # `terminal_wait:` OPENS A TERMINAL (ctrl+alt+t) AND THEN TYPES. The step above has already
+  # opened one, so a second ctrl+alt+t starts a NEW terminal window and the keys that follow go to
+  # it - while the command already typed into the first one is never submitted.
+  #
+  # MEASURED ON RUN 44545555943's kubuntu ssh recording, whose terminal shows exactly that:
+  #
+  #	vmuser@kubuntu:~$ xset s off; xset -dpms; xset s noblank; echo SCREEN_KEPT_ONECHO ADMIN | sudo ...
+  #	server does not have extension for -dpms option
+  #	[sudo: authenticate] Password:
+  #
+  # `SCREEN_KEPT_ON` runs straight into `ECHO ADMIN` with no line break: the Return after the first
+  # command went to the OTHER window. And the `xset -dpms` failure - "server does not have extension
+  # for -dpms option" - is harmless; the screen is still kept awake by `s off` and `s noblank`.
+  # UBUNTU'S SHAPE - unlock sudo ONCE, then plain sudo - AND THE REASON IS THE SAME HERE.
+  #
+  # RUN 44556278874 spent its ten minutes on 'connection refused'. The password travelled inside
+  # each command line (`echo <password> | sudo -S ...`), so any command whose Return was lost took
+  # the password with it, and sudo answered 'no password was provided' while apt-get asked for one.
+  step "unlock sudo once for this session"
+    run == printf '%s\n' {{ password }} | sudo -S -v
+    settle == 4
+    terminal_wait == 0
+  step "install openssh-server"
+    run == sudo apt-get install -y openssh-server
+    settle == 60
+    terminal_wait == 0
+  step "allow password authentication"
+    run == sudo sed -i "s/^#\?\s*PasswordAuthentication.*/PasswordAuthentication yes/" /etc/ssh/sshd_config ; sudo grep -i "^PasswordAuthentication" /etc/ssh/sshd_config
+    settle == 3
+    terminal_wait == 0
+  step "enable ssh at boot"
+    run == sudo systemctl enable --now ssh
+    settle == 8
+    terminal_wait == 0
+  step "wait for sshd"
+    require_ssh == true
+    timeout == 600
+  step "prove the kernel over ssh"
+    ssh == uname -a
+    timeout == 120
+  step "prove the account over ssh"
+    ssh == id -un; hostname
+    timeout == 120
+  step "ask the guest to power off"
+    ssh == printf '%s\n' '{{ password }}' | sudo -S -p '' poweroff
+    timeout == 300
+  step "wait for the machine to stop"
+    timeout == 300
+    wait_until == stopped
+  step "publish the disk"
+    compress == '{{ out }}'

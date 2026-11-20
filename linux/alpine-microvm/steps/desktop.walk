@@ -1,0 +1,51 @@
+# A MICROVM WITH A SCREEN, A ROOT FILESYSTEM, AND A RECORDING THAT SHOWS BOTH.
+#
+# THE EXISTING `verify.walk` PROVES THE VOCABULARY RUNS A GUEST, and it can only look at the SERIAL
+# LINE: its guest is Alpine's diskless netboot, which has no root filesystem of its own and draws
+# nothing on the VGA adapter. MEASURED: a screendump of that guest is 1093 bytes of black with one row
+# of boot banner, for the whole run.
+#
+# THIS FILE IS THE OTHER SHAPE. It boots a root filesystem the CI builds (see `alpine-rootfs.sh`), so:
+#
+#   - the kernel has somewhere to switch_root to, and `/sbin/init` runs
+#   - `tty1` gets a getty, so the guest DRAWS ITS LOGIN PROMPT ON THE VGA ADAPTER
+#   - `graphics=on` (the default) means the recorder has something to photograph
+#
+# THE THREE THINGS THAT MAKE IT WORK, AND EACH WAS MEASURED THE HARD WAY:
+#
+# 1. `kernel_append` IS REQUIRED. The engine's default is Alpine's diskless line -
+#    `console=ttyS0 modules=loop,squashfs,sd-mod modloop=/dev/vda` - and a guest whose root is an
+#    EXT4 disk on /dev/vda mounts it, then has `modloop=/dev/vda` mounted OVER it, then drops to
+#    `initramfs emergency recovery shell launched`. Without this key the walk sits in
+#    "the console will say login" until its timeout, which is exactly what it did.
+#
+# 2. THE INITRAMFS MUST CARRY ext4. The netboot initramfs has 72 modules and ext4 is not one of them,
+#    so `mount /dev/vda` answers `No such device`. `mkinitfs` with `ext4 virtio_blk` is what fixes it.
+#
+# 3. `console=tty0` AS WELL AS `ttyS0`, so the drawn output reaches the screen the recorder reads.
+#    With only `ttyS0` the guest is perfectly healthy and the video is black.
+
+walkthrough "alpine microvm - a desktop on the VGA adapter, and a recording of it"
+  resolution 1024x768
+  # THE VIDEO IS THE ARTIFACT, so its size is stated rather than inherited.
+  recording_resolution 1024x768
+
+  needs alpine-vmlinuz alpine-initramfs alpine.qcow2
+
+  # THE ROOT FILESYSTEM, BUILT BY THE CI STEP AND NOT INSTALLED BY THIS FILE.
+  # A microvm has no firmware and no installer: the disk arrives ready, which is what makes the run
+  # ninety seconds rather than forty minutes.
+  disk alpine.qcow2
+
+  boot as a microvm from kernel "alpine-vmlinuz" and initramfs "alpine-initramfs" with "console=tty0 console=ttyS0 root=/dev/vda rw rootfstype=ext4", waiting up to 180s
+
+  # THE GUEST SAYS THIS ON ITS OWN SERIAL LINE, and it is the fact the boot worked: init finished and
+  # getty is asking for a login.
+  the console will say "login"
+
+  # AND THIS IS THE PART THE OLD FILE COULD NOT DO. The recording runs for the whole walk, so these
+  # twenty seconds are twenty frames of a login prompt drawn on the VGA adapter - which is what makes
+  # the mp4 a picture of the guest rather than a black field.
+  wait 20s
+
+  stop the machine by killing it, waiting up to 60s

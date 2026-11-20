@@ -1,4 +1,7 @@
 name: macos 15 ssh - the setup assistant, remote login, and a graceful shutdown
+recording_resolution:
+- 1920
+- 1080
 resolution:
 - 1920
 - 1080

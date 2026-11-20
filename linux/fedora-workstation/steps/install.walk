@@ -1,0 +1,143 @@
+walkthrough "fedora-workstation - anaconda and the first boot"
+  resolution 1920x1080
+  password admin
+  var out == {default: out/distro.qcow2, from: args.out}
+  var user == {default: vmuser, from: args.user}
+  header recording_resolution == [1920, 1080]
+
+  needs fedora-workstation.iso, named "the media this stage boots from is already on disk"
+  step "create the empty disk"
+    disk == disk.qcow2
+    disk_gb == 128
+  step "boot the installer"
+    boot == true
+    iso == fedora-workstation.iso
+    os == linux
+    # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
+    memory_mb == 4096
+    timeout == 1800
+  step "wait for the live desktop"
+    desktop == linux/gnome
+    reference == reference/desktop.png
+    range == [0.90, 1.0]
+    # THE REFERENCE IS THIS BOOT'S OWN DESKTOP, AND THE BAND IS THE BOTTOM OF THE SCREEN.
+  #
+  # MEASURED ON RUN 44519496307, WHICH NEVER SATISFIED THE GATE WHILE ITS DESKTOP WAS UP:
+  #
+  #	t=300   a complete GNOME session - the welcome dialog, the Dock, the top bar
+  #	t>=350  black, because the guest blanks its own display
+  #
+  # and every frame scored 0.0000 against the old reference, whose wall paper is a DIFFERENT PIECE
+  # OF ART (the shipped one is the gold-gears splash art; this boot draws a pale gradient behind an
+  # Overview that is scaling the wall paper down and blurring it). Two different pictures, so no
+  # band could have matched both.
+  #
+  # THE REFERENCE IS NOW THAT FRAME. THE BAND IS ROWS 820..1020, the wall paper below the Overview's
+  # app grid and above the Dock: 1.0000 on every desktop frame from 60 s, 0.0002 on the boot and
+  # splash frames before it.
+  #
+  # AND THE SCREEN BLANKS AT ABOUT 350 s, which is why the gate has to open early: `poll: 5` is what
+  # gives it that chance, and it is already there.
+    rect == [0, 820, 1920, 1020]
+    rect_at == [1920, 1080]
+    poll == 5
+    timeout == 5400
+  click "a pointer nudge on the wallpaper, so the idle timer starts again" at 960 300, waiting 20s, named "a pointer nudge on the wallpaper, so the idle timer starts again"
+  step "answer the live session's welcome dialog"
+    loop == {check: {from: welcome_dialog, mode: text, name: offered, rect: [773, 536, 1001, 639], rect_at: [1920, 1080], scale: 1, words: [[Welcome], [Install]]}, do: [{settle: 5}], max: 30, see: {name: welcome_dialog}, until: {fact: offered}}
+  click "launch the installer" at 830 698, waiting 25s, named "launch the installer"
+  step "anaconda's web ui is up"
+    loop == {check: {from: anaconda, mode: text, name: ready, rect: [538, 72, 725, 143], rect_at: [1920, 1080], scale: 1, words: [[Workstation], [Encryption]]}, do: [{settle: 10}], max: 60, see: {name: anaconda}, until: {fact: ready}}
+  click "open the language search" at 938 224, waiting 2s, named "open the language search"
+  step "search for the United States"
+    settle == 4
+    type == united states
+  click "choose English (United States)" at 853 314, waiting 6s, named "choose English (United States)"
+  step "the wizard is in English now"
+    see == name: english
+  step "it speaks English"
+    check == {from: english, mode: text, name: ok, rect: [353, 146, 978, 214], rect_at: [1920, 1080], scale: 1, words: [[Welcome], [now]]}
+  click welcome at 726 999, waiting 15s, named "welcome"
+  step "the installation method page"
+    see == name: method
+  step "that page asks how to install"
+    check == {from: method, mode: text, name: asking, rect: [623, 226, 931, 477], rect_at: [1920, 1080], scale: 1, words: [[Destination], [Encryption], [storage]]}
+  click "open the storage editor, which is the only place a filesystem can be chosen" at 928 446, waiting 8s, named "open the storage editor, which is the only place a filesystem can be chosen"
+  click launch at 794 642, waiting 20s, named "launch it"
+  step "the editor is up"
+    loop == {check: {from: blivet, mode: text, name: up, rect: [610, 186, 1431, 344], rect_at: [1920, 1080], scale: 1, words: [[Requirements], [Unformatted], [Type]]}, do: [{settle: 10}], max: 60, see: {name: blivet}, until: {fact: up}}
+  click "the disk's menu" at 1185 328, waiting 4s, named "the disk's menu"
+  click "create the partition table" at 1117 480, waiting 6s, named "create the partition table"
+  click "initialize it as GPT, which is the default" at 474 381, waiting 8s, named "initialize it as GPT, which is the default"
+  click "the free space's menu" at 1185 363, waiting 4s, named "the free space's menu"
+  step "the free space menu is open"
+    loop == {check: {from: the_free_space_menu_is_open, mode: text, name: up, rect: [1000, 380, 1360, 460], rect_at: [1920, 1080], scale: 1, words: [[Create], [Format], [Delete]]}, do: [{settle: 2}], max: 12, see: {name: the_free_space_menu_is_open}, until: {fact: up}}
+  click "create the root partition" at 1132 405, waiting 8s, named "create the root partition"
+  step "the root dialog is up"
+    loop == {check: {from: the_root_dialog_is_up, mode: text, name: up, rect: [380, 320, 1100, 650], rect_at: [1920, 1080], scale: 1, words: [[Create], [Type], [Mount]]}, do: [{settle: 2}], max: 12, see: {name: the_root_dialog_is_up}, until: {fact: up}}
+  step "name it root"
+    click == [882, 271]
+    settle == 2
+    type == root
+  step "mount it at the root"
+    click == [882, 333]
+    settle == 2
+    type == /
+  click "create it, taking the dialog's own ext4 default" at 441 628, waiting 8s, named "create it, taking the dialog's own ext4 default"
+  step "the root partition exists"
+    loop == {check: {from: part1, mode: text, name: there, rect: [618, 331, 693, 389], rect_at: [1920, 1080], scale: 1, words: [[vda1], [ext4]]}, do: [{settle: 4}], max: 20, see: {name: part1}, until: {fact: there}}
+  click "open the root partition's detail page" at 460 363, waiting 6s, named "open the root partition's detail page"
+  step "the detail page is up"
+    loop == {check: {from: detail, mode: text, name: up, rect: [390, 330, 1040, 410], rect_at: [1920, 1080], scale: 1, words: [[UUID], [filesystem]]}, do: [{settle: 2}], max: 12, see: {name: detail}, until: {fact: up}}
+  click "shrink it from the detail page" at 1008 267, waiting 6s, named "shrink it from the detail page"
+  step "the shrink dialog is up"
+    loop == {check: {from: shrink_dialog, mode: text, name: up, rect: [400, 200, 950, 350], rect_at: [1920, 1080], scale: 1, words: [[Shrink], [Size]]}, do: [{settle: 2}], max: 12, see: {name: shrink_dialog}, until: {fact: up}}
+  click shrink at 1029 562, waiting 6s, named "shrink it"
+  click "to 136 GB, leaving room for the ESP" at 1041 275, waiting 1s, named "to 136 GB, leaving room for the ESP"
+  press ctrl+a, waiting 1s, named "replace the size"
+  step "the size the shrink dialog is given"
+    settle == 2
+    type == "136"
+  click "confirm the shrink" at 456 337, waiting 8s, named "confirm the shrink"
+  click "back to the partition list" at 427 222, waiting 6s, named "back to the partition list"
+  step "the list is up, with free space on it"
+    loop == {check: {from: back_at_list, mode: text, name: up, rect: [618, 277, 694, 354], rect_at: [1920, 1080], scale: 1, words: [[Unformatted], [GPT]]}, do: [{settle: 2}], max: 12, see: {name: back_at_list}, until: {fact: up}}
+  step "the new free space's menu"
+    # SAME MENU AS STEP 24, SAME PLACE: the small pop-up under the row's three-dot button, at
+    # x 1070..1200, y 396..418. This rect was [411,194,519,257] - the top-left of the page.
+    # MEASURED on run 44532343964's own recording, whose last frame has that menu open.
+    loop == {check: {from: fs_menu, mode: text, name: open, rect: [1030, 380, 1350, 460], rect_at: [1920, 1080], scale: 1, words: [[Create]]}, do: [{click: [1185, 407], settle: 3}], max: 6, see: {name: fs_menu}, until: {fact: open}}
+  click "create the ESP" at 1132 449, waiting 8s, named "create the ESP"
+  step "the ESP dialog is up"
+    loop == {check: {from: esp_dialog, mode: text, name: up, rect: [571, 485, 700, 599], rect_at: [1920, 1080], scale: 1, words: [[Overwrite], [Encryption]]}, do: [{settle: 2}], max: 12, see: {name: esp_dialog}, until: {fact: up}}
+  step "set the type to the ESP"
+    loop == {check: {from: type_now, mode: text, name: esp, rect: [560, 380, 1400, 420], rect_at: [1920, 1080], scale: 1, words: [[partition]]}, do: [{click: [882, 396], settle: 3}, {click: [648, 576], settle: 3}], max: 6, see: {name: type_now}, until: {fact: esp}}
+  step "name it boot"
+    clear == true
+    click == [882, 271]
+    settle == 2
+    type == boot
+  click "create it, and the mount point is filled in for us" at 456 566, waiting 10s, named "create it, and the mount point is filled in for us"
+  step "the ESP exists"
+    loop == {check: {from: part2, mode: text, name: there, rect: [1343, 466, 1403, 523], rect_at: [1920, 1080], scale: 2, words: [[vda2], [EFI]]}, do: [{settle: 4}], max: 20, see: {name: part2}, until: {fact: there}}
+  click "back to the installer" at 450 975, waiting 12s, named "back to the installer"
+  click "accept the layout it detected" at 756 337, waiting 15s, named "accept the layout it detected"
+  step "the review page, which now names this storage"
+    see == name: review
+  step "the review names a configured layout"
+    check == {from: review, mode: text, name: configured, rect: [621, 600, 735, 661], rect_at: [1920, 1080], scale: 1, words: [[configured], [Review]]}
+  step "next from the installation method"
+    loop == {check: {from: review_page, mode: text, name: here, rect: [353, 266, 443, 324], rect_at: [1920, 1080], scale: 3, words: [[Review]]}, do: [{click: [730, 999], settle: 12}], max: 4, see: {name: review_page}, until: {fact: here}}
+  press Escape, waiting 3s, named "close any quit dialog"
+  step "press install"
+    loop == {check: {from: install_started, mode: text, name: begun, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 3, words: [[Installing]]}, do: [{click: [730, 999], settle: 15}], max: 4, see: {name: install_started}, until: {fact: begun}}
+  step "the install is written"
+    disk_min_mb == 512
+    disk_settle == 180
+    poll == 20
+    timeout == 3600
+  step "stop the machine"
+    shutdown == kill
+    timeout == 120
+  step "publish the disk"
+    compress == '{{ out }}'

@@ -1,0 +1,128 @@
+walkthrough "ubuntu - the subiquity walk"
+  resolution 1920x1080
+  recording_resolution 1920x1080
+  password admin
+  var out == {default: out/distro.qcow2, from: args.out}
+  var user == {default: vmuser, from: args.user}
+
+  needs ubuntu.iso, named "the media this stage boots from is already on disk"
+  step "create the empty disk"
+    disk == disk.qcow2
+    disk_gb == 128
+  step "boot the installer"
+    boot == true
+    iso == ubuntu.iso
+    os == linux
+    # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
+    memory_mb == 4096
+    timeout == 1800
+  # THE DESKTOP IS DECIDED BY THE REFERENCE IMAGE, for the reason the windows file records: the
+  # three brightness thresholds answer "a dark body with a lighter strip", and every installer pane
+  # on the way there is close enough to that to be arguable. A reference answers the same question
+  # with a measurement two orders of magnitude wider - 0.0043 for a splash against 0.9669 for a
+  # desktop on this very recording.
+  step "wait for the live desktop"
+    desktop == linux/gnome
+    reference == reference/desktop.png
+    rect == [0, 0, 1920, 120]
+    rect_at == [1920, 1080]
+    range == [0.90, 1.0]
+    timeout == 5400
+  # THE LIVE SESSION'S RIGHT-CLICK MENU IS OPEN MORE OFTEN THAN NOT, because the installer puts it
+  # there and the walk's own clicks leave it behind. MEASURED on run 44361392014, where the captured
+  # frame had the menu open over the wallpaper and the reference did not: 0.6664 similar.
+  #
+  # AND THE REFERENCE IS THE INSTALLER'S OWN WINDOW, which is what the next step waits for - so the
+  # comparison is about "the live session got this far", not "the desktop is empty".
+  press Escape, waiting 2s, named "close the right-click menu the live session leaves open"
+  settle 2s
+  # THE INSTALLER WINDOW HAS TO BE UP BEFORE THE COMPARISON, NOT AFTER IT.
+  #
+  # THE ORDER WAS "compare the screen, then wait for the installer", and the two raced. MEASURED
+  # ACROSS THREE RUNS: run 44349187441 captured the desktop with the installer's window as a black
+  # rectangle (0.6753), run 44361392014 captured it with a right-click menu open (0.6664), and run
+  # 44365861355 captured it with "Welcome to Ubuntu / Choose your language" fully drawn (0.6710).
+  # Three different screens, because `desktop:` says "brightness, variance and saturation look like
+  # a table" and the installer appears somewhere inside that window.
+  #
+  # SO THE WINDOW IS WAITED FOR FIRST, which makes the screen the comparison sees ONE screen instead
+  # of three, and the reference is the frame from a run where it was already up.
+  step "wait for the installer window"
+    loop == {check: {from: screen, mode: text, name: done, words: [[welcome, to, ubuntu], [choose, your, language]], rect: [873, 208, 1133, 395], rect_at: [1920, 1080]}, do: [{click: [420, 300]}, {settle: 5}], max: 120, see: {name: screen}, until: {fact: done}}
+  settle 3s
+  step "the desktop is the one this file was written against"
+    see == shot
+  step "the screen is the one this file was written against"
+    check == {name: matched, must: true, from: shot, mode: like, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], reference: reference/desktop.png, range: [0.97, 1.0]}
+  click "welcome / language" at 1355 848, waiting 12s, named "welcome / language"
+  step "wait for the accessibility page, because a click that assumes the page before it is a click that can miss"
+    loop == {check: {from: page, mode: text, name: there, words: [[accessibility]], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, do: [{settle: 5}], max: 24, see: {name: page}, until: {fact: there}}
+  click accessibility at 1355 848, waiting 12s, named "accessibility"
+  step "wait for the keyboard layout page, because a click that assumes the page before it is a click that can miss"
+    loop == {check: {from: page, mode: text, name: there, words: [[keyboard], [layout]], rect: [885, 208, 1036, 271], rect_at: [1920, 1080]}, do: [{settle: 5}], max: 24, see: {name: page}, until: {fact: there}}
+  click keyboard at 1355 848, waiting 12s, named "keyboard layout"
+  step "wait for the internet connection page, because a click that assumes the page before it is a click that can miss"
+    loop == {check: {from: page, mode: text, name: there, words: [[internet], [connection]], rect: [873, 210, 1046, 268], rect_at: [1920, 1080]}, do: [{settle: 5}], max: 24, see: {name: page}, until: {fact: there}}
+  click internet at 1355 848, waiting 12s, named "internet connection"
+  step "read whether the installer offered to update itself, which blocks every page behind it"
+    see == page
+  step "is the update dialog up"
+    check == {from: page, mode: text, name: update_offered, words: [update, available], rect: [883, 208, 1036, 271], rect_at: [1920, 1080]}
+  step "leave the update page by the same Next every other page uses"
+    if == update_offered
+    then == [{click: [1355, 848], name: "next, past the update offer", settle: 8}]
+  step "wait for the what do you want to do with ubuntu page, because a click that assumes the page before it is a click that can miss"
+    loop == {check: {from: page, mode: text, name: there, words: [[install], [ubuntu]], rect: [944, 477, 1085, 554], rect_at: [1920, 1080]}, do: [{settle: 5}], max: 24, see: {name: page}, until: {fact: there}}
+  click "what do you want to do with ubuntu" at 1355 848, waiting 12s, named "what do you want to do with ubuntu"
+  step "wait for the type of installation page, because a click that assumes the page before it is a click that can miss"
+    loop == {check: {from: page, mode: text, name: there, words: [[interactive], [installation]], rect: [944, 209, 1045, 501], rect_at: [1920, 1080]}, do: [{settle: 5}], max: 24, see: {name: page}, until: {fact: there}}
+  click "type of installation" at 1355 848, waiting 12s, named "type of installation"
+  step "wait for the applications page, because a click that assumes the page before it is a click that can miss"
+    loop == {check: {from: page, mode: text, name: there, words: [[apps]], rect: [937, 433, 1027, 496], rect_at: [1920, 1080]}, do: [{settle: 5}], max: 24, see: {name: page}, until: {fact: there}}
+  click applications at 1355 848, waiting 12s, named "applications"
+  step "wait for the optimise your computer page, because a click that assumes the page before it is a click that can miss"
+    loop == {check: {from: page, mode: text, name: there, words: [[proprietary]], rect: [1082, 397, 1232, 465], rect_at: [1920, 1080]}, do: [{settle: 5}], max: 24, see: {name: page}, until: {fact: there}}
+  click "optimise your computer" at 1355 848, waiting 12s, named "optimise your computer"
+  step "wait for the disk setup page, because a click that assumes the page before it is a click that can miss"
+    loop == {check: {from: page, mode: text, name: there, words: [[erase], [disk]], rect: [944, 473, 1054, 545], rect_at: [1920, 1080]}, do: [{settle: 5}], max: 24, see: {name: page}, until: {fact: there}}
+  click disk at 1355 848, waiting 12s, named "disk setup"
+  step "wait for the encryption page, because a click that assumes the page before it is a click that can miss"
+    loop == {check: {from: page, mode: text, name: there, words: [[encryption]], rect: [852, 210, 967, 271], rect_at: [1920, 1080]}, do: [{settle: 5}], max: 24, see: {name: page}, until: {fact: there}}
+  click encryption at 1355 848, waiting 12s, named "encryption"
+  step "wait for the account page before typing into it"
+    loop == {check: {from: page, mode: text, name: there, words: [[create, account]], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, do: [{settle: 5}], max: 24, see: {name: page}, until: {fact: there}}
+  step "create your account - full name"
+    clear == true
+    click == [1139, 393]
+    settle == 2
+    type == '{{ user }}'
+  step "create your account - username"
+    clear == true
+    click == [1139, 501]
+    settle == 2
+    type == '{{ user }}'
+  step "create your account - password"
+    clear == true
+    click == [1050, 563]
+    settle == 2
+    type == '{{ password }}'
+  step "create your account - confirm password"
+    clear == true
+    click == [1139, 616]
+    settle == 3
+    type == '{{ password }}'
+  click "clear 'require my password to log in'" at 923 670, waiting 3s, named "clear 'require my password to log in'"
+  click "create your account" at 1355 848, waiting 12s, named "create your account"
+  step "wait for the time zone page"
+    loop == {check: {from: page, mode: text, name: there, words: [[timezone]], rect: [944, 210, 1050, 268], rect_at: [1920, 1080]}, do: [{settle: 5}], max: 24, see: {name: page}, until: {fact: there}}
+  click "time zone - new york on the map" at 762 483, waiting 4s, named "time zone - new york on the map"
+  click time at 1355 848, waiting 14s, named "time zone"
+  click "ready to install - the green install button" at 1355 848, waiting 30s, named "ready to install - the green install button"
+  step "the installer finishes"
+    loop == {check: {from: screen, mode: text, name: done, words: [[installed, and, ready, to, use], [restart, to, complete, the, installation], [restart, now]], rect: [690, 630, 1270, 730], rect_at: [1920, 1080]}, do: [{click: [420, 300], settle: 20}], max: 270, see: {name: screen}, until: {fact: done}}
+  settle 20s, named "give the installer its last few seconds, because \"ready to use\" is not \"flushed\""
+  step "stop the machine"
+    shutdown == kill
+    timeout == 120
+  step "publish the disk"
+    compress == '{{ out }}'

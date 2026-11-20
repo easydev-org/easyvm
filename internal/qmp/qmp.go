@@ -195,7 +195,23 @@ func (c *Conn) Screendump(dir string) (Frame, error) {
 	// exposes the filename, and the same frame is ~100 KB - SO THE WRITE IS SHORT AND THE RACE SHRINKS
 	// WITH IT. This is one command on the same socket, written as raw JSON because the wrapper has no
 	// field for the format.
-	path := filepath.Join(dir, fmt.Sprintf("frame-%06d.png", n))
+	// THE NAME IS THE CONNECTION'S COUNTER AND A NANOSECOND STAMP, AND THE STAMP IS THE FIX.
+	//
+	// `n` ALONE RESTARTS AT 1 ON EVERY RECONNECT - it is a field of `*Conn`, and `qmpRetry` throws
+	// that object away when the socket dies. So a reconnect began writing `frame-000001.png` again,
+	// ON TOP OF A FILE A READER HAD ALREADY BEEN HANDED. MEASURED on the pod:
+	//
+	//	the setup wizard is up: loading the frame `wizard`: /work/frames/frame-000001.png:
+	//	png: invalid format: not enough pixel data (is the write still in progress? format "png")
+	//
+	// - and the question in that message was the right one. The reader was not reading a frame
+	// still being written by ITS capture; it was reading a path whose contents had been replaced by
+	// a later, shorter write from a different connection.
+	//
+	// A NANOSECOND STAMP MAKES THE NAME UNIQUE ACROSS RECONNECTS AND ACROSS THE TWO CAPTURERS (the
+	// recorder's sampler and a gate), and costs nothing: these files are named for a post-mortem, and
+	// the number is only there to keep them apart.
+	path := filepath.Join(dir, fmt.Sprintf("frame-%06d-%d.png", n, time.Now().UnixNano()))
 	cmd, err := json.Marshal(map[string]any{
 		"execute": "screendump",
 		"arguments": map[string]any{
@@ -788,6 +804,26 @@ func (c *Conn) button(b raw.InputButton, down bool) error {
 	return nil
 }
 
+// Ping asks qemu the cheapest question the protocol has, to prove the channel still answers.
+//
+// A CACHED `*Conn` IS NOT EVIDENCE THAT QEMU IS STILL ON THE OTHER END. MEASURED on a pod: qemu was
+// healthy - four vCPUs in `kvm_vcpu_block`, the guest's own CPU ticks climbing - while this side's
+// socket was ESTAB with NO PEER, and every later key press reported "the qmp connection is closed".
+// `query-status` changes nothing, costs one round trip, and is the difference between a stage that
+// reconnects and one that reports forty false failures about a machine that is running.
+func (c *Conn) Ping() error {
+	// A CONNECTION THAT WAS NEVER OPENED ANSWERS LIKE ONE THAT WAS CLOSED, and the difference matters:
+	// `Ping` is asked by callers that already hold a `*Conn` and cannot tell "never dialled" from
+	// "dialled and gone". A nil dereference here would be a panic in the daemon, which is PID 1.
+	if c == nil || c.l == nil {
+		return ErrClosed
+	}
+	return c.withRaw(func(m *raw.Monitor) error {
+		_, err := m.QueryStatus()
+		return err
+	})
+}
+
 // Key sends one key with no modifiers.
 func (c *Conn) Key(name string) error {
 	return c.Stroke(nil, name)
@@ -855,6 +891,47 @@ func (c *Conn) Stroke(modifiers []string, key string) error {
 		return m.InputSendEvent(nil, nil, events)
 	}); err != nil {
 		return fmt.Errorf("input-send-event %v+%s: %w", modifiers, key, err)
+	}
+	return nil
+}
+
+// ReleaseModifiers sends a bare "down: false" for each of the four modifier keys, one after another.
+//
+// A GUEST CAN MISS A MODIFIER'S OWN UP-EVENT, and the symptom is the whole next line in capitals.
+//
+// MEASURED ON `linux/zorin-ssh`: the terminal reads
+//
+//	$ xset s off; ...; echo SCREEN_KEPT_ON
+//	$ PKILL _F UPDATE_NOTIFIER; PKILL _F GNOME_SOFTWARE; PKILL _F PACKAGEKITD
+//	$ SUDO APT_GET UPDATE
+//	> SUDO APT_GET UPDATE
+//
+// - every character of the NEXT command in its shifted form, and `-` arriving as `_` (which is
+// shift+minus). `SCREEN_KEPT_ON` ends in an uppercase letter, so the last stroke before the Return
+// was shift+o, and the guest never saw that shift released.
+//
+// THE EVENT LIST ALREADY ENDS WITH THE UP-EVENT (`Stroke` sends modifiers down, key down, key up,
+// modifiers up, in ONE `input-send-event`), so this is not a missing event on this side - it is a
+// guest that drops one. Sending the ups AGAIN costs four events that set a key to a state it is
+// already in, which is harmless, and it is the only lever this side has over a guest's own driver.
+//
+// IT IS CALLED BETWEEN TYPED STRINGS, NOT BETWEEN CHARACTERS: an extra modifier event in the middle
+// of someone's text is a way to lose a character, and this bug is about the seam between two lines.
+func (c *Conn) ReleaseModifiers() error {
+	events := make([]raw.InputEvent, 0, 4)
+	for _, name := range []string{"shift", "ctrl", "alt", "meta_l"} {
+		code, err := qcodeByName(name)
+		if err != nil {
+			return err
+		}
+		events = append(events, raw.InputEventKey(raw.InputKeyEvent{
+			Down: false, Key: raw.KeyValueQcode(code),
+		}))
+	}
+	if err := c.withRaw(func(m *raw.Monitor) error {
+		return m.InputSendEvent(nil, nil, events)
+	}); err != nil {
+		return fmt.Errorf("release modifiers: %w", err)
 	}
 	return nil
 }

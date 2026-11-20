@@ -420,12 +420,15 @@ func espFallback(disk, from string) error {
 	}
 	// `from` is a slash path inside the ESP, defaulting to the directory BlissOS's own installer
 	// writes. Its last element is the directory name to look for.
-	leaf := "BLISSOS"
-	if from != "" {
-		leaf = strings.ToUpper(strings.Trim(strings.TrimPrefix(from, "/"), "/"))
-		if i := strings.LastIndexByte(leaf, '/'); i >= 0 {
-			leaf = leaf[i+1:]
-		}
+	// THE LOADER'S DIRECTORY IS THE FILE'S TO NAME, AND THE DEFAULT USED TO BE `BLISSOS`.
+	//
+	// A hardcoded distribution name in a general primitive is a bug waiting for the second caller:
+	// the first walking style that was not Android would have copied /EFI/BLISSOS on a disk that has
+	// /EFI/ubuntu, and the error would say "there is no loader to copy" about a loader that is there.
+	// `esp_from` is required now - see doESPFallback - so this cannot be reached empty.
+	leaf := strings.ToUpper(strings.Trim(strings.TrimPrefix(from, "/"), "/"))
+	if i := strings.LastIndexByte(leaf, '/'); i >= 0 {
+		leaf = leaf[i+1:]
 	}
 	src := fat.find(efiEntry.cluster, leaf)
 	if src == nil {
@@ -502,7 +505,23 @@ func espFallback(disk, from string) error {
 
 // doESPFallback is the step: `esp_fallback:` names the disk, `esp_from:` the loader directory.
 func (e *Executor) doESPFallback(s walk.Step) error {
+	// TWO FORMS, ONE ACTION. The mapping says what each part is; the flat form is what the files use.
 	disk := s.Get("esp_fallback")
+	from := s.Get("esp_from")
+	if m, ok := s.Spec["esp_fallback"].(map[string]any); ok {
+		if v, ok := m["disk"].(string); ok {
+			disk = v
+		}
+		if v, ok := m["from"].(string); ok {
+			from = v
+		}
+		for k := range m {
+			if k != "disk" && k != "from" {
+				return fail(s.Name, "`esp_fallback:` has no key %q; the mapping form is "+
+					"{disk, from}", k)
+			}
+		}
+	}
 	if disk == "" || disk == "disk" {
 		disk = e.bootDisk()
 		if disk == "" {
@@ -521,7 +540,12 @@ func (e *Executor) doESPFallback(s walk.Step) error {
 		}
 	}
 	e.Driver.Log(fmt.Sprintf("  esp fallback: %s", filepath.Base(disk)))
-	if err := espFallback(disk, s.Get("esp_from")); err != nil {
+	if from == "" {
+		return fail(s.Name, "`esp_fallback:` needs the loader's directory inside the ESP: "+
+			"`esp_fallback: {disk: disk, from: /EFI/BLISSOS}`. It has no default - a "+
+			"distribution's own name baked into a primitive is wrong for the next guest")
+	}
+	if err := espFallback(disk, from); err != nil {
 		return fail(s.Name, "%v", err)
 	}
 	return nil

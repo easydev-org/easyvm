@@ -10,12 +10,12 @@ import (
 //
 // MEASURED ON THE macOS 26 ssh STAGE, and it cost that stage a whole run. The step was
 //
-//	- name: open the remote login pane from the keyboard
-//	  unless: [allow, full, disk, access]
-//	  region: [...]
-//	  do:
-//	  - key: meta_l+f
-//	  - key: ret
+//   - name: open the remote login pane from the keyboard
+//     unless: [allow, full, disk, access]
+//     region: [...]
+//     do:
+//   - key: meta_l+f
+//   - key: ret
 //
 // The panel was already open, so the reading held the words and the gate was shut. The log said
 //
@@ -82,12 +82,15 @@ func TestTheDispatcherReadsTheUnlessSentinelAsASkip(t *testing.T) {
 		t.Fatal(err)
 	}
 	src := string(body)
-	i := strings.Index(src, `case s.Has("unless"), s.Has("unless_any"):`)
+	// THE ARM IS SPELLED `when_not`, which is what `unless:` compiles to in the vocabulary. The
+	// test looks for the arm that HANDLES it rather than for the word "unless", because the two are
+	// deliberately different: `unless:` is the user-facing key and `when_not:` is the gate.
+	i := strings.Index(src, `case s.Has("when_not"), s.Has("when_not_any"):`)
 	if i < 0 {
-		t.Fatal("the dispatcher has no `unless` arm")
+		t.Fatal("the dispatcher has no `unless`/`when_not` arm")
 	}
 	rest := src[i:]
-	if end := strings.Index(rest, "case s.Has(\"until_console\")"); end > 0 {
+	if end := strings.Index(rest, "case s.Has(\"until\")"); end > 0 {
 		rest = rest[:end]
 	}
 	if !strings.Contains(rest, "errors.Is(err, errUnlessAlready)") {

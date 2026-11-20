@@ -1,4 +1,7 @@
 name: kubuntu 26.04 - install to ext4, then the power button
+recording_resolution:
+- 1920
+- 1080
 resolution:
 - 1920
 - 1080
@@ -26,10 +29,8 @@ steps:
   # forty minutes into a run. Every one of these files is declared by this leg's
   # `assets:` in its workflow and placed here by `pull-artifact.sh` before
   # `easyvm run` is called; nothing in this file downloads.
-  require:
+  needs:
   - kubuntu.iso
-- name: start recording
-  record: kubuntu-install.mp4
 - name: create the empty disk
   disk: disk.qcow2
   disk_gb: 128
@@ -62,8 +63,6 @@ steps:
 - name: wait for the installer's launcher
   desktop: linux/kubuntu
   timeout: 5400
-  poll: 5
-  keep_alive: true
 
 # THE TWO BUTTONS, MEASURED OFF THE FRAME by scanning row y=844 for runs of brighter pixels:
 #
@@ -77,15 +76,10 @@ steps:
   click:
   - 1332
   - 844
-  wait_after: 20
+  settle: 20
 
 - name: calamares is open
-  ocr:
-    name: cal
-    region: [0, 0, 1920, 1080]
-    region_at: [1920, 1080]
-    scale: 1
-    wait: 5
+  see: {name: cal}
 
 # CALAMARES' OWN FOOTER IS THE PROOF OF A PAGE, AND THE SIDEBAR IS NOT CLICKABLE.
 #
@@ -96,9 +90,11 @@ steps:
   check:
     name: opened
     from: cal
-    mode: says
+    mode: text
     words: [welcome, partitions, next]
 
+    rect: [0, 0, 1920, 1080]
+    rect_at: [1920, 1080]
 # (1777, 1059) is `Next`, measured from the footer strip: three buttons, `Back`, `Next`, `Cancel`.
 #
 # Welcome -> Location
@@ -106,44 +102,34 @@ steps:
   click:
   - 1777
   - 1059
-  wait_after: 8
+  settle: 8
 
 # Location -> Keyboard
 - name: next from location
   click:
   - 1777
   - 1059
-  wait_after: 8
+  settle: 8
 
 # Keyboard -> Customize, where the installation mode is chosen
 - name: next from keyboard
   click:
   - 1777
   - 1059
-  wait_after: 8
+  settle: 8
 
 - name: the installation mode page
-  ocr:
-    name: mode
-    region: [0, 0, 1920, 1080]
-    region_at: [1920, 1080]
-    scale: 1
-    wait: 3
+  see: {name: mode}
 
 # Customize -> Partitions
 - name: next from customize
   click:
   - 1777
   - 1059
-  wait_after: 8
+  settle: 8
 
 - name: the partitions page
-  ocr:
-    name: parts
-    region: [0, 0, 1920, 1080]
-    region_at: [1920, 1080]
-    scale: 1
-    wait: 4
+  see: {name: parts}
 
 # THE PARTITIONS PAGE OFFERS `Erase disk` AND `Manual partitioning`, AND `Erase disk` IS THE ONE
 # THAT MATTERS HERE: ITS DEFAULT FILESYSTEM IS ext4, MEASURED.
@@ -162,83 +148,70 @@ steps:
   click:
   - 250
   - 76
-  wait_after: 6
+  settle: 6
 
 - name: the erase page shows ext4
-  ocr:
-    name: fs
-    region: [0, 0, 1920, 1080]
-    region_at: [1920, 1080]
-    scale: 1
-    wait: 3
+  see: {name: fs}
 
 - name: the default filesystem is ext4
   check:
     name: ext4
     from: fs
-    mode: says
+    mode: text
     words: [ext4]
 
+    rect: [0, 0, 1920, 1080]
+    rect_at: [1920, 1080]
 # Partitions -> Users
 - name: next from partitions
   click:
   - 1777
   - 1059
-  wait_after: 8
+  settle: 8
 
 - name: the users page
-  ocr:
-    name: users
-    region: [0, 0, 1920, 1080]
-    region_at: [1920, 1080]
-    scale: 1
-    wait: 4
+  see: {name: users}
 
 # THE FIVE FIELDS, MEASURED FROM THE PAGE. Each box is wide and the click is in its left third where
 # the caret lands after existing text, so `ctrl+a` then `backspace` is a reliable clear.
 - name: the full name
   click: [293, 51]
   type: '{{ user }}'
-  wait_after: 2
+  settle: 2
 - name: the login name
   click: [293, 119]
   clear: true
   type: '{{ user }}'
-  wait_after: 2
+  settle: 2
 - name: the computer name
   click: [293, 187]
   clear: true
   type: kubuntu
-  wait_after: 2
+  settle: 2
 - name: the password
   click: [293, 255]
   clear: true
   type: '{{ password }}'
-  wait_after: 2
+  settle: 2
 - name: the password again
   click: [500, 255]
   clear: true
   type: '{{ password }}'
-  wait_after: 2
+  settle: 2
 
 # THE ACCOUNT LOGS ITSELF IN, because an unattended client cannot type at a login screen.
 - name: log in automatically
   click: [205, 295]
-  wait_after: 3
+  settle: 3
 
 - name: the users page is filled in
-  ocr:
-    name: filled
-    region: [0, 0, 1920, 1080]
-    region_at: [1920, 1080]
-    scale: 1
-    wait: 3
+  see: {name: filled}
 
 - name: the password was accepted
   check:
     name: ok
     from: filled
-    mode: says_without
+    mode: text
     # THE FORM IS COMPLETE WHEN THE USER NAME IS THERE AND NO MISMATCH IS SHOWN.
     #
     # `short` IS DELIBERATELY NOT IN `without:` - it is a WARNING for a password under eight
@@ -247,49 +220,43 @@ steps:
     words: [vmuser]
     without: [short]
     
+    rect: [0, 0, 1920, 1080]
+    rect_at: [1920, 1080]
 # Users -> Summary
 - name: next from users
   click:
   - 1777
   - 1059
-  wait_after: 8
+  settle: 8
 
 - name: the summary page
-  ocr:
-    name: summary
-    region: [0, 0, 1920, 1080]
-    region_at: [1920, 1080]
-    scale: 1
-    wait: 4
+  see: {name: summary}
 
 # THE SUMMARY SAYS ext4 IN WORDS, WHICH IS THE SECOND INDEPENDENT READING OF THE FILESYSTEM.
 - name: the summary names ext4
   check:
     name: ext4
     from: summary
-    mode: says
+    mode: text
     words: [ext4]
 
+    rect: [0, 0, 1920, 1080]
+    rect_at: [1920, 1080]
 # Summary -> the confirmation dialog
 - name: start the install
   click:
   - 1777
   - 1059
-  wait_after: 8
+  settle: 8
 
 - name: the confirmation dialog
-  ocr:
-    name: confirm
-    region: [0, 0, 1920, 1080]
-    region_at: [1920, 1080]
-    scale: 1
-    wait: 3
+  see: {name: confirm}
 
 # `Install Now`, MEASURED AT (1071, 535) INSIDE THE DIALOG. The dialog's own title is the check, so a
 # click that missed it is visible as a page with no dialog rather than as a silent no-op.
 - name: install now
   click: [1071, 535]
-  wait_after: 15
+  settle: 15
 
 # THE INSTALL WRITES FOR TWENTY MINUTES AND THE PROGRESS BARS ARE THE ONLY SIGNAL. `disk_settle`
 # waits for the DISK to stop changing rather than for a clock, which is the difference between "the
@@ -298,25 +265,20 @@ steps:
   disk_settle: 300
   disk_min_mb: 4000
   timeout: 3600
-  poll: 20
-  keep_alive: true
 
 - name: the install is done
   loop:
     max: 60
     do:
-    - wait: 15
-    ocr:
-      name: done
-      region: [0, 0, 1920, 1080]
-      region_at: [1920, 1080]
-      scale: 1
-      wait: 0
+    - settle: 15
+    see: {name: done}
     check:
       name: finished
       from: done
-      mode: says
+      mode: text
       words: [installed]
+      rect: [0, 0, 1920, 1080]
+      rect_at: [1920, 1080]
     until:
       fact: finished
 
@@ -344,5 +306,3 @@ steps:
 
 - name: publish the disk
   compress: '{{ out }}'
-- name: stop recording
-  record: false

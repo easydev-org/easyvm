@@ -1,0 +1,172 @@
+walkthrough "mx - the minstall walk"
+  resolution 1920x1080
+  password admin
+  var out == {default: out/distro.qcow2, from: args.out}
+  var user == {default: vmuser, from: args.user}
+  header recording_resolution == [1920, 1080]
+
+  needs mx.iso, named "the media this stage boots from is already on disk"
+  step "create the empty disk"
+    disk == disk.qcow2
+    disk_gb == 128
+  step "boot the installer"
+    boot == true
+    iso == mx.iso
+    os == linux
+    # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
+    memory_mb == 4096
+    timeout == 1800
+  step "the medium's boot menu is up"
+    see == name: mxmenu
+  # THIS IS OVMF'S OWN LANGUAGE PANEL, NOT A GRUB MENU, AND IT WANTS `Continue`.
+  #
+  # MEASURED ON RUN 44520500564, whose recording is this panel for its whole 80 minutes, and whose
+  # log shows the check that was supposed to recognise it FAILING:
+  #
+  #	see: 0 word(s):
+  #	that menu is the language submenu ... is_mx_menu = false (none of "Language" ... in "")
+  #
+  # The screen says "Select Language   [Standard English]   Continue / Reset" with `Device Manager`,
+  # `Boot Manager`, `Boot Maintenance Manager` under it. The check looked at [664,328,949,408] -
+  # the MIDDLE of the screen, where nothing is drawn - and read nothing.
+  #
+  # WORSE, THE KEYS THAT FOLLOWED WERE FOR A MENU THAT WAS NOT THERE. `press Escape` was meant to
+  # leave a GRUB language submenu; here Escape is OVMF's "exit this page", and the six `up` presses
+  # and the `Return` after it went to whatever Escape left behind.
+  #
+  # THE PANEL'S ANSWER IS `Back to main menu`, WHICH IS ITS LAST ROW.
+  #
+  # ITS OWN FOOTER SAYS SO: "Use up and down, Hit ENTER to select/deselect. Press e to edit, ESC to
+  # go back." The rows are Language, Keyboard, Timezone, Reset and `<= Back to main menu`, and the
+  # live session is behind the last one. So the key sequence is: down until the highlight is on the
+  # last row, then Enter.
+  #
+  # MEASURED ON RUN 44520492586, whose recording is this panel for its whole 18 minutes - that run
+  # was cancelled while the walk waited on a screen it never left.
+  # THIS MEDIUM'S BOOT MENU IS THREE PANELS DEEP, AND ONLY THE LAST BUT ONE HAS THE LIVE SESSION.
+  #
+  # MEASURED ACROSS THREE RUNS, EACH RECORDING SHOWING THE PANEL IT WAS STUCK ON:
+  #
+  #   44520492586   "Welcome to MX-25.3_Xfce (Infinity)!"  Language / Keyboard / Timezone /
+  #                 Reset / "<== Back to main menu"
+  #   44524178444   after choosing "Back to main menu":  "===> Boot Rescue Menus <=== (version
+  #                 22.12.28)"  GRUB-EFI bootloader / GRUB menus / Frugal menus / Windows
+  #                 bootloader / Reboot / Power Off / Reboot into BIOS/UEFI Setup /
+  #                 "<=== Back to main menu (or press ESC)"
+  #
+  # So `Back to main menu` from the LANGUAGE panel does not reach the main menu - it reaches the
+  # RESCUE menu, which is one more level down. Its own footer says how to leave: "Back to main menu
+  # (or press ESC)". ESC is the shorter route and is what this file uses.
+  #
+  # THE LANGUAGE PANEL'S FOOTER IS "Use up and down, Hit ENTER to select/deselect", so `up` walks the
+  # list and `Return` opens the highlighted row. Four downs from `Language` is `Back to main menu`.
+  step "that menu is this medium's own language panel"
+    loop == {check: {from: mxmenu, mode: text, name: is_mx_menu, rect: [560, 180, 1460, 580], rect_at: [1920, 1080], scale: 1, words: [[Language], [Keyboard], [Timezone], [Back, to, main, menu]]}, do: [{settle: 3}], max: 20, see: {name: mxmenu}, until: {fact: is_mx_menu}}
+  press down, waiting 1s, named "down to Keyboard"
+  press down, waiting 1s, named "down to Timezone"
+  press down, waiting 1s, named "down to Reset"
+  press down, waiting 1s, named "down to Back to main menu"
+  press Return, waiting 20s, named "enter the rescue menu, which is what that row opens"
+  # A SINGLE `check:` ON A PANEL THAT IS STILL PAINTING READS NOTHING, AND THAT IS WHAT HAPPENED.
+  #
+  # MEASURED ON RUN 44531638796, whose language-panel check logged `see: 0 word(s)` and whose walk
+  # then pressed four downs and a Return into a panel it had not confirmed. The recording's last
+  # frame IS the rescue menu, so the panel arrived - a moment after the one frame the `check:` took.
+  #
+  # A `loop:` IS THE RETRY. It reads once every few seconds until the words are there, which is what
+  # a menu that appears asynchronously needs. Both panels get one.
+  step "the rescue menu is up, and its footer says ESC leaves it"
+    loop == {check: {from: mxrescue, mode: text, name: is_rescue, rect: [560, 180, 1460, 640], rect_at: [1920, 1080], scale: 1, words: [[Boot, Rescue, Menus], [Back, to, main, menu]]}, do: [{settle: 3}], max: 20, see: {name: mxrescue}, until: {fact: is_rescue}}
+  press Escape, waiting 20s, named "ESC to the main menu, where the live session is"
+  # THE HIGHLIGHT COMES BACK WHERE IT WAS - ON THE LANGUAGE ROW - NOT ON THE TOP ENTRY.
+  #
+  # MEASURED ON RUN 44527035434, whose recording ends on the real main menu:
+  #
+  #	MX-25.3 Xfce x64 (September 20, 2026) (sysvinit)
+  #	MX-25.3 Xfce x64 (September 20, 2026) (systemd)
+  #	Check integrity of the live media
+  #	Language - Keyboard - Timezone          <- highlighted
+  #	>>> Advanced Options <<<
+  #	Memory Test (64-bit UEFI)
+  #	Boot Rescue Menus
+  #
+  # The live session is the FIRST row, and the highlight is on the fourth. `up` walks the list, so
+  # three of them put it on the top row; `Return` boots it.
+  press up, waiting 1s, named "up to Check integrity"
+  press up, waiting 1s, named "up to the systemd entry"
+  press up, waiting 1s, named "up to the top row, the live session"
+  press Return, waiting 30s, named "boot the live session"
+  step "wait for the live desktop"
+    desktop == linux/xfce
+    reference == reference/desktop.png
+    range == [0.90, 1.0]
+    # THE BAND IS WALLPAPER, NOT THE MENU BAR, FOR THE SAME REASON AS fedora-workstation.
+    #
+    # MEASURED ON THIS MEDIUM'S OWN RECORDING: the left 300 pixels, rows 540..740, are the same in
+    # every desktop frame (0.9988 minimum across 17 samples), and the top-of-screen band carries a
+    # clock and a menu that a reference taken at another minute cannot match. An XFCE panel is at the
+    # BOTTOM here, so rows 540..740 are wallpaper above it and below the menu.
+    rect == [0, 540, 300, 740]
+    rect_at == [1920, 1080]
+    timeout == 5400
+  # ONE CLICK, NOT TWO. THE SECOND ONE ASKS THE INSTALLER TO START WHILE IT IS ALREADY STARTING.
+  #
+  # MEASURED ON RUN 44507018955, whose recording ends on this dialog over the whole screen:
+  #
+  #	[ MX Linux Installer ]  !  The installer appears to be running already.
+  #	                          Please close it if possible, or run 'pkill minstall' in terminal.
+  #	                          [ OK ]
+  #
+  # The two clicks were meant as "double-click, because a single one may be missed". What they
+  # actually do is launch the installer twice, and the second launch is refused by the first - so
+  # the modal sits over the welcome page and every later step reads the wrong screen. `wait for the
+  # terms page` then spent its whole budget on `sword: den`, a fragment of the installer's own name
+  # behind the dialog.
+  #
+  # ONE CLICK AND A SETTLE, and the `wait for the terms page` below is the retry: it is already a
+  # loop, and a page that has not arrived is what a loop is for.
+  step "desktop - installer"
+    do == [{click: [81, 259], settle: 6}]
+    settle == 28
+  step "wait for the terms page"
+    loop == {check: {from: screen, mode: text, name: done, rect: [690, 195, 1040, 255], rect_at: [1920, 1080], words: [terms, of, use]}, do: [{settle: 6}], max: 30, see: {name: screen}, until: {fact: done}}
+  click "terms of use" at 1482 889, waiting 14s, named "terms of use"
+  step "wait for the installation type page"
+    loop == {check: {from: screen, mode: text, name: done, rect: [660, 210, 1360, 270], rect_at: [1920, 1080], words: [select, type, of, installation]}, do: [{settle: 6}], max: 30, see: {name: screen}, until: {fact: done}}
+  click installation at 1482 889, waiting 16s, named "installation type"
+  step "wait for the confirmation page"
+    loop == {check: {from: screen, mode: text, name: done, rect: [457, 284, 547, 340], rect_at: [1920, 1080], words: [final, review]}, do: [{settle: 6}], max: 30, see: {name: screen}, until: {fact: done}}
+  click "installation confirmation - start" at 1478 889, waiting 25s, named "installation confirmation - start"
+  click "dismiss the invalid settings modal if it is up" at 1069 583, waiting 4s, named "dismiss the invalid settings modal if it is up"
+  step "wait for the swap file page"
+    loop == {check: {from: screen, mode: text, name: done, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], words: [create, a, swap, file]}, do: [{settle: 6}], max: 40, see: {name: screen}, until: {fact: done}}
+  click swap at 1482 889, waiting 18s, named "swap file"
+  step "wait for the computer identity page"
+    loop == {check: {from: screen, mode: text, name: done, rect: [387, 241, 579, 548], rect_at: [1920, 1080], words: [computer, identity]}, do: [{settle: 6}], max: 40, see: {name: screen}, until: {fact: done}}
+  click computer at 1482 889, waiting 18s, named "computer identity"
+  step "wait for the localization page"
+    loop == {check: {from: screen, mode: text, name: done, rect: [314, 241, 644, 616], rect_at: [1920, 1080], words: [localization, defaults]}, do: [{settle: 6}], max: 40, see: {name: screen}, until: {fact: done}}
+  click localization at 1482 889, waiting 18s, named "localization defaults"
+  step "wait for the account page"
+    loop == {check: {from: screen, mode: text, name: done, rect: [314, 284, 569, 412], rect_at: [1920, 1080], words: [default, user, login]}, do: [{settle: 6}], max: 30, see: {name: screen}, until: {fact: done}}
+  step "account - login name"
+    click == [1210, 342]
+    settle == 2
+    type == '{{ user }}'
+  step "account - password"
+    click == [1210, 377]
+    settle == 2
+    type == '{{ password }}'
+  step "account - confirm password"
+    click == [1210, 412]
+    settle == 3
+    type == '{{ password }}'
+  click autologin at 700 561, waiting 4s, named "autologin"
+  click "default user login" at 1482 889, waiting 25s, named "default user login"
+  step "the installer finishes"
+    loop == {check: {from: screen, mode: text, name: done, rect: [314, 241, 594, 331], rect_at: [1920, 1080], words: [[congratulations], [completed, the, installation]]}, do: [{click: [420, 300], settle: 20}], max: 90, see: {name: screen}, until: {fact: done}}
+  step "stop the machine"
+    shutdown == kill
+    timeout == 120
+  step "publish the disk"
+    compress == '{{ out }}'

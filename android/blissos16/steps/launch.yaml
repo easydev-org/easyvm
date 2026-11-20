@@ -1,4 +1,7 @@
 name: android 13 (blissos 16.9.7) - start the installed disk
+recording_resolution:
+- 1920
+- 1080
 resolution:
 - 1920
 - 1080
@@ -39,7 +42,6 @@ vars:
 
 steps:
   - name: start recording
-    record: blissos16-launch.mp4
 
   - name: boot the installed disk
     boot: true
@@ -61,29 +63,20 @@ steps:
     loop:
       max: 60
       do:
-      - wait: 5
-      ocr:
-        name: boot
-        region:
-        - 0
-        - 0
-        - 1920
-        - 1080
-        region_at:
-        - 1920
-        - 1080
-        scale: 1
-        wait: 0
+      - settle: 5
+      see: {name: boot}
       check:
         name: reached
         from: boot
-        mode: says_any
+        mode: text
         # EITHER THE MENU OR THE ANDROID SPLASH. A menu means grub.cfg was found and is being shown;
         # the splash means it was found and the entry was taken. Both are "the disk started itself".
         words:
         - - blissos
         - - android
         - - grub
+        rect: [0, 0, 1920, 1080]
+        rect_at: [1920, 1080]
       until:
         fact: reached
 
@@ -145,28 +138,19 @@ steps:
     loop:
       max: 20
       do:
-      - wait: 5
-      ocr:
-        name: chooser
-        region:
-        - 600
-        - 580
-        - 1320
-        - 740
-        region_at:
-        - 1920
-        - 1080
-        scale: 1
-        wait: 0
+      - settle: 5
+      see: {name: chooser}
       # THE DIALOG'S OWN TITLE. `home app` is the line the sheet is named after, and it is the one
       # string on this frame that a boot splash, a lock screen and a launcher all lack.
       check:
         name: asked
         from: chooser
-        mode: says
+        mode: text
         words:
         - home
         - app
+        rect: [0, 0, 1920, 1080]
+        rect_at: [1920, 1080]
       until:
         fact: asked
 
@@ -179,7 +163,7 @@ steps:
     click:
     - 666
     - 722
-    wait_after: 3
+    settle: 3
 
   - name: always, so the next boot goes straight to the desktop
     # `Always` RATHER THAN `Just once`: `Just once` asks again on the next boot, and this disk is
@@ -187,7 +171,7 @@ steps:
     click:
     - 1238
     - 986
-    wait_after: 6
+    settle: 6
 
   - name: wait for Android's own UI
     desktop: android
@@ -196,8 +180,6 @@ steps:
 
   # ONE PICTURE, KEPT. It is the evidence a run passed, and it cannot be produced without the guest
   # being up.
-  - name: photograph the screen
-    screenshot: screen.png
 
   # =======================================================================================
   # STOPPED, NOT ASKED
@@ -211,4 +193,3 @@ steps:
     timeout: 120
 
   - name: stop recording
-    record: false

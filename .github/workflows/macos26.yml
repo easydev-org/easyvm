@@ -13,20 +13,27 @@ name: macos26
 # opens. `macos.yml` is the 15 chain and this is the 26 chain; the day 26 grows an ssh stage it gets a
 # job here, not a condition there.
 #
-# `from_tag` IS ABSENT ON PURPOSE. There is nothing to start from yet: this file's only stage is the
-# one that CREATES the disk.
+# THE CHAIN IS TWO STAGES, AND `from_tag` PICKS WHERE IT STARTS.
+#
+#   setup   CREATES the disk: recovery image, Disk Utility, the copy, the first boot.
+#   ssh     ANSWERS the Setup Assistant, enables Remote Login, and powers off through sshd.
+#
+# There is no `vm-configure` stage because there is no `macos/26/steps/vm-configure.walk` - 26 never
+# grew one, and inventing a stage for a file that does not exist is a job that fails at load.
+#
+# `from_tag: macos26` starts at `ssh`, because that disk is already published. `from_tag: macos26-ssh`
+# is accepted by the ssh job as well: it means "the disk I want is the one ssh publishes", which is
+# how a dispatch names the LAST tag when it wants the chain to end there.
 
 on:
   workflow_dispatch:
     inputs:
       disks_repository:
         description: "the ghcr repository that holds the assets"
-        default: "easydev-org/easyvm"
-      stage:
-        description: "which stage to run: all, setup, ssh, dev, or vm-configure"
-        type: choice
-        options: [all, setup, ssh, dev, vm-configure]
-        default: all
+        default: "easydev-org/easyvm-fork"
+      from_tag:
+        description: "start from this published disk instead of building it (macos26, macos26-ssh)"
+        default: ""
 
 concurrency:
   group: macos26
@@ -61,7 +68,7 @@ jobs:
       # otherwise compare the runner against an empty string and pass everything.
       - uses: actions/checkout@v4
         with:
-          sparse-checkout: macos/26/steps/setup.yaml
+          sparse-checkout: macos/26/steps/setup.walk
       - name: the guest's memory has to fit in the runner's
         run: |
           set -eu
@@ -72,15 +79,19 @@ jobs:
           # dash, where they are syntax errors - and its check is a plain text match, so an awk
           # character class for whitespace trips it. MEASURED: internal/oci's
           # TestNoWorkflowUsesABashOnlyConstruct failed on the awk version of this line.
-          need_mib=$(grep -m1 'memory_mb:' macos/26/steps/setup.yaml | cut -d: -f2 | tr -cd '0-9')
+          # THE `.walk` SPELLS IT `memory_mb == 12288`, so the field separator is `==` and not `:`.
+          # THE VALUE IS THE LAST WORD ON THE LINE, which is true of both spellings - so `awk
+          # '{print $NF}'` reads either one and the check does not have to be edited again when a
+          # file moves between formats.
+          need_mib=$(grep -m1 'memory_mb' macos/26/steps/setup.walk | awk '{print $NF}' | tr -cd '0-9')
           if [ -z "$need_mib" ]; then
-            echo "::error::macos/26/steps/setup.yaml declares no memory_mb, so this check cannot say whether the guest fits"
+            echo "::error::macos/26/steps/setup.walk declares no memory_mb, so this check cannot say whether the guest fits"
             exit 1
           fi
           need_gib=$(( need_mib / 1024 ))
           total_kib=$(awk '/^MemTotal:/{print $2}' /proc/meminfo)
           total_gib=$(( total_kib / 1024 / 1024 ))
-          echo "runner: ${total_gib} GiB, guest: ${need_gib} GiB (macos/26/steps/setup.yaml memory_mb: ${need_mib})"
+          echo "runner: ${total_gib} GiB, guest: ${need_gib} GiB (macos/26/steps/setup.walk memory_mb: ${need_mib})"
           # THE MARGIN IS TWO GIB, AND IT COMES FROM THE MEASUREMENT RATHER THAN FROM FEAR.
           #
           # Measured on a host with room: a 12 GiB guest's qemu RSS climbs to 12.01 GiB during the copy
@@ -95,20 +106,13 @@ jobs:
           # runner that this walk is now sized for.
           margin_gib=2
           if [ "$total_gib" -lt $(( need_gib + margin_gib )) ]; then
-            echo "::error::this runner has ${total_gib} GiB and the macOS 26 setup walk asks for ${need_gib} GiB plus about ${margin_gib} GiB for qemu itself. The guest will be killed by the OOM killer a few minutes into the copy, with no error in any log - measured on run 44122437321, where a 16 GiB guest on a 15 GiB runner left disk.qcow2 at 194 KiB. Lower memory_mb in macos/26/steps/setup.yaml, or use a larger runner."
+            echo "::error::this runner has ${total_gib} GiB and the macOS 26 setup walk asks for ${need_gib} GiB plus about ${margin_gib} GiB for qemu itself. The guest will be killed by the OOM killer a few minutes into the copy, with no error in any log - measured on run 44122437321, where a 16 GiB guest on a 15 GiB runner left disk.qcow2 at 194 KiB. Lower memory_mb in macos/26/steps/setup.walk, or use a larger runner."
             exit 1
           fi
 
   setup:
     needs: room
-    # `all` IS THE NORMAL RUN AND `setup` REBUILDS ONLY THE INSTALLER. `ssh` SKIPS THIS JOB, so the
-    # ssh stage can be re-run against the disk that is already published as `macos26` without paying
-    # for the two-and-a-half-hour install again - which is the whole reason these are two jobs.
-    # A DISPATCH INPUT IS EMPTY ON EVERY OTHER EVENT, so the event name is tested first - this
-    # repository's `TestNoConditionDependsOnAnAbsentDispatchInput` refuses a bare `inputs.` check, and
-    # it is right: a `workflow_call` or a `push` would have `inputs.stage` empty and the comparison
-    # false, silently skipping the job while the workflow reports success.
-    if: github.event_name != 'workflow_dispatch' || inputs.stage == 'all' || inputs.stage == 'setup'
+    if: always() && !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.from_tag == '' || inputs.from_tag == 'macos26')
     uses: ./.github/workflows/stage.yml
     secrets: inherit
     with:
@@ -118,7 +122,7 @@ jobs:
         [
           {
             "name": "macos26-setup",
-            "file": "macos/26/steps/setup.yaml",
+            "file": "macos/26/steps/setup.walk",
             "pull": "",
             "assets": ["macos-recovery-tahoe:recovery.dmg", "macos-asset-boot-26:boot.img", "macos-asset-rom-26:macos.rom", "macos-asset-vars-26:macos.vars"],
             "out": "macos26.qcow2",
@@ -142,22 +146,11 @@ jobs:
   # reset-then-wait-then-log-in sequence alone spends two and a half minutes.
   ssh:
     needs: [room, setup]
-    # ONLY WHEN THE SETUP STAGE PUBLISHED A DISK, OR WHEN THE CALLER SKIPPED SETUP ON PURPOSE.
-    #
-    # `needs.setup.result` IS `skipped` WHEN `stage: ssh`, and that is the case this exists for: the
-    # disk is already published as `macos26`, and re-installing it to get to a one-hour wizard is
-    # three wasted hours. A FAILED setup is still refused, because then `macos26` points at the
-    # previous release's disk and an ssh stage that ran anyway would prove something about a disk
-    # nobody asked it about.
-    # THE SAME RULE AS `setup`: `inputs.` is empty off a dispatch, so the event is named first and a
-    # non-dispatch run is treated as `all` - which is what it means.
-    if: |
-      always() && !cancelled() && (
-        github.event_name != 'workflow_dispatch' ||
-        inputs.stage == 'ssh' ||
-        inputs.stage == 'all' && needs.setup.result == 'success' ||
-        inputs.stage == 'dev' && needs.setup.result == 'success'
-      )
+    # A SKIPPED `setup` IS SATISFIED BY `needs`, which is what makes `from_tag: macos26` start HERE:
+    # the disk is already published, and re-installing it to reach a one-hour wizard is three wasted
+    # hours. A FAILED setup is still refused, because then `macos26` points at an older disk and an
+    # ssh stage that ran anyway would prove something about a disk nobody asked about.
+    if: always() && !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.from_tag == '' || inputs.from_tag == 'macos26' || inputs.from_tag == 'macos26-ssh')
     uses: ./.github/workflows/stage.yml
     secrets: inherit
     with:
@@ -167,7 +160,7 @@ jobs:
         [
           {
             "name": "macos26-ssh",
-            "file": "macos/26/steps/ssh.yaml",
+            "file": "macos/26/steps/ssh.walk",
             "pull": "macos26",
             "assets": ["macos-asset-boot-26:boot.img", "macos-asset-rom-26:macos.rom", "macos-asset-vars-26:macos.vars"],
             "out": "macos26-ssh.qcow2",
@@ -178,23 +171,17 @@ jobs:
 
   # THE VM-CONFIGURE STAGE: the guest agent, the three names, the login agent and auto login.
   #
-  # IT IS NOT A COPY OF macos/15/steps/vm-configure.yaml. A probe against the disk the ssh stage
+  # IT IS NOT A COPY OF macos/15/steps/vm-configure.walk. A probe against the disk the ssh stage
   # publishes answered for 26 - time zone already America/Los_Angeles, locale already en_US, FileVault
   # already Off, LocalHostName already `vmuser` - so the time zone, locale and FileVault steps are
   # GONE, and what is left is what the probe found missing: HostName, ComputerName,
   # ~/Library/LaunchAgents (which does not exist), /etc/kcpassword, and `displaysleep 10`.
   #
-  # ITS OWN HOUR. `xcode` is not here - that is the dev job - but the agent install plus the launcher
-  # proof plus two reboots' worth of ssh is still the longest of the configure stages.
+  # ITS OWN HOUR AND A HALF. `xcode` is not here - that is the dev job - but the agent install plus the
+  # launcher proof plus two reboots' worth of ssh is still the longest of the configure stages.
   vm-configure:
     needs: [room, ssh]
-    if: |
-      always() && !cancelled() && (
-        github.event_name != 'workflow_dispatch' ||
-        inputs.stage == 'vm-configure' ||
-        inputs.stage == 'all' && needs.ssh.result == 'success' ||
-        inputs.stage == 'dev' && needs.ssh.result == 'success'
-      )
+    if: always() && !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.from_tag == '' || inputs.from_tag == 'macos26' || inputs.from_tag == 'macos26-ssh' || inputs.from_tag == 'macos26-vm-configure')
     uses: ./.github/workflows/stage.yml
     secrets: inherit
     with:
@@ -204,7 +191,7 @@ jobs:
         [
           {
             "name": "macos26-vm-configure",
-            "file": "macos/26/steps/vm-configure.yaml",
+            "file": "macos/26/steps/vm-configure.walk",
             "pull": "macos26-ssh",
             "assets": ["macos-asset-boot-26:boot.img", "macos-asset-rom-26:macos.rom", "macos-asset-vars-26:macos.vars", "macos-asset-mac-guest-agent:mac-guest-agent"],
             "out": "macos26-vm-configure.qcow2",
@@ -233,12 +220,7 @@ jobs:
   # mostly waiting.
   dev:
     needs: [room, vm-configure]
-    if: |
-      always() && !cancelled() && (
-        github.event_name != 'workflow_dispatch' ||
-        inputs.stage == 'dev' ||
-        inputs.stage == 'all' && needs.vm-configure.result == 'success'
-      )
+    if: always() && !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.from_tag == '' || inputs.from_tag == 'macos26' || inputs.from_tag == 'macos26-ssh' || inputs.from_tag == 'macos26-vm-configure' || inputs.from_tag == 'macos26-dev')
     uses: ./.github/workflows/stage.yml
     secrets: inherit
     with:
@@ -248,7 +230,7 @@ jobs:
         [
           {
             "name": "macos26-dev",
-            "file": "macos/26/steps/dev.yaml",
+            "file": "macos/26/steps/dev.walk",
             "pull": "macos26-vm-configure",
             "assets": ["macos-asset-boot-26:boot.img", "macos-asset-rom-26:macos.rom", "macos-asset-vars-26:macos.vars", "macos-asset-xcode-26.6:Xcode_26.6_Universal.xip", "dev-node-pkg:node.pkg", "dev-python-pkg:python.pkg"],
             "out": "macos26-dev.qcow2",

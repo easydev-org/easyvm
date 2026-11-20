@@ -33,10 +33,37 @@ on:
         description: "the concurrency group, one per OS"
         type: string
         required: true
-      # THE DEFAULT TAG EACH LEG PULLS. A stage that installs has none.
+      # WHERE THE LEG PULLS ITS INPUT DISK FROM, and where it publishes its output.
+      #
+      # THESE ARE TWO INPUTS BECAUSE THEY ARE TWO DECISIONS, and before the split they were one:
+      # every leg pulled from `easydev-org/easyvm` and pushed to `inputs.disks_repository`. A fork
+      # that points `disks_repository:` at the upstream package - which is what it must do to reuse
+      # the 5 GiB Ubuntu ISO nobody wants to bake twice - then also asks its GITHUB_TOKEN to WRITE
+      # there, and a token minted for `easydev-org/easyvm-fork` has no access to `easydev-org/easyvm`
+      # at all. The install finishes, the disk is real, and the push answers 403.
+      #
+      # SO THE READ SIDE DEFAULTS TO THE UPSTREAM PACKAGE AND THE WRITE SIDE TO THIS REPOSITORY.
+      # `${{ github.repository }}` is the fork when this runs on the fork and the product when it runs
+      # on the product, which is the only value that is right in both places.
       disks_repository:
+        description: >-
+          the ghcr package this leg PULLS its input disk and media from. Upstream by default, because
+          those packages are public and re-baking them costs hours.
         type: string
-        default: "easydev-org/easyvm"
+        default: "easydev-org/easyvm-fork"
+      publish_repository:
+        description: >-
+          the ghcr package this leg PUSHES its disk to. This repository by default - a token can only
+          write to the package its own repository holds.
+        type: string
+        default: ""
+      image_tag:
+        description: >-
+          the image tag this stage runs inside. `latest` is the product and is what every operating
+          system's workflow uses; a BRANCH tag is how a change to the vocabulary is driven by real
+          guests before it merges, without publishing over `:latest`.
+        type: string
+        default: "latest"
 
 # NO WORKFLOW-LEVEL `concurrency` HERE. THE CALLER OWNS THE RUN.
 #
@@ -52,7 +79,7 @@ jobs:
     # a default chosen for a 70-minute Windows stage.
     timeout-minutes: ${{ matrix.timeout }}
     container:
-      image: ghcr.io/${{ github.repository }}:latest
+      image: ghcr.io/${{ github.repository }}:${{ inputs.image_tag }}
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
@@ -279,6 +306,41 @@ jobs:
             ls -l "$dest"
           done
 
+      - name: the guest's memory has to fit in the runner's
+        # A GUEST BIGGER THAN THE RUNNER IS KILLED BY THE OOM KILLER A FEW MINUTES IN, AND NOTHING IN
+        # THE LOGS SAYS SO. MEASURED, from the macos26 stage that first asked 16384:
+        #
+        #	the guest was killed and disk.qcow2 was left at 194 KiB
+        #
+        # with no error in any log - the machine simply stopped being there. This stage now asks for
+        # 12288 on windows and macos 15, and a standard `ubuntu-24.04` runner has sixteen.
+        #
+        # THE NUMBER COMES FROM THE FILE THIS LEG RUNS, so raising it there is caught here rather
+        # than turning into a broken pipe nobody can attribute.
+        #
+        # `{print $NF}` READS BOTH SPELLINGS: a `.walk` writes `memory_mb == 12288` and a `.yaml`
+        # writes `memory_mb: 12288`; the number is the last word either way.
+        run: |
+          set -eu
+          file="${{ matrix.file }}"
+          need_mib=$(grep -m1 'memory_mb' "$file" | awk '{print $NF}' | tr -cd '0-9')
+          if [ -z "$need_mib" ]; then
+            echo "the guest size is the engine's default; $file names none"
+            exit 0
+          fi
+          need_gib=$(( need_mib / 1024 ))
+          total_kib=$(awk '/^MemTotal:/{print $2}' /proc/meminfo)
+          total_gib=$(( total_kib / 1024 / 1024 ))
+          # TWO GIBABYTES OF MARGIN: qemu's own RSS on top of the guest was measured at 12.01 GiB for
+          # a 12 GiB guest, so the guest is essentially all of it and the margin is for the daemon.
+          if [ "$(( need_gib + 2 ))" -gt "$total_gib" ]; then
+            echo "::error::$file asks for ${need_gib} GiB and this runner has ${total_gib} GiB."
+            echo "::error::The OOM killer would take the guest a few minutes in, leaving an almost"
+            echo "::error::empty disk and no error in any log. Lower memory_mb or use a larger runner."
+            exit 1
+          fi
+          echo "runner: ${total_gib} GiB, guest: ${need_gib} GiB (from $file)"
+
       - name: start the daemon
         # ONE PROCESS OWNS THE MACHINE FOR THE WHOLE STAGE. It runs in the background because
         # `easyvm run` is a CLIENT: it sends a request and returns, and the daemon drives the file.
@@ -300,6 +362,17 @@ jobs:
           #
           # and every install leg failed in 312 bytes of log with NO VIDEO AT ALL, because a machine
           # that never started records nothing. Three workflows, one flag.
+          # THE PACKAGE THIS GUEST WRITES TO IS THIS REPOSITORY, AND IT IS SAID OUT LOUD.
+          #
+          # `internal/asset` FALLS BACK TO ONE HARD-CODED NAME when `DISKS_REPOSITORY` is empty -
+          # correct for the product, wrong for every fork, and a fork has no credentials for it. A
+          # `fetch:` step that runs inside this daemon would therefore publish into `easydev-org/easyvm`
+          # and be refused with a 403 that names the registry rather than the variable.
+          #
+          # THE LEGS BELOW DO NOT FETCH: every input arrives by `pull-artifact.sh` before the walk
+          # starts, which is the rule this stage is built on. This is the belt for the one step that
+          # forgets, and it is the fork's own name rather than a second default.
+          export DISKS_REPOSITORY="$(printf '%s' "${{ inputs.publish_repository || github.repository }}" | tr '[:upper:]' '[:lower:]')"
           easyvm serve --work "$GITHUB_WORKSPACE/work" \
             > "$GITHUB_WORKSPACE/work/daemon.log" 2>&1 &
           echo $! > "$GITHUB_WORKSPACE/work/daemon.pid"
@@ -543,7 +616,7 @@ jobs:
         with:
           path: ${{ env.out }}
           tag: ${{ env.tag }}
-          repository: ${{ inputs.disks_repository }}
+          repository: ${{ inputs.publish_repository || github.repository }}
           media-type: application/vnd.easydev.qcow2
           token: ${{ github.token }}
           check-name: ${{ matrix.name }}-publish

@@ -1,0 +1,144 @@
+walkthrough "windows 11 - dev toolchain"
+  resolution 1920x1080
+  recording_resolution 1920x1080
+  user vmuser
+  password admin
+  var out == {default: out/distro.qcow2, from: args.out}
+  var user == {default: vmuser, from: args.user}
+  header boot_disk == from_caller
+  header ssh_port == 2222
+
+  step "boot the disk"
+    boot == true
+    os == windows
+    # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
+    memory_mb == 12288
+    timeout == 900
+  step "wait for the desktop"
+    desktop == windows
+    timeout == 900
+  step "wait for sshd"
+    require_ssh == true
+    ssh_probe == echo ok
+    timeout == 900
+  step "copy wait-winget.ps1 in"
+    scp == [wait-winget.ps1, "C:/Users/{{ user }}/wait-winget.ps1"]
+    timeout == 300
+  step "wait for winget to have an index"
+    ssh == "powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/{{ user }}/wait-winget.ps1"
+    timeout == 900
+  step "copy install-buildtools.ps1 in"
+    scp == [install-buildtools.ps1, "C:/Users/{{ user }}/install-buildtools.ps1"]
+    timeout == 300
+  step "install the build tools"
+    ssh == "powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/{{ user }}/install-buildtools.ps1"
+    timeout == 3600
+  step "copy install-the-windows-sdk.ps1 in"
+    scp == [install-the-windows-sdk.ps1, "C:/Users/{{ user }}/install-the-windows-sdk.ps1"]
+    timeout == 300
+  step "install the windows sdk"
+    ssh == "powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/{{ user }}/install-the-windows-sdk.ps1"
+    timeout == 2400
+  step "copy install-the-dotnet-sdk.ps1 in"
+    scp == [install-the-dotnet-sdk.ps1, "C:/Users/{{ user }}/install-the-dotnet-sdk.ps1"]
+    timeout == 300
+  step "install the dotnet sdk"
+    ssh == "powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/{{ user }}/install-the-dotnet-sdk.ps1"
+    timeout == 2400
+  step "copy install-powershell-7.ps1 in"
+    scp == [install-powershell-7.ps1, "C:/Users/{{ user }}/install-powershell-7.ps1"]
+    timeout == 300
+  step "install powershell 7"
+    ssh == "powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/{{ user }}/install-powershell-7.ps1"
+    timeout == 2400
+  step "copy install-python.ps1 in"
+    scp == [install-python.ps1, "C:/Users/{{ user }}/install-python.ps1"]
+    timeout == 300
+  step "install python"
+    ssh == "powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/{{ user }}/install-python.ps1"
+    timeout == 2400
+  step "copy install-node.ps1 in"
+    scp == [install-node.ps1, "C:/Users/{{ user }}/install-node.ps1"]
+    timeout == 300
+  step "install node"
+    ssh == "powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/{{ user }}/install-node.ps1"
+    timeout == 2400
+  step "copy install-git.ps1 in"
+    scp == [install-git.ps1, "C:/Users/{{ user }}/install-git.ps1"]
+    timeout == 300
+  step "install git"
+    ssh == "powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/{{ user }}/install-git.ps1"
+    timeout == 2400
+  # THE FIRST RESTART AFTER SIX INSTALLERS TAKES LONGER THAN TEN MINUTES.
+  #
+  # MEASURED on run 44196553357, the first run to install everything: build tools, the Windows SDK,
+  # the .NET SDK, PowerShell 7, Python, Node and Git all succeeded, the machine rebooted - and sshd did
+  # not answer within the 600 seconds this step allowed. The step before the installs uses the same
+  # `require_ssh:` and passes in seconds, so the difference is what is now on the disk: six packages'
+  # worth of services, PATH entries and first-run work, all of it happening while Windows is still
+  # bringing its own services up.
+  #
+  # THIRTY MINUTES, which is the budget the OTHER slow boots in this repository already use
+  # (`boot: timeout: 1800`, `wait for the desktop: timeout: 5400`). A restart that has not answered
+  # in half an hour is a failure worth reporting; one that takes twelve minutes is not.
+  step "wait for sshd again"
+    require_ssh == true
+    ssh_probe == echo ok
+    timeout == 1800
+  step "copy msvc-check.ps1 in"
+    scp == [msvc-check.ps1, "C:/Users/{{ user }}/msvc-check.ps1"]
+    timeout == 300
+  step "build and run a C program"
+    ssh == "powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/{{ user }}/msvc-check.ps1"
+    timeout == 900
+  step "copy dotnet-check.ps1 in"
+    scp == [dotnet-check.ps1, "C:/Users/{{ user }}/dotnet-check.ps1"]
+    timeout == 300
+  step "build and run a dotnet app"
+    ssh == "powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/{{ user }}/dotnet-check.ps1"
+    timeout == 1800
+  # `pwsh` IS INSTALLED AND NOT YET ON PATH, BECAUSE PATH IS PER-SESSION ON WINDOWS.
+  #
+  # THE INSTALL SUCCEEDS - the step above downloads and hash-verifies the MSI:
+  #
+  #	=== install powershell 7
+  #	  script install-powershell-7.ps1 (powershell) -> 0
+  #	  Downloading https://github.com/PowerShell/PowerShell/releases/download/v7.6.10/PowerShell-7.6.10-win-x64.msi
+  #	  Successfully verified installer hash
+  #
+  # and then the very next step cannot find it:
+  #
+  #	=== prove powershell 7
+  #	  ssh: powershell -Command "pwsh -v" -> 1
+  #	  pwsh : The term 'pwsh' is not recognized ...
+  #
+  # MEASURED on run 44177932721, step 16/22. `winget --scope machine` writes the new directory into the
+  # MACHINE PATH, and an ssh exec shell inherits the environment sshd captured when it STARTED - which
+  # was before the install. The same file already knows this: `install the build tools` resolves
+  # `winget.exe` out of the registry PATH instead of trusting `$env:PATH`, for exactly this reason.
+  #
+  # SO THE PROOF LOOKS WHERE THE INSTALLER PUT IT, and still runs it: a path that exists and answers is
+  # a stronger statement than a name that resolves.
+  step "prove powershell 7"
+    ssh == powershell -Command "$p = 'C:\Program Files\PowerShell\7\pwsh.exe'; if (Test-Path $p) { & $p -v } else { 'PWSH_MISSING'; exit 1 }"
+    timeout == 300
+  step "prove the windows sdk"
+    ssh == powershell -Command "if (Test-Path 'C:\Program Files (x86)\Windows Kits\10\Include') { Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\Include' -Name } else { 'SDK_MISSING' }"
+    timeout == 120
+  step "copy prove-python-node-git.ps1 in"
+    scp == [prove-python-node-git.ps1, "C:/Users/{{ user }}/prove-python-node-git.ps1"]
+    timeout == 300
+  step "prove python node and git"
+    ssh == "powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/{{ user }}/prove-python-node-git.ps1"
+    timeout == 300
+  step "note what the toolchain reports"
+    ssh == powershell -Command "'SDK=' + (Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\Include' -Name -ErrorAction SilentlyContinue | Select-Object -Last 1) + ' DOTNET=' + ((& 'C:\Program Files\dotnet\dotnet.exe' --version) 2>&1)"
+    timeout == 180
+  step "ask the guest to power off"
+    ssh == printf '%s\n' '{{ password }}' | sudo -S -p '' poweroff
+    timeout == 300
+  step "wait for the machine to stop"
+    wait_until == stopped
+    timeout == 300
+  step "publish the disk"
+    compress == '{{ out }}'

@@ -1,0 +1,34 @@
+# THE SMALLEST THING THAT PROVES THE VOCABULARY RUNS A GUEST.
+#
+# NOT A DISTRIBUTION INSTALL. Most of what this repository's walkthroughs do needs a full machine -
+# UEFI firmware, a virtio disk, a VGA adapter, a USB tablet - because they drive an INSTALLER through
+# its GUI. This drives a guest that boots in under a minute on 512 MiB, so it is the file that should
+# run on every push: a vocabulary change that breaks `click`, `see`, `want` or the dispatcher fails
+# here in ninety seconds rather than forty minutes into a kubuntu install.
+#
+# A MICROVM HAS NO FIRMWARE AND NO DISPLAY, so the two things a normal boot relies on are both gone:
+# qemu is handed the kernel directly, and the guest's only output is the serial line. That is why
+# every assertion below reads the CONSOLE rather than the screen.
+
+walkthrough "alpine microvm - the vocabulary against the smallest guest"
+  resolution 1024x768
+  recording_resolution 1024x768
+
+  needs alpine.iso alpine-vmlinuz alpine-initramfs
+
+  # THE MEDIUM IS ATTACHED AS A SECOND DISK, not booted from: a microvm is handed its kernel, and
+  # Alpine's `modloop=` points at the squashfs inside this ISO. MEASURED without it: the initramfs
+  # mounts nothing and drops to `initramfs emergency recovery shell launched`.
+  make a disk "alpine.qcow2" of 1 GiB
+  boot as a microvm from kernel "alpine-vmlinuz" and initramfs "alpine-initramfs", waiting up to 300s
+
+  # THE GUEST SAYS THIS ITSELF, on the serial line, before anything else exists. It is the machine
+  # saying "a kernel ran", which is the first fact this walkthrough establishes.
+  wait for the console to say "Linux version", waiting up to 180s
+
+  # AND THEN IT SAYS THIS, which is Alpine's own way of saying "init finished and I want a login".
+  # This is the fact the whole file exists to establish: the vocabulary started a guest and the
+  # guest came all the way up.
+  the console will say "login"
+
+  stop the machine by killing it, waiting up to 60s

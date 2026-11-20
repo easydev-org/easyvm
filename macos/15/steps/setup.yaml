@@ -1,4 +1,7 @@
 name: macos 15 setup (recovery image to setup assistant)
+recording_resolution:
+- 1920
+- 1080
 resolution:
 - 1920
 - 1080

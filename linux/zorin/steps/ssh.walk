@@ -1,0 +1,268 @@
+walkthrough "linux-zorin - sshd"
+  resolution 1920x1080
+  password admin
+  var out == {default: out/distro.qcow2, from: args.out}
+  # THE ACCOUNT THIS DISK HAS IS `vmuservmuser` - see the manjaro header for the measurement.
+  #
+  # ubiquity fills the username from the full name as it is typed, so its two `type:` steps
+  # APPEND and the account is created with the value twice.
+  # `ssh_user` IS THE HEADER KEY THE SSH CLIENT READS - `var user` IS NOT.
+  #
+  # MEASURED ON RUN 44611943331 (manjaro), whose failure was NOT a refused port but
+  #
+  #	wait for sshd: the port is open but no shell answers: ssh: handshake failed: ssh: unable to
+  #	authenticate, attempted methods [none password], no supported methods remain
+  #
+  # - the daemon reached the guest and offered the WRONG NAME. `require_ssh:` and every `ssh ==`
+  # step authenticate as `File.SSHUser`, which is parsed from a top-level `ssh_user:` key
+  # (internal/walk/walk.go) and defaults to `vmuser`. Setting `var user` changes what gets TYPED on
+  # the console; it does not change who the client logs in as.
+  header ssh_user == vmuservmuser
+  var user == {default: vmuservmuser, from: args.user}
+  header recording_resolution == [1920, 1080]
+
+  step "boot the disk"
+    boot == true
+    os == linux
+    # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
+    memory_mb == 4096
+    timeout == 900
+  # THE GREETER IS ASKED FOR BEFORE ANYTHING IS CLICKED, BECAUSE IT IS NOT THERE YET.
+  #
+  # MEASURED ON RUN 44472625613, whose recording is BLACK at 15 seconds and shows the greeter at
+  # 22: the clicks and the `type:` that followed all landed on nothing, so the password field kept
+  # its "Password" placeholder and `wait for the desktop` expired after 15 minutes. Every step below
+  # carries `optional: true`, which is what let the miss through silently - an optional step that
+  # misses is indistinguishable from one that was not needed.
+  #
+  # THE BAND IS THE GREETER'S OWN MIDDLE: the user tile and the password field, x 740..1340 and
+  # y 470..770. Read back from that recording at scale 2 it yields "Password vmuser"; at scale 1 it
+  # yields nothing, which is why the scale is 2 and not the default.
+  step "the greeter is drawn"
+    loop == {check: {from: greeter, mode: text, name: up, rect: [740, 470, 1340, 770], rect_at: [1920, 1080], scale: 2, words: [[password], [vmuser]]}, do: [{key: esc, settle: 4}], max: 60, see: {name: greeter}, until: {fact: up}}
+  step "greeter - the user tile"
+    when == [password, vmuser]
+    click == [960, 488]
+  step "greeter - the password box"
+    when == [password, vmuser]
+    clear == false
+    click == [960, 627]
+    settle == 4
+    type == '{{ password }}'
+  step "greeter - submit"
+    when == [password, vmuser]
+    key == ret
+    settle == 12
+  # ZORIN'S FIRST-RUN "Start Tour" PANEL IS A MODAL THAT TAKES THE KEYBOARD, AND IT MUST GO FIRST.
+  #
+  # MEASURED ON RUN 58323ec's zorin ssh: the recording shows the terminal with only FOUR commands in
+  # it - xset, pkill, the sudo unlock, and 'sudo systemctl stop packagekit' - and then a bare
+  # 'vmuservmuser@...:~$' prompt with NOTHING after it, while the stage's log says it went on to type
+  # seven more commands. Behind the terminal, 'No Thanks / Start Tour' is sitting in a panel in the
+  # middle of the screen.
+  #
+  # `xset` ALSO DOES NOT EXIST HERE ('Command xset not found, did you mean...'), so the screen-awake
+  # step is a no-op on this guest and is replaced by nothing: the panel is what takes the input, not
+  # a blanked screen.
+  #
+  # `No Thanks` is at 873,797. Escape follows for a panel that is already dismissed.
+  step "dismiss the first-run tour panel, which takes the keyboard"
+    when == [password, vmuser]
+    click == [873, 797]
+  press Escape, waiting 2s, named "clear anything the panel left behind"
+  press ctrl+alt+t, waiting 20s, named "open the terminal"
+  # NO `terminal_wait:` HERE, AND THAT IS THE FIX RATHER THAN AN OMISSION.
+  #
+  # `terminal_wait:` OPENS A TERMINAL (ctrl+alt+t) AND THEN TYPES. The step above has already
+  # opened one, so a second ctrl+alt+t starts a NEW terminal window and the keys that follow go to
+  # it - while the command already typed into the first one is never submitted.
+  #
+  # MEASURED ON RUN 44545555943's kubuntu ssh recording, whose terminal shows exactly that:
+  #
+  #	vmuser@kubuntu:~$ xset s off; xset -dpms; xset s noblank; echo screen_kept_onECHO ADMIN | sudo ...
+  #	server does not have extension for -dpms option
+  #	[sudo: authenticate] Password:
+  #
+  # `SCREEN_KEPT_ON` runs straight into `ECHO ADMIN` with no line break: the Return after the first
+  # command went to the OTHER window. And the `xset -dpms` failure - "server does not have extension
+  # for -dpms option" - is harmless; the screen is still kept awake by `s off` and `s noblank`.
+  # UBUNTU'S SHAPE, WHICH IS THE ONE THAT PASSES: unlock sudo ONCE, then plain sudo.
+  #
+  # MEASURED ON RUN 44556944097, whose zorin ssh recording shows the terminal with
+  #
+  #	$ CHO ADMIN | sudo -S sh -c "systemctl stop packagekit ...
+  #	CHO: command not found
+  #	[sudo] password for vmuser:
+  #	sudo: no password was provided
+  #	sudo: a password is required
+  #	Command 'apt-get' not found ...
+  #
+  # TWO FAULTS AT ONCE: the 'echo' lost its first two characters (the previous command's Return
+  # had not been delivered, so 'echo admin' was appended to it), and sudo therefore never got a
+  # password. Nothing was installed and sshd never started.
+  #
+  # `printf ... | sudo -S -v` IS THE CURE ubuntu's stage has used all along: it authenticates ONCE
+  # and stores the timestamp, after which every `sudo` needs no password at all - so a command that
+  # loses its first characters cannot lose the password with them.
+  # THE SCREEN GOES BLACK WHILE THE INSTALL RUNS, WHICH IS WHY THE LATER COMMANDS DO NOTHING.
+  #
+  # MEASURED ON RUN 44557723577: the install itself SUCCEEDS - the recording shows
+  #
+  #	Setting up openssh-server (1:9.6p1-3ubuntu13.20) ...
+  #	Creating SSH2 RSA key ... ECDSA key ... ED25519 key ...
+  #	Created symlink /etc/systemd/system/sshd.service -> ...
+  #
+  # and then `/usr/sbin/policy-rc.d returned 101, not running 'restart ssh.socket'`, after which the
+  # last thirty seconds of the recording are PURE BLACK. dpms took the screen during the 60-second
+  # settle that followed the install, and the commands after it typed into a dark screen.
+  #
+  # `xset s off` is not enough on its own for this desktop: the blanking policy here also involves
+  # the screensaver daemon, so both are set, and the power settings are set through them.
+  # `xset` IS NOT INSTALLED ON THIS GUEST, AND THE STEP THAT CALLED IT STILL RAN THE REST.
+  #
+  # MEASURED: "Command 'xset' not found, did you mean: command 'xset' from deb x11-xserver-utils".
+  # The blanking on this desktop comes from GNOME's own idle timer, so `gsettings` is the part that
+  # does the work here - and it is kept, without the `;` chain that put three failures in front of it.
+  # THE UPDATER'S POLKIT DIALOG IS MODAL AND IT APPEARS WHILE THE STAGE IS TYPING.
+  #
+  # MEASURED ON RUN 61537d1's zorin ssh, at 400 s: a centred "Authentication Required / To install or
+  # remove software, you need to authenticate" panel with 'Sorry, that didn't work. Please try again.'
+  # in red under its password box, an "Install in ..." progress window behind it, and the terminal
+  # behind THAT already showing '[sudo] pas...'. So the password meant for the terminal went into the
+  # polkit box, polkit rejected it, and every later command went nowhere: sshd was never enabled and
+  # 22 refused for ten minutes.
+  #
+  # THE PANEL IS DISMISSED BY THE KEYBOARD, IN A LOOP, BECAUSE IT COMES BACK:
+  #   - Escape closes a polkit prompt on GNOME;
+  #   - Cancel (860,700 on that frame) is the same act if Escape is not enough;
+  #   - the loop stops when its own heading is no longer on the screen.
+  #
+  # This runs BEFORE anything types into the terminal, because a single character lost to the panel
+  # is a step that silently did nothing.
+  # THE PANEL IS DISMISSED WITH A FIXED NUMBER OF KEYSTROKES, NOT A CONDITION.
+  #
+  # A `loop:` STOPS WHEN ITS FACT IS TRUE, and the fact that matters is "the panel is gone" - which
+  # `check:` cannot express: every mode it has is about words that ARE on screen. `says_without` is
+  # the nearest, and it is the INVERSE of what is needed (true while the panel is still up), so a
+  # loop on it would press Escape until the panel arrived rather than until it left.
+  #
+  # Three Escapes and two Cancel clicks are what it takes, and pressing them when the panel is
+  # already gone costs nothing: Escape on a desktop closes an overview that is not open.
+  step "dismiss the updater's authentication panel"
+    do == [{key: esc, settle: 2}, {key: esc, settle: 2}, {click: [860, 700], settle: 2}, {key: esc, settle: 2}]
+  step "keep the screen on, with the tool this guest actually has"
+    run == gsettings set org.gnome.desktop.session idle-delay 0
+    settle == 4
+  # THE SOFTWARE UPDATER STEALS FOCUS AND THE LONG COMMANDS ARRIVE IN PIECES.
+  #
+  # MEASURED ON RUN 44588531483, whose terminal at 150 s reads fragments - 'echo SCRE', 'SCREEN_KEP',
+  # 'sudo sys', '-upgrade.s', 'SUDO AT_' - with a '>' continuation prompt under them, while the
+  # Software Updater sits over the window. '>' means zsh is waiting for a quote to close, and the
+  # fragments are what is left of commands whose characters went to the dialog instead.
+  #
+  # `sudo` IS UNLOCKED FIRST, BECAUSE `pkill` AS THE USER CANNOT KILL A ROOT-OWNED UPDATER.
+  #
+  # MEASURED: "pkill: killing pid 1022 failed: Operation not permitted" - the updater runs as root,
+  # so the unprivileged pkill this file used did nothing and the panel kept coming back. Authenticate
+  # once, then kill it with the authority to do so.
+  step "unlock sudo once for this session"
+    run == printf '%s\n' {{ password }} | sudo -S -v
+    settle == 5
+    type_gap == 0.06
+  step "stop the updater that keeps raising the panel"
+    run == sudo pkill -f update-notifier
+    settle == 3
+    type_gap == 0.06
+    terminal_wait == 0
+  step "stop the software centre"
+    run == sudo pkill -f gnome-software
+    settle == 3
+    type_gap == 0.06
+    terminal_wait == 0
+  # `apt-get update` FIRST: this disk's index can point at a version the archive has replaced,
+  # which answers 404 and reads like a network problem (measured on popos, same family).
+  # THE SOFTWARE UPDATER RAISES POLKIT'S 'Authentication Required' OVER THE TERMINAL, UNPROMPTED.
+  #
+  # MEASURED ON RUN 44557723577's successor: at 150 s the screen is that dialog - "To install or
+  # remove software, you need to authenticate" - with the terminal visible behind it and these
+  # lines on it:
+  #
+  #	xset s off; xset s noblank; xset -dpms ...
+  #	-S -v
+  #	sudo apt ...
+  #
+  # The dialog is not from a click: this desktop's update notifier puts it up on its own when the
+  # package index changes, and it takes the keyboard. Nothing typed after it arrives.
+  #
+  # SO THE NOTIFIER IS STOPPED BEFORE THE INDEX IS TOUCHED. `apt-daily` and PackageKit are what
+  # raise it; both are stopped here (they were the subject of a step this file used to have, whose
+  # CLICK on the updater was the thing pressing Install).
+  # THE LONG LINES ARRIVE WITH DOUBLED CHARACTERS, SO THERE ARE NO LONG LINES.
+  #
+  # MEASURED ON RUN 44614135879's terminal, in full:
+  #
+  #	$ pkill -f update-nnnotifier; pkill -f gnome-software; pkill -f packagekitd
+  #	$ sudo systemctl stop packagekit unattended-upgrades apt--daily.service apt-daily-upgrade.service
+  #	  ; sudo systemctl disable ---now packagekit; ...
+  #	Failed to stop apt--daily.service: Unit apt--daily.service not loaded.
+  #	systemctl: unrecognized option '---now'
+  #
+  # `nnn`, `--`, `---` - each one a key ARRIVING TWICE. That is autorepeat: the engine sends key-down
+  # and key-up in one event list (see qmp.Conn.Stroke), but a guest under load can still latch a key
+  # down for a frame too long, and a 184-character line is 184 chances for it to happen. The line
+  # that BROKE was the one command this stage cannot do without.
+  #
+  # SO EVERY COMMAND IS SHORT, and `type_gap` is wide enough that each key is released before the
+  # next is sent. A short command that doubles a character still names a real unit; a long one that
+  # doubles a `-` fails on its first word.
+  step "stop the update notifier, one short command at a time"
+    run == sudo systemctl stop packagekit
+    settle == 3
+    type_gap == 0.09
+  step "stop the unattended upgrades"
+    run == sudo systemctl stop unattended-upgrades
+    settle == 3
+    type_gap == 0.09
+  step "stop the timers that start them again"
+    run == sudo systemctl stop apt-daily.timer apt-daily-upgrade.timer
+    settle == 3
+    type_gap == 0.09
+  step "refresh the package index"
+    run == sudo apt-get update
+    settle == 60
+    type_gap == 0.09
+  step "install openssh-server"
+    run == sudo apt-get install -y openssh-server
+    settle == 90
+    type_gap == 0.09
+  step "allow password authentication"
+    run == sudo sed -i "s/^#\?\s*PasswordAuthentication.*/PasswordAuthentication yes/" /etc/ssh/sshd_config ; sudo grep -i "^PasswordAuthentication" /etc/ssh/sshd_config
+    settle == 3
+    type_gap == 0.09
+  # THE ENABLE IS NOT DECORATION: `policy-rc.d returned 101` means the package install was told NOT
+  # to start the service, so this is the step that makes sshd run at all.
+  step "enable ssh at boot"
+    run == sudo systemctl enable ssh
+    settle == 5
+    type_gap == 0.09
+  step "start ssh now"
+    run == sudo systemctl start ssh
+    settle == 8
+    type_gap == 0.09
+  step "wait for sshd"
+    require_ssh == true
+    timeout == 600
+  step "prove the kernel over ssh"
+    ssh == uname -a
+    timeout == 120
+  step "prove the account over ssh"
+    ssh == id -un; hostname
+    timeout == 120
+  step "ask the guest to power off"
+    ssh == printf '%s\n' '{{ password }}' | sudo -S -p '' poweroff
+    timeout == 300
+  step "wait for the machine to stop"
+    timeout == 300
+    wait_until == stopped
+  step "publish the disk"
+    compress == '{{ out }}'

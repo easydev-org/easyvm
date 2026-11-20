@@ -1,0 +1,14 @@
+walkthrough "what a reading looks like"
+  resolution 1920x1080
+  recording_resolution 1920x1080
+
+  # ONE CAPTURE, TWO QUESTIONS ABOUT IT: the words in one place, the colour in another.
+  see the screen as "page"
+
+  # `want:` USED TO COMBINE FOUR COMPARISONS INTO ONE BOOLEAN, AND NOTHING USED IT.
+  # `check:` binds ONE boolean from ONE reading, so a combined verdict is several steps and one `if:` -
+  # which is what a reader can follow, and what 29 walkthroughs actually do.
+  step "the middle says install"
+    check == {name: label_ok, from: page, mode: text, rect: middle, rect_at: [1920, 1080], words: [[Install]]}
+  step "the bottom band is a toolbar"
+    check == {name: panel_ok, from: page, mode: mean_between, rect: bottom 4.5%, rect_at: [1920, 1080], range: [0, 255]}

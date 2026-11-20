@@ -1,4 +1,7 @@
 name: nixos - the Calamares walk
+recording_resolution:
+- 1920
+- 1080
 resolution:
 - 1920
 - 1080

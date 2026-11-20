@@ -1,0 +1,119 @@
+walkthrough "linux-popos - sshd"
+  resolution 1920x1080
+  password admin
+  var out == {default: out/distro.qcow2, from: args.out}
+  var ssh_user == vmuser
+  var user == {default: vmuser, from: args.user}
+  header recording_resolution == [1920, 1080]
+
+  step "boot the disk"
+    boot == true
+    os == linux
+    # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
+    memory_mb == 4096
+    timeout == 900
+  # THIS DISK COMES UP ON A FULL-DISK-ENCRYPTION PROMPT, AND THE WALK HAS TO ANSWER IT.
+  #
+  # MEASURED ON RUN 44550974321, whose ssh recording at 120 s is
+  #
+  #	cryptsetup: ERROR: cryptdata: cryptsetup failed, bad password or options?
+  #	[lock]  Please unlock disk cryptdata
+  #
+  # plymouth's unlock screen, with nothing typing into it. The stage then spent ten minutes on
+  # 'connection refused' against a guest that had never finished booting.
+  #
+  # THE INSTALL WALK DOES CLICK 'drive encryption - don't encrypt', so this is not what it asked
+  # for - but the install is not being changed, and the disk that was published is encrypted. The
+  # stage therefore unlocks what it was given.
+  #
+  # THE PASSPHRASE IS THE ACCOUNT PASSWORD: pop's installer asks for one passphrase and uses it for
+  # both. It is typed blind into plymouth - there is no field to click - and Return submits it.
+  # `optional` is NOT used here: a disk that needs no unlock must not hang, so the type is guarded
+  # by the prompt's own words.
+  step "the disk asks for its passphrase, when it is encrypted"
+    loop == {check: {from: unlock, mode: text, name: locked, rect: [600, 480, 1320, 600], rect_at: [1920, 1080], scale: 1, words: [[unlock, disk], [cryptsetup]]}, do: [{settle: 5}], max: 40, see: {name: unlock}, until: {fact: locked}}
+    optional == true
+  step "answer the passphrase prompt"
+    when == [unlock]
+    settle == 2
+    type == '{{ password }}'
+  press Return, waiting 20s, named "submit the passphrase"
+  step "greeter - the password box"
+    when == [password, vmuser]
+    click == [1120, 283]
+  step "greeter - log in"
+    when == [password, vmuser]
+    settle == 3
+    type == '{{ password }}'
+  step "greeter - submit"
+    when == [password, vmuser]
+    key == ret
+    settle == 12
+  click "open the terminal" at 1092 1048, waiting 20s, named "open the terminal"
+  # NO `terminal_wait:` HERE, AND THAT IS THE FIX RATHER THAN AN OMISSION.
+  #
+  # `terminal_wait:` OPENS A TERMINAL (ctrl+alt+t) AND THEN TYPES. The step above has already
+  # opened one, so a second ctrl+alt+t starts a NEW terminal window and the keys that follow go to
+  # it - while the command already typed into the first one is never submitted.
+  #
+  # MEASURED ON RUN 44545555943's kubuntu ssh recording, whose terminal shows exactly that:
+  #
+  #	vmuser@kubuntu:~$ xset s off; xset -dpms; xset s noblank; echo SCREEN_KEPT_ONECHO ADMIN | sudo ...
+  #	server does not have extension for -dpms option
+  #	[sudo: authenticate] Password:
+  #
+  # `SCREEN_KEPT_ON` runs straight into `ECHO ADMIN` with no line break: the Return after the first
+  # command went to the OTHER window. And the `xset -dpms` failure - "server does not have extension
+  # for -dpms option" - is harmless; the screen is still kept awake by `s off` and `s noblank`.
+  # UBUNTU'S SHAPE: unlock sudo ONCE, then plain sudo for everything.
+  #
+  # MEASURED ACROSS THIS SESSION: every leg that failed at 'wait for sshd' had the terminal show
+  # either 'CHO: command not found' (the previous command's Return was not delivered, so 'echo
+  # admin' lost its first two characters) or 'sudo: no password was provided'. Both are the same
+  # fault - the password travels in the command line - and both are cured by authenticating once
+  # and letting sudo keep the timestamp.
+  step "unlock sudo once for this session"
+    run == printf '%s\n' {{ password }} | sudo -S -v
+    settle == 4
+  # THE PACKAGE INDEX IN THIS DISK IS STALE, AND THE FIRST ATTEMPT GOT A 404.
+  #
+  # MEASURED ON RUN 44557723577's successor, whose terminal reads
+  #
+  #	Err:1 http://apt.pop-os.org/ubuntu noble-updates/main amd64 openssh-sftp-server 1:9.6p1-3ubuntu13.5
+  #	  404  Not Found
+  #	Err:2 http://apt.pop-os.org/ubuntu noble-updates/main amd64 openssh-server 1:9.6p1-3ubuntu13.5
+  #	  404  Not Found
+  #	E: Failed to fetch ... 404  Not Found
+  #
+  # sudo was already unlocked and the terminal was fine - the failure is the index: this disk's
+  # apt lists point at a package version pop-os has since replaced. `apt-get update` first, which is
+  # what the error message itself recommends.
+  step "refresh the package index"
+    run == sudo apt-get update 2>&1 | tail -3
+    settle == 45
+  step "install openssh-server"
+    run == sudo apt-get install -y openssh-server
+    settle == 60
+  step "allow password authentication"
+    run == sudo sed -i "s/^#\?\s*PasswordAuthentication.*/PasswordAuthentication yes/" /etc/ssh/sshd_config ; sudo grep -i "^PasswordAuthentication" /etc/ssh/sshd_config
+    settle == 3
+  step "enable ssh at boot"
+    run == sudo systemctl enable --now ssh
+    settle == 8
+  step "wait for sshd"
+    require_ssh == true
+    timeout == 600
+  step "prove the kernel over ssh"
+    ssh == uname -a
+    timeout == 120
+  step "prove the account over ssh"
+    ssh == id -un; hostname
+    timeout == 120
+  step "ask the guest to power off"
+    ssh == printf '%s\n' '{{ password }}' | sudo -S -p '' poweroff
+    timeout == 300
+  step "wait for the machine to stop"
+    timeout == 300
+    wait_until == stopped
+  step "publish the disk"
+    compress == '{{ out }}'

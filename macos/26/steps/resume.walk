@@ -1,0 +1,13 @@
+walkthrough "macos 26 - start the disk that is already there"
+  resolution 1920x1080
+  var out == {default: out/mac26.qcow2, from: args.out}
+  header boot_disk == from_caller
+  header recording_resolution == [1920, 1080]
+
+  needs recovery.dmg, named "the recovery image this boot reads is already on disk"
+  step "boot the disk that is already there"
+    boot == true
+    memory_mb == 12288
+    os == macos
+    recovery == recovery.dmg
+    timeout == 900

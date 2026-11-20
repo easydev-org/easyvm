@@ -35,7 +35,7 @@ on:
     inputs:
       disks_repository:
         description: "the ghcr repository that holds the disks"
-        default: "easydev-org/easyvm"
+        default: "easydev-org/easyvm-fork"
       from_tag:
         description: >-
           start from a PUBLISHED disk: android-blissos-install or android-blissos-vm. Empty runs the whole chain.
@@ -68,7 +68,7 @@ jobs:
         [
           {
             "name": "android-blissos-install",
-            "file": "android/blissos16/steps/install.yaml",
+            "file": "android/blissos16/steps/install.walk",
             "pull": "",
             "assets": ["iso-blissos-16.9.7:blissos-16.9.7.iso"],
             "out": "android-blissos-install.qcow2",
@@ -89,7 +89,7 @@ jobs:
         [
           {
             "name": "android-blissos-vm",
-            "file": "android/blissos16/steps/vm-configure.yaml",
+            "file": "android/blissos16/steps/vm-configure.walk",
             "pull": "android-blissos-install",
             "out": "android-blissos-vm.qcow2",
             "publish": "android-blissos-vm",

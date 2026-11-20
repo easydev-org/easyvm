@@ -2,6 +2,7 @@ package run
 
 import (
 	"fmt"
+	"image"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -84,7 +85,17 @@ func (e *Executor) doOCR(s walk.Step) error {
 		return err
 	}
 
-	// THE WAIT IS EXPLICIT IN THE FILE AND HONOURED HERE.
+	// THE WAIT IS A WAIT. `wait: 3` means "look three seconds from now", and the frame it looks at
+	// is whatever the one-a-second capture has by then.
+	//
+	// I REWROTE THIS AS "A FRAME STAMPED AT OR AFTER NOW" AND IT MADE EVERY `wait: 0` SLOW. Measured:
+	// 151 of the 194 waits in the tree are `wait: 0`, and asking for a frame from *after* the current
+	// instant means waiting for the next tick - so a step that asked to look immediately waited up to
+	// a second, 151 times over.
+	//
+	// THE TIMESTAMP WAS ANSWERING A QUESTION THE FILE ALREADY ANSWERS. A step that clicked says
+	// `wait: 3`; that is where "let the screen catch up" belongs, and it is visible in the file. A
+	// cache that guessed it from clocks would be deciding it twice.
 	if spec.Wait > 0 {
 		time.Sleep(time.Duration(spec.Wait * float64(time.Second)))
 	}
@@ -156,17 +167,25 @@ func parseOCRStep(s walk.Step) (ocrSpec, error) {
 		return ocrSpec{}, fail(s.Name, "`ocr:` must name what it read: `ocr: {name: menu, ...}`. "+
 			"A reading with no name cannot be asked about by `check:`")
 	}
-	region, ok := rectOfMapping(raw, "region")
+	// `rect:` / `rect_at:` ARE THE NAMES; `region:` / `region_at:` are what every file wrote
+	// before they were merged. ONE REGION, ONE NAME - 245 uses spelled it two ways.
+	region, ok := rectOfMapping(raw, "rect")
 	if !ok {
-		return ocrSpec{}, fail(s.Name, "`ocr:` must name its `region: [x0, y0, x1, y1]`. A read "+
+		region, ok = rectOfMapping(raw, "region")
+	}
+	if !ok {
+		return ocrSpec{}, fail(s.Name, "`ocr:` must name its `rect: [x0, y0, x1, y1]`. A read "+
 			"without one reads the whole screen, which is how a gate matched the title of the "+
 			"window it was waiting to open, and what made 47 of 70 steps read a full 1920x1080 frame")
 	}
 	spec.Region = region
-	at, ok := pairOfMapping(raw, "region_at")
+	at, ok := pairOfMapping(raw, "rect_at")
 	if !ok {
-		return ocrSpec{}, fail(s.Name, "`ocr:` must say `region_at: [width, height]` - the size "+
-			"its `region:` was measured at. Without it the crop cannot be scaled for a guest that "+
+		at, ok = pairOfMapping(raw, "region_at")
+	}
+	if !ok {
+		return ocrSpec{}, fail(s.Name, "`ocr:` must say `rect_at: [width, height]` - the size "+
+			"its `rect:` was measured at. Without it the crop cannot be scaled for a guest that "+
 			"draws at another size, which is the whole reason macOS recovery reads 640x480 while "+
 			"every coordinate in that file was measured at 1920x1080")
 	}
@@ -186,10 +205,10 @@ func parseOCRStep(s walk.Step) (ocrSpec, error) {
 	// rule the step vocabulary applies.
 	for k := range raw {
 		switch k {
-		case "name", "region", "region_at", "scale", "wait":
+		case "name", "rect", "rect_at", "region", "region_at", "scale", "wait":
 		default:
-			return ocrSpec{}, fail(s.Name, "`ocr:` has unknown key %q; it takes name, region, "+
-				"region_at, scale and wait", k)
+			return ocrSpec{}, fail(s.Name, "`ocr:` has unknown key %q; it takes name, rect, "+
+				"rect_at, scale and wait", k)
 		}
 	}
 	return spec, nil
@@ -226,11 +245,70 @@ func (e *Executor) doCheck(s walk.Step) error {
 	if strings.TrimSpace(from) == "" {
 		return fail(s.Name, "`check:` must say `from:` - the reading an `ocr:` step produced")
 	}
-	words, ok := e.seen[from]
-	if !ok {
-		return fail(s.Name, "`check: from: %s` names a reading no `ocr:` step has made. An `ocr:` "+
-			"step has to come first, in file order, with that `name:`", from)
+	// `from:` MAY NAME A FRAME, AND THIS IS THE SHAPE THE VOCABULARY IS MOVING TO.
+	//
+	//	see:   {name: shot}                       capture once
+	//	check: {name: dark, from: shot, mode: mean_between, range: [0, 60], rect: bottom 4.5%}
+	//
+	// THE FRAME WAS CAPTURED BY THE `see:`, so this reads a picture rather than the screen - which is
+	// what keeps `check:` free to re-ask. Every question about one screen is answered from the same
+	// capture, each with its own `rect`.
+	// A `from:` THAT NAMES A CAPTURED FRAME IS A QUESTION ABOUT THE PICTURE, AND IT NEEDS A REGION.
+	//
+	// THE `&& hasRect(raw)` USED TO BE THE WHOLE GUARD, so a frame check that FORGOT its `rect:`
+	// fell through to the word path, looked for `from` in `e.seen` - which a `see:` never writes -
+	// and failed with
+	//
+	//	`check: from: details` names a reading no `ocr:` or `see:` step has made
+	//
+	// which names the wrong problem twice: the capture EXISTS, and the missing thing is the region.
+	// MEASURED on `macos/15/steps/setup.walk` step 11 of 33, on the real CI runner, where the step
+	// was `check: {from: details, mode: contains, text: Uninitialized}` and the walk stopped two
+	// steps before Disk Utility could be driven at all.
+	//
+	// SO THE TWO CASES ARE TOLD APART: a name in `e.shots` IS a frame, and a frame question without
+	// a `rect:` is refused with the sentence that says so - which is what the file's author needs.
+	if path, isShot := e.shots[from]; isShot {
+		if !hasRect(raw) {
+			return fail(s.Name, "`check: from: %s` reads a frame a `see:` captured, so it needs "+
+				"`rect:` - the region to measure, as a fraction (`middle`, `bottom 4.5%%`) or "+
+				"`[x0, y0, x1, y1]` with `rect_at:`. A picture with no region has nothing to ask "+
+				"about", from)
+		}
+		return e.checkFrame(s.Name, raw, from, path)
 	}
+
+	// A `from:` MAY NAME A NUMBER RATHER THAN WORDS, AND THAT IS WHAT MAKES `mode: number_between`
+	// USEFUL. `see:` binds seven numbers per reading - `<name>.mean`, `<name>.similarity` and so on -
+	// and until now nothing read them: `number_between` parsed digits out of a WORD LIST, so a file
+	// could only compare a number that an `ocr:` step happened to read as text.
+	//
+	// MEASURED, and it is why this exists: `check: {from: shot, mode: number_between}` on a reading
+	// that bound `shot.similarity` failed on a real run with "names a reading no ocr: step has made".
+	if _, hasWords := e.seen[from]; !hasWords {
+		if num, hasNumber := e.numbers[from]; hasNumber {
+			return e.runNumberCheck(s.Name, raw, from, num)
+		}
+		// `<name>` alone may also mean `<name>.<the only number>` - a `see: {reference:}` binds exactly
+		// one, and making a file write `from: shot.similarity` when it wrote `reference:` would be the
+		// same duplication in the other direction.
+		var found []string
+		for k := range e.numbers {
+			if strings.HasPrefix(k, from+".") {
+				found = append(found, k)
+			}
+		}
+		if len(found) == 1 {
+			return e.runNumberCheck(s.Name, raw, from, e.numbers[found[0]])
+		}
+		if len(found) > 1 {
+			return fail(s.Name, "`check: from: %s` names a reading with %d numbers (%s). Name one, "+
+				"as in `from: %s.similarity`", from, len(found), strings.Join(found, ", "), from)
+		}
+		return fail(s.Name, "`check: from: %s` names a reading no `ocr:` or `see:` step has made. A "+
+			"reading has to come first, in file order, with that `name:`", from)
+	}
+	words := e.seen[from]
 
 	mode, _ := raw["mode"].(string)
 	if mode == "" {
@@ -248,7 +326,29 @@ func (e *Executor) doCheck(s walk.Step) error {
 	}
 	e.facts[name] = okNow
 	e.Driver.Log(fmt.Sprintf("  %s: %s = %v (mode %s: %s)", s.Name, name, okNow, mode, detail))
-	return nil
+	return assertIfAsked(s, raw, name, okNow, detail)
+}
+
+// assertIfAsked fails the step when the file said the answer MUST be true.
+//
+// A `check:` BINDS A BOOLEAN, and that is right for the two things it is usually for: an `if:` reads
+// it, and a `loop:` re-asks it until it holds. NEITHER OF THOSE IS AN ASSERTION, so neither fails the
+// walk when the answer is false - and a step that says "this screen is the reference" with no `if:`
+// and no `until:` is a step nobody reads.
+//
+// MEASURED on run 44280999011, which reported `status: finished step 44/44` while its own log said:
+//
+//	the screen is the one this file was written against: matched = false
+//	(0.6781 similar, wanted 0.9700..1.0000)
+//
+// THE FILE SAID WHAT THE SCREEN MUST BE AND THE SCREEN WAS NOT THAT, and the run passed. `must: true`
+// is the word that makes the binding a verdict.
+func assertIfAsked(s walk.Step, raw map[string]any, name string, okNow bool, detail string) error {
+	must, _ := raw["must"].(bool)
+	if !must || okNow {
+		return nil
+	}
+	return fail(s.Name, "%s must be true and is false: %s", name, detail)
 }
 
 // runCheckMode applies ONE named comparison and says what it found.
@@ -407,7 +507,11 @@ func runCheckMode(step, mode string, words []string, raw map[string]any) (bool, 
 // checkModeNames is the single list, so a new mode is added HERE and named in the error above.
 func checkModeNames() []string {
 	return []string{"says", "says_any", "says_without", "size_between", "number_between", "equals",
-		"contains", "matches"}
+		"contains", "matches",
+		// AND THE FRAME MODES, WHICH ARE THE SAME QUESTION ASKED OF A PICTURE. They are in one list
+		// because a reader choosing a mode should see every mode, and because a file that says
+		// `from: <a frame>` may now use any word relation the other path offers.
+		"text", "like", "mean_between", "sat_between", "spread_between"}
 }
 
 // modeWords reads a plain word list, `words:`.
@@ -657,3 +761,362 @@ func numbersIn(words []string) []float64 {
 // none: `42 percent`, `41 of 100`, `step 3`. Requiring a unit made `number_between` answer false for
 // every reading that was not a disk capacity.
 var bareNumberPattern = regexp.MustCompile(`(\d+(?:\.\d+)?)\s*(?:(tb|gb|mb)\b)?`)
+
+// runNumberCheck applies a `check:` mode to ONE number a `see:` step bound.
+//
+// ONLY THE MODES THAT COMPARE A NUMBER ARE OFFERED, because the others are about words and would
+// have nothing to look at. The refusal names them, so a file that wrote `mode: says` about a number
+// learns what to write instead.
+func (e *Executor) runNumberCheck(step string, raw map[string]any, from string, value float64) error {
+	mode, _ := raw["mode"].(string)
+	var okNow bool
+	var detail string
+	switch mode {
+	case "number_between":
+		lo, hi, err := modeRange(raw)
+		if err != nil {
+			return fail(step, "%v", err)
+		}
+		okNow = value >= lo && value <= hi
+		detail = fmt.Sprintf("%.4f is %s %.4f..%.4f", value, map[bool]string{true: "in", false: "outside"}[okNow], lo, hi)
+	case "equals":
+		// A NUMBER'S `equals:` HAS NO TOLERANCE, DELIBERATELY: a file that wants a range says
+		// `number_between`, and a float compared for equality is a fact about a measurement nobody
+		// should assert.
+		want, hasWant := toFloat(raw["value"])
+		if !hasWant {
+			return fail(step, "`mode: equals` on a number needs `value:`")
+		}
+		okNow = value == want
+		detail = fmt.Sprintf("%.4f == %.4f", value, want)
+	case "":
+		return fail(step, "`check:` must say `mode:`; for a number the modes are number_between "+
+			"and equals")
+	default:
+		return fail(step, "`mode: %s` compares WORDS and `from: %s` names a NUMBER (%.4f). The "+
+			"modes for a number are number_between and equals", mode, from, value)
+	}
+	name, _ := raw["name"].(string)
+	if strings.TrimSpace(name) == "" {
+		return fail(step, "`check:` must name the boolean it produces, as in `check: {name: same, "+
+			"from: shot, mode: number_between, range: [0.97, 1.0]}`")
+	}
+	if e.facts == nil {
+		e.facts = make(map[string]bool)
+	}
+	e.facts[name] = okNow
+	e.Driver.Log(fmt.Sprintf("  %s: %s = %v (%s)", step, name, okNow, detail))
+	if must, _ := raw["must"].(bool); must && !okNow {
+		return fail(step, "%s must be true and is false: %s", name, detail)
+	}
+	return nil
+}
+
+// finishNumberCheck binds the verdict under the check's own name.
+func finishNumberCheck(step string, raw map[string]any, okNow bool, detail string) error {
+	_ = finishNumberCheck
+	return nil
+}
+
+// hasRect reports whether a `check:` names a region of its own.
+func hasRect(raw map[string]any) bool {
+	_, ok := raw["rect"]
+	if ok {
+		return true
+	}
+	_, ok = raw["region"]
+	return ok
+}
+
+// checkFrame measures a REGION of a frame the walk already captured, then decides on it.
+//
+// THE MODES ARE THE MEASUREMENTS, because a frame offers numbers rather than words:
+//
+//	mode: like            share of pixels matching `reference:`, 0..1   (needs `reference:`)
+//	mode: mean_between    mean brightness in `range:`
+//	mode: sat_between     mean saturation in `range:`, 0..1
+//	mode: spread_between  mean absolute deviation in `range:`
+//	mode: text            the words an OCR read of the region found; judged by `words:`/`without:`
+//
+// A FILE THAT WANTS SEVERAL ANSWERS ABOUT ONE SCREEN WRITES SEVERAL `check:` STEPS, each with its own
+// `rect`. That is the point of the frame being named: the capture is paid once.
+func (e *Executor) checkFrame(step string, raw map[string]any, from, path string) error {
+	name, _ := raw["name"].(string)
+	if strings.TrimSpace(name) == "" {
+		return fail(step, "`check:` must name the boolean it produces")
+	}
+	mode, _ := raw["mode"].(string)
+	if mode == "" {
+		return fail(step, "`check:` must say `mode:` - one of like, mean_between, sat_between, "+
+			"spread_between, text")
+	}
+	rect, err := rectOfCheck(raw)
+	if err != nil {
+		return fail(step, "%v", err)
+	}
+	img, err := screen.Load(path)
+	if err != nil {
+		return fail(step, "loading the frame `%s`: %v", from, err)
+	}
+
+	okNow := false
+	var detail string
+	switch mode {
+	case "like":
+		ref, _ := raw["reference"].(string)
+		if strings.TrimSpace(ref) == "" {
+			return fail(step, "`mode: like` needs `reference:` - the image to compare against")
+		}
+		lo, hi, err := modeRange(raw)
+		if err != nil {
+			return fail(step, "%v", err)
+		}
+		sim, err := e.similarityInRect(step, ref, img, rect)
+		if err != nil {
+			return err
+		}
+		okNow = sim >= lo && sim <= hi
+		detail = fmt.Sprintf("%.4f similar, wanted %.4f..%.4f", sim, lo, hi)
+		// THE PICTURES THE NUMBER CAME FROM, KEPT.
+		//
+		// THE NUMBER ALONE WAS THE WHOLE PROBLEM. MEASURED on a fedora run: the log said
+		// "0.7097 similar, wanted 0.7800..1.0000" about a page that looked correct, and there was no
+		// way to ask WHICH pixels disagreed - the crops were local variables and the frame would be
+		// overwritten by the next capture a second later. These three files answer that question:
+		// what the frame showed, what the reference holds, and where they differ.
+		e.recordLikeEvidence(step, ref, img, rect, sim, lo, hi)
+
+	case "text", "contains", "matches", "equals":
+		// THE WORD MODES, ALL FOUR, FROM ONE READ.
+		//
+		// `contains`, `matches` AND `equals` WERE ONLY EVER IMPLEMENTED FOR A READING BOUND AS WORDS
+		// (`e.seen`), and the frame path refused them with "not a measurement of a frame". MEASURED:
+		// `macos/26/steps/setup.yaml` asks `mode: matches` to decide whether the installer has
+		// finished, and `macos/15` and `macos/26` both ask `mode: contains` about a disk row. Those
+		// are the checks that end an eight-hour install, so a mode the frame path cannot answer is
+		// not a tidiness problem - the walk either fails or, worse, a `must:`-less check binds false
+		// and the loop runs to its ceiling.
+		//
+		// SO THE READ HAPPENS ONCE AND THE RELATION IS APPLIED TO IT, which is the same thing
+		// `runCheckMode` does for `e.seen`. The two paths now agree about what a mode means.
+		//
+		// `scale:` IS THE ENLARGEMENT FOR SMALL TEXT, and it belongs to the READ rather than to the
+		// capture. MEASURED on the real 640x480 recovery frame: at scale 6 four rows read, at scale 2
+		// only two - so a file that needs a small row to be legible says so where it reads it.
+		scale := 3
+		if v, ok := toFloat(raw["scale"]); ok && v > 0 {
+			scale = int(v)
+		}
+		words, err := e.readWords(img, rect, scale)
+		if err != nil {
+			return fail(step, "%v", err)
+		}
+		if mode == "text" {
+			okNow, detail, err = e.judgeWords(step, raw, words)
+			if err != nil {
+				return err
+			}
+			// THE WORDS IT READ, AND WHAT IT WANTED. The log prints one of these - the sentence in
+			// `detail` names either the words that matched or the ones that did not - and neither
+			// tells a reader what the OCR ACTUALLY SAW. Recording the full read is what makes
+			// "tesseract misread the pane" distinguishable from "the pane was not there".
+			e.recordTextEvidence(words, textWanted(raw), okNow, textMissing(raw, words))
+			break
+		}
+		okNow, detail, err = runCheckMode(step, mode, words, raw)
+		if err != nil {
+			return fail(step, "%v", err)
+		}
+	default:
+		r := screen.Measure(img, rect)
+		got, what := 0.0, ""
+		switch mode {
+		case "mean_between":
+			got, what = r.Mean, "mean brightness"
+		case "sat_between":
+			got, what = r.Sat, "saturation"
+		case "spread_between":
+			got, what = r.Spread, "spread"
+		default:
+			return fail(step, "`mode: %s` is not a measurement of a frame; the ones this build "+
+				"has are like, mean_between, sat_between, spread_between, text, contains, "+
+				"matches and equals", mode)
+		}
+		lo, hi, err := modeRange(raw)
+		if err != nil {
+			return fail(step, "%v", err)
+		}
+		okNow = got >= lo && got <= hi
+		detail = fmt.Sprintf("%s %.4f, wanted %.4f..%.4f", what, got, lo, hi)
+	}
+
+	if e.facts == nil {
+		e.facts = make(map[string]bool)
+	}
+	e.facts[name] = okNow
+	e.Driver.Log(fmt.Sprintf("  %s: %s = %v (%s)", step, name, okNow, detail))
+	// `must: true` MAKES THE ANSWER A VERDICT. Without it a check binds a boolean for an `if:` or a
+	// `loop: until:` to read - and a file whose check nothing reads is a file whose assertion cannot
+	// fail. MEASURED on run 44280999011: `matched = false` in the log, `44/44` in the status.
+	if must, _ := raw["must"].(bool); must && !okNow {
+		return fail(step, "%s must be true and is false: %s", name, detail)
+	}
+	return nil
+}
+
+// rectOfCheck reads a `check:`'s own region.
+func rectOfCheck(raw map[string]any) (screen.Rect, error) {
+	rectRaw, ok := raw["rect"]
+	if !ok {
+		rectRaw, ok = raw["region"]
+	}
+	if !ok {
+		return screen.Rect{}, fmt.Errorf("a `check:` of a frame needs `rect:` - the region to " +
+			"measure, as a fraction (`bottom 4.5%%`, `middle`) or `[x0, y0, x1, y1]` with `rect_at:`")
+	}
+	at, _ := pairOfMapping(raw, "rect_at")
+	if at == ([2]int{}) {
+		at, _ = pairOfMapping(raw, "region_at")
+	}
+	rect, err := parseRectAt(rectRaw, at)
+	if err != nil {
+		return screen.Rect{}, err
+	}
+	return rect, nil
+}
+
+// similarityInRect compares one region of a frame to a reference image.
+//
+// THE REGION IS CROPPED FROM BOTH, so a reference may be a full screen and the question about a band
+// of it - which is the case a single `rect:` could not express before.
+func (e *Executor) similarityInRect(step, ref string, frame image.Image, rect screen.Rect) (float64, error) {
+	path := ref
+	if !filepath.IsAbs(path) {
+		beside := filepath.Join(filepath.Dir(e.File.Path), ref)
+		if fileExists(beside) {
+			path = beside
+		}
+	}
+	reference, err := screen.Load(path)
+	if err != nil {
+		return 0, fail(step, "reading the reference %q: %v", ref, err)
+	}
+	fc, err := Crop(frame, rect)
+	if err != nil {
+		return 0, fail(step, "%v", err)
+	}
+	rc, err := Crop(reference, rect)
+	if err != nil {
+		return 0, fail(step, "%v", err)
+	}
+	diff, err := screen.Compare(fc, rc, 8)
+	if err != nil {
+		return 0, fail(step, "%v", err)
+	}
+	return 1 - diff.Changed, nil
+}
+
+// judgeWords applies `words:`/`without:` to a word list, the same rules `check:` uses on a reading.
+func (e *Executor) judgeWords(step string, raw map[string]any, words []string) (bool, string, error) {
+	if sets, ok := raw["words"]; ok {
+		alts, err := wordSetsOfValue(sets)
+		if err != nil {
+			return false, "", fail(step, "%v", err)
+		}
+		for _, set := range alts {
+			if says(words, set) {
+				return true, fmt.Sprintf("read %q", strings.Join(set, " ")), nil
+			}
+		}
+		return false, fmt.Sprintf("none of %s in %q", describeSets(alts), truncateWords(words, 10)), nil
+	}
+	if without, ok := raw["without"]; ok {
+		want := stringsToSlice(without)
+		for _, w := range want {
+			for _, have := range words {
+				if strings.EqualFold(have, w) {
+					return false, fmt.Sprintf("%q is on screen and the check said it would not be", w), nil
+				}
+			}
+		}
+		return true, "none of the excluded words are present", nil
+	}
+	return false, "", fail(step, "`mode: text` needs `words:` (any of these word-sets) or `without:`")
+}
+
+// wordSetsOfValue reads `[[a, b], [c]]` or `[a, b]` as a list of word-sets.
+func wordSetsOfValue(v any) ([][]string, error) {
+	list, ok := v.([]any)
+	if !ok {
+		return nil, fmt.Errorf("`words:` must be a list")
+	}
+	var out [][]string
+	for _, item := range list {
+		switch t := item.(type) {
+		case string:
+			out = append(out, []string{t})
+		case []any:
+			out = append(out, stringsToSlice(t))
+		default:
+			return nil, fmt.Errorf("`words:` items must be strings or lists of strings")
+		}
+	}
+	return out, nil
+}
+
+func stringsToSlice(v any) []string {
+	list, _ := v.([]any)
+	out := make([]string, 0, len(list))
+	for _, item := range list {
+		if str, ok := item.(string); ok {
+			out = append(out, str)
+		}
+	}
+	return out
+}
+
+// textWanted is the words a text condition asked for, as one flat list for the journal.
+func textWanted(raw map[string]any) []string {
+	var out []string
+	if sets, ok := raw["words"]; ok {
+		if alts, err := wordSetsOfValue(sets); err == nil {
+			for _, set := range alts {
+				out = append(out, strings.Join(set, " "))
+			}
+		}
+	}
+	if without, ok := raw["without"]; ok {
+		for _, w := range stringsToSlice(without) {
+			out = append(out, "!"+w)
+		}
+	}
+	return out
+}
+
+// textMissing names the wanted words that the read did not contain.
+//
+// IT IS COMPUTED FOR THE REPORT, not for the verdict: the verdict already happened in `judgeWords`.
+// A reader looking at a failed text check needs to know WHICH word was absent, because "none of
+// welcome/install matched" and "it read 'welcome' but not 'install'" are different problems.
+func textMissing(raw map[string]any, words []string) []string {
+	var out []string
+	have := map[string]bool{}
+	for _, w := range words {
+		have[strings.ToLower(w)] = true
+	}
+	if sets, ok := raw["words"]; ok {
+		if alts, err := wordSetsOfValue(sets); err == nil {
+			for _, set := range alts {
+				if says(words, set) {
+					return nil
+				}
+				for _, w := range set {
+					if !have[strings.ToLower(w)] {
+						out = append(out, w)
+					}
+				}
+			}
+		}
+	}
+	return out
+}

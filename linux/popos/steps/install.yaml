@@ -1,4 +1,7 @@
 name: popos - the pop installer walk
+recording_resolution:
+- 1920
+- 1080
 resolution:
 - 1920
 - 1080

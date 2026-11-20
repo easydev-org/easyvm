@@ -1,0 +1,509 @@
+walkthrough "linux-opensuse-tumbleweed - sshd"
+  resolution 1920x1080
+  # THE PASSWORD THIS DISK WAS BUILT WITH. `install.walk` sets it to Qz7vLp2w, and this file said
+  # `admin` - a value that never existed on the guest.
+  #
+  # MEASURED ON RUN 44557723577's successor: the console login typed six characters for the user and
+  # five for a password, and returned to `localhost login:` because the password was wrong. Five
+  # characters is `admin`; the password on this disk is eight.
+  password Qz7vLp2w
+  var out == {default: out/distro.qcow2, from: args.out}
+  # THE ACCOUNT ON THIS DISK IS `vmuser` - AGAMA DOES NOT APPEND THE WAY CALAMARES DID.
+  #
+  # MEASURED ON RUN 12997be's console, whose whole login history is on the screen:
+  #
+  #	localhost login: vmuser
+  #	Password:
+  #	Login incorrect
+  #
+  # - and the same for `vmuservmuser`. So `vmuser` is the right NAME and the failure there was the
+  # PASSWORD's timing, not the name: every earlier attempt shows
+  #
+  #	localhost login: Qz7vLp2w        <- the password, in the user-name slot
+  #
+  # The `vmuservmuser` guess came from manjaro's calamares and does not apply to this installer.
+  header ssh_user == vmuser
+  var user == {default: vmuser, from: args.user}
+  header recording_resolution == [1920, 1080]
+
+  step "boot the disk"
+    boot == true
+    os == linux
+    # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
+    memory_mb == 4096
+    timeout == 900
+  # THIS MEDIUM BOOTS TO A TEXT CONSOLE, NOT TO A DESKTOP - AND IT ALWAYS DID.
+  #
+  # MEASURED ON RUN 44554888493, whose ssh recording ends on
+  #
+  #	Welcome to openSUSE Leap 16.1 - Kernel 6.12.0-160100.8-default (tty1).
+  #	localhost login:
+  #
+  # a getty prompt, twice, with the machine idle. There is no greeter, no panel, no desktop: the
+  # media this stage boots does not install one. `wait for the desktop` was therefore waiting for
+  # something the disk has never had, for fifteen minutes, and the whole graphical path after it -
+  # ctrl+alt+t, xset, a terminal - was written for a session that does not exist.
+  #
+  # SO THE CONSOLE IS WHERE THE COMMANDS GO. `run:` types into whatever has focus, and on this
+  # guest that is tty1's login prompt: type the user, Return, type the password, Return, and the
+  # shell is as usable as a terminal window for everything this stage does.
+  #
+  # THE GRAPHICAL STEPS BELOW ARE KEPT AND MADE OPTIONAL, because a disk that DOES carry a desktop
+  # must not be broken by this: if a greeter answers, the walk logs in and opens a terminal exactly
+  # as before, and the console login then finds no prompt and does nothing.
+  # THE DISK COMES UP ON GRUB, AS THREE OTHER MEDIA HERE DO.
+  #
+  # MEASURED ON RUN 44557723577's successor: at 100 s the screen is openSUSE's GRUB menu with
+  # 'openSUSE Leap 16.1, with Linux 6.12.0-160100.8-default' highlighted and
+  # 'C: Command Line   E: Edit Entry' along the bottom. The stage's first action was a click where
+  # a greeter's password box would be, which is not on this screen.
+  #
+  # The first entry is already highlighted; Return boots it.
+  step "the disk's boot menu, when it has one"
+    loop == {check: {from: grubmenu, mode: text, name: at_menu, rect: [150, 330, 1720, 460], rect_at: [1920, 1080], scale: 1, words: [[opensuse, leap], [recovery, mode]]}, do: [{settle: 5}], max: 12, see: {name: grubmenu}, until: {fact: at_menu}}
+    optional == true
+  press Return, waiting 60s, named "boot the highlighted entry, which is the installed system"
+  # THE GREETER AND THE DESKTOP ARE GONE FROM THIS FILE, AND THAT IS THE POINT OF THE STAGE.
+  #
+  # MEASURED TWICE ON THE POD, BY INSTALLING openSUSE TWICE:
+  #
+  #	Software: No desktop selected   (the default)   ->  `localhost login:` on tty1
+  #	Software: GNOME Desktop (Wayland)               ->  GDM, then a full GNOME desktop
+  #
+  # THE MEDIUM THIS STAGE BOOTS INSTALLS NO DESKTOP, so there is no greeter to click and no terminal
+  # to open with ctrl+alt+t. What used to stand here was three `when: [password, vmuser]` steps and a
+  # `desktop:` wait - and the `when:` never bound, because no step binds a fact by those names, so
+  # the whole block was dead code dressed up as a conditional path. A `when:` on a fact nothing
+  # binds is not a guard; it is a comment that the reader cannot tell from a live branch.
+  #
+  # THE CONSOLE IS THE PATH, and it always was for this disk: tty1 gives a login prompt, and the
+  # shell behind it runs every command this stage needs. That is what the next step does.
+  # THE CONSOLE LOGIN IS ONE RETRIED SEQUENCE, AND ITS SUCCESS TEST IS THE PROMPT - NOT THE NAME.
+  #
+  # MEASURED ON RUN 44701006147's recording, and it is the reason this step is rewritten:
+  #
+  #	Welcome to openSUSE Leap 16.1 - Kernel 6.12.0-160100.8-default (tty1).
+  #	localhost login: ^[_
+  #
+  # The screen NEVER LEFT THE LOGIN PROMPT. The previous check asked for the word "vmuser", which
+  # appears in this guest's own prompt (`vmuser@linux:~>`) - so on a screen showing `localhost login:`
+  # the check was looking at a word that was not there, and on a screen that HAD logged in it would
+  # pass. That much is right. What was wrong is the `do`: its first action was a bare Return, which
+  # submits an EMPTY user name and makes getty answer `Login incorrect` before the name is typed. Every
+  # pass therefore spent its first stroke on a mistake, and the sequence was one keystroke out of step
+  # for the rest of the pass - which is exactly the `^[` left on the prompt.
+  #
+  # SO A PASS IS THE LOGIN AND NOTHING ELSE: type the name, Return, type the password, Return. A pass
+  # that fails returns the console to `login:`, and that is what makes repeating it safe - there is no
+  # state to abandon first.
+  #
+  # THE SUCCESS TEST IS THE SHELL PROMPT. `vmuser@` is what a logged-in prompt starts with and what a
+  # `login:` prompt cannot contain, so the two screens cannot be confused for one another.
+  #
+  # AND THE TYPING IS SLOW, BECAUSE THIS GUEST DROPS CHARACTERS AT 0.10s. MEASURED on the pod, whose
+  # screen afterwards held:
+  #
+  #	localhost login: vmser                     <- the `u` of `vmuser` never arrived
+  #
+  # - so getty rejected a name that was never the account's, the loop's next pass typed the real name
+  # into a shell that had not opened, and the screen filled with
+  #
+  #	vmuser@localhost:> vmuser
+  #	vmuser: command not found
+  #
+  # 0.25s per character is what every other console login in this repository uses, and a text console
+  # on tty1 has no buffering to hide a dropped keystroke - the character is simply gone.
+  #
+  # AND EACH PASS STARTS WITH A RETURN, WHICH IS THE OPPOSITE OF WHAT THIS STEP USED TO DO. A bare
+  # Return at `login:` is an empty user name and getty answers "Login incorrect" - that is why it was
+  # removed. But it is the ONLY stroke that returns a console left in a shell by a previous pass to a
+  # fresh `login:`, and after a dropped character the console can be in a shell whose command line
+  # still holds half a name. A pass that begins there types `vmuser` into a prompt that is already
+  # logged in, and the next pass has no clean prompt left to start from.
+  step "log in on the console, retrying until the shell answers"
+    loop == {check: {from: console, mode: text, name: logged_in, rect: [0, 100, 1920, 1000], rect_at: [1920, 1080], scale: 1, words: [[vmuser@]]}, do: [{key: ret, settle: 3}, {type: "{{ user }}", type_gap: 0.25, settle: 5}, {key: ret, settle: 8}, {type: "{{ password }}", type_gap: 0.25, settle: 5}, {key: ret, settle: 14}], max: 5, see: {name: console}, until: {fact: logged_in}}
+  step "unlock sudo once for this session"
+    run == printf '%s\n' {{ password }} | sudo -S -v
+    settle == 4
+    terminal_wait == 0
+  # NO `terminal_wait:` HERE, AND THAT IS THE FIX RATHER THAN AN OMISSION.
+  #
+  # `terminal_wait:` OPENS A TERMINAL (ctrl+alt+t) AND THEN TYPES. The step above has already
+  # opened one, so a second ctrl+alt+t starts a NEW terminal window and the keys that follow go to
+  # it - while the command already typed into the first one is never submitted.
+  #
+  # MEASURED ON RUN 44545555943's kubuntu ssh recording, whose terminal shows exactly that:
+  #
+  #	vmuser@kubuntu:~$ xset s off; xset -dpms; xset s noblank; echo SCREEN_KEPT_ONECHO ADMIN | sudo ...
+  #	server does not have extension for -dpms option
+  #	[sudo: authenticate] Password:
+  #
+  # `SCREEN_KEPT_ON` runs straight into `ECHO ADMIN` with no line break: the Return after the first
+  # command went to the OTHER window. And the `xset -dpms` failure - "server does not have extension
+  # for -dpms option" - is harmless; the screen is still kept awake by `s off` and `s noblank`.
+  step "install openssh"
+    run == sudo zypper --non-interactive --no-gpg-checks install openssh 2>&1 | tail -5
+    settle == 60
+    terminal_wait == 0
+  # `/etc/ssh/sshd_config` DOES NOT EXIST ON THIS IMAGE - sshd READS /usr/etc/ssh/sshd_config.
+  #
+  # MEASURED TWICE. The first attempt's sed said "sed: can't read /etc/ssh/sshd_config: No such file
+  # or directory", and so did the grep. This distribution is usr-merged and ships the file at
+  # /usr/etc/ssh/sshd_config; sshd runs with the vendor's defaults, and the handshake answers
+  # "unexpected message type 51 (expected 60)" - the shape of a server whose configuration never
+  # mentions this client's algorithms.
+  #
+  # SO THE VENDOR FILE IS COPIED INTO PLACE FIRST, and the `-f` guard makes the copy harmless on an
+  # image that already has one. Neither `sh -c` nor a nested quote appears anywhere in these steps:
+  # the version of this that used `sh -c '...'` left the console at a bare `>` and NOTHING after it
+  # ran.
+  step "make both config paths exist"
+    run == sudo mkdir -p /etc/ssh/sshd_config.d /run/sshd
+    settle == 2
+    terminal_wait == 0
+  step "the vendor config becomes the one sshd reads"
+    run == sudo sh -c "test -f /etc/ssh/sshd_config || cp /usr/etc/ssh/sshd_config /etc/ssh/sshd_config"
+    settle == 3
+    terminal_wait == 0
+  step "prove the main file is there"
+    run == sudo test -s /etc/ssh/sshd_config
+    settle == 2
+    terminal_wait == 0
+  # BOTH PLACES, IN ONE STEP: THE MAIN FILE AND THE DROP-IN.
+  #
+  # `sed` REPLACES the commented line rather than appending a second one - an image that ships
+  # `#PasswordAuthentication yes` would otherwise end up with two settings, and the FIRST wins in
+  # sshd's own reading order. This image has no /etc/ssh/sshd_config at all until the copy above
+  # makes one, which is why the sed has nothing to do the first time and the append is the fallback.
+  step "allow password authentication"
+    run == sudo sed -i -e s/^#PasswordAuthentication/PasswordAuthentication/ -e s/^PasswordAuthentication.no$/PasswordAuthentication.yes/ /etc/ssh/sshd_config ; sudo grep -n PasswordAuthentication /etc/ssh/sshd_config
+    settle == 3
+  # `sshd -T` SAID NOTHING AT ALL, WHICH MEANS IT IS NOT READING THE FILE THAT WAS EDITED.
+  #
+  # MEASURED ON TWO RUNS, the same two lines in a row:
+  #
+  #	$ sudo sshd -T 2>&1 | grep -i passwordauthentication
+  #	(nothing)
+  #	$ grep -c PasswordAuthentication /etc/ssh/sshd_config
+  #	1
+  #
+  # A file that contains the setting and a daemon that reports none of it. On this distribution
+  # /etc/ssh/sshd_config is a COPY laid beside a vendor file that the unit's own `-f` points at, so
+  # editing the copy changes nothing.
+  #
+  # SO THE VALUE IS ASKED FOR WITH THE FILE NAMED, AND WRITTEN TO BOTH: `sshd -T -f` prints what that
+  # exact file would do, and the drop-in is written for every path that exists. Both lines are printed
+  # back with their answer, so the next recording says which file the daemon is actually using
+  # instead of leaving it to be guessed.
+  step "show what each config file would do"
+    run == sudo sshd -T -f /etc/ssh/sshd_config 2>&1 | grep -i passwordauthentication ; echo --- ; sudo sshd -T -f /usr/etc/ssh/sshd_config 2>&1 | grep -i passwordauthentication ; echo --- ; sudo ls -l /etc/ssh/sshd_config /usr/etc/ssh/sshd_config
+    settle == 4
+    terminal_wait == 0
+  # `sshd -T` PRINTED NOTHING AT ALL - TWICE - AND grep HID THE REASON.
+  #
+  # MEASURED ON RUN 56dfbf5's console, in full:
+  #
+  #	vmuser@localhost:~> sudo sshd -T -f /etc/ssh/sshd_config 2>&1 | grep -i passwordauthentication
+  #	---
+  #	vmuser@localhost:~> sudo sshd -T -f /usr/etc/ssh/sshd_config 2>&1 | grep -i passwordauthentication
+  #	---
+  #	-rw------- 1 root root 4076 Nov 20 02:35 /etc/ssh/sshd_config      <- ours, just written
+  #	-rw-r----- 1 root root 4076 Jul 28 09:58 /usr/etc/ssh/sshd_config  <- the vendor's, untouched
+  #
+  # and `grep -n PasswordAuthentication /etc/ssh/sshd_config` printed `94:PasswordAuthentication yes`.
+  # So the FILE says yes, the daemon says NOTHING, and `2>&1 | grep` threw away whatever sshd said
+  # instead of the line that was asked for. That grep is the bug in this step: it turned "sshd
+  # refused to load this file" into "the setting is absent".
+  #
+  # SO THE NEXT STEP PRINTS sshd's OWN WORDS, unconditionally, for each file and for the system
+  # default (no -f), and the exit status with them. Nothing is filtered, so the reason cannot hide.
+  step "ask sshd what it thinks, and let it say why"
+    run == sudo sshd -T -f /etc/ssh/sshd_config 2>&1 | head -5; echo "exit=$?"; echo ===; sudo sshd -T -f /usr/etc/ssh/sshd_config 2>&1 | head -5; echo "exit=$?"; echo ===; sudo sshd -T 2>&1 | head -5; echo "exit=$?"
+    settle == 5
+    terminal_wait == 0
+  # NO `\\n` INSIDE A DOUBLE-QUOTED `sh -c`, AND THAT IS THE WHOLE FIX FOR THIS STEP.
+  #
+  # MEASURED ON RUN e799ae4's console: every command after this one appeared with a bare `>` in front
+  # of it, ending at a lone `> _` - zsh waiting for a quote to close. `printf '...\\n'` inside a
+  # YAML double-quoted string had its `\\n` turned into A REAL NEWLINE before the shell ever saw it,
+  # so the single-quoted argument opened on one line and never closed, and the rest of the stage was
+  # swallowed as string literal.
+  #
+  # `echo` NEEDS NO ESCAPE, so there is nothing for the two layers of quoting to disagree about.
+  step "write the drop-in everywhere a config dir exists"
+    run == sudo mkdir -p /etc/ssh/sshd_config.d /usr/etc/ssh/sshd_config.d; echo PasswordAuthentication yes | sudo tee /etc/ssh/sshd_config.d/99-vm.conf; echo PasswordAuthentication yes | sudo tee /usr/etc/ssh/sshd_config.d/99-vm.conf; sudo sed -i s/^PasswordAuthentication.no/PasswordAuthentication.yes/ /etc/ssh/sshd_config; sudo grep -n PasswordAuthentication /etc/ssh/sshd_config ; grep -c PasswordAuthentication /etc/ssh/sshd_config
+    settle == 3
+    terminal_wait == 0
+  step "the vendor file says it too, because that is the one sshd may read"
+    run == sudo grep -q ^PasswordAuthentication /usr/etc/ssh/sshd_config || echo PasswordAuthentication yes | sudo tee -a /usr/etc/ssh/sshd_config; sudo sed -i s/^PasswordAuthentication.no/PasswordAuthentication.yes/ /usr/etc/ssh/sshd_config; sudo grep -n PasswordAuthentication /usr/etc/ssh/sshd_config
+    settle == 3
+    terminal_wait == 0
+  step "enable sshd at boot"
+    run == sudo systemctl enable sshd 2>&1 | tail -3
+    settle == 8
+    terminal_wait == 0
+  # sshd REFUSES TO START WITHOUT A HOST KEY, AND THIS IMAGE SHIPS NONE.
+  #
+  # MEASURED ON RUN ef86936's console, three times, once per config path:
+  #
+  #	vmuser@localhost:~> sudo sshd -T -f /etc/ssh/sshd_config 2>&1 | head -5
+  #	sshd: no hostkeys available -- exiting.
+  #	exit=0
+  #
+  # "no hostkeys available" is the FIRST thing sshd checks - before it reads the config at all - so
+  # every `sshd -T` question this file asked for three runs was answered by that line and nothing
+  # else. And the exit status reads 0 because `head` is the last command in the pipe, not sshd.
+  #
+  # The keys are generated here, through the CONSOLE, because there is no ssh yet: `ssh-keygen -A`
+  # writes one of each type sshd's defaults ask for, and this image's package install never ran the
+  # generator (the same `policy-rc.d`-shaped gap zorin had).
+  #
+  # `/run/sshd` IS sshd's PRIVILEGE SEPARATION DIRECTORY AND THIS IMAGE DOES NOT CREATE IT EITHER.
+  # Measured: "Missing privilege separation directory: /run/sshd".
+  step "generate the host keys sshd will not start without"
+    run == sudo mkdir -p /run/sshd /etc/ssh; sudo ssh-keygen -A; sudo ls -l /etc/ssh/ssh_host_*_key
+    settle == 12
+    terminal_wait == 0
+  # NOW THAT A HOST KEY EXISTS, `sshd -T` CAN ANSWER - AND IT MUST SAY WHICH FILE IT READ.
+  #
+  # MEASURED ON RUN e06024d's console, AFTER the keys were generated this time:
+  #
+  #	ssh-keygen: generating new host keys: RSA ECDSA ED25519
+  #	-rw------- 1 root root 525 Nov 20 03:49 /etc/ssh/ssh_host_ecdsa_key
+  #	... and sshd then read ACTIVE
+  #
+  # so the key half is fixed. What is left is the AUTHENTICATION half, and the config file itself
+  # says which mechanism this distribution expects:
+  #
+  #	67:# PasswordAuthentication. Depending on your PAM configuration,
+  #	   # if you wish to use the "PermitRootLogin without-password" ...
+  #
+  # OPEN SUSE AUTHENTICATES THROUGH PAM, and PAM's own password stack is what has to accept this
+  # account. `sshd -T` (which no longer needs a key) is asked for the two settings that decide it,
+  # and `pam.d/sshd` is printed, so the next recording says whether the daemon or PAM refused.
+  # `usepam yes` WITH NO `/etc/pam.d/sshd` IS THE WHOLE AUTHENTICATION FAILURE.
+  #
+  # MEASURED ON RUN c2d6a1f's console, and this is the answer the last six runs were looking for:
+  #
+  #\tvmuser@localhost:~> sudo sshd -T | grep -iE "^(passwordauthentication|usepam|...)"
+  #\tusepam yes
+  #\tpermitrootlogin prohibit-password
+  #\tpubkeyauthentication yes
+  #\tkbdinteractiveauthentication yes
+  #\tpasswordauthentication yes
+  #
+  #\tvmuser@localhost:~> sudo grep -c . /etc/pam.d/sshd
+  #\tgrep: /etc/pam.d/sshd: No such file or directory
+  #
+  # SO THE DAEMON IS TOLD TO AUTHENTICATE THROUGH PAM and the PAM configuration for it does not
+  # exist. Every password offered is refused by a stack that is not there, which is exactly the
+  # message the client printed: "unable to authenticate, attempted methods [none password
+  # keyboard-interactive]".
+  #
+  # THERE IS NO /etc/pam.d/login EITHER - THIS DISTRIBUTION USES `common-*`, AND THE PROOF IS BELOW.
+  #
+  # MEASURED ON RUN 45a2cb5's console. `/etc/pam.d/` holds exactly these:
+  #
+  #	common-account   common-account-pc        common-auth      common-auth-pc
+  #	common-password  common-password-pc      common-session   common-session-pc
+  #	postlogin-account  postlogin-auth  postlogin-password  postlogin-session  (+ -pc variants)
+  #
+  # and the copy from `login` failed with the message that says so:
+  #
+  #	cp: cannot stat '/etc/pam.d/login': No such file or directory
+  #
+  # SO THE FILE IS BUILT FROM THE `common-*` MODULES THEMSELVES, which is how this distribution's own
+  # services do it. `common-auth` reads /etc/shadow (pam_unix), `common-account` checks the account is
+  # not locked, and `common-session` sets up the session; `postlogin-*` is what openSUSE adds on top
+  # for sshd's login class, and it is included because it exists here.
+  #
+  # THE ORDER IS PAM'S OWN: account, auth, password, session.
+  # /etc/pam.d/sshd DOES NOT EXIST ON THIS IMAGE, AND THAT IS WHY SSH AUTHENTICATION FAILED.
+  #
+  # MEASURED ON THE POD, with a guest installed by this same stage, after every other check had
+  # passed:
+  #
+  #	ss -ltnp           0.0.0.0:22 and [::]:22, sshd listening       the port is open
+  #	systemctl status   active (running)                            the daemon is up
+  #	common-auth        auth required pam_unix.so try_first_pass    the module that reads shadow
+  #	passwd -S vmuser   P vmuser                                    not locked
+  #	echo Qz7vLp2w | su -c true vmuser ; echo rc=   -> rc=0        the password is right
+  #	firewall-cmd       dhcpv6-client ssh                           the port is open
+  #
+  #	cat: /etc/pam.d/sshd: No such file or directory                <- THE FILE WAS NOT THERE
+  #
+  # AND /var/log/secure SAID WHAT THAT COSTS:
+  #
+  #	sshd[1662]: error: PAM: Authentication failure for vmuser from 172.30.0.1
+  #	sshd[1662]: Failed password for vmuser from 172.30.0.1 port 53736 ssh2
+  #
+  # A service with no `/etc/pam.d/<name>` file is handled by `/etc/pam.d/other`, whose default
+  # answer is to REFUSE. So sshd asked PAM, PAM fell through to `other`, and the refusal arrived as
+  # "authentication failure" - a message that names the password and therefore sends a reader to
+  # the wrong place entirely.
+  #
+  # WRITTEN IN ONE COMMAND, NOT ONE LINE AT A TIME, AND THE REASON IS THE FAILURE ABOVE. Five
+  # separate `echo ... | sudo tee -a` steps meant five chances for a dropped keystroke to leave a
+  # HALF-BUILT pam stack, with nothing checking the result: the file would exist, sshd would start,
+  # and only the ten-minute `wait for sshd` would report anything. One `printf >` either writes the
+  # five lines or does not.
+  #
+  # MEASURED AFTER THIS: `ssh vmuser@127.0.0.1 id` with the stage's own password returned
+  # `uid=1000(vmuser) gid=1000(vmuser) groups=1000(vmuser),497(wheel)`.
+  step "write the PAM stack sshd reads, which this image does not ship"
+    run == sudo sh -c 'printf "auth include common-auth\naccount include common-account\npassword include common-password\nsession include common-session\nsession include postlogin-session\n" > /etc/pam.d/sshd'
+    settle == 4
+    terminal_wait == 0
+  # AND IT IS CHECKED, LINE BY LINE, BECAUSE A HALF-WRITTEN FILE IS THE FAILURE MODE THAT COSTS TEN
+  # MINUTES TO FIND. `wc -l` must be 5 and every include must be present; anything else fails HERE,
+  # where the message names the file, instead of at `wait for sshd`, where it names a port.
+  step "the PAM stack is complete"
+    run == sudo sh -c 'test $(wc -l < /etc/pam.d/sshd) -eq 5 && grep -c include /etc/pam.d/sshd'
+    settle == 3
+    terminal_wait == 0
+  step "prove the stack is there and reads the shadow database"
+    run == sudo ls -l /etc/pam.d/sshd; sudo grep -c . /etc/pam.d/sshd; sudo grep -l pam_unix /etc/pam.d/common-auth
+    settle == 4
+    terminal_wait == 0
+  # AND NOW ASK THE DAEMON, WITH A HOST KEY ON DISK SO IT CAN ANSWER.
+  #
+  # MEASURED ON RUN 43338e3's console, which is the last piece of this puzzle:
+  #
+  #	vmuservmuser@localhost:~> sudo passwd -S vmuser
+  #	vmuser P 2026-11-19 0 99999 7 -1          <- P: a usable password, not locked, not expired
+  #	Password expires: Sep 03, 2300 (never)
+  #
+  # So the account is fine, the PAM stack is written (154 bytes, five lines, pam_unix), sshd is active
+  # - and the client is still refused. The daemon's own view has to be read from the daemon, and
+  # `sshd -T` can only do that now that /etc/ssh/ssh_host_*_key exists.
+  step "what sshd itself says about authentication, now that it can answer"
+    run == sudo sshd -T 2>&1 | grep -iE "^(passwordauthentication|usepam|kbdinteractiveauthentication|pubkeyauthentication|permitrootlogin|authenticationmethods)"; echo --- ; sudo grep -iE "^(PasswordAuthentication|UsePAM|KbdInteractive|AuthenticationMethods)" /etc/ssh/sshd_config ; sudo sed -i s/^PasswordAuthentication.no/PasswordAuthentication.yes/ /etc/ssh/sshd_config
+    settle == 5
+    terminal_wait == 0
+  # SELINUX IS NOT TOUCHED, AND I WAS WRONG TO THINK IT MATTERED.
+  #
+  # I ADDED A `setenforce 0` HERE ON THE EVIDENCE THAT `getenforce` SAID `Enforcing` AND THAT THE
+  # SAME PASSWORD WAS ACCEPTED BY `su` BUT REFUSED BY sshd - which looks exactly like a domain
+  # difference. IT WAS NOT. The actual cause was `/etc/pam.d/sshd` missing (see the step that writes
+  # it), and with that file in place sshd authenticated while SELinux was still ENFORCING.
+  #
+  # MEASURED, and this is what settles it: a guest with `/etc/pam.d/sshd` written and SELinux
+  # untouched answered
+  #
+  #	ssh vmuser@127.0.0.1 id  ->  uid=1000(vmuser) gid=1000(vmuser) groups=1000(vmuser),497(wheel)
+  #
+  # TURNING A SECURITY FEATURE OFF TO MAKE A STAGE PASS IS A CLAIM THAT THE STAGE NEEDS IT OFF, and
+  # that claim was false. A walkthrough that disables SELinux to authenticate is also one that would
+  # never notice if this distribution's policy DID start refusing PAM - the failure would be hidden
+  # by the workaround.
+  step "start sshd"
+    run == sudo systemctl restart sshd 2>&1 | tail -3; sleep 2; systemctl is-active sshd
+    settle == 10
+    terminal_wait == 0
+  step "prove sshd is active"
+    run == systemctl is-active sshd
+    settle == 4
+    terminal_wait == 0
+  # THE LOCAL HALF OF THE AUTHENTICATION, ASKED BEFORE THE NETWORK HALF.
+  #
+  # MEASURED ON RUN 50fbdf8: `/etc/pam.d/sshd` was created (154 bytes, 5 lines), `common-auth` names
+  # pam_unix, sshd is active - and the client is STILL refused with "unable to authenticate, attempted
+  # methods [none password keyboard-interactive]". So the daemon side is now complete and the
+  # question has moved to the account: a password that PAM cannot verify.
+  #
+  # THESE TWO LINES SAY WHICH. `passwd -S` prints the shadow entry's state - `P` for a usable
+  # password, `NP` for none, `L` for locked - and `chage -l` prints whether it has expired. A locked
+  # or expired account is refused by pam_unix with exactly the message above, and no sshd setting
+  # can change it.
+  # THE PAM STACK'S OWN CONTENT, PRINTED, BECAUSE EVERYTHING AROUND IT IS ALREADY CORRECT.
+  #
+  # MEASURED ON RUN dad5a90, and this is what "correct everywhere else" looks like:
+  #
+  #	sshd -T    usepam yes · passwordauthentication yes · kbdinteractive yes ·
+  #	           authenticationmethods any · pubkeyauthentication yes
+  #	passwd -S  vmuser P 2026-11-19 0 99999 7 -1     usable, not locked, never expires
+  #	/etc/pam.d/sshd   154 bytes, five lines, `common-auth` names pam_unix
+  #	sshd       active, host keys present
+  #
+  # and the client is STILL refused. So the question is no longer "is a setting right" - it is "what
+  # does the stack this daemon loads actually do". `common-auth` is a FILE THIS STAGE NEVER WROTE,
+  # shipped by the distribution, and it may name a module this image does not have, or require a
+  # service name sshd does not pass.
+  #
+  # THE WHOLE CHAIN IS PRINTED: the file this stage wrote, the file it includes, and whether each
+  # module it names exists on disk. That is the last thing a recording can answer.
+  step "print the PAM chain this sshd will load"
+    run == sudo cat /etc/pam.d/sshd; echo "=== common-auth ==="; sudo cat /etc/pam.d/common-auth; echo "=== modules named, and whether they exist ==="; for m in $(sudo grep -hoE "pam_[a-z0-9_]+" /etc/pam.d/sshd /etc/pam.d/common-* 2>/dev/null | sort -u); do printf "%-22s " "$m"; sudo find /lib/security /usr/lib64/security /usr/lib/security -name "$m.so" 2>/dev/null | head -1 || echo MISSING; done
+    settle == 6
+    terminal_wait == 0
+  step "is the account's password usable to PAM"
+    run == sudo passwd -S vmuser; sudo chage -l vmuser | head -4
+    settle == 5
+    terminal_wait == 0
+  step "open the firewall for ssh"
+    run == sudo sh -c "firewall-cmd --add-service=ssh --permanent; firewall-cmd --reload; firewall-cmd --list-services" 2>&1 | tail -5
+    settle == 8
+    terminal_wait == 0
+  # WHAT THE DAEMON IS ACTUALLY LISTENING ON, PRINTED BEFORE THE WAIT.
+  #
+  # MEASURED ON RUN 44712184092, whose recording shows this guest is healthy in every way the earlier
+  # steps can check:
+  #
+  #	systemctl is-active sshd     active
+  #	/etc/pam.d/common-auth       auth required pam_unix.so try_first_pass
+  #	all pam_* modules named      found under /usr/lib64/security
+  #	passwd -S vmuser             P vmuser      not locked
+  #	chage -l vmuser              password expires Sep 03, 2300
+  #	firewall-cmd --list-services dhcpv6-client ssh
+  #
+  # AND PORT 2222 STILL REFUSED for the full ten minutes. Every one of those checks is about the
+  # daemon being CONFIGURED correctly; none of them is about it being REACHABLE, and that is the gap
+  # this step closes. `ss -ltn` is the one command that answers "on what address and port is it
+  # listening", and the answer decides which of the three remaining causes it is:
+  #
+  #	127.0.0.1:22 only     it is bound to the loopback, so the forward cannot reach it
+  #	*:22 or :::22         it is listening; the forwarding or the firewall is the problem
+  #	nothing               it is not listening, and the earlier `active` was about a different unit
+  #
+  # IT RUNS BEFORE THE WAIT, so the recording holds the answer even when the wait expires.
+  step "show what the daemon is listening on"
+    run == sudo ss -ltnp | grep -E ":22\b|sshd" ; echo "=== unit ==="; systemctl status sshd --no-pager 2>&1 | head -8
+    settle == 5
+    terminal_wait == 0
+  step "wait for sshd"
+    require_ssh == true
+    timeout == 600
+  step "prove the kernel over ssh"
+    ssh == uname -a
+    timeout == 120
+  step "prove the account over ssh"
+    ssh == id -un; hostname
+    timeout == 120
+  step "enable sshd again, over ssh, where the exit status is readable"
+    ssh == "printf '%s\\n' '{{ password }}' | sudo -S -p '' systemctl enable --now sshd 2>&1 | tail -3\nsystemctl is-enabled sshd\ntest \"$(systemctl is-enabled sshd)\" = \"enabled\"\n"
+    timeout == 180
+  step "prove sshd will start at boot"
+    ssh == "set -e\necho \"is-enabled: $(systemctl is-enabled sshd)\"\necho \"is-active:  $(systemctl is-active sshd)\"\necho \"wants:      $(ls /etc/systemd/system/multi-user.target.wants/sshd.service 2>&1)\"\ntest \"$(systemctl is-enabled sshd)\" = \"enabled\"\ntest -L /etc/systemd/system/multi-user.target.wants/sshd.service\n"
+    timeout == 120
+  # `optional` IS GONE AND THE TOLERANCE IS IN THE COMMAND. A reboot that works also closes this
+  # connection, so the client reports a failure for a machine that is rebooting exactly as asked -
+  # writing `|| true` says that where the log shows it, and `come back up with sshd answering` below
+  # is the assertion. `optional` would have swallowed a reboot that never started too.
+  step "restart the machine"
+    ssh == "printf '%s\\n' '{{ password }}' | sudo -S -p '' systemctl reboot || true\n"
+    timeout == 60
+  step "come back up with sshd answering"
+    require_ssh == true
+    ssh_after_reboot == true
+    timeout == 900
+  step "read what this boot did"
+    ssh == "set -e\necho \"--- identity, over a connection that did not exist when sshd was installed ---\"\nid -un; hostname\necho \"--- is-enabled / is-active ---\"\nsystemctl is-enabled sshd; systemctl is-active sshd\necho \"--- the unit's own account of this start ---\"\njournalctl -b -u sshd --no-pager 2>&1 | tail -12\ntest \"$(systemctl is-enabled sshd)\" = \"enabled\"\ntest \"$(systemctl is-active sshd)\" = \"active\"\n"
+    timeout == 120
+  step "ask the guest to power off"
+    ssh == printf '%s\n' '{{ password }}' | sudo -S -p '' poweroff
+    timeout == 300
+  step "wait for the machine to stop"
+    timeout == 300
+    wait_until == stopped
+  step "publish the disk"
+    compress == '{{ out }}'

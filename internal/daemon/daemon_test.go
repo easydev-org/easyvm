@@ -128,7 +128,12 @@ func TestTheDaemonListensOnItsPort(t *testing.T) {
 	d := New()
 	ready := make(chan string, 1)
 	go func() {
-		_ = d.Serve(ServeOptions{Work: work, Ready: func(addr string) { ready <- addr }})
+		// AN EPHEMERAL PORT, NOT THE DEFAULT :8080. This test asserts that the daemon BINDS AND
+		// REPORTS its address; which number it binds is not the subject, and :8080 is held by any
+		// other daemon on the same machine - a developer's own pod, for instance, whose presence would
+		// then fail this test for a reason that has nothing to do with the code under test.
+		_ = d.Serve(ServeOptions{Work: work, HTTPAddr: "127.0.0.1:0",
+			Ready: func(addr string) { ready <- addr }})
 	}()
 	select {
 	case addr := <-ready:
@@ -211,7 +216,7 @@ func TestUnknownCommandIsRefused(t *testing.T) {
 func TestBadFileFailsTheRun(t *testing.T) {
 	work, d := startDaemon(t)
 	bad := filepath.Join(t.TempDir(), "bad.yaml")
-	if err := os.WriteFile(bad, []byte("name: bad\nsteps:\n  - name: x\n    nonsense: 1\n"), 0o644); err != nil {
+	if err := os.WriteFile(bad, []byte("name: bad\nrecording_resolution: [1920, 1080]\nsteps:\n  - name: x\n    nonsense: 1\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

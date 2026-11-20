@@ -25,7 +25,7 @@ on:
     inputs:
       disks_repository:
         description: "the ghcr repository that holds the disks"
-        default: "easydev-org/easyvm"
+        default: "easydev-org/easyvm-fork"
       from_tag:
         description: >-
           start from a PUBLISHED disk: windows11 or windows11-ssh or windows11-vm-configure or windows11-dev. Empty runs the whole chain. A fix to a later stage then costs that stage, not the entire bake.
@@ -62,7 +62,7 @@ jobs:
         [
           {
             "name": "windows-install",
-            "file": "windows/11/steps/install.yaml",
+            "file": "windows/11/steps/install.walk",
             "pull": "",
             "assets": ["iso-windows11:windows.iso", "iso-virtio-win:virtio-win.iso"],
             "out": "windows11.qcow2",
@@ -83,7 +83,7 @@ jobs:
         [
           {
             "name": "windows-ssh",
-            "file": "windows/11/steps/ssh.yaml",
+            "file": "windows/11/steps/ssh.walk",
             "pull": "windows11",
             "out": "windows11-ssh.qcow2",
             "publish": "windows11-ssh",
@@ -103,7 +103,7 @@ jobs:
         [
           {
             "name": "windows-vm-configure",
-            "file": "windows/11/steps/vm-configure.yaml",
+            "file": "windows/11/steps/vm-configure.walk",
             "pull": "windows11-ssh",
             "out": "windows11-vm-configure.qcow2",
             "publish": "windows11-vm-configure",
@@ -123,7 +123,7 @@ jobs:
         [
           {
             "name": "windows-dev",
-            "file": "windows/11/steps/dev.yaml",
+            "file": "windows/11/steps/dev.walk",
             "pull": "windows11-vm-configure",
             "out": "windows11-dev.qcow2",
             "publish": "windows11-dev",
