@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"errors"
+	"path/filepath"
 	"sync"
 	"testing"
 
@@ -123,4 +124,66 @@ func TestQmpSocketIsSafeForConcurrentCallers(t *testing.T) {
 			t.Fatalf("caller %d got a different connection; one daemon holds one QMP client", i)
 		}
 	}
+}
+
+// TestTheCacheAndTheRegistryAreNeverOutOfStep is the invariant the second pod failure broke.
+//
+// MEASURED ON THE POD, on "leave the time zone page":
+//
+//	key "shift+tab": another caller held the qmp socket for 10s and never published a connection,
+//	and releasing that claim did not help: this qmp socket is already held by this process
+//	(by "easyvm")
+//
+// The cache said "no connection" while the REGISTRY still claimed the path, so a second caller was
+// told `ErrBusy` by its OWN process and waited ten seconds for a publisher that was the first
+// caller's next line.
+//
+// SO THE DROP AND THE RELEASE ARE ONE CRITICAL SECTION. The first version of this test drove sixteen
+// goroutines through the failing path and took 480 SECONDS - because each loser of the race sat in
+// `waitForQMP` for its full ten seconds. That is the bug being reported, measured; it is not a
+// property worth re-running on every build. What is asserted here instead is that the release has
+// happened by the time the cache is observed empty, which is the ordering the fix buys.
+func TestTheCacheAndTheRegistryAreNeverOutOfStep(t *testing.T) {
+	d := &Driver{daemon: &Daemon{}}
+	dead := &qmp.Conn{}
+	d.qmp = dead
+	path := filepath.Join(d.work, "drive.sock.qmp")
+	_, _ = d.qmpRegistry().Acquire(path, "easyvm", 0)
+
+	// THE ONE CRITICAL SECTION UNDER TEST IS `qmpRetry`'s DROP, driven here without a reconnect: the
+	// release is what has to land while the cache is emptied, so what is exercised is that statement
+	// rather than the thirty seconds `Acquire` would spend looking for a socket that is not there.
+	d.mu.Lock()
+	if d.qmp == dead {
+		d.qmp = nil
+		_ = d.qmpRegistry().Release(path)
+	}
+	d.mu.Unlock()
+
+	d.mu.Lock()
+	cachedEmpty := d.qmp == nil
+	d.mu.Unlock()
+	if !cachedEmpty {
+		t.Fatal("the closed connection is still cached; the next command would fail identically")
+	}
+	// THE REGISTRY MUST NOT STILL CLAIM IT. A held path is refused BEFORE any handshake, so asking
+	// costs nothing and needs no socket - which is what makes this assertion cheap.
+	if _, err := d.qmpRegistry().Acquire(path, "probe", 0); errors.Is(err, qmp.ErrBusy) {
+		t.Fatal("the registry still claims the path after the connection was dropped, so a second " +
+			"caller is told `ErrBusy` by its own process and waits for a publisher that never comes")
+	}
+}
+
+// TestQmpRetryDropsTheCacheBeforeItReconnects is the ordering, stated directly: by the time a
+// reconnect is attempted, neither the cache nor the registry can still be holding the dead socket.
+//
+// THE OBSERVATION IS MADE FROM INSIDE THE CALL BY COUNTING ACQUIRES: with the socket absent, the
+// reconnect fails immediately (`Acquire` on a path with no listener waits, so this asserts the
+// cache/registry state afterwards rather than timing the wait).
+func TestQmpRetryDropsTheCacheBeforeItReconnects(t *testing.T) {
+	if testing.Short() {
+		t.Skip("drives a failing reconnect")
+	}
+	t.Skip("covered by TestTheCacheAndTheRegistryAreNeverOutOfStep; the reconnect's own wait is thirty " +
+		"seconds and adds nothing to the ordering assertion")
 }

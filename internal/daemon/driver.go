@@ -1626,15 +1626,27 @@ func (d *Driver) qmpRetry(fn qmpCommand) error {
 	// was in flight. `Release` CLOSES what the registry holds for the path, so calling it
 	// unconditionally would close the replacement that somebody else is about to use, and the retry
 	// would then reproduce the very failure it exists to repair.
+	// THE DROP AND THE REGISTRY RELEASE HAPPEN UNDER THE SAME LOCK, AND THAT IS NOT TIDINESS - IT IS
+	// THE WHOLE POINT. MEASURED ON THE POD, on the step after the one this retry was written for:
+	//
+	//	leave the time zone page: key "shift+tab": another caller held the qmp socket for 10s and never
+	//	published a connection ... this qmp socket is already held by this process (by "easyvm")
+	//
+	// Between `d.qmp = nil` and `Release` the cache said "no connection" while the REGISTRY still
+	// claimed the path. A second caller arriving in that window saw no cache, asked the registry, was
+	// told `ErrBusy` by this very process, and went into `waitForQMP` - which waited ten seconds for a
+	// publisher that was this goroutine's own next line. The two then deadlocked each other's
+	// recovery, and the error named a conflict with itself.
+	//
+	// `Release` does not block (it closes one socket and deletes two map entries), so holding `d.mu`
+	// across it is safe. What it buys is that no caller can observe "cache empty, registry held".
 	d.mu.Lock()
 	mine := d.qmp == conn
 	if mine {
 		d.qmp = nil
-	}
-	d.mu.Unlock()
-	if mine {
 		_ = d.qmpRegistry().Release(filepath.Join(d.work, "drive.sock.qmp"))
 	}
+	d.mu.Unlock()
 
 	fresh, err := d.qmpSocket()
 	if err != nil {
