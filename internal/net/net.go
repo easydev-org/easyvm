@@ -258,7 +258,30 @@ func Up(sshPort int, forwards []int) error {
 	if err := applyNAT(); err != nil {
 		return err
 	}
-	return applyForwards(sshPort, forwards)
+	if err := applyForwards(sshPort, forwards); err != nil {
+		return err
+	}
+	// THE GUEST'S UDP, WHICH TCP RULES CANNOT CARRY.
+	//
+	// A SOCKS5 PROXY FORWARDS UDP OVER ITS OWN ASSOCIATION, not over CONNECT, so `iptables` cannot
+	// put the guest's datagrams through one: they have to reach a tun device the daemon owns, and the
+	// daemon then speaks SOCKS5 UDP ASSOCIATE on the guest's behalf. See `udprelay.go`.
+	//
+	// IT IS BEST-EFFORT, AND THAT IS DELIBERATE: a guest whose UDP cannot be relayed should still boot
+	// with a working TCP egress rather than fail `Up` and have no network at all. The failure is
+	// printed once, here, because the alternative is a QUIC timeout inside the guest with no
+	// explanation anywhere.
+	//
+	// THE PREVIOUS RELAY GOES FIRST: `Up` can run twice on a daemon that was restarted without its
+	// namespace being rebuilt, and a second tun device with the first one's route still installed
+	// would answer for traffic the first is also reading.
+	StopUDPRelay()
+	if relay, err := StartUDPRelay(GuestIP); err != nil {
+		fmt.Printf("udp relay: %v (the guest's UDP will not be proxied)\n", err)
+	} else if relay != nil {
+		udpRelay = relay
+	}
+	return nil
 }
 
 // ipForwardPath is the kernel's own answer to "is forwarding on", per namespace.
@@ -297,6 +320,11 @@ func ensureIPForward() error {
 
 // Down removes what Up created, and is safe on a partially-created network.
 func Down() {
+	// THE RELAY OWNS A TUN DEVICE AND A ROUTE, so it is torn down before the rules that point into
+	// it - a route whose device is gone is a route `ip route flush` has to be told about separately.
+	StopUDPRelay()
+	udpRelay = nil
+
 	spec := fmt.Sprintf("%s/%d", BridgeIP, Prefix)
 
 	// THE JUMPS GO BEFORE THE CHAIN, OR THE CHAIN CANNOT GO.

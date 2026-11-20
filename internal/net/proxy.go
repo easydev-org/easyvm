@@ -43,14 +43,17 @@ import (
 // copies bytes in both directions. The guest sees an ordinary TCP connection to port 443 and never
 // learns that anything happened.
 //
-// WHAT IS DELIBERATELY NOT PROXIED:
+// WHAT IS DELIBERATELY NOT PROXIED HERE:
 //
 //	the guest's traffic to this container (172.30.0.0/24)   a NAT rule that caught it would break
 //	                                                        the daemon's own ssh and screen calls
-//	DNS on port 53                                          UDP, and mihomo's proxy port is TCP-only;
-//	                                                        the DHCP lease already gives the guest a
-//	                                                        resolver, and a redirected TCP :53 would
-//	                                                        be a DNS query the proxy cannot answer
+//	DNS on port 53                                          a redirected TCP :53 would be a DNS query
+//	                                                        this tunnel cannot answer; the DHCP lease
+//	                                                        already gives the guest a resolver
+//
+// UDP IS NOT ABSENT, IT IS SOMEWHERE ELSE: `udprelay.go` carries it through a tun device and a SOCKS5
+// relay, because CONNECT cannot. The two are kept apart on purpose - this chain matches `-p tcp`
+// only, so a guest's datagrams never arrive at a listener that would read them as garbage.
 //
 // AND CI HAS NONE OF THIS. `EASYVM_TRANSPARENT_PROXY` is unset on a runner, so no listener starts and
 // no iptables rule is added: the guest uses the internet directly, exactly as it does on a desk.
@@ -187,10 +190,51 @@ func (p *TransparentProxy) handle(conn net.Conn) {
 func (p *TransparentProxy) tunnel(conn net.Conn, dst string) {
 	defer conn.Close()
 
+	// THE RULES ARE CONSULTED BEFORE THE PROXY IS, BECAUSE THEY DECIDE WHETHER IT IS USED AT ALL.
+	//
+	// `block` closes the connection here: the guest sees a refused connection, which is what a
+	// firewall looks like from inside and is the honest answer. `direct` dials the destination from
+	// THIS pod with no proxy in the path - the same code, one branch, and the copy loop below is
+	// shared so neither path can drift from the other.
+	// THE UPSTREAM IS THE RULE'S DECISION WHEN A RULE MATCHED, AND THE DEFAULT OTHERWISE.
+	//
+	// `defaultUpstream` IS READ ONCE AT STARTUP AND IS WHAT p.Upstream WAS: the address this daemon
+	// was told about by `EASYVM_TRANSPARENT_PROXY`. A rule that names an upstream only changes this
+	// one thing - which proxy is dialled - so the CONNECT framing, the refusal handling and the copy
+	// loop below are all shared by every upstream, and a new one cannot behave differently.
+	upstream := p.Upstream
+	if ip, port, err := splitDst(dst); err == nil {
+		v := VerdictFor(ip, port)
+		switch v.Kind {
+		case KindBlock:
+			return
+		case KindDirect:
+			up, err := net.DialTimeout("tcp", dst, 15*time.Second)
+			if err != nil {
+				return
+			}
+			defer up.Close()
+			_ = up.SetDeadline(time.Time{})
+			copyBoth(conn, up, up, true)
+			return
+		}
+		if v.Upstream != "" {
+			// A NAMED UPSTREAM THAT HAS NO HTTP ADDRESS CANNOT CARRY TCP. Dialling the default in
+			// that case would be a rule that silently did something other than what it says, so the
+			// connection is refused instead - and the rules API validates the name at apply time, so
+			// this is the case of a table that changed underneath a rule.
+			if addr, ok := httpFor(v.Upstream); ok {
+				upstream = addr
+			} else {
+				return
+			}
+		}
+	}
+
 	// `CONNECT host:port HTTP/1.1` IS THE WHOLE PROTOCOL. There is no TLS to negotiate here: the
 	// guest's TLS runs end to end THROUGH this tunnel, which is why the proxy needs no certificate
 	// and cannot read the traffic.
-	up, err := net.DialTimeout("tcp", p.Upstream, 15*time.Second)
+	up, err := net.DialTimeout("tcp", upstream, 15*time.Second)
 	if err != nil {
 		return
 	}
@@ -230,22 +274,73 @@ func (p *TransparentProxy) tunnel(conn net.Conn, dst string) {
 	// BOTH DIRECTIONS, AND EITHER ONE CLOSING ENDS THE PAIR. A tunnel is over when the guest is
 	// done; waiting for the upstream as well would hold the connection open for the proxy's own
 	// idle timeout.
+	copyBoth(conn, up, br, false)
+}
+
+// copyBoth runs the two directions and returns when EITHER finishes, which is what makes a tunnel end
+// when one side closes rather than waiting for the other's idle timeout.
+//
+// `from` IS SEPARATE FROM `to` BECAUSE THE PROXY PATH HAS A bufio.Reader: the CONNECT response was
+// read through a buffered reader and any bytes after its headers are the start of the tunnel, so the
+// upstream-to-guest direction has to drain THAT reader rather than the socket.
+// copyBoth runs the two directions and returns when the GUEST side is done, with `drain` controlling
+// whether the reply side is given time to finish.
+//
+// THE TWO PATHS GENUINELY NEED DIFFERENT ANSWERS, AND TREATING THEM THE SAME WAS A BUG.
+//
+// A CONNECT TUNNEL IS A BYTE PIPE: when one end closes, the other has nothing left to say, and waiting
+// for it would hold a socket open on a peer that has gone. That is the original `<-done` and it is
+// right for the proxy path.
+//
+// A DIRECT CONNECTION IS NOT. MEASURED: with `<-done`, `curl http://deb.debian.org` printed
+// `Connected to deb.debian.org (199.232.162.132) port 80` and then `Operation timed out with 0 bytes
+// received` - because the guest's direction finishes the moment its request line is written, `<-done`
+// returned, and `tunnel`'s `defer conn.Close()` tore down a socket whose reply was still in flight.
+//
+// SO THE DIRECT PATH WAITS FOR THE REPLY, BOUNDED. The bound is what keeps a peer that half-closed and
+// went silent from holding the tunnel open forever.
+func copyBoth(guest net.Conn, up net.Conn, from io.Reader, drainReply bool) {
 	done := make(chan struct{}, 2)
 	go func() {
-		_, _ = io.Copy(up, conn)
+		_, _ = io.Copy(up, guest)
+		// HALF-CLOSE, NOT CLOSE: the other direction may still have a response to deliver.
 		if tc, ok := up.(*net.TCPConn); ok {
 			_ = tc.CloseWrite()
 		}
 		done <- struct{}{}
 	}()
 	go func() {
-		_, _ = io.Copy(conn, br)
-		if tc, ok := conn.(*net.TCPConn); ok {
+		_, _ = io.Copy(guest, from)
+		if tc, ok := guest.(*net.TCPConn); ok {
 			_ = tc.CloseWrite()
 		}
 		done <- struct{}{}
 	}()
 	<-done
+	if !drainReply {
+		return
+	}
+	// A SHORT GRACE, NOT A SECOND FULL COPY. The reply is usually already in the kernel buffer or
+	// arrives within a round trip; this window is for that, not for streaming a large body.
+	_ = up.SetReadDeadline(time.Now().Add(5 * time.Second))
+	<-done
+}
+
+// splitDst turns "1.2.3.4:443" into its parts, for the rules lookup.
+func splitDst(dst string) (net.IP, int, error) {
+	host, port, err := net.SplitHostPort(dst)
+	if err != nil {
+		return nil, 0, err
+	}
+	p, err := strconv.Atoi(port)
+	if err != nil {
+		return nil, 0, err
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return nil, 0, fmt.Errorf("%q is not an address", host)
+	}
+	return ip, p, nil
 }
 
 // originalDestination reads SO_ORIGINAL_DST from a redirected socket.
