@@ -98,20 +98,25 @@ walkthrough "linux-fedora-workstation - sshd"
   #
   # The loop presses Next until the wizard's own heading is gone. `max: 12` is the number of pages
   # this wizard has plus slack; a page that does not advance costs one press, not the whole stage.
-  # CLICKS DO NOT TAKE IN THIS WIZARD; THE KEYBOARD DOES.
+  # NEITHER A CLICK NOR TAB+RETURN ADVANCES THIS WIZARD; A BARE RETURN DOES, BECAUSE NEXT IS THE
+  # PAGE'S DEFAULT ACTION.
   #
-  # MEASURED ON TWO RUNS. FIRST (Start Setup): a click at the button's own centre logged
-  # "clicked (960, 844)" and the recording at 200 s was the same page, button highlighted - a Tab and
-  # a Return then started the wizard. SECOND (this loop): eight clicks at (1420,193), which is inside
-  # the Next button on every page, and the recording at 500 s is STILL the Privacy page with Next
-  # drawn in exactly the place that was clicked.
+  # MEASURED ON THREE RUNS:
+  #   1. a click at Start Setup's own centre logged "clicked (960, 844)" and did nothing; a Tab+Return
+  #      started the wizard;
+  #   2. eight clicks at (1420,193) - inside Next on every page - logged eight "clicked" lines and
+  #      the page never changed;
+  #   3. eight Tab+Return pairs left the recording on the Privacy page with the Location Services
+  #      switch TURNED ON - so Tab had put the focus on the SWITCH and each Return toggled it.
   #
-  # So the wizard is driven by keys. TAB moves the focus to the next control - on these pages that is
-  # either a toggle (harmless: Location Services) or the Next button - and RETURN presses whatever
-  # has focus. Eight pairs is this wizard's page count plus slack, and past the last page the keys
-  # land on a desktop, where Tab does nothing and Return opens nothing that Escape cannot close.
+  # The Next button is drawn in the accent colour, which in this toolkit means it is the page's
+  # DEFAULT action: a Return with no focus in the content area activates it. Tab must not be pressed
+  # first, because the first Tab lands on the switch.
+  #
+  # Eight Returns is this wizard's page count plus slack; past the last page a Return on a desktop
+  # opens nothing that Escape cannot close.
   step "walk the setup wizard to its end"
-    do == [{key: tab, settle: 1}, {key: ret, settle: 6}, {key: tab, settle: 1}, {key: ret, settle: 6}, {key: tab, settle: 1}, {key: ret, settle: 6}, {key: tab, settle: 1}, {key: ret, settle: 6}, {key: tab, settle: 1}, {key: ret, settle: 6}, {key: tab, settle: 1}, {key: ret, settle: 6}, {key: tab, settle: 1}, {key: ret, settle: 6}, {key: tab, settle: 1}, {key: ret, settle: 8}]
+    do == [{key: ret, settle: 7}, {key: ret, settle: 7}, {key: ret, settle: 7}, {key: ret, settle: 7}, {key: ret, settle: 7}, {key: ret, settle: 7}, {key: ret, settle: 7}, {key: ret, settle: 7}, {key: ret, settle: 7}, {key: ret, settle: 9}]
   press Escape, waiting 2s, named "clear a context menu if the wizard had already closed"
 
   click "desktop - give the shell focus" at 960 700, waiting 2s, named "desktop - give the shell focus"
