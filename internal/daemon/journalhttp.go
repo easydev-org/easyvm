@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"fmt"
+	"html"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/easydev-org/easyvm/internal/journal"
+	"github.com/easydev-org/easyvm/internal/report"
 )
 
 // THE JOURNAL'S READ SURFACE. Four endpoints, and what each is FOR decides its shape:
@@ -295,4 +297,28 @@ func confined(root, path string) bool {
 		return false
 	}
 	return absPath == absRoot || strings.HasPrefix(absPath, absRoot+string(filepath.Separator))
+}
+// handleReport renders the run's journal as the HTML page, served rather than written.
+//
+// THE SAME PAGE `easyvm report` PRODUCES, with its pictures fetched from `/api/artifact` instead of
+// sitting beside it. That is the only difference, and it is what makes "open the daemon's URL and
+// read the report" work without a build step or a published directory.
+//
+//	/report            the newest run
+//	/report?run=<id>   one run
+func (d *Daemon) handleReport(w http.ResponseWriter, r *http.Request) {
+	work := d.workDir()
+	if work == "" {
+		http.Error(w, "this daemon has no work directory", http.StatusServiceUnavailable)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	// NO CACHE: a run in progress changes under the reader, and a cached page would show a stale
+	// step list while the machine moved on.
+	w.Header().Set("Cache-Control", "no-store")
+	if _, err := report.Render(w, work, r.URL.Query().Get("run")); err != nil {
+		// THE HEADERS ARE ALREADY SENT, so the error has to be visible in the page rather than as a
+		// status code. A reader who opened this URL wants to know why it is empty.
+		fmt.Fprintf(w, "<h1>no report</h1><p>%s</p>", html.EscapeString(err.Error()))
+	}
 }

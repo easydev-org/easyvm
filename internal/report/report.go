@@ -32,6 +32,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -162,6 +163,79 @@ func Build(opts Options) (Written, error) {
 	return out, nil
 }
 
+// Render writes the page to w WITHOUT writing anything to disk.
+//
+// IT IS WHAT THE DAEMON SERVES, and the difference from `Build` matters: `Build` copies pictures and
+// video into an output directory because a report is meant to be SENT - zipped, uploaded, opened from
+// a `file://` URL with no server. A browser pointed at a RUNNING daemon has none of those needs: the
+// pictures are already on disk beside the journal and are served by `/api/artifact`, so rendering in
+// memory is the whole job.
+//
+// THE ASSET LINKS THEREFORE DIFFER. `Build` writes `assets/<sha>.png`; this writes
+// `/api/artifact?h=<sha>` and `evidence/<file>` as `/api/artifact?p=journal/<file>`. One page, two
+// audiences, and the difference is a prefix rather than a second template.
+func Render(w io.Writer, work, run string) (int, error) {
+	db, err := journal.OpenExisting(work)
+	if err != nil {
+		return 0, err
+	}
+	defer db.Close()
+
+	if run == "" {
+		runs, err := db.Runs()
+		if err != nil {
+			return 0, err
+		}
+		if len(runs) == 0 {
+			return 0, fmt.Errorf("the journal in %s holds no runs", work)
+		}
+		run = runs[0].ID
+	}
+
+	steps, err := db.Steps(run, 0)
+	if err != nil {
+		return 0, err
+	}
+	library, err := db.Library(run)
+	if err != nil {
+		return 0, err
+	}
+	summary, err := db.Summary(run)
+	if err != nil {
+		return 0, err
+	}
+
+	details := make([]detail, 0, len(steps))
+	for _, s := range steps {
+		rec, err := db.Record(run, s.Seq)
+		if err != nil {
+			rec = s
+		}
+		evs, err := db.Events(run, rec.StepIndex, "")
+		if err != nil {
+			evs = nil
+		}
+		details = append(details, detail{rec: rec, events: evs})
+	}
+
+	// THE VIDEO IS DISCOVERED, NOT COPIED: a live page can play the file the daemon is still writing,
+	// and `/api/artifact?p=<name>.mp4` already serves the work directory.
+	var videos []string
+	if entries, err := os.ReadDir(work); err == nil {
+		for _, e := range entries {
+			if !e.IsDir() && strings.HasSuffix(e.Name(), ".mp4") {
+				videos = append(videos, e.Name())
+			}
+		}
+		sort.Strings(videos)
+	}
+
+	if err := renderTo(w, run, run, details, summary, library, videos, true); err != nil {
+		return 0, err
+	}
+	return len(details), nil
+}
+
 // copyAssets copies the library's pictures into the report.
 //
 // A PICTURE THAT CANNOT BE FOUND IS SKIPPED rather than fatal: a journal can outlive a deleted
@@ -229,7 +303,15 @@ type detail struct {
 	events []journal.Event
 }
 
-func render(w *os.File, run, title string, details []detail, summary journal.Summary, library []journal.Image, videos []string) error {
+func render(w io.Writer, run, title string, details []detail, summary journal.Summary, library []journal.Image, videos []string) error {
+	return renderTo(w, run, title, details, summary, library, videos, false)
+}
+
+// renderTo is the one renderer, and `live` says whether the page is served by a daemon.
+//
+// THE ONLY THING `live` CHANGES IS WHERE A PICTURE COMES FROM. A copied report has the bytes beside
+// it; a live page asks the daemon for them by the same addresses the API already accepts.
+func renderTo(w io.Writer, run, title string, details []detail, summary journal.Summary, library []journal.Image, videos []string, live bool) error {
 	var b strings.Builder
 
 	b.WriteString(`<!DOCTYPE html>
@@ -313,8 +395,13 @@ details>summary{outline:none}
 		fmt.Fprintf(&b, `<details><summary class="sub" style="cursor:pointer;margin:0 0 12px">`+
 			`recording (%d file(s))</summary>`+"\n", len(videos))
 		for _, v := range videos {
+			src := v
+			if live {
+				// THE DAEMON SERVES THE WORK DIRECTORY, and a recording is a file in it.
+				src = "/api/artifact?p=" + v
+			}
 			fmt.Fprintf(&b, `<video controls preload="metadata" style="max-height:360px;width:auto" src="%s"></video>`+"\n",
-				html.EscapeString(v))
+				html.EscapeString(src))
 		}
 		b.WriteString("</details>\n")
 	}
@@ -322,7 +409,7 @@ details>summary{outline:none}
 	// THE STEPS.
 	b.WriteString(`<h2>Steps</h2>` + "\n" + `<ol class="steps">` + "\n")
 	for i, d := range details {
-		renderStep(&b, i+1, d.rec, d.events)
+		renderStep(&b, i+1, d.rec, d.events, live)
 	}
 	b.WriteString("</ol>\n")
 
@@ -349,8 +436,12 @@ details>summary{outline:none}
 			im := byHash[sha][0]
 			times := len(byHash[sha])
 			b.WriteString("<figure>")
-			fmt.Fprintf(&b, `<img loading="lazy" src="assets/%s.png" alt="%s">`,
-				html.EscapeString(sha), html.EscapeString(im.Name))
+			thumb := "assets/" + sha + ".png"
+			if live {
+				thumb = "/api/artifact?h=" + sha
+			}
+			fmt.Fprintf(&b, `<img loading="lazy" src="%s" alt="%s">`,
+				html.EscapeString(thumb), html.EscapeString(im.Name))
 			caption := fmt.Sprintf("%s", html.EscapeString(im.Name))
 			if times > 1 {
 				caption += fmt.Sprintf(` <b>&times;%d</b>`, times)
@@ -372,7 +463,7 @@ details>summary{outline:none}
 	}
 
 	b.WriteString("</body></html>\n")
-	_, err := w.WriteString(b.String())
+	_, err := io.WriteString(w, b.String())
 	return err
 }
 
@@ -381,7 +472,7 @@ details>summary{outline:none}
 // THE DETAIL IS IN A `<details>` ELEMENT rather than an always-open block, because a report of forty
 // steps where every one shows its calls is a page nobody can scan. What is always visible is what a
 // reader scans for: the number, the name, the verdict and how long it took.
-func renderStep(b *strings.Builder, n int, r journal.Record, events []journal.Event) {
+func renderStep(b *strings.Builder, n int, r journal.Record, events []journal.Event, live bool) {
 	status := string(r.Status)
 	if status == "" {
 		status = "running"
@@ -425,7 +516,7 @@ func renderStep(b *strings.Builder, n int, r journal.Record, events []journal.Ev
 	if len(r.Images) > 0 {
 		b.WriteString(`<div class="figs">`)
 		for _, im := range r.Images {
-			src := pictureSrc(im)
+			src := pictureSrcLive(im, live)
 			if src == "" {
 				continue
 			}
@@ -517,11 +608,24 @@ func renderStep(b *strings.Builder, n int, r journal.Record, events []journal.Ev
 // A LIBRARY PICTURE IS `assets/`, a check's crop is `evidence/`. The distinction is the one
 // `journal.Image` makes: a content address is part of the run's library, a path in the work directory
 // is evidence for one comparison.
-func pictureSrc(im journal.Image) string {
+func pictureSrc(im journal.Image) string { return pictureSrcLive(im, false) }
+
+// pictureSrcLive answers where a picture is, for a copied report or for a live page.
+//
+// A COPIED REPORT HAS THE BYTES BESIDE IT; A LIVE PAGE ASKS THE DAEMON. That is the whole difference,
+// and keeping it in one function means the two can never disagree about WHICH picture is meant - only
+// about how to fetch it.
+func pictureSrcLive(im journal.Image, live bool) string {
 	if im.Sha != "" {
+		if live {
+			return "/api/artifact?h=" + im.Sha
+		}
 		return "assets/" + im.Sha + ".png"
 	}
 	if im.Rel != "" {
+		if live {
+			return "/api/artifact?p=" + im.Rel
+		}
 		// The work-directory crops are copied under `evidence/`, keeping only their file name: the
 		// step name is already in it, and a nested path from another machine is not portable.
 		return "evidence/" + filepath.Base(im.Rel)

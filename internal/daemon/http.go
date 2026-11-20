@@ -141,6 +141,8 @@ func (d *Daemon) ServeHTTP(opts HTTPServeOptions) error {
 	mux.HandleFunc("/api/journal/library", d.handleJournalLibrary)
 	mux.HandleFunc("/api/journal/runs", d.handleJournalRuns)
 	mux.HandleFunc("/api/artifact", d.handleArtifact)
+	// THE REPORT, AS A PAGE. The same HTML `easyvm report` writes, rendered on request.
+	mux.HandleFunc("/report", d.handleReport)
 	// THE SHARED DIRECTORY, ON THIS SAME PORT. It used to be SMB on 445 with a per-family client -
 	// and FreeBSD's client could not connect at all, because netsmb speaks SMB1 on NetBIOS 139 while
 	// smbd serves SMB3 on 445. HTTP is the transport every guest already has, needs no package, no
