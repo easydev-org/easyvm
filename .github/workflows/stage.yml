@@ -88,6 +88,14 @@ on:
           `easydev-org/easyvm`, because the image is built there.
         type: string
         default: ""
+      shapes_dir:
+        description: >-
+          a directory of shape files to use INSTEAD of the ones compiled into the image. Empty means
+          the image'"'"'s own six. A walkthrough repository that ships a machine this build does not
+          have points this at its own `shapes/`, which is how an operating system is added without
+          changing the engine.
+        type: string
+        default: ""
 
 # NO WORKFLOW-LEVEL `concurrency` HERE. THE CALLER OWNS THE RUN.
 #
@@ -397,7 +405,14 @@ jobs:
           # starts, which is the rule this stage is built on. This is the belt for the one step that
           # forgets, and it is the fork's own name rather than a second default.
           export DISKS_REPOSITORY="$(printf '%s' "${{ inputs.publish_repository || github.repository }}" | tr '[:upper:]' '[:lower:]')"
-          easyvm serve --work "$GITHUB_WORKSPACE/work" \
+          # THE MACHINES THIS LEG MAY START. A caller that ships its own shapes points at them, and
+          # the daemon loads THOSE INSTEAD of the image's six - a name it did not write is a refusal
+          # rather than a machine the image happened to carry.
+          shapes_flag=""
+          if [ -n "${{ inputs.shapes_dir }}" ]; then
+            shapes_flag="--shapes ${{ inputs.shapes_dir }}"
+          fi
+          easyvm serve --work "$GITHUB_WORKSPACE/work" $shapes_flag \
             > "$GITHUB_WORKSPACE/work/daemon.log" 2>&1 &
           echo $! > "$GITHUB_WORKSPACE/work/daemon.pid"
           for i in $(seq 1 30); do
