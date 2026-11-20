@@ -79,9 +79,6 @@ type Driver struct {
 	daemon *Daemon
 	file   *walk.File
 	work   string
-	// qmpWait bounds `waitForQMP`. Zero means `qmpHandshakeWait`, which is what production uses; a
-	// test sets it smaller so it does not pay ten seconds to reach the code after the wait.
-	qmpWait time.Duration
 	// guestOS is the family the machine was actually STARTED as, remembered at boot.
 	//
 	// IT IS NOT READ FROM THE FILE, because a sandbox runs several files against one machine and the
@@ -1643,66 +1640,39 @@ func (d *Driver) qmpRegistry() *qmp.Registry {
 }
 
 func (d *Driver) qmpSocket() (*qmp.Conn, error) {
-	// THE CACHED CONNECTION IS HANDED OUT WITHOUT BEING PROBED, AND THAT IS A CORRECTION OF MY OWN
-	// LAST ATTEMPT RATHER THAN OF THE ORIGINAL CLAIM.
+	// THE CACHED CONNECTION IS HANDED OUT AS IT IS, AND THE REPAIR HAPPENS ON USE.
 	//
-	// The connection is a SHARED resource: the recorder's sampler asks for a frame every second, a
-	// gate polls the screen, and a step types into it - all through the one `*Conn` this field holds.
-	// SO A PROBE THAT CLOSES ON FAILURE IS A CLOSE THAT LANDS UNDER SOMEBODY ELSE'S COMMAND, and that
-	// is exactly what the previous version did. MEASURED ON A POD, through the daemon's own HTTP
-	// endpoint rather than a hand-made QMP client:
+	// THIS FUNCTION IS ONLY EVER CALLED WITH `qmpMu` HELD (from `qmpRetry` and from the capture
+	// path), so "one connection" is not something it has to enforce - there is exactly one caller at
+	// a time, and the connection it returns cannot be closed by anybody else while it is being used.
+	//
+	// THAT IS WHY THERE IS NO PROBE HERE ANY MORE. A probe that failed used to CLOSE the shared
+	// connection, and the caller that had just been handed it sent its next command into a closed
+	// socket. MEASURED, through the daemon's own HTTP endpoint:
 	//
 	//	POST /api/command {"command":"key","key":"shift"}   20/20 ok   one command per request
 	//	POST /api/command {"command":"type","text":"a"}      0/15 ok   stroke + release-modifiers
 	//	    "type: release modifiers: the qmp connection is closed"
 	//
-	// while qemu answered `query-status` with `running: true` and the daemon had restarted zero
-	// times. THE FIRST COMMAND OF A REQUEST NEVER FAILED AND THE SECOND REPEATEDLY DID, which is the
-	// shape of a close performed by a third party in between - one probe, one close, one victim.
-	//
-	// A FAILED PROBE WAS NEVER PROOF EITHER. `Ping` takes the same mutex every other command takes,
-	// so a momentary failure closed a channel that was about to be used successfully.
-	//
-	// THE REPAIR BELONGS WHERE THE FAILURE IS OBSERVED: `qmpRetry` runs the command, and only a
-	// command that reports `ErrClosed` drops this cached connection and reconnects. A dead connection
-	// is then discovered by USING it, which is the only evidence that counts, and a working one is
-	// never closed out from under a caller that is about to use it.
-	d.mu.Lock()
-	cached := d.qmp
-	d.mu.Unlock()
-	if cached != nil {
-		return cached, nil
-	}
-
-	path := filepath.Join(d.work, "drive.sock.qmp")
-
-	// THE HANDSHAKE HAPPENS OUTSIDE THE LOCK, because it waits up to thirty seconds for a socket that
-	// a dead qemu will never create - and every other caller of this driver would block behind it.
-	conn, err := d.qmpRegistry().Acquire(path, "easyvm", 30*time.Second)
-	if err != nil {
-		// `ErrBusy` MEANS SOMEONE ELSE ALREADY DID THIS, AND THAT IS A SUCCESS.
-		//
-		// THE RECORDER'S SAMPLER CALLS `Frame()` EVERY SECOND, AND `Frame()` CALLS THIS. During a boot
-		// those two race: the sampler asks for a frame a moment after qemu creates the socket, wins the
-		// Acquire, and `Boot` then gets `ErrBusy` for a machine it just started successfully.
-		//
-		// So the other caller's connection is waited for rather than refused. It is the same rule as
-		// the "another caller won the race" branch below.
-		if errors.Is(err, qmp.ErrBusy) {
-			return d.waitForQMP()
-		}
-		return nil, err
-	}
-
+	// - the FIRST command of a request never failed and the SECOND repeatedly did, which is the
+	// shape of a close performed by a third party in between. A dead connection is discovered by
+	// USING it, in `qmpRetry`, where the failure is real.
 	d.mu.Lock()
 	if d.qmp != nil {
-		// another caller won the race; its connection is the machine's, so this one is given back
-		// rather than left open beside it - qemu has one client slot and two would poison it.
-		other := d.qmp
+		conn := d.qmp
 		d.mu.Unlock()
-		_ = conn.Close()
-		return other, nil
+		return conn, nil
 	}
+	d.mu.Unlock()
+
+	path := filepath.Join(d.work, "drive.sock.qmp")
+	// THE HANDSHAKE IS OUTSIDE `d.mu` AND INSIDE `qmpMu`: it can wait for a socket qemu has not
+	// created yet, and nothing else may touch the connection while that wait happens.
+	conn, err := d.qmpRegistry().Acquire(path, "easyvm", 30*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	d.mu.Lock()
 	d.qmp = conn
 	d.mu.Unlock()
 	return conn, nil
@@ -1759,93 +1729,6 @@ func (d *Driver) qmpRetry(fn qmpCommand) error {
 	}
 	return fn(fresh)
 }
-
-// waitForQMP waits for ANOTHER caller's connection to be published, and returns it.
-//
-// IT EXISTS FOR ONE RACE, described on `qmpSocket`: the recorder's sampler and a boot both ask for the
-// QMP socket within a second of each other, and only one of them can hold it. The loser waits here for
-// the winner's connection rather than reporting `ErrBusy` about a machine that is running.
-//
-// THE WAIT IS BOUNDED, AND WHEN IT EXPIRES THE ENTRY IS CLEANED UP RATHER THAN ONLY DESCRIBED.
-//
-// MEASURED, on a work directory whose previous machine was killed without a `destroy`:
-//
-//	boot: another caller has held the qmp socket for 10s and never published a connection;
-//	that caller is stuck, and it has to be found rather than waited for
-//
-// THE SENTENCE WAS TRUE AND THE RUN WAS NOT DEAD. `Boot` releases the registry entry before it starts
-// qemu; the recorder's sampler then won the `Acquire`, and that sampler exited - on the killed
-// machine's step boundary - without ever publishing `d.qmp`. The registry went on claiming the path,
-// so every later `Acquire` returned `ErrBusy` naming an owner that no longer existed, and the next run
-// could not boot at all. The message asked a person to go and find the caller; in that state there was
-// nothing left to find.
-//
-// SO THE GHOST IS REMOVED HERE. `Release` is idempotent and closes whatever the map holds, which is
-// exactly "find it" without leaving the process. Only then is it worth one more `Acquire` - if the map
-// was lying, this recovers; if it was not, the error below still names the real problem.
-func (d *Driver) waitForQMP() (*qmp.Conn, error) {
-	// THE BOUND IS A FIELD SO A TEST DOES NOT HAVE TO SPEND IT. Ten seconds is right in production -
-	// it is a hundred times the handshake it covers - and wrong in a unit test, which would pay ten
-	// seconds per case for a wait it is about to demonstrate the far side of.
-	wait := qmpHandshakeWait
-	if d.qmpWait > 0 {
-		wait = d.qmpWait
-	}
-	deadline := time.Now().Add(wait)
-	for time.Now().Before(deadline) {
-		time.Sleep(50 * time.Millisecond)
-		d.mu.Lock()
-		conn := d.qmp
-		d.mu.Unlock()
-		if conn != nil {
-			return conn, nil
-		}
-	}
-
-	// THE WINNER IS A GHOST: DROP THE DEAD CLAIM AND TRY ONCE.
-	//
-	// THE PATH COMES FROM THE SAME PLACE `qmpSocket` GOT IT. A second spelling of the same join is a
-	// second chance to disagree, and a relative path here silently probed `drive.sock.qmp` in the
-	// process's own directory while the machine's socket lived nowhere near it.
-	path := filepath.Join(d.work, "drive.sock.qmp")
-	_ = d.qmpRegistry().Release(path)
-	conn, acquireErr := d.qmpRegistry().Acquire(path, "easyvm", wait)
-	if acquireErr == nil {
-		d.mu.Lock()
-		if d.qmp != nil {
-			// a third caller published while this one was acquiring; keep theirs and give this
-			// one back, because qemu has one client slot and two would poison it.
-			other := d.qmp
-			d.mu.Unlock()
-			_ = conn.Close()
-			return other, nil
-		}
-		d.qmp = conn
-		d.mu.Unlock()
-		return conn, nil
-	}
-
-	// THE SECOND ATTEMPT'S REASON IS CARRIED, AND THAT IS NOT TIDINESS.
-	//
-	// Without it the message says "the socket itself does not answer either", which is a CLAIM this
-	// function cannot make: `Acquire` fails for several reasons and only one of them is a socket with
-	// no listener. MEASURED while writing the test for this path - the real cause was a test listener
-	// whose handshake did not complete, and the sentence pointed at the socket:
-	//
-	//	and the socket itself does not answer either; that caller is stuck
-	//
-	// A reader with that message redeploys a container. A reader with the wrapped error has the
-	// handshake failure in front of them.
-	return nil, fmt.Errorf("another caller held the qmp socket for %s and never published a "+
-		"connection, and releasing that claim did not help: %w", wait, acquireErr)
-}
-
-// qmpHandshakeWait is how long a loser of the QMP race waits for the winner's connection.
-//
-// IT IS SHORTER THAN `Acquire`'S OWN THIRTY SECONDS BY DESIGN: this wait only covers "the winner is
-// mid-handshake", which is milliseconds, so a number that bounds a wedged winner quickly is worth more
-// than one that would tolerate it.
-const qmpHandshakeWait = 10 * time.Second
 
 // shutdown releases everything this machine owns, AND IT IS IDEMPOTENT.
 //
