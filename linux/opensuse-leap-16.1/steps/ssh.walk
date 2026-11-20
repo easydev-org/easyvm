@@ -311,6 +311,21 @@ walkthrough "linux-opensuse-tumbleweed - sshd"
     run == sudo ls -l /etc/pam.d/sshd; sudo grep -c . /etc/pam.d/sshd; sudo grep -l pam_unix /etc/pam.d/common-auth
     settle == 4
     terminal_wait == 0
+  # AND NOW ASK THE DAEMON, WITH A HOST KEY ON DISK SO IT CAN ANSWER.
+  #
+  # MEASURED ON RUN 43338e3's console, which is the last piece of this puzzle:
+  #
+  #	vmuservmuser@localhost:~> sudo passwd -S vmuser
+  #	vmuser P 2026-11-19 0 99999 7 -1          <- P: a usable password, not locked, not expired
+  #	Password expires: Sep 03, 2300 (never)
+  #
+  # So the account is fine, the PAM stack is written (154 bytes, five lines, pam_unix), sshd is active
+  # - and the client is still refused. The daemon's own view has to be read from the daemon, and
+  # `sshd -T` can only do that now that /etc/ssh/ssh_host_*_key exists.
+  step "what sshd itself says about authentication, now that it can answer"
+    run == sudo sshd -T 2>&1 | grep -iE "^(passwordauthentication|usepam|kbdinteractiveauthentication|pubkeyauthentication|permitrootlogin|authenticationmethods)"; echo --- ; sudo grep -iE "^(PasswordAuthentication|UsePAM|KbdInteractive|AuthenticationMethods)" /etc/ssh/sshd_config ; sudo sed -i s/^PasswordAuthentication.no/PasswordAuthentication.yes/ /etc/ssh/sshd_config
+    settle == 5
+    terminal_wait == 0
   step "start sshd"
     run == sudo systemctl restart sshd 2>&1 | tail -3; sleep 2; systemctl is-active sshd
     settle == 10
