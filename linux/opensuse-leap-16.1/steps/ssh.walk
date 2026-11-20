@@ -172,14 +172,35 @@ walkthrough "linux-opensuse-tumbleweed - sshd"
     run == sudo sshd -T -f /etc/ssh/sshd_config 2>&1 | grep -i passwordauthentication ; echo --- ; sudo sshd -T -f /usr/etc/ssh/sshd_config 2>&1 | grep -i passwordauthentication ; echo --- ; sudo ls -l /etc/ssh/sshd_config /usr/etc/ssh/sshd_config
     settle == 4
     terminal_wait == 0
-  # ONE AUTHORITATIVE DROP-IN, AND THE MAIN FILE REWRITTEN WITH IT.
+  # `sshd -T` PRINTED NOTHING AT ALL - TWICE - AND grep HID THE REASON.
   #
-  # THE ORDER MATTERS AND SO DOES THE PROOF: the drop-in is written for every directory that exists,
-  # then the main file is made to say the same thing, then `sshd -T -f` is asked about each. If the
-  # daemon still reports nothing, the next recording says so at the step that caused it.
-  step "write the setting in both places"
-    run == sudo sh -c "mkdir -p /etc/ssh/sshd_config.d /usr/etc/ssh/sshd_config.d; printf 'PasswordAuthentication yes\\n' > /etc/ssh/sshd_config.d/99-vm.conf; printf 'PasswordAuthentication yes\\n' > /usr/etc/ssh/sshd_config.d/99-vm.conf"; sudo sed -i -e s/^PasswordAuthentication.no/PasswordAuthentication.yes/ -e s/^#PasswordAuthentication/PasswordAuthentication/ /etc/ssh/sshd_config ; sudo grep -i passwordauthentication /etc/ssh/sshd_config ; sudo sshd -T 2>&1 | grep -i passwordauthentication
-    settle == 4
+  # MEASURED ON RUN 56dfbf5's console, in full:
+  #
+  #	vmuser@localhost:~> sudo sshd -T -f /etc/ssh/sshd_config 2>&1 | grep -i passwordauthentication
+  #	---
+  #	vmuser@localhost:~> sudo sshd -T -f /usr/etc/ssh/sshd_config 2>&1 | grep -i passwordauthentication
+  #	---
+  #	-rw------- 1 root root 4076 Nov 20 02:35 /etc/ssh/sshd_config      <- ours, just written
+  #	-rw-r----- 1 root root 4076 Jul 28 09:58 /usr/etc/ssh/sshd_config  <- the vendor's, untouched
+  #
+  # and `grep -n PasswordAuthentication /etc/ssh/sshd_config` printed `94:PasswordAuthentication yes`.
+  # So the FILE says yes, the daemon says NOTHING, and `2>&1 | grep` threw away whatever sshd said
+  # instead of the line that was asked for. That grep is the bug in this step: it turned "sshd
+  # refused to load this file" into "the setting is absent".
+  #
+  # SO THE NEXT STEP PRINTS sshd's OWN WORDS, unconditionally, for each file and for the system
+  # default (no -f), and the exit status with them. Nothing is filtered, so the reason cannot hide.
+  step "ask sshd what it thinks, and let it say why"
+    run == sudo sshd -T -f /etc/ssh/sshd_config 2>&1 | head -5; echo "exit=$?"; echo ===; sudo sshd -T -f /usr/etc/ssh/sshd_config 2>&1 | head -5; echo "exit=$?"; echo ===; sudo sshd -T 2>&1 | head -5; echo "exit=$?"
+    settle == 5
+    terminal_wait == 0
+  step "write the drop-in everywhere a config dir exists"
+    run == sudo sh -c "mkdir -p /etc/ssh/sshd_config.d /usr/etc/ssh/sshd_config.d; printf 'PasswordAuthentication yes\\n' > /etc/ssh/sshd_config.d/99-vm.conf; printf 'PasswordAuthentication yes\\n' > /usr/etc/ssh/sshd_config.d/99-vm.conf"; sudo sed -i s/^PasswordAuthentication.no/PasswordAuthentication.yes/ /etc/ssh/sshd_config ; sudo grep -n PasswordAuthentication /etc/ssh/sshd_config"
+    settle == 3
+    terminal_wait == 0
+  step "the vendor file says it too, because that is the one sshd may read"
+    run == sudo sh -c "grep -q ^PasswordAuthentication /usr/etc/ssh/sshd_config || printf 'PasswordAuthentication yes\\n' >> /usr/etc/ssh/sshd_config"; sudo sed -i s/^PasswordAuthentication.no/PasswordAuthentication.yes/ /usr/etc/ssh/sshd_config ; sudo grep -n PasswordAuthentication /usr/etc/ssh/sshd_config
+    settle == 3
     terminal_wait == 0
   step "enable sshd at boot"
     run == sudo systemctl enable sshd 2>&1 | tail -3
