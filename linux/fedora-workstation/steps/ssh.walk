@@ -121,17 +121,37 @@ walkthrough "linux-fedora-workstation - sshd"
   # password is asked for on the page after it.
   step "walk the wizard to About You"
     do == [{key: tab, settle: 1}, {key: tab, settle: 1}, {key: ret, settle: 7}, {key: tab, settle: 1}, {key: tab, settle: 1}, {key: ret, settle: 7}, {key: tab, settle: 1}, {key: tab, settle: 1}, {key: ret, settle: 8}]
+  # THE ACCOUNT FORM IS RECOGNISED BY A PICTURE, NOT BY WORDS OR A GUESS ABOUT FOCUS.
+  #
+  # MEASURED ON THIS WIZARD, six runs: the words on the page are not unique to it (Privacy, the update
+  # pane and this form are all white cards with a title and a blue Next), and the two ways it can look
+  # are "Create Account" (Full Name + Username) and "Enterprise Login" (Domain + Username + Password).
+  # A stage that typed on the wrong one put the password into a domain field and the wizard sat there.
+  #
+  # SO THE REGION IS COMPARED AS A PICTURE against a frame from run 145ff2b, in which the cursor is IN
+  # the Full Name field - which is the state this stage needs, not merely a page that mentions the
+  # same words.
+  #
+  # THE NUMBERS ARE MEASURED, not chosen. `rect: [710, 530, 1215, 655]` over that frame:
+  #
+  #	1.0000  the create-account form with the cursor in Full Name     <- the state to act on
+  #	0.5072  the same dialog in enterprise-login mode
+  #	0.8890  an earlier wizard page
+  #	0.8889  the page before it
+  #
+  # A threshold of 0.95 sits in that gap with room on both sides; the engine's own comparison is
+  # "pixels within 8 levels per channel", which is what produced those four numbers.
+  step "the create-account form is up, with the cursor in Full Name"
+    loop == {check: {from: account_form, mode: like, name: ready, rect: [710, 530, 1215, 655], rect_at: [1920, 1080], reference: reference/about-you-create-account.png, range: [0.95, 1.0]}, do: [{settle: 5}], max: 10, see: {name: account_form}, until: {fact: ready}}
+    optional == true
   # THE FIELDS ARE TYPED UNCONDITIONALLY, BECAUSE A WRONG PAGE MAKES THEM HARMLESS RATHER THAN DAMAGING.
   #
-  # A `when: [about]` GATE WAS TRIED AND REJECTED: `doCheck` only binds the fact when the check RUNS,
-  # and the check here is inside an `optional` loop, so a page that never matched would leave the
-  # name unbound and the gate would skip the typing silently - the same "optional step that let the
-  # miss through" fault this file's header already complains about.
-  #
-  # Typing into a page that is NOT this form lands in whatever has focus, and the only thing on the
-  # other side of this dialog is the wizard's own chrome. The steps that matter are gated afterwards
-  # by the account existing: if the typing missed, the sshd install below has no user to authenticate
-  # and the stage fails there, with the reason on screen.
+  # A `when: [ready]` GATE WAS TRIED AND REJECTED: `doCheck` only binds the fact when the check RUNS,
+  # and this check lives inside an `optional` loop, so a page that never matched would leave the name
+  # unbound and the gate would skip the typing silently - the same "optional step that let the miss
+  # through" fault this file's header already complains about. The picture above is the RECORD of
+  # what the stage saw; the typing stays unconditional and is proven by sshd authenticating the
+  # account three steps later.
   step "the full name"
     type == '{{ user }}'
     type_gap == 0.09
