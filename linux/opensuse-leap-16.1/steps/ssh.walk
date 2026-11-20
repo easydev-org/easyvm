@@ -118,23 +118,17 @@ walkthrough "linux-opensuse-tumbleweed - sshd"
     run == sudo zypper --non-interactive --no-gpg-checks install openssh 2>&1 | tail -5
     settle == 60
     terminal_wait == 0
+  # BOTH PLACES, IN ONE STEP: THE MAIN FILE AND THE DROP-IN.
+  #
+  # `sed` REPLACES the commented line rather than appending a second one - an image that ships
+  # `#PasswordAuthentication yes` would otherwise end up with two settings, and the FIRST wins in
+  # sshd's own reading order. This image has no /etc/ssh/sshd_config at all until the copy above
+  # makes one, which is why the sed has nothing to do the first time and the append is the fallback.
   step "allow password authentication"
-    # THIS IMAGE HAS NO /etc/ssh/sshd_config AT ALL - sshd reads /usr/etc/ssh/sshd_config.
-    #
-    # MEASURED ON RUN 0a4fe70's console, in full:
-    #
-    #	sed: can't read /etc/ssh/sshd_config: No such file or directory
-    #	grep: /etc/ssh/sshd_config: No such file or directory
-    #
-    # - so the whole step that "allows password authentication" wrote a drop-in that nothing
-    # includes and edited a file that does not exist, and sshd ran with the vendor's defaults. The
-    # handshake then failed with `unexpected message type 51 (expected 60)`, which is what a server
-    # whose configuration never mentions this client's algorithms looks like.
-    #
-    # THE VENDOR FILE IS /usr/etc/ssh/sshd_config ON THIS DISTRIBUTION (usr-merge with the packaged
-    # file left in place). Both paths are written, and the file that sshd actually reads is proved by
-    # `sshd -T` printing the value back.
-    run == sudo sh -c 'mkdir -p /etc/ssh/sshd_config.d /run/sshd; for f in /etc/ssh/sshd_config /usr/etc/ssh/sshd_config; do [ -f $f ] || touch $f; sed -i "s/^#\?\s*PasswordAuthentication.*/PasswordAuthentication yes/" $f; grep -q "^PasswordAuthentication yes" $f || printf "PasswordAuthentication yes\n" >> $f; done; printf "PasswordAuthentication yes\n" > /etc/ssh/sshd_config.d/99-vm.conf; printf "PasswordAuthentication yes\n" > /usr/etc/ssh/sshd_config.d/99-vm.conf 2>/dev/null || true; sudo sshd -T 2>&1 | grep -i "^passwordauthentication" || grep -i "^passwordauthentication" /usr/etc/ssh/sshd_config
+    run == sudo sed -i s/^#PasswordAuthentication/PasswordAuthentication/ /etc/ssh/sshd_config ; grep -q ^PasswordAuthentication /etc/ssh/sshd_config || sudo sh -c "printf 'PasswordAuthentication yes\\n' >> /etc/ssh/sshd_config" ; sudo sh -c "printf 'PasswordAuthentication yes\\n' > /etc/ssh/sshd_config.d/99-vm.conf" ; sudo grep -c PasswordAuthentication /etc/ssh/sshd_config
+    settle == 3
+  step "prove what sshd itself took"
+    run == sudo sshd -T 2>&1 | grep -i passwordauthentication
     settle == 3
     terminal_wait == 0
   step "enable sshd at boot"

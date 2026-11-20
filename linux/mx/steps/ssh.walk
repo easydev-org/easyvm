@@ -164,6 +164,23 @@ walkthrough "linux-mx - sshd"
     run == sudo systemctl enable ssh 2>/dev/null; sudo update-rc.d ssh defaults 2>/dev/null; sudo service ssh start; sudo service sshd start; sleep 2; sudo service ssh status
     settle == 12
     terminal_wait == 0
+  # `i/o TIMEOUT` IS A FIREWALL, NOT A MISSING DAEMON - AND THIS IMAGE SHIPS ufw.
+  #
+  # MEASURED ON RUN b0b83d5's mx ssh: openssh installed and sshd started (the terminal shows the host
+  # keys and "Starting OpenBSD Secure Shell server: sshd"), and the port then answered with
+  # 'dial tcp 172.30.0.1:2222: i/o timeout' - TIMEOUT, which is what a DROP rule produces; a daemon
+  # that is not listening gives 'connection refused' in milliseconds.
+  #
+  # The install step's own output ends with 'Processing triggers for ufw (0.36.2-9)', so ufw is
+  # present on this disk. `ufw allow 22/tcp` is the rule, and it is idempotent.
+  step "open the firewall for ssh"
+    run == sudo ufw allow 22/tcp
+    settle == 4
+    terminal_wait == 0
+  step "show the firewall's rules"
+    run == sudo ufw status
+    settle == 3
+    terminal_wait == 0
   step "wait for sshd"
     require_ssh == true
     timeout == 600
