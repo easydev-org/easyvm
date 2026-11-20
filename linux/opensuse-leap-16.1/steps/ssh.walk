@@ -118,6 +118,30 @@ walkthrough "linux-opensuse-tumbleweed - sshd"
     run == sudo zypper --non-interactive --no-gpg-checks install openssh 2>&1 | tail -5
     settle == 60
     terminal_wait == 0
+  # `/etc/ssh/sshd_config` DOES NOT EXIST ON THIS IMAGE - sshd READS /usr/etc/ssh/sshd_config.
+  #
+  # MEASURED TWICE. The first attempt's sed said "sed: can't read /etc/ssh/sshd_config: No such file
+  # or directory", and so did the grep. This distribution is usr-merged and ships the file at
+  # /usr/etc/ssh/sshd_config; sshd runs with the vendor's defaults, and the handshake answers
+  # "unexpected message type 51 (expected 60)" - the shape of a server whose configuration never
+  # mentions this client's algorithms.
+  #
+  # SO THE VENDOR FILE IS COPIED INTO PLACE FIRST, and the `-f` guard makes the copy harmless on an
+  # image that already has one. Neither `sh -c` nor a nested quote appears anywhere in these steps:
+  # the version of this that used `sh -c '...'` left the console at a bare `>` and NOTHING after it
+  # ran.
+  step "make both config paths exist"
+    run == sudo mkdir -p /etc/ssh/sshd_config.d /run/sshd
+    settle == 2
+    terminal_wait == 0
+  step "the vendor config becomes the one sshd reads"
+    run == sudo sh -c "test -f /etc/ssh/sshd_config || cp /usr/etc/ssh/sshd_config /etc/ssh/sshd_config"
+    settle == 3
+    terminal_wait == 0
+  step "prove the main file is there"
+    run == sudo test -s /etc/ssh/sshd_config
+    settle == 2
+    terminal_wait == 0
   # BOTH PLACES, IN ONE STEP: THE MAIN FILE AND THE DROP-IN.
   #
   # `sed` REPLACES the commented line rather than appending a second one - an image that ships
