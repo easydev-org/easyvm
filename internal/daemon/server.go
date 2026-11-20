@@ -22,9 +22,9 @@
 package daemon
 
 import (
-	"github.com/easydev-org/easyvm/internal/journal"
 	"errors"
 	"fmt"
+	"github.com/easydev-org/easyvm/internal/journal"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -62,7 +62,7 @@ type Daemon struct {
 	// jdb is the run's journal: the structured record of every step and every external call, which
 	// `/api/journal` reads. Nil until a run has opened one.
 	jdb *journal.DB
-	mu sync.Mutex
+	mu  sync.Mutex
 	// st is the current state, guarded by mu.
 	st State
 	// ex is the executor of the run in progress, nil when idle.

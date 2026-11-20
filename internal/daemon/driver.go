@@ -13,13 +13,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/easydev-org/easyvm/internal/artifact"
 	"github.com/easydev-org/easyvm/internal/guest"
+	"github.com/easydev-org/easyvm/internal/journal"
 	"github.com/easydev-org/easyvm/internal/keys"
 	"github.com/easydev-org/easyvm/internal/machine"
 	easyvmnet "github.com/easydev-org/easyvm/internal/net"
 	"github.com/easydev-org/easyvm/internal/overlay"
-	"github.com/easydev-org/easyvm/internal/artifact"
-	"github.com/easydev-org/easyvm/internal/journal"
 	"github.com/easydev-org/easyvm/internal/qmp"
 	"github.com/easydev-org/easyvm/internal/run"
 	"github.com/easydev-org/easyvm/internal/screen"
@@ -120,6 +120,25 @@ type Driver struct {
 	// frameMu serialises screen capture. ONE FRAME AT A TIME, because three readers of one screen do
 	// not need three screendumps and interleaved writes produce unreadable files.
 	frameMu sync.Mutex
+	// qmpMu SERIALISES "take the connection, use it, and repair it if it is dead" AS ONE UNIT.
+	//
+	// THE TRANSPORT ALREADY SERIALISES ONE COMMAND - `line.Run` holds its own mutex - AND THAT IS NOT
+	// ENOUGH, BECAUSE THE REPAIR IS NOT A COMMAND. MEASURED ON THE POD, on opensuse's console login:
+	//
+	//	login [2.3]: typing: input-send-event []+7: the qmp connection is closed
+	//
+	// The first character of the password landed and the second did not, on a guest whose qemu was
+	// running and whose socket was listening. The recorder's sampler captures a frame every second and
+	// a `type:` sends one `input-send-event` per character; when a capture failed, the sampler took
+	// the repair path - drop the shared connection, open another - and the typing caller's next
+	// character went into the socket that had just been closed underneath it.
+	//
+	// SO THE UNIT OF EXCLUSION IS THE WHOLE TRANSACTION, NOT THE COMMAND. Two callers can no longer
+	// both decide "this connection is dead" and both act on it; the second waits and finds a working
+	// connection that the first already repaired. The cost is nothing that was not already paid:
+	// `line.Run` serialises every command anyway, so this lock does not reduce throughput, it only
+	// stops the DECISIONS from interleaving.
+	qmpMu sync.Mutex
 	// frames is the one-a-second capture every reader shares. See framecache.go for the measurement
 	// that made it: the sampler and a gate fought over one QMP socket and the gate lost 166 of 180
 	// attempts in silence.
@@ -281,22 +300,36 @@ func (d *Driver) frameCache() *frameCache {
 		d.frames = newFrameCache(func() (cachedFrame, error) {
 			d.frameMu.Lock()
 			defer d.frameMu.Unlock()
-			// THE CAPTURE GOES THROUGH `qmpRetry` FOR THE SAME REASON EVERY OTHER COMMAND DOES: a
-			// frame that fails because the socket went away is a tick this sampler can still deliver,
-			// and a leftover `d.qmp` would otherwise cost every later capture too.
-			var out cachedFrame
-			err := d.qmpRetry(func(conn *qmp.Conn) error {
-				f, err := conn.Screendump(filepath.Join(d.work, "frames"))
-				if err != nil {
-					return err
-				}
-				out = cachedFrame{path: f.Path, w: f.Width, h: f.Height, at: time.Now()}
-				return nil
-			})
+			// A FRAME THAT FAILS IS A LOST TICK, NOT A REASON TO RECONNECT A SHARED CONNECTION.
+			//
+			// THE SAMPLER AND A TYPING CALLER SHARE ONE `*Conn`, and `qmpRetry`'s repair CLOSES the
+			// connection it gives up on. So a sampler that took the repair path closed the socket a
+			// `type:` was in the middle of using. MEASURED on the pod, on opensuse's console login:
+			//
+			//	login [2.3]: typing: input-send-event []+7: the qmp connection is closed
+			//
+			// - the first character landed, the second did not, and the guest was fine.
+			//
+			// A CAPTURE IS WORTH LESS THAN A KEYSTROKE. If this tick fails the recording is one frame
+			// shorter and says so in its own count; the connection stays as it is, and the caller that
+			// is actually SENDING something is the one that gets to decide whether it needs repair.
+			// That is why this goes through `qmpSocket` and a bare `Screendump` rather than
+			// `qmpRetry`: the sampler observes, it does not repair.
+			// THE SAME LOCK AS EVERY OTHER COMMAND, because the transport is shared and a capture is
+			// not privileged over a keystroke. What makes this safe is that the capture does NOT
+			// repair: a failed tick is a lost frame, and the connection stays as it is for whoever is
+			// actually sending something.
+			d.qmpMu.Lock()
+			defer d.qmpMu.Unlock()
+			conn, err := d.qmpSocket()
 			if err != nil {
 				return cachedFrame{}, err
 			}
-			return out, nil
+			f, err := conn.Screendump(filepath.Join(d.work, "frames"))
+			if err != nil {
+				return cachedFrame{}, err
+			}
+			return cachedFrame{path: f.Path, w: f.Width, h: f.Height, at: time.Now()}, nil
 		})
 	}
 	return d.frames
@@ -1686,6 +1719,11 @@ func (d *Driver) qmpSocket() (*qmp.Conn, error) {
 type qmpCommand func(*qmp.Conn) error
 
 func (d *Driver) qmpRetry(fn qmpCommand) error {
+	// ONE TRANSACTION AT A TIME: take the connection, use it, repair it, retry - and let nobody else
+	// in until that is finished. See the note on `qmpMu` for the measured failure this prevents.
+	d.qmpMu.Lock()
+	defer d.qmpMu.Unlock()
+
 	conn, err := d.qmpSocket()
 	if err != nil {
 		return err
@@ -1695,35 +1733,21 @@ func (d *Driver) qmpRetry(fn qmpCommand) error {
 		return err
 	}
 
-	// ONE RECONNECT, AND IT IS PUBLISHED RATHER THAN TAKEN.
-	//
-	// THE FIRST VERSION OF THIS FUNCTION CALLED `qmpSocket()` AGAIN AND USED WHAT IT RETURNED, WHICH
-	// WAS A LOOP THAT NEVER SETTLED. MEASURED on the pod: 280 "reconnecting" lines for ONE boot,
-	// every command failing - because the recorder's sampler calls this every second and:
-	//
-	//	sampler   sees the dead connection, drops it, opens a new one, publishes it in `d.qmp`
-	//	this call sees the dead connection, drops it - THE ONE THE SAMPLER JUST PUBLISHED -
-	//	          opens another, and the sampler's next tick drops that one
-	//
-	// Each caller treated "the cached connection is not the one I used" as "mine to replace". The
-	// remedy is to distinguish the two: a caller that finds SOMEBODY ELSE'S working connection in the
-	// cache after a failure RETRIES ON THAT ONE, and only a caller that still finds the dead
-	// connection replaces it.
+	// THE FAILED CONNECTION IS DROPPED AND THE PATH RELEASED IN THE SAME CRITICAL SECTION, so no
+	// caller can observe "cache empty, registry held" - and since this whole function is now
+	// exclusive, nobody can be using the connection this is about to close.
 	d.mu.Lock()
-	current := d.qmp
-	switch {
-	case current == nil:
-		// nobody else has reconnected: this caller does it
-	case current == conn:
-		// still the dead one, so it is this caller's to drop
+	if d.qmp == conn {
 		d.qmp = nil
 		_ = d.qmpRegistry().Release(filepath.Join(d.work, "drive.sock.qmp"))
-	default:
-		// somebody else already replaced it, and that connection is this machine's
-		d.mu.Unlock()
-		return fn(current)
 	}
+	other := d.qmp
 	d.mu.Unlock()
+
+	if other != nil {
+		// somebody published a replacement while this command was in flight (the boot path does this)
+		return fn(other)
+	}
 
 	fresh, err := d.qmpSocket()
 	if err != nil {

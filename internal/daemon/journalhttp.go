@@ -329,6 +329,7 @@ func confined(root, path string) bool {
 	}
 	return absPath == absRoot || strings.HasPrefix(absPath, absRoot+string(filepath.Separator))
 }
+
 // handleReport renders the run's journal as the HTML page, served rather than written.
 //
 // THE SAME PAGE `easyvm report` PRODUCES, with its pictures fetched from `/api/artifact` instead of
