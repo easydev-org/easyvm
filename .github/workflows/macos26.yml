@@ -13,8 +13,17 @@ name: macos26
 # opens. `macos.yml` is the 15 chain and this is the 26 chain; the day 26 grows an ssh stage it gets a
 # job here, not a condition there.
 #
-# `from_tag` IS ABSENT ON PURPOSE. There is nothing to start from yet: this file's only stage is the
-# one that CREATES the disk.
+# THE CHAIN IS TWO STAGES, AND `from_tag` PICKS WHERE IT STARTS.
+#
+#   setup   CREATES the disk: recovery image, Disk Utility, the copy, the first boot.
+#   ssh     ANSWERS the Setup Assistant, enables Remote Login, and powers off through sshd.
+#
+# There is no `vm-configure` stage because there is no `macos/26/steps/vm-configure.walk` - 26 never
+# grew one, and inventing a stage for a file that does not exist is a job that fails at load.
+#
+# `from_tag: macos26` starts at `ssh`, because that disk is already published. `from_tag: macos26-ssh`
+# is accepted by the ssh job as well: it means "the disk I want is the one ssh publishes", which is
+# how a dispatch names the LAST tag when it wants the chain to end there.
 
 on:
   workflow_dispatch:
@@ -22,6 +31,9 @@ on:
       disks_repository:
         description: "the ghcr repository that holds the assets"
         default: "easydev-org/easyvm"
+      from_tag:
+        description: "start from this published disk instead of building it (macos26, macos26-ssh)"
+        default: ""
 
 concurrency:
   group: macos26
@@ -100,6 +112,7 @@ jobs:
 
   setup:
     needs: room
+    if: always() && !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.from_tag == '' || inputs.from_tag == 'macos26')
     uses: ./.github/workflows/stage.yml
     secrets: inherit
     with:
@@ -115,5 +128,35 @@ jobs:
             "out": "macos26.qcow2",
             "publish": "macos26",
             "timeout": 400
+          }
+        ]
+
+  # THE `ssh` STAGE, WHICH ANSWERS THE SETUP ASSISTANT AND TURNS ON REMOTE LOGIN.
+  #
+  # `setup` ENDS WHERE THE INSTALLER ENDS. What that disk does NOT have is an answered assistant or a
+  # remote-login switch, and `macos/26/steps/ssh.walk` is the file that does both: it walks every pane
+  # the assistant can show (country, transfer, account, terms, filevault, look, update, keyboard) by
+  # its own words, then logs in and enables Remote Login.
+  #
+  # IT IS A SEPARATE JOB FOR THE REASON macos15's IS: the assistant can take 45 minutes, and a failure
+  # here must cost the assistant, not the four hours of install before it. `from_tag: macos26` starts
+  # the chain at this job.
+  ssh:
+    if: always() && !cancelled() && (github.event_name != 'workflow_dispatch' || inputs.from_tag == '' || inputs.from_tag == 'macos26' || inputs.from_tag == 'macos26-ssh')
+    uses: ./.github/workflows/stage.yml
+    secrets: inherit
+    with:
+      group: macos26
+      disks_repository: ${{ inputs.disks_repository }}
+      stages: |
+        [
+          {
+            "name": "macos26-ssh",
+            "file": "macos/26/steps/ssh.walk",
+            "pull": "macos26",
+            "assets": ["macos-asset-boot-26:boot.img", "macos-asset-rom-26:macos.rom", "macos-asset-vars-26:macos.vars"],
+            "out": "macos26-ssh.qcow2",
+            "publish": "macos26-ssh",
+            "timeout": 120
           }
         ]
