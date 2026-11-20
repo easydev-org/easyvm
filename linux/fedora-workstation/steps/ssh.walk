@@ -98,25 +98,27 @@ walkthrough "linux-fedora-workstation - sshd"
   #
   # The loop presses Next until the wizard's own heading is gone. `max: 12` is the number of pages
   # this wizard has plus slack; a page that does not advance costs one press, not the whole stage.
-  # THE WIZARD IS DRIVEN BY ITS OWN MNEMONIC, BECAUSE IT IGNORES BOTH THE MOUSE AND A BARE RETURN.
+  # TAB MOVES THE FOCUS AND RETURN PRESSES WHAT HAS IT - AND THE PAGE HAS TWO CONTROLS BEFORE NEXT.
   #
-  # MEASURED, FOUR RUNS, FOUR DIFFERENT ATTEMPTS AT THE SAME PAGE:
-  #   1. a click at Start Setup's centre logged "clicked (960,844)" and did nothing; Tab+Return then
-  #      started the wizard;
-  #   2. eight clicks at (1420,193) - inside Next on every page - logged eight "clicked" lines and the
-  #      Privacy page never changed;
-  #   3. eight Tab+Return pairs left the Privacy page with the Location Services switch ON: Tab had
-  #      focused the switch and each Return toggled it;
-  #   4. ten bare Returns left it exactly as it was.
+  # THE ONE THING THAT IS KNOWN TO WORK IN THIS WIZARD IS Tab+Return: it is what pressed Start Setup
+  # when a click at the button's own centre did nothing. So the wizard is reachable by keyboard; the
+  # question was only where the focus lands.
   #
-  # So on this page neither a pointer event nor Return reaches the Next button. Its label carries a
-  # mnemonic - GTK underlines the letter and binds it to Alt - and `alt+n` is that binding. It works
-  # whatever has focus, and on the pages where Next is the default it is harmless.
+  # MEASURED ON THE PRIVACY PAGE, four attempts:
+  #   eight clicks at (1420,193) inside Next  -> nothing;
+  #   eight [Tab, Return] pairs              -> the Location Services switch toggled, page unchanged;
+  #   ten bare Returns                       -> nothing;
+  #   twelve `alt+n`                          -> the switch toggled again, page unchanged
+  #                                              (frames at 250/600/700/850 s are all Privacy).
   #
-  # Twelve presses is this wizard's page count plus slack; past the last page Alt+N does nothing,
-  # and Escape dismisses anything that was opened.
+  # The toggle explains all of it: on this page the FIRST Tab lands on the switch and Return flips
+  # it. Next is the row AFTER it, so the button needs TWO Tabs - and every attempt so far pressed
+  # Return one Tab too early.
+  #
+  # So each page gets [Tab, Tab, Return]. Eight pages of that is this wizard's length plus slack; a
+  # Return on a desktop opens nothing that Escape cannot close.
   step "walk the setup wizard to its end"
-    do == [{key: alt+n, settle: 7}, {key: alt+n, settle: 7}, {key: alt+n, settle: 7}, {key: alt+n, settle: 7}, {key: alt+n, settle: 7}, {key: alt+n, settle: 7}, {key: alt+n, settle: 7}, {key: alt+n, settle: 7}, {key: alt+n, settle: 7}, {key: alt+n, settle: 7}, {key: alt+n, settle: 7}, {key: alt+n, settle: 9}]
+    do == [{key: tab, settle: 1}, {key: tab, settle: 1}, {key: ret, settle: 7}, {key: tab, settle: 1}, {key: tab, settle: 1}, {key: ret, settle: 7}, {key: tab, settle: 1}, {key: tab, settle: 1}, {key: ret, settle: 7}, {key: tab, settle: 1}, {key: tab, settle: 1}, {key: ret, settle: 7}, {key: tab, settle: 1}, {key: tab, settle: 1}, {key: ret, settle: 7}, {key: tab, settle: 1}, {key: tab, settle: 1}, {key: ret, settle: 7}, {key: tab, settle: 1}, {key: tab, settle: 1}, {key: ret, settle: 7}, {key: tab, settle: 1}, {key: tab, settle: 1}, {key: ret, settle: 9}]
   press Escape, waiting 2s, named "clear a context menu if the wizard had already closed"
 
   # THE TERMINAL IS OPENED WITHOUT A POINTER EVENT, BECAUSE CLICKS DO NOT LAND IN THIS GUEST.
