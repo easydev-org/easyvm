@@ -1,0 +1,42 @@
+# LINUX: UEFI firmware, a virtio disk, a VGA adapter at the resolution the coordinates were measured
+# at. This is the shape most guests here use, and the one every other shape is a deviation from.
+
+name: linux
+description: "UEFI, virtio disk, VGA at 1920x1080 - what every Linux installer here expects"
+
+firmware:
+  kind: ovmf
+  # THE TWO PFLASH SLOTS ARE TEMPLATES because the DAEMON chooses the files: the container image
+  # carries one OVMF build and a run may point `OVMF_CODE` elsewhere. `{{.Code}}` is what the caller
+  # passed and `{{.Vars}}` is the writable copy made per run.
+  code: "{{.Code}}"
+  vars: "{{.Vars}}"
+
+cpu: {}
+smp:
+  format: plain
+
+# `vga` IS THE `-device VGA,xres=1920,yres=1080,vgamem_mb=32` FORM, and it is not a preference:
+# `-vga std` cannot carry a resolution, so a guest given it comes up at qemu's own 1280x800 and every
+# coordinate measured on 1920x1080 lands somewhere else. MEASURED: `linux-nixos-ssh` failed with
+# "`region_at` is [1920, 1080] but this frame is 1280x800".
+#
+# `vgamem_mb=32` IS NOT TUNING. The adapter's default is 8 MiB and 1920x1080 at 32 bits is 7.91 MiB
+# before double buffering, so the default cannot hold a frame and the symptom is a black screen from
+# the first capture with no error at all.
+video:
+  kind: vga
+
+# HDA, because that is what Windows, Linux and the BSDs bind out of the box.
+audio: hda
+
+smc: false
+
+# AN ISO IS WHAT MARKS AN INSTALL for this family.
+install_medium: iso
+
+extra_args: []
+
+media:
+  iso: true
+  recovery: false

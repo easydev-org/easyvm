@@ -197,6 +197,9 @@ func cmdServe(args []string) int {
 	work := fs.String("work", "", "the directory the frames and the guest scratch live in")
 	httpAddr := fs.String("http", daemon.DefaultHTTPAddr, "the browser surface: a live screen, a "+
 		"click map, keys and typing. Empty disables it")
+	shapesDir := fs.String("shapes", "", "a directory of shape files to use INSTEAD of the ones "+
+		"compiled into this binary. A shape says what machine an `os:` means - firmware, CPU flags, "+
+		"devices - so a repository can add an operating system this build does not ship")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -216,8 +219,9 @@ func cmdServe(args []string) int {
 	// on a daemon that had done nothing wrong. The address is `Serve`'s business now, and this is the
 	// only place it is decided.
 	err := d.Serve(daemon.ServeOptions{
-		Work:     *work,
-		HTTPAddr: *httpAddr,
+		Work:      *work,
+		HTTPAddr:  *httpAddr,
+		ShapesDir: *shapesDir,
 		Ready: func(addr string) {
 			// THE READY LINE IS A CONTRACT. A supervisor - or a test - waits for it rather than
 			// polling for a socket file, because a file that exists is not a daemon that answers.

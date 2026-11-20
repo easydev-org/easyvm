@@ -1,0 +1,61 @@
+# MICROVM: THE SMALLEST MACHINE THAT BOOTS A MODERN LINUX KERNEL.
+#
+# No firmware, no boot sector, no PCIe bus, no IDE, no USB. qemu is handed the kernel and an initramfs
+# directly, and the disk arrives holding a root filesystem. 512-768 MiB of RAM instead of 4 GiB, and
+# seconds instead of forty minutes.
+#
+# WHAT THAT BUYS AND WHAT IT COSTS. A distribution installer needs UEFI, a virtio-blk disk, a VGA
+# adapter and a USB tablet; a walk whose job is "drive a guest and read its screen" pays for all four
+# and needs none. A microvm is for the second kind.
+#
+# THE DISPLAY IS `absent` HERE AND THAT IS NOT THE ONLY OPTION. Three shapes exist, and the difference
+# is WHAT THE GUEST RUNS rather than what qemu creates:
+#
+#	without a display   no adapter at all, serial only. `see:` reads nothing and a recording is blank.
+#	with a console     a text-mode ISA VGA adapter the guest draws its TTY on. A recording of a
+#	                   headless guest is a PICTURE of its console.
+#	with a desktop     the same adapter with a window manager on it.
+#
+# This file is the first. A walkthrough that wants a console says so on its `boot:` step, and the
+# daemon picks `isa-vga` or `virtio-gpu-device` from that - not from this file - because the choice is
+# about the guest's session, not about the machine.
+
+name: microvm
+description: "no firmware, no PCIe, no display - a kernel and an initramfs handed to qemu by the host"
+
+# A MICROVM HAS NO FIRMWARE AT ALL, which is the whole point of the machine type: no pflash, no boot
+# order, no UEFI, and one fewer thing that can fail before the guest is up.
+firmware:
+  kind: none
+
+# `microvm` HAS NO PCI BUS, so `ich9-intel-hda` cannot attach and the default sound card would stop
+# the machine at startup. A guest whose job is to prove the vocabulary does not need audio.
+audio: none
+
+cpu: {}
+smp:
+  format: plain
+
+# `-vga std` DOES NOT WORK ON A MICROVM:
+#
+#	qemu-system-x86_64: warning: A -vga option was passed but this machine type does not use that
+#	option; No VGA device has been created
+#
+# The adapter is chosen on the `boot:` step instead, because it depends on what the guest runs.
+video:
+  kind: absent
+
+smc: false
+
+# NOTHING IS INSTALLED. A microvm has no firmware to read a boot sector, so the host hands qemu a
+# kernel and an initramfs and the disk arrives already holding a system.
+install_medium: none
+
+extra_args: []
+
+media:
+  # AN INSTALLER ISO IS REFUSED, and the refusal names the machine type: a guest with no firmware
+  # cannot boot one, and a stage that attached it anyway would record a blank screen.
+  iso: false
+  iso_reason: "a microvm has no firmware to boot an ISO; it is handed a kernel and an initramfs by the host, and its disk arrives holding a root filesystem"
+  recovery: false

@@ -1,0 +1,389 @@
+package machine
+
+// A SHAPE IS THE MACHINE A GUEST IS GIVEN, AS DATA.
+//
+// THE FIFTEEN `if b.OS.IsMacOS()` BRANCHES THIS REPLACES were all answering the same four questions -
+// which firmware, which CPU flags, which devices, which media - and each answer was a fact about an
+// operating system rather than a decision the engine made. A fact belongs in a file somebody can read
+// and change; the engine's job is to assemble qemu's argument list from it.
+//
+// SO THERE IS NO `switch` LEFT ON THE OPERATING SYSTEM. `Boot` carries a Shape, and every builder
+// (`FirmwareArgs`, `CPU`, `SMP`, `VGA`, `AudioArgs`, `SMCArgs`, `ExtraArgs`) reads a field. Adding a
+// machine is adding a YAML file - see `shapes/` - and nothing here changes.
+//
+// THE ONE THING THIS CANNOT EXPRESS IS A MEASUREMENT, so every field's comment carries the one that
+// made it what it is. A shape file that says `-device vmware-svga` without saying why is a file whose
+// next editor will "fix" it to `vgamem_mb=256` and lose three quarters of a recording.
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
+
+	"gopkg.in/yaml.v3"
+)
+
+// FirmwareKind is how the guest is started before any operating system code runs.
+type FirmwareKind string
+
+const (
+	// FirmwareOVMF is UEFI: pflash code plus a writable variables store. Every Windows, Linux and
+	// BSD guest here uses it.
+	FirmwareOVMF FirmwareKind = "ovmf"
+	// FirmwareOpenCore is macOS's loader, which is itself a disk the firmware boots first.
+	//
+	// OPENCORE IS NOT OPTIONAL FOR macOS, EVEN FROM AN INSTALLED DISK: without it qemu starts, the
+	// firmware finds no loader, and the guest sits in the UEFI shell.
+	FirmwareOpenCore FirmwareKind = "opencore"
+	// FirmwareNone is a microvm. It has no firmware at all - the host hands qemu a kernel - which is
+	// the whole point of the machine type: no pflash, no boot order, no UEFI, and one fewer thing
+	// that can fail before the guest is up.
+	FirmwareNone FirmwareKind = "none"
+)
+
+// SMPFormat is the grammar qemu's `-smp` accepts for this guest.
+type SMPFormat string
+
+const (
+	// SMPPlain is a bare count, which every guest except macOS understands.
+	SMPPlain SMPFormat = "plain"
+	// SMPTopology spells out sockets, dies, cores and threads. A BARE COUNT IS NOT WHAT macOS
+	// UNDERSTANDS: dockur's configureSmp() spells out the structure, and the guest reads it.
+	SMPTopology SMPFormat = "topology"
+)
+
+// InstallMedium says which attached medium means "this boot writes".
+//
+// IT EXISTS BECAUSE THE TWO ANSWERS ARE ALREADY MEASURED AND THEY DIFFER. macOS installs FROM its
+// recovery image, so a boot that attaches `recovery:` is the one that writes. Everything else installs
+// from an ISO, so `iso:` is what marks an install. Conflating them was two published defects - see the
+// note on `Boot.FreshDisk`.
+type InstallMedium string
+
+const (
+	MediumISO      InstallMedium = "iso"
+	MediumRecovery InstallMedium = "recovery"
+	MediumNone     InstallMedium = "none"
+)
+
+// ShapeFile is one YAML file in a shapes directory.
+//
+// IT IS DELIBERATELY CLOSE TO THE SHAPE RATHER THAN TO THE FILE'S SYNTAX: a reader should be able to
+// open `shapes/macos.yaml` beside this struct and see one field per key.
+type ShapeFile struct {
+	// Name is what a walkthrough's `os:` says. It is also the file's stem, by convention.
+	Name string `yaml:"name"`
+	// Description is one line for `easyvm check` and for the error that lists what this build has.
+	Description string `yaml:"description"`
+
+	Firmware FirmwareSpec `yaml:"firmware"`
+	CPU      CPUSpec      `yaml:"cpu"`
+	SMP      SMPSpec      `yaml:"smp"`
+	Video    VideoSpec    `yaml:"video"`
+	Audio    string       `yaml:"audio"`
+	// SMC is Apple's System Management Controller, which only macOS reads.
+	SMC bool `yaml:"smc"`
+	// InstallMedium is which attached medium marks this boot as an install.
+	InstallMedium InstallMedium `yaml:"install_medium"`
+	// ExtraArgs are qemu arguments appended verbatim, one array per argument pair.
+	//
+	// ONE ARRAY PER PAIR RATHER THAN ONE FLAT LIST, so a file cannot end up with an odd number of
+	// arguments - a flat list whose `-device` lost its value is a qemu error naming the device.
+	ExtraArgs [][]string `yaml:"extra_args"`
+	// Media is which media this guest may be given, and refused otherwise.
+	Media MediaSpec `yaml:"media"`
+}
+
+// FirmwareSpec is what the `-drive if=pflash` lines name.
+type FirmwareSpec struct {
+	Kind FirmwareKind `yaml:"kind"`
+	// Code and Vars are the two pflash slots for `ovmf`. They are templates because they name files
+	// the DAEMON chooses: `{{.Code}}` and `{{.Vars}}` are filled from the caller's environment.
+	Code string `yaml:"code"`
+	Vars string `yaml:"vars"`
+}
+
+// CPUSpec is what is appended to the resolved CPU model.
+type CPUSpec struct {
+	// Suffix is appended verbatim after a comma, which is how every qemu CPU flag is spelled.
+	Suffix string `yaml:"suffix"`
+}
+
+// SMPSpec is how `-smp` is rendered.
+type SMPSpec struct {
+	Format SMPFormat `yaml:"format"`
+}
+
+// VideoSpec is the adapter.
+type VideoSpec struct {
+	// Kind is `vga` (the -device VGA,xres= form), `virtio` (virtio-vga), `none` (no adapter at all,
+	// because another device supplies one) or `absent` (a microvm with no display).
+	Kind string `yaml:"kind"`
+}
+
+// MediaSpec is which of the optional media a guest may be given.
+type MediaSpec struct {
+	// Recovery says macOS's recovery image is legal for this guest. Nothing else may attach one.
+	Recovery bool `yaml:"recovery"`
+	// ISO false means an install ISO is refused with the reason from ISOReason.
+	ISO       bool   `yaml:"iso"`
+	ISOReason string `yaml:"iso_reason"`
+	// AnswerAndDriver says Windows Setup's two extra CDs are legal here.
+	AnswerAndDriver bool `yaml:"answer_and_driver"`
+}
+
+// Shape is a ShapeFile that has been checked and compiled.
+//
+// THE COMPILED FORM IS SEPARATE FROM THE FILE SO VALIDATION HAPPENS ONCE. A format string with the
+// wrong number of verbs, or an adapter kind nothing knows how to render, is a load-time error rather
+// than a qemu failure forty minutes into a stage.
+type Shape struct {
+	Name        string
+	Description string
+
+	Firmware      FirmwareKind
+	FirmwareCode  string
+	FirmwareVars  string
+	CPUSuffix     string
+	SMPFormat     SMPFormat
+	Video         string
+	Audio         string
+	SMC           bool
+	InstallMedium InstallMedium
+	ExtraArgs     []string
+	Media         MediaSpec
+}
+
+// Validate compiles a ShapeFile, refusing anything the builders could not render.
+func (f ShapeFile) Validate() (Shape, error) {
+	var s Shape
+	if f.Name == "" {
+		return s, fmt.Errorf("a shape must have a `name:`; it is what a walkthrough's `os:` says")
+	}
+	s.Name, s.Description = f.Name, f.Description
+
+	switch f.Firmware.Kind {
+	case FirmwareOVMF:
+		// THE TEMPLATES ARE REQUIRED FOR OVMF AND IGNORED FOR THE OTHERS, and the difference is
+		// stated rather than tolerated: a `none` shape carrying pflash paths is a file whose author
+		// expected firmware and will not get it.
+		if f.Firmware.Code == "" || f.Firmware.Vars == "" {
+			return s, fmt.Errorf("shape %q: `firmware.kind: ovmf` needs `code:` and `vars:` - the two "+
+				"pflash slots qemu is given", f.Name)
+		}
+		s.Firmware, s.FirmwareCode, s.FirmwareVars = FirmwareOVMF, f.Firmware.Code, f.Firmware.Vars
+	case FirmwareOpenCore:
+		// OPENCORE'S PATHS COME FROM THE BOOT, NOT FROM THE FILE: they are built per run from the
+		// recovery image. A shape that named them would name a file that does not exist yet.
+		if f.Firmware.Code != "" || f.Firmware.Vars != "" {
+			return s, fmt.Errorf("shape %q: `firmware.kind: opencore` must not name `code:`/`vars:`; "+
+				"they are built from the recovery image on each run", f.Name)
+		}
+		s.Firmware = FirmwareOpenCore
+	case FirmwareNone:
+		if f.Firmware.Code != "" || f.Firmware.Vars != "" {
+			return s, fmt.Errorf("shape %q: `firmware.kind: none` must not name `code:`/`vars:`; a "+
+				"machine with no firmware has no pflash to read", f.Name)
+		}
+		s.Firmware = FirmwareNone
+	case "":
+		return s, fmt.Errorf("shape %q: `firmware.kind:` is required; one of %q, %q or %q",
+			f.Name, FirmwareOVMF, FirmwareOpenCore, FirmwareNone)
+	default:
+		return s, fmt.Errorf("shape %q: `firmware.kind: %s` is not a firmware this build knows; one of "+
+			"%q, %q or %q", f.Name, f.Firmware.Kind, FirmwareOVMF, FirmwareOpenCore, FirmwareNone)
+	}
+
+	s.CPUSuffix = f.CPU.Suffix
+
+	switch f.SMP.Format {
+	case SMPPlain, SMPTopology:
+		s.SMPFormat = f.SMP.Format
+	case "":
+		s.SMPFormat = SMPPlain
+	default:
+		return s, fmt.Errorf("shape %q: `smp.format: %s` is not one this build knows; %q or %q",
+			f.Name, f.SMP.Format, SMPPlain, SMPTopology)
+	}
+
+	switch f.Video.Kind {
+	case "vga", "virtio", "none", "absent":
+		s.Video = f.Video.Kind
+	case "":
+		// THE DEFAULT IS `vga`, because that is what a shape of this repository's shape means: a
+		// guest given a VGA adapter at the resolution its coordinates were measured at.
+		s.Video = "vga"
+	default:
+		return s, fmt.Errorf("shape %q: `video.kind: %s` is not an adapter this build knows; one of "+
+			"\"vga\" (the -device VGA,xres= form), \"virtio\" (virtio-vga, which carries a DRM node), "+
+			"\"none\" (another device supplies one) or \"absent\" (no display at all)", f.Name, f.Video.Kind)
+	}
+
+	switch f.Audio {
+	case "hda", "usb", "none":
+		s.Audio = f.Audio
+	case "":
+		s.Audio = "hda"
+	default:
+		return s, fmt.Errorf("shape %q: `audio: %s` is not a sound device this build knows; one of "+
+			"\"hda\" (what Windows, Linux and the BSDs bind out of the box), \"usb\" (what macOS "+
+			"needs) or \"none\"", f.Name, f.Audio)
+	}
+
+	switch f.InstallMedium {
+	case MediumISO, MediumRecovery, MediumNone:
+		s.InstallMedium = f.InstallMedium
+	case "":
+		s.InstallMedium = MediumISO
+	default:
+		return s, fmt.Errorf("shape %q: `install_medium: %s` is not one of %q, %q or %q",
+			f.Name, f.InstallMedium, MediumISO, MediumRecovery, MediumNone)
+	}
+
+	for i, pair := range f.ExtraArgs {
+		if len(pair) != 2 {
+			return s, fmt.Errorf("shape %q: `extra_args[%d]` has %d element(s); every qemu argument is "+
+				"an OPTION and a VALUE, so each entry must be exactly two - a flat list whose `-device` "+
+				"lost its value is a qemu error naming the device rather than the file",
+				f.Name, i, len(pair))
+		}
+		s.ExtraArgs = append(s.ExtraArgs, pair...)
+	}
+
+	s.Media = f.Media
+	// A SHAPE THAT CAN TAKE AN INSTALL ISO MUST SAY SO, because the refusal for the others names a
+	// reason and a reason for a guest that has no install ISO is a fact worth keeping.
+	if s.Media.ISO && s.Media.ISOReason != "" {
+		return s, fmt.Errorf("shape %q: `media.iso: true` and `media.iso_reason:` are contradictory; "+
+			"the reason is only read when an ISO is refused", f.Name)
+	}
+	if !s.Media.ISO && s.Media.ISOReason == "" {
+		return s, fmt.Errorf("shape %q: `media.iso: false` needs `media.iso_reason:` - a refusal that "+
+			"does not say why sends a reader looking for a bug in the engine", f.Name)
+	}
+	s.SMC = f.SMC
+	return s, nil
+}
+
+// Registry is every shape this build can start, by name.
+type Registry struct {
+	mu     sync.RWMutex
+	shapes map[string]Shape
+}
+
+// NewRegistry returns an empty registry.
+func NewRegistry() *Registry { return &Registry{shapes: map[string]Shape{}} }
+
+// Register adds a shape, refusing a duplicate name.
+//
+// A DUPLICATE IS REFUSED RATHER THAN OVERWRITTEN, because two files claiming `os: macos` is a
+// configuration whose behaviour depends on directory order - and a machine that changes shape when a
+// file is renamed is not a machine anybody can reason about.
+func (r *Registry) Register(s Shape) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if old, ok := r.shapes[s.Name]; ok {
+		return fmt.Errorf("two shapes are named %q: %q and %q. A name is what a walkthrough's `os:` "+
+			"says, so it has to choose exactly one machine", s.Name, old.Description, s.Description)
+	}
+	r.shapes[s.Name] = s
+	return nil
+}
+
+// Lookup returns the shape for name.
+func (r *Registry) Lookup(name string) (Shape, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	s, ok := r.shapes[name]
+	return s, ok
+}
+
+// Names returns every registered name, sorted, for an error message that tells a reader what they
+// could have written instead.
+func (r *Registry) Names() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]string, 0, len(r.shapes))
+	for n := range r.shapes {
+		out = append(out, n)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// Len is how many shapes this registry holds.
+func (r *Registry) Len() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return len(r.shapes)
+}
+
+// LoadDir reads every `*.yaml` in dir and registers it.
+//
+// A FILE THAT FAILS IS AN ERROR, NOT A WARNING. A shape file is configuration for a machine that will
+// be started; one that does not parse is a guest that will not boot, and finding that out at the
+// `boot:` step rather than at load is finding it out forty minutes into a stage.
+func (r *Registry) LoadDir(dir string) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return fmt.Errorf("shapes directory %s: %w", dir, err)
+	}
+	var loaded int
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".yaml") {
+			continue
+		}
+		path := filepath.Join(dir, e.Name())
+		if err := r.LoadFile(path); err != nil {
+			return err
+		}
+		loaded++
+	}
+	if loaded == 0 {
+		return fmt.Errorf("shapes directory %s holds no `*.yaml` files, so this build could start no "+
+			"machine at all", dir)
+	}
+	return nil
+}
+
+// LoadBytes reads one shape and registers it, with `name` only for error messages.
+//
+// SEPARATE FROM LoadFile BECAUSE AN EMBEDDED FILE HAS NO PATH. The bytes are the same bytes; what a
+// reader of an error needs is which shape failed, and the file's name answers that either way.
+func (r *Registry) LoadBytes(name string, raw []byte) error {
+	var f ShapeFile
+	if err := yaml.Unmarshal(raw, &f); err != nil {
+		return fmt.Errorf("shape %s: %w", name, err)
+	}
+	s, err := f.Validate()
+	if err != nil {
+		return fmt.Errorf("shape %s: %w", name, err)
+	}
+	if err := r.Register(s); err != nil {
+		return fmt.Errorf("shape %s: %w", name, err)
+	}
+	return nil
+}
+
+// LoadFile reads one shape file and registers it.
+func (r *Registry) LoadFile(path string) error {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	var f ShapeFile
+	if err := yaml.Unmarshal(raw, &f); err != nil {
+		return fmt.Errorf("shape file %s: %w", path, err)
+	}
+	s, err := f.Validate()
+	if err != nil {
+		return fmt.Errorf("shape file %s: %w", path, err)
+	}
+	if err := r.Register(s); err != nil {
+		return fmt.Errorf("shape file %s: %w", path, err)
+	}
+	return nil
+}

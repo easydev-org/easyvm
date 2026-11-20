@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"github.com/easydev-org/easyvm/internal/keys"
+	"github.com/easydev-org/easyvm/internal/machine"
 	"github.com/easydev-org/easyvm/internal/protocol"
 	"github.com/easydev-org/easyvm/internal/qmp"
 	"github.com/easydev-org/easyvm/internal/run"
@@ -359,6 +360,12 @@ type ServeOptions struct {
 	// Ready is called once the listener is open, for a supervisor that waits for an address rather
 	// than polling for a file - a file that exists is not a daemon that answers.
 	Ready func(addr string)
+	// ShapesDir REPLACES the machine shapes compiled into the binary.
+	//
+	// Empty means "use the embedded ones", which is what a container wants: the image carries the
+	// binary, not a source tree. A walkthrough repository can point this at its own directory to add
+	// a machine this build does not ship - see `internal/machine/shape.go` for why a shape is data.
+	ShapesDir string
 }
 
 // Serve listens on ONE HTTP PORT until Shutdown.
@@ -394,6 +401,21 @@ func (d *Daemon) Serve(opts ServeOptions) error {
 		return err
 	}
 	d.work = opts.Work
+
+	// THE MACHINES THIS DAEMON CAN START, LOADED BEFORE ANY GUEST IS. A shape that does not parse is
+	// an error here, where it names the file, rather than at the `boot:` step of a stage that has
+	// already spent its budget.
+	if opts.ShapesDir != "" {
+		if err := machine.LoadShapes(opts.ShapesDir); err != nil {
+			return err
+		}
+	} else if machine.Shapes().Len() == 0 {
+		// EMBEDDED, WHICH IS WHAT A CONTAINER WANTS: the image carries the binary rather than a
+		// source tree, so a loader that read only from disk would start no guest at all.
+		if err := machine.LoadEmbedded(); err != nil {
+			return err
+		}
+	}
 
 	// THE DIRECTORY IS CLAIMED BEFORE ANYTHING WRITES TO IT, and the claim is the KERNEL's.
 	//

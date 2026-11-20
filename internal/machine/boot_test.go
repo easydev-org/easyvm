@@ -787,9 +787,29 @@ func TestTheMacOSAdapterIsBareVmwareSVGA(t *testing.T) {
 			"quarters of the recording lost and the rest black. The recovery system has no " +
 			"VMwareGfx driver to use that memory with")
 	}
-	if !strings.Contains(src, `"-device", "vmware-svga"`) {
+	// AND IT IS IN THE SHAPE FILE, WHICH IS WHERE IT LIVES NOW. The guard moved with the fact: a
+	// search of `boot.go` would pass on a file that no longer mentions the adapter at all.
+	shapes, err := os.ReadFile("shapes/macos.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(shapes), `- ["-device", "vmware-svga"]`) {
 		t.Fatal("the macOS adapter is no longer `vmware-svga`; virtio-vga left a 7 MB framebuffer " +
 			"with `No Kext Loaded`, so the wallpaper layer could not be drawn")
+	}
+	// THE COMMENT IN THE SHAPE FILE *NAMES* vgamem_mb=256 to explain why it is not used, so this
+	// looks at the ARGUMENT rather than at the text: a line that is not a comment and carries the
+	// option is the defect, and the prose above it is the reason it will not come back.
+	for _, line := range strings.Split(string(shapes), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if strings.Contains(trimmed, "vgamem_mb=256") {
+			t.Fatalf("the macOS shape ASKS for `vgamem_mb=256` in %q. Measured: 1803 frames and 3 "+
+				"losses with a bare `vmware-svga` against 92 frames and 264 losses with the "+
+				"argument - three quarters of the recording lost and the rest black", trimmed)
+		}
 	}
 }
 
@@ -985,7 +1005,10 @@ func TestTheDaemonAsksForTheSoundCard(t *testing.T) {
 // NO firmware, and is handed its kernel directly. Those three together are what makes a guest boot
 // in a minute on 512 MiB instead of forty minutes on 4 GiB.
 func TestAMicroVMBootAsksForTheSmallMachine(t *testing.T) {
-	small := Boot{OS: Linux, MicroVM: true, Kernel: "/w/vmlinuz", Initrd: "/w/initramfs"}
+	// `os: microvm` IS THE NAME, AND THE FLAG COMES FROM IT rather than being set beside it: the
+	// shape with no firmware and the machine type with no PCIe bus are the same choice, and
+	// `Validate` refuses a boot that sets one without the other.
+	small := Boot{OS: "microvm", MicroVM: true, Kernel: "/w/vmlinuz", Initrd: "/w/initramfs"}
 
 	// NO FIRMWARE: there is no boot sector to read, because there is no firmware to read one.
 	if got := small.FirmwareArgs("/usr/share/OVMF/OVMF_CODE_4M.fd", "/w/vars.fd"); len(got) != 0 {

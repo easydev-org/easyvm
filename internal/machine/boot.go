@@ -73,22 +73,90 @@ func (o OS) IsLinuxLike() bool { return o == Linux || o == BSD || o == Android }
 // SMP topology all turn on it, and each of those is a silent failure when wrong.
 func (o OS) IsMacOS() bool { return o == MacOS }
 
-// ParseOS refuses anything that is not a machine this build can start.
-func ParseOS(s string) (OS, error) {
-	switch OS(s) {
-	case Windows, Linux, MacOS, BSD, Android:
-		return OS(s), nil
-	case "":
-		return "", fmt.Errorf("a boot step must name `os:` - windows, linux, macos, bsd or android")
+// shape returns the machine this boot is for, resolving the name if nobody filled it in.
+//
+// THE FALLBACK EXISTS FOR TWO REASONS, AND NEITHER IS CONVENIENCE.
+//
+//	A `Boot` VALUE IS USED IN PLACES THAT NEVER SAW THE DAEMON - a test, a `check:` that asks "what
+//	would this guest be given", a tool that renders a command line for a person to read. Requiring
+//	every one of them to call `Resolve` first would put the same three lines in each, and one of them
+//	would eventually pass the wrong name.
+//
+//	AND THE ZERO VALUE HAS TO MEAN SOMETHING. A struct whose builders all read a field that only the
+//	daemon fills is a struct that silently produces an argument list with no firmware and no devices
+//	when somebody forgets. Resolving on read makes the zero value correct instead of empty.
+//
+// A SHAPE THAT WAS FILLED IN IS USED AS IT IS, so `--shapes` and a test that wants a shape of its own
+// both keep working: only an EMPTY shape is resolved from the name.
+func (b Boot) shape() Shape {
+	if b.Shape.Name != "" {
+		return b.Shape
 	}
-	return "", fmt.Errorf("%q is not an os this build starts; the five are windows, linux, "+
-		"macos, bsd and android", s)
+	if sh, ok := defaultShapes.Lookup(string(b.OS)); ok {
+		return sh
+	}
+	return Shape{}
+}
+
+// DefaultShapes is the registry this process starts with, loaded once from the shapes directory.
+//
+// IT IS A PACKAGE-LEVEL VALUE RATHER THAN A PARAMETER because every caller that asks "may this build
+// start a chromeos guest" is answering a question about the BUILD, not about a particular boot. A
+// second registry is possible - `LoadDir` on a different directory - and is how a test drives a shape
+// of its own.
+var defaultShapes = NewRegistry()
+
+// Shapes returns the registry `ParseOS` and `Resolve` consult.
+func Shapes() *Registry { return defaultShapes }
+
+// LoadShapes reads a directory of shape files into the default registry, replacing nothing.
+//
+// CALLED ONCE, BY THE DAEMON, BEFORE ANY GUEST IS STARTED. A directory that does not parse is an
+// error rather than a warning: a shape file is configuration for a machine that will be started, and
+// finding out it is malformed at the `boot:` step is finding out forty minutes into a stage.
+func LoadShapes(dir string) error { return defaultShapes.LoadDir(dir) }
+
+// ParseOS refuses anything this build has no shape for.
+//
+// THE LIST IS NO LONGER IN THIS FUNCTION. It was a `switch` over five constants, so adding a sixth
+// machine meant editing the parser, and the error message named the five either way. It now asks the
+// registry, and the error names what THIS build actually has - which is the only list that is true.
+func ParseOS(s string) (OS, error) {
+	if s == "" {
+		return "", fmt.Errorf("a boot step must name `os:` - this build has %s",
+			strings.Join(defaultShapes.Names(), ", "))
+	}
+	if _, ok := defaultShapes.Lookup(s); !ok {
+		return "", fmt.Errorf("%q is not an os this build starts; it has %s",
+			s, strings.Join(defaultShapes.Names(), ", "))
+	}
+	return OS(s), nil
+}
+
+// Resolve returns the machine a name means, refusing one this build has no shape for.
+//
+// THIS IS THE ONE PLACE A NAME BECOMES A MACHINE. `Boot.Shape` is filled from it, so every builder in
+// this file reads a field rather than switching on an operating system.
+func Resolve(name string) (Shape, error) {
+	sh, ok := defaultShapes.Lookup(name)
+	if !ok {
+		return Shape{}, fmt.Errorf("%q is not an os this build starts; it has %s",
+			name, strings.Join(defaultShapes.Names(), ", "))
+	}
+	return sh, nil
 }
 
 // Boot is what one `boot:` step says.
 type Boot struct {
-	// OS is which machine this is.
+	// OS is which machine this is - the NAME a walkthrough's `os:` says.
 	OS OS
+	// Shape is the MACHINE that name resolves to: firmware, CPU flags, devices, media rules.
+	//
+	// IT IS FILLED BY `Resolve` FROM A SHAPE FILE, and it is what every builder below reads. There is
+	// no `switch` on the operating system anywhere in this package any more: the fifteen branches
+	// that used to answer "which firmware, which CPU flags, which devices" were facts about a machine,
+	// and facts belong in a file somebody can read and change.
+	Shape Shape
 	// Disk is the target, and for a disk boot it is also what boots.
 	Disk string
 	// ISO is an installer medium. Windows and Linux boot it directly; macOS has no install ISO and
@@ -107,6 +175,13 @@ type Boot struct {
 	BootImage string
 	// MicroVM asks for the smallest machine that boots a modern Linux kernel: qemu's `microvm`
 	// machine type, no PCIe, no IDE, no USB, no VGA.
+	//
+	// IT IS SET FROM THE `os:` THE FILE WROTE, and it is kept as a field rather than derived on every
+	// read because it decides the MACHINE TYPE - `-machine microvm` rather than `q35` - which is a
+	// different question from any single device.
+	//
+	// THE SHAPE MUST AGREE: `os: microvm` resolves to a shape whose firmware is `none`, and a boot
+	// that sets one without the other is refused in `Validate`.
 	MicroVM bool
 	// MicroVMDisplay is serial, terminal or desktop - whether the microvm has a VGA adapter.
 	//
@@ -177,6 +252,19 @@ func (b Boot) Validate() error {
 	if b.OS == "" {
 		return fmt.Errorf("a boot step must name `os:`")
 	}
+	// THE NAME AND THE MACHINE MUST AGREE, AND THERE IS ONE PLACE THEY CAN DISAGREE.
+	//
+	// `microvm` is the shape with no firmware, and `-machine microvm` is what that shape means. A
+	// boot that set `MicroVM` without the shape - or the shape without the flag - would ask for a
+	// machine type whose devices the other half did not describe, and the symptom is a qemu error
+	// naming a device nobody put in the argument list.
+	if noFirmware := b.shape().Firmware == FirmwareNone; noFirmware != b.MicroVM {
+		return fmt.Errorf("`os: %s` resolves to a shape with `firmware.kind: %s` but this boot "+
+			"%s the microvm machine type. A machine with no firmware and a machine type that has no "+
+			"PCIe bus are the same choice, and half of it produces a qemu error naming a device "+
+			"nobody added", b.OS, b.shape().Firmware,
+			map[bool]string{true: "asks for", false: "does not ask for"}[b.MicroVM])
+	}
 	if b.Disk == "" {
 		return fmt.Errorf("booting needs a target disk: a `disk:` step must come first, or pass " +
 			"--boot-disk")
@@ -186,9 +274,11 @@ func (b Boot) Validate() error {
 	}
 
 	if b.ISO != "" {
-		if b.OS.IsMacOS() {
-			return fmt.Errorf("macOS has no install ISO; it installs from its recovery image. " +
-				"Use `recovery:` rather than `iso:`")
+		// THE SHAPE SAYS WHETHER THIS GUEST MAY BE GIVEN AN INSTALL ISO, AND ITS REFUSAL CARRIES THE
+		// REASON. macOS has no install ISO at all - it installs from its recovery image - and a stage
+		// that attached one would watch the guest sit in the UEFI shell with nothing said.
+		if !b.shape().Media.ISO {
+			return fmt.Errorf("%s", b.shape().Media.ISOReason)
 		}
 		if err := requireFile(b.ISO, "the installer medium"); err != nil {
 			return err
@@ -199,17 +289,25 @@ func (b Boot) Validate() error {
 		"the driver CD":      b.DriverCD,
 	} {
 		if path != "" {
+			// AND THE TWO EXTRA DISCS ARE WINDOWS SETUP'S, which is a fact the shape carries: a Linux
+			// installer given an answer-file CD would find nothing on it and the mistake would surface
+			// as a wizard that never advanced.
+			if !b.shape().Media.AnswerAndDriver {
+				return fmt.Errorf("%s is Windows Setup's, and this guest is %q. The medium would be "+
+					"attached and read by nobody, which surfaces later as a wizard that never "+
+					"advances rather than as this sentence", why, b.OS)
+			}
 			if err := requireFile(path, why); err != nil {
 				return err
 			}
 		}
 	}
 
-	if b.Recovery != "" && !b.OS.IsMacOS() {
+	if b.Recovery != "" && !b.shape().Media.Recovery {
 		return fmt.Errorf("`recovery:` is macOS's install medium; this guest is %s", b.OS)
 	}
 
-	if b.OS.IsMacOS() {
+	if b.shape().Firmware == FirmwareOpenCore {
 		// OPENCORE IS NOT OPTIONAL FOR macOS, EVEN FROM AN INSTALLED DISK. Those three files are
 		// what the firmware boots: without them qemu starts, the firmware finds no loader, and the
 		// guest sits in the UEFI shell.
@@ -289,7 +387,7 @@ func requireFile(path, why string) error {
 func (b Boot) StorageArgs() []string {
 	args := []string{}
 
-	if b.OS.IsMacOS() {
+	if b.shape().Firmware == FirmwareOpenCore {
 		// OPENCORE'S OWN DISK, FIRST AND WITH bootindex=0. "A disk with no bootindex is not in the
 		// boot order at all" - the firmware then reports it could not load Boot0001, six runs in a
 		// row.
@@ -641,10 +739,16 @@ func (b Boot) StorageArgs() []string {
 // is read-only and never handed a TRIM - and this build has no overlay yet. Until it does, a stage
 // that boots a pulled artifact discards into the artifact itself. See Boot.Discardable.
 func (b Boot) installing() bool {
-	if b.OS.IsMacOS() {
-		// macOS's installer IS the recovery image on a USB device, so a boot that attaches it is
-		// the one that writes. Every later stage boots an installed system and attaches nothing.
+	// WHICH MEDIUM MARKS AN INSTALL IS A FACT ABOUT THE GUEST, so the shape says it.
+	//
+	// macOS's installer IS the recovery image on a USB device, so a boot that attaches it is the one
+	// that writes. Everything else installs from an ISO. Conflating the two was two published defects
+	// - see the note on `FreshDisk`.
+	switch b.shape().InstallMedium {
+	case MediumRecovery:
 		return b.Recovery != ""
+	case MediumNone:
+		return false
 	}
 	return b.ISO != ""
 }
@@ -663,6 +767,7 @@ func (b Boot) installing() bool {
 //	 one commit because a file that let `boot:` make the overlay had no way to tell `compress:` to
 //	 flatten it. Now `boot:` records the overlay it made, so the two are the same path: every
 //	 machine runs on a diff, and publishing flattens it."
+//
 // WantsOverlay ASKS WHETHER THE DISK CAME FROM SOMEWHERE, NOT WHETHER AN INSTALLER IS ATTACHED.
 //
 // THE OLD RULE WAS `!installing()`, AND IT LOST WRITES. MEASURED IN easydev-org/easyvm#3: a walk that
@@ -699,13 +804,19 @@ func (b Boot) Discardable() bool { return !b.installing() }
 // like OVMF, which is why it appears here rather than in the storage section - and why a macOS guest
 // given OVMF's files in these slots boots to a crossed-out circle.
 func (b Boot) FirmwareArgs(ovmfCode, ovmfVars string) []string {
-	// A MICROVM HAS NO FIRMWARE. It boots a kernel the host hands it, which is the whole point of the
-	// machine type: no pflash, no boot order, no UEFI, and one fewer thing that can fail before the
-	// guest is up.
-	if b.MicroVM {
+	// THE SHAPE SAYS WHICH FIRMWARE; THE BOOT SAYS WHERE OPENCORE'S FILES ARE.
+	//
+	// OpenCore's two files are BUILT PER RUN from the recovery image, so they cannot be named in a
+	// shape file - and OVMF's two come from the caller, because the container image carries one build
+	// and an environment may point elsewhere. So the shape chooses the KIND and each branch fills in
+	// the paths it owns.
+	switch b.shape().Firmware {
+	case FirmwareNone:
+		// A MICROVM HAS NO FIRMWARE. It boots a kernel the host hands it, which is the whole point of
+		// the machine type: no pflash, no boot order, no UEFI, and one fewer thing that can fail
+		// before the guest is up.
 		return nil
-	}
-	if b.OS.IsMacOS() {
+	case FirmwareOpenCore:
 		return []string{
 			"-drive", "if=pflash,format=raw,readonly=on,file=" + b.OpenCoreROM,
 			"-drive", "if=pflash,format=raw,file=" + b.OpenCoreVars,
@@ -730,34 +841,10 @@ func (b Boot) FirmwareArgs(ovmfCode, ovmfVars string) []string {
 //	                                    a 7 MB framebuffer with "No Kext Loaded", so the wallpaper
 //	                                    layer could not be drawn
 func (b Boot) ExtraArgs() []string {
-	if !b.OS.IsMacOS() {
-		return nil
-	}
-	return []string{
-		"-global", "ICH9-LPC.disable_s3=1",
-		"-global", "ICH9-LPC.disable_s4=1",
-		"-global", "ICH9-LPC.acpi-pci-hotplug-with-bridge-support=off",
-		"-rtc", "base=utc",
-		"-smbios", "type=2",
-		// BARE `vmware-svga`, NOT `vmware-svga,vgamem_mb=256`, AND THE MEASUREMENT IS THE REASON.
-		//
-		// The Python implementation sets `vgamem_mb=256` for an INSTALLED macOS, which has
-		// VMwareGfx loaded and can use the memory. THE RECOVERY SYSTEM HAS NO SUCH DRIVER, and
-		// asking for 256 MB made its framebuffer far WORSE rather than better - two runs on
-		// adjacent commits, same walkthrough, same machine:
-		//
-		//	22eeda3   bare vmware-svga         1803 frames captured,   3 lost
-		//	5ba0c18   vgamem_mb=256              92 frames captured, 264 lost
-		//
-		// 264 LOST TICKS IS THREE QUARTERS OF THE RECORDING, and the 92 that survived are BLACK at
-		// mean luminance 0.6 - the recovery system never drew anything. The `Ul ag` that the gate
-		// reported for thirty minutes is OCR reading noise, not a menu.
-		//
-		// SO THE 640x480 IS NOT A MEMORY PROBLEM AND THIS ARGUMENT DOES NOT FIX IT. The gate reads
-		// 640x480 because that is the mode OpenCore's GOP leaves the guest in before macOS loads a
-		// display driver; the fix has to be in where the walkthrough reads, not in the adapter.
-		"-device", "vmware-svga",
-	}
+	// THE LIST ITSELF IS IN THE SHAPE FILE, COMMENT AND ALL, because it is macOS's and macOS's alone.
+	// Its comments carry the measurement that made each entry what it is - the `vmware-svga` one in
+	// particular, where adding `vgamem_mb=256` cost three quarters of a recording.
+	return append([]string(nil), b.shape().ExtraArgs...)
 }
 
 // SMCArgs is the Apple SMC device and its key.
@@ -766,7 +853,7 @@ func (b Boot) ExtraArgs() []string {
 // firmware is Apple's, and without it the kernel stops before it draws anything. Every hackintosh
 // carries the same string.
 func (b Boot) SMCArgs(osk string) []string {
-	if !b.OS.IsMacOS() {
+	if !b.shape().SMC {
 		return nil
 	}
 	if osk == "" {
@@ -794,12 +881,9 @@ func (b Boot) CPU(base string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if !b.OS.IsMacOS() {
-		return cpu, nil
-	}
-	return cpu + ",vendor=GenuineIntel,vmx=off,vmware-cpuid-freq=on,-pdpe1gb,+invtsc," +
-		"+ssse3,+sse4.2,+popcnt,+avx,+avx2,+aes,+fma,+bmi1,+bmi2,+smep," +
-		"+xsave,+xsaveopt,+xgetbv1,+movbe,+rdrand,check", nil
+	// THE FLAGS ARE THE SHAPE'S, VERBATIM, and macOS's list ends in `check` so qemu REFUSES at
+	// startup rather than silently ignoring a flag this host cannot provide.
+	return cpu + b.shape().CPUSuffix, nil
 }
 
 // SMP is the processor topology.
@@ -810,41 +894,27 @@ func (b Boot) SMP(cpus int) string {
 	if cpus <= 0 {
 		cpus = DefaultCPUs
 	}
-	if !b.OS.IsMacOS() {
-		return fmt.Sprint(cpus)
+	if b.shape().SMPFormat == SMPTopology {
+		return fmt.Sprintf("%d,sockets=1,dies=1,cores=%d,threads=1", cpus, cpus)
 	}
-	return fmt.Sprintf("%d,sockets=1,dies=1,cores=%d,threads=1", cpus, cpus)
+	return fmt.Sprint(cpus)
 }
 
-// VGA is the video adapter, and macOS needs `none` so the adapter can be a PCIe -device.
+// VGA is the video adapter, and the shape says which one.
 //
-// ON q35, `-vga` CREATES AN ISA VGA DEVICE ON THE LEGACY BUS and macOS expects the PCIe one, which
-// is why the macOS list has `vmware-svga` as a device and this returns none.
+// ON q35, `-vga` CREATES AN ISA VGA DEVICE ON THE LEGACY BUS and macOS expects the PCIe one, which is
+// why the macOS shape has `vmware-svga` as a device in `extra_args` and `video.kind: none` here.
+//
+// ANDROID NEEDS A DRM NODE, AND `std` VGA DOES NOT PROVIDE ONE. MEASURED, and it is the difference
+// between a desktop and what looks like a hang: the installed system runs Android's HWC with
+// `HWC=drm_minigbm`, which opens /dev/dri/card0. `-device VGA` gives a framebuffer and NO DRM device,
+// so Android brings up no display at all and the screen STOPS ON INITRD'S LAST LINE - measured at
+// 240 s, 600 s and 600 s again before the cause was found, with nothing in the console saying so.
+//
+// A MICROVM GETS `absent`, because a machine with no PCI bus cannot create a `-device VGA` and `-vga
+// std` warns that it created nothing. Its adapter, when it has one, is chosen on the `boot:` step:
+// that is a fact about the guest's SESSION rather than about the machine.
 func (b Boot) VGA(defaultVGA string) string {
-	if b.OS.IsMacOS() {
-		return "none"
-	}
-	// ANDROID NEEDS A DRM NODE, AND `std` VGA DOES NOT PROVIDE ONE.
-	//
-	// MEASURED, and it is the difference between a desktop and what looks like a hang. The installed
-	// system runs Android's HWC with `HWC=drm_minigbm`, which opens /dev/dri/card0:
-	//
-	//	-device VGA          a framebuffer and NO DRM device. Android brings up no display at all,
-	//	                     and the screen STOPS ON INITRD'S LAST LINE for as long as you wait -
-	//	                     measured at 240 s, 600 s and 600 s again before the cause was found.
-	//	                     Nothing in the console says what is wrong.
-	//	-device virtio-vga   the real KMS driver, so /dev/dri/card0 exists and the launcher draws.
-	//
-	// It applies to the INSTALLER too: the same kernel runs in both, with the same HWC argument out
-	// of the same grub.cfg. And `virtio` reaches the daemon as `-device virtio-vga,xres=...`, which
-	// is the one form that can carry the resolution the panes were measured at.
-	//
-	// IT IS NOT OVERRIDABLE, AND THE REFUSAL IS IN THE DAEMON'S ARGUMENT LIST.
-	//
-	// A caller that asks for `std` on an android guest would get a black screen that reports
-	// nothing - the failure this whole section exists to prevent - so the daemon refuses `--vga`
-	// values other than `virtio` BY NAME rather than building arguments for a guest that cannot
-	// draw. See the android branch where the video arguments are assembled.
 	return b.VGAFor(defaultVGA)
 }
 
@@ -857,11 +927,19 @@ const AndroidVGA = "virtio"
 // VGAFor is `VGA` without the prose, so the argument-building code and the refusal in `Validate`
 // answer the same question from the same place and cannot disagree.
 func (b Boot) VGAFor(defaultVGA string) string {
-	if b.OS.IsMacOS() {
+	// FOUR ANSWERS, AND EACH ONE IS IN A SHAPE FILE'S `video.kind`.
+	//
+	//	none     another device supplies the adapter - macOS's `vmware-svga` in `extra_args`
+	//	virtio   virtio-vga, the only form that carries a resolution AND provides a DRM node
+	//	absent   no display at all, which is a microvm that draws nothing
+	//	vga      the default: `-device VGA,xres=...,yres=...`
+	switch b.shape().Video {
+	case "none":
 		return "none"
-	}
-	if b.OS == Android {
+	case "virtio":
 		return AndroidVGA
+	case "absent":
+		return "absent"
 	}
 	return defaultVGA
 }
@@ -909,22 +987,27 @@ func (b Boot) VGAFor(defaultVGA string) string {
 // silently opt out, and the failure mode is the one above: a guest with no card that reports it as a
 // capture bug three stages later.
 func (b Boot) AudioArgs() []string {
-	// A MICROVM HAS NO PCI BUS, so `ich9-intel-hda` - the default sound card - cannot attach. A guest
-	// whose job is to prove the vocabulary does not need audio, and the device it cannot have is the
-	// one that stops the machine at startup.
-	if b.MicroVM {
+	// THE SHAPE SAYS WHICH CARD, AND `none` IS A REAL ANSWER RATHER THAN AN ABSENCE.
+	//
+	// A MICROVM HAS NO PCI BUS, so `ich9-intel-hda` - the default - cannot attach, and the device it
+	// cannot have is the one that stops the machine at startup.
+	switch b.shape().Audio {
+	case "none":
 		return nil
-	}
-	// `usb-audio` NEEDS THE xHCI CONTROLLER, which Windows' answer/driver CDs already create and
-	// macOS's own device list creates. On a guest with neither, `bus=xhci.0` names a bus that does
-	// not exist and qemu refuses to start - so this branch is only taken for macOS, whose
-	// `ExtraArgs` always carries the controller.
-	if b.OS.IsMacOS() {
+	case "usb":
+		// `usb-audio` NEEDS THE xHCI CONTROLLER, which macOS's own device list creates. On a guest
+		// with neither, `bus=xhci.0` names a bus that does not exist and qemu refuses to start.
 		return []string{
 			"-audiodev", "none,id=snd0",
 			"-device", "usb-audio,bus=xhci.0,audiodev=snd0",
 		}
 	}
+	// `hda-duplex` RATHER THAN `hda-output`: duplex carries line-out AND line-in, so one codec gives
+	// the guest a speaker endpoint and a microphone endpoint.
+	//
+	// ORDERING IS LOAD-BEARING AND QEMU'S ERROR DOES NOT SAY SO: `-audiodev` must come before the
+	// device that names it, or qemu fails with `audiodev snd0 not found`, which reads like a missing
+	// option rather than a sequencing mistake.
 	return []string{
 		"-audiodev", "none,id=snd0",
 		"-device", "ich9-intel-hda",

@@ -1,0 +1,49 @@
+# WINDOWS: the same machine as Linux, plus two extra optical discs.
+#
+# THE MACHINE IS IDENTICAL. What differs is the MEDIA: Windows Setup finds neither its answer file nor
+# its drivers on the install ISO, so two more discs are attached and the firmware boots the ISO as it
+# would for any other guest.
+#
+# THE EXTRA DISCS NEED A USB CONTROLLER, AND THAT IS THE ONE ARGUMENT THIS SHAPE ADDS.
+#
+#	qemu-system-x86_64: -device qemu-xhci,id=xhci: Duplicate ID 'xhci' for device
+#
+# The daemon used to append an xHCI controller and a tablet at the end of its own argument list, and a
+# Windows boot already had one for the answer and driver discs - qemu refuses rather than merging, so
+# the machine never started and the failure arrived as
+#
+#	boot: qmp /work/drive.sock.qmp: connect: no such file or directory (waited 30s)
+#
+# which points at the socket rather than at the argument that killed qemu. The controller now comes
+# from `Boot.StorageArgs` for every guest that needs optical media, and `ExtraArgs` carries nothing.
+
+name: windows
+description: "UEFI, virtio disk, VGA, plus the answer-file and driver CDs Setup reads"
+
+firmware:
+  kind: ovmf
+  code: "{{.Code}}"
+  vars: "{{.Vars}}"
+
+cpu: {}
+
+# `N,sockets=1,cores=N,threads=1` IS NOT WHAT WINDOWS NEEDS - it reads a bare count like Linux - so
+# this stays plain and the topology form belongs to the one guest that requires it.
+smp:
+  format: plain
+
+video:
+  kind: vga
+
+audio: hda
+smc: false
+install_medium: iso
+extra_args: []
+
+media:
+  iso: true
+  recovery: false
+  # WINDOWS SETUP'S TWO EXTRA DISCS. Refused for every other guest, because a Linux installer given
+  # an answer-file CD would find nothing on it and the mistake would surface as a wizard that never
+  # advanced.
+  answer_and_driver: true

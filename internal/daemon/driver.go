@@ -694,6 +694,13 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 	if err != nil {
 		return err
 	}
+	// THE NAME BECOMES A MACHINE HERE, ONCE. Every qemu argument this boot produces reads a field of
+	// this shape - firmware, CPU flags, adapter, sound card, media rules - so a walkthrough's `os:`
+	// is the whole of what decides how its guest is started.
+	shape, err := machine.Resolve(spec.OS)
+	if err != nil {
+		return err
+	}
 	d.mu.Lock()
 	d.guestOS = spec.OS
 	d.mu.Unlock()
@@ -723,6 +730,7 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 	// its `fetch:` gets a sentence naming what is missing, not qemu's message about a drive.
 	boot := machine.Boot{
 		OS:             guestOS,
+		Shape:          shape,
 		Disk:           spec.Disk,
 		ISO:            spec.ISO,
 		AnswerCD:       spec.AnswerCD,

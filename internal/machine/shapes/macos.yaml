@@ -1,0 +1,89 @@
+# macOS: OPENCORE, NOT UEFI, AND EVERY LINE BELOW IS A MEASUREMENT.
+#
+# This is the one shape with a fan-out: firmware, boot order, CPU flags, SMP grammar, video adapter,
+# sound card and SMC key all turn on it, and each is a SILENT failure when wrong - the guest boots and
+# simply never draws, or draws at 640x480, or deadlocks at HANDOFF TO XNU.
+
+name: macos
+description: "OpenCore, Apple's CPU flags, no VGA adapter, USB audio and the SMC key"
+
+firmware:
+  # OPENCORE'S OWN TWO FILES ARE BUILT PER RUN from the recovery image, so they are not named here -
+  # a shape that named them would name a file that does not exist yet.
+  kind: opencore
+
+# THE CPU FLAG LIST, AND EACH ENTRY IS LOAD-BEARING.
+#
+#	+invtsc    ONE OF THE TWENTY FLAGS macOS NEEDS, AND TCG CANNOT PROVIDE IT. That is the deadlock
+#	           documented in internal/machine: every vCPU at 100%, block I/O frozen, the serial output
+#	           ending at `[EB|LOG:HANDOFF TO XNU]` with no panic.
+#	vmx=off    macOS refuses to boot when the host advertises VMX it cannot use.
+#	vendor=GenuineIntel  the kernel checks; a QEMU vendor string stops it before it draws.
+#	check      qemu refuses at startup rather than silently ignoring a flag this CPU cannot provide,
+#	           which turns a forty-minute boot into an immediate error.
+cpu:
+  suffix: ",vendor=GenuineIntel,vmx=off,vmware-cpuid-freq=on,-pdpe1gb,+invtsc,+ssse3,+sse4.2,+popcnt,+avx,+avx2,+aes,+fma,+bmi1,+bmi2,+smep,+xsave,+xsaveopt,+xgetbv1,+movbe,+rdrand,check"
+
+# A BARE COUNT IS NOT WHAT macOS UNDERSTANDS. dockur's configureSmp() spells out sockets, dies, cores
+# and threads, and the guest reads that structure.
+smp:
+  format: topology
+
+# `none`, BECAUSE ON q35 `-vga` CREATES AN ISA VGA DEVICE ON THE LEGACY BUS and macOS expects the PCIe
+# one - which OpenCore supplies as `vmware-svga` in `extra_args` below.
+video:
+  kind: none
+
+# `usb-audio`, NOT HDA, AND IT IS THE ONLY DEVICE APPLE'S DRIVER BINDS WITHOUT INJECTION.
+#
+# MEASURED: AppleHDA's controller loads against an ICH9 HDA device once OpenCore injects a matching
+# device-id - `com.apple.driver.AppleHDAController (600.2)`, `com.apple.iokit.IOHDAFamily (600.2)`,
+# `com.apple.iokit.IOAudioFamily (600.2)` all appear - but it NEVER ENUMERATES THE CODEC:
+# `IOHDACodecDevice` has no children, `AppleHDAEngine` is never instantiated, and CoreAudio reports
+# zero devices. qemu's `hda-duplex` does not present a vendor/product pair that AppleHDA's
+# personalities match. `AppleUSBAudio` is in every macOS, is already loaded, and binds qemu's
+# `usb-audio` with no injection at all.
+audio: usb
+
+# THE KEY IS NOT A SECRET AND IS NOT OPTIONAL. macOS reads it from the SMC to decide whether the
+# firmware is Apple's, and without it the kernel stops before it draws anything. Every hackintosh
+# carries the same string.
+smc: true
+
+# macOS'S INSTALLER IS THE RECOVERY IMAGE ON A USB DEVICE, so a boot that attaches it is the one that
+# writes. Every later stage boots an installed system and attaches nothing - which is why an installed
+# macOS booted WITH a recovery image would be given a throwaway overlay and rupture on destroy.
+install_medium: recovery
+
+extra_args:
+  # THE THREE ICH9 GLOBALS AND THE RTC/SMBIOS LINES, from macos/15/machine.py's own list.
+  - ["-global", "ICH9-LPC.disable_s3=1"]
+  - ["-global", "ICH9-LPC.disable_s4=1"]
+  - ["-global", "ICH9-LPC.acpi-pci-hotplug-with-bridge-support=off"]
+  - ["-rtc", "base=utc"]
+  - ["-smbios", "type=2"]
+  # BARE `vmware-svga`, NOT `vmware-svga,vgamem_mb=256`, AND THE MEASUREMENT IS THE REASON.
+  #
+  # The Python implementation sets vgamem_mb=256 for an INSTALLED macOS, which has VMwareGfx loaded
+  # and can use the memory. THE RECOVERY SYSTEM HAS NO SUCH DRIVER, and asking for 256 MB made its
+  # framebuffer far WORSE rather than better - two runs on adjacent commits, same walkthrough, same
+  # machine:
+  #
+  #	22eeda3   bare vmware-svga         1803 frames captured,   3 lost
+  #	5ba0c18   vgamem_mb=256              92 frames captured, 264 lost
+  #
+  # 264 LOST TICKS IS THREE QUARTERS OF THE RECORDING, and the 92 that survived are BLACK at mean
+  # luminance 0.6 - the recovery system never drew anything. The `Ul ag` that the gate reported for
+  # thirty minutes is OCR reading noise, not a menu.
+  #
+  # SO THE 640x480 IS NOT A MEMORY PROBLEM AND THIS ARGUMENT DOES NOT FIX IT. The gate reads 640x480
+  # because that is the mode OpenCore's GOP leaves the guest in before macOS loads a display driver;
+  # the fix has to be in where the walkthrough reads, not in the adapter.
+  - ["-device", "vmware-svga"]
+
+media:
+  # macOS HAS NO INSTALL ISO, and the refusal says so rather than letting a stage attach one and watch
+  # the guest sit in the UEFI shell.
+  iso: false
+  iso_reason: "macOS has no install ISO; it installs from its recovery image. Use `recovery:` rather than `iso:`"
+  recovery: true
