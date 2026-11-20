@@ -263,8 +263,39 @@ func (d *Daemon) handleArtifact(w http.ResponseWriter, r *http.Request) {
 // journalDB is the run's journal, or nil.
 func (d *Daemon) journalDB() *journal.DB {
 	d.mu.Lock()
-	defer d.mu.Unlock()
-	return d.jdb
+	db, work := d.jdb, d.work
+	d.mu.Unlock()
+	if db != nil {
+		return db
+	}
+	// A DAEMON THAT IS NOT RUNNING A WALK STILL HAS A JOURNAL, and this is a correction rather than a
+	// convenience.
+	//
+	// MEASURED: `/report` answered 200 with the whole page while `/api/journal` answered
+	// 503 "this daemon has no journal" - on the same process, about the same run. The cause was that
+	// `d.jdb` is only set when `startRun` opens a journal, so a daemon that had finished its run, or
+	// was restarted, served the report from disk but could not answer the list it was built from.
+	//
+	// The journal on disk IS the daemon's answer; `OpenExisting` refuses to create one, so a work
+	// directory with no run still says "no journal" instead of inventing an empty database.
+	if work == "" {
+		return nil
+	}
+	opened, err := journal.OpenExisting(work)
+	if err != nil {
+		return nil
+	}
+	d.mu.Lock()
+	if d.jdb == nil {
+		d.jdb = opened
+		opened = nil
+	}
+	kept := d.jdb
+	d.mu.Unlock()
+	if opened != nil {
+		_ = opened.Close()
+	}
+	return kept
 }
 
 // workDir is the daemon's work directory.
