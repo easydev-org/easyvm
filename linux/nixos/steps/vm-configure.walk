@@ -60,9 +60,21 @@ walkthrough "linux-nixos - configure the vm (name, share, guest agent)"
   step "prove the launcher is installed"
     ssh == "set -e\nls -l ~/bootstrap-launcher.sh ~/.config/systemd/user/org.vm.bootstrap.service\ngrep -q bootstrap-launcher.sh ~/.config/systemd/user/org.vm.bootstrap.service\nsystemctl --user is-enabled org.vm.bootstrap.service\ntest \"$(systemctl --user is-enabled org.vm.bootstrap.service)\" = \"enabled\"\n"
     timeout == 60
+  # `poweroff` CUTS THE CONNECTION IT WAS SENT OVER, SO SSH REPORTS "exited without exit status".
+  #
+  # MEASURED ON RUN 9a8cae4's nixos vm leg: every step before this one answered - including the guest
+  # agent, the host share and the launcher - and the stage died on
+  #
+  #	ask the guest to power off: ssh: wait: remote command exited without exit status or exit signal
+  #
+  # which is what a SUCCESSFUL poweroff looks like from the client: the machine goes down mid-command
+  # and the channel closes without a status. It is put in the background so the shell returns first,
+  # the step is optional, and `wait for the machine to stop` - the assertion the next stage depends
+  # on - still has to pass.
   step "ask the guest to power off"
-    ssh == printf '%s\n' '{{ password }}' | sudo -S -p '' poweroff
+    ssh == printf '%s\n' '{{ password }}' | sudo -S -p '' sh -c 'nohup poweroff >/dev/null 2>&1 &'
     timeout == 300
+    optional == true
   step "wait for the machine to stop"
     timeout == 300
     wait_until == stopped
