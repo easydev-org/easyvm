@@ -204,7 +204,7 @@ walkthrough "linux-opensuse-tumbleweed - sshd"
   #
   # `echo` NEEDS NO ESCAPE, so there is nothing for the two layers of quoting to disagree about.
   step "write the drop-in everywhere a config dir exists"
-    run == sudo mkdir -p /etc/ssh/sshd_config.d /usr/etc/ssh/sshd_config.d; echo PasswordAuthentication yes | sudo tee /etc/ssh/sshd_config.d/99-vm.conf; echo PasswordAuthentication yes | sudo tee /usr/etc/ssh/sshd_config.d/99-vm.conf; sudo sed -i s/^PasswordAuthentication.no/PasswordAuthentication.yes/ /etc/ssh/sshd_config; sudo grep -n PasswordAuthentication /etc/ssh/sshd_config
+    run == sudo mkdir -p /etc/ssh/sshd_config.d /usr/etc/ssh/sshd_config.d; echo PasswordAuthentication yes | sudo tee /etc/ssh/sshd_config.d/99-vm.conf; echo PasswordAuthentication yes | sudo tee /usr/etc/ssh/sshd_config.d/99-vm.conf; sudo sed -i s/^PasswordAuthentication.no/PasswordAuthentication.yes/ /etc/ssh/sshd_config; sudo grep -n PasswordAuthentication /etc/ssh/sshd_config ; grep -c PasswordAuthentication /etc/ssh/sshd_config
     settle == 3
     terminal_wait == 0
   step "the vendor file says it too, because that is the one sshd may read"
