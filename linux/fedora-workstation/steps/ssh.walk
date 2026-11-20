@@ -378,18 +378,26 @@ walkthrough "linux-fedora-workstation - sshd"
     settle == 2
     type == terminal
     type_gap == 0.08
-  step "the result list has had time to draw"
-    settle == 4
-  # THE RESULT IS CLICKED, NOT OPENED WITH RETURN, AND THE DIFFERENCE IS MEASURED.
+  # THE RESULT IS WAITED FOR, THEN CLICKED, AND THE DIFFERENCE IS MEASURED.
   #
-  # MEASURED ON THE POD: with "terminal" in the box the search draws the Terminal app FIRST, at
-  # (960, 178) - and a Return at that moment opened something else, leaving a clean desktop with no
-  # window on it. Clicking that first tile opened
+  # MEASURED ON THE POD in both directions:
   #
-  #	vmuser@fedora:~$
+  #	click at (960, 178) with "terminal" drawn      -> the window opened, prompt `vmuser@fedora:~$`
+  #	click at (960, 178) four seconds after typing  -> a clean desktop, NO window
   #
-  # immediately. The tile is the first row of a list whose height is fixed by the search field above
-  # it, so its centre does not move as the list fills in.
+  # The second is what this stage did on its next run, and it is not a wrong coordinate: the search
+  # result had not been drawn yet when the pointer arrived. A fixed `settle:` is a guess about how
+  # long GNOME's search takes, and on a guest still finishing its first login that guess was short.
+  #
+  # SO THE TILE IS WAITED FOR, BY ITS OWN WORD. A search that has produced nothing draws no word in
+  # that row; one that has produced the app draws "Terminal". The loop presses nothing - a key here
+  # would go into the search box and change what is being searched for.
+  step "the Terminal result has been drawn"
+    # THE RECT IS THE TILE AND ITS LABEL, NOT THE WHOLE RESULT AREA. MEASURED with tesseract on a
+    # frame of this screen: the wider box `[700, 90, 1250, 240]` returns NOTHING - the tile's icon is
+    # a gradient and the text is small against it - while `[860, 150, 1060, 250]` reads "Terminal".
+    # A gate whose rectangle cannot see the word it is waiting for fails for ever, quietly.
+    loop == {check: {from: results, mode: text, name: drawn, rect: [860, 150, 1060, 250], rect_at: [1920, 1080], scale: 1, words: [[terminal]]}, do: [{settle: 2}], max: 10, see: {name: results}, until: {fact: drawn}}
   step "open the terminal on the first result"
     click == [960, 178]
     settle == 20

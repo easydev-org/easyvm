@@ -56,6 +56,7 @@ TWO MODES, AND THEY DIFFER IN WHEN THE MACHINE STOPS:
   easyvm stop    [--work DIR]                    stop the run and the machine
   easyvm destroy [--work DIR]                    stop a sandbox's machine (its only ending)
   easyvm health  [--work DIR]                    exit 0 only if QMP and the guest both answer
+  easyvm report  [--work DIR] [--out DIR]        write the run's journal as a self-contained page
 
   easyvm check   FILE                            validate without any machine at all
   easyvm list    FILE                            one line per step

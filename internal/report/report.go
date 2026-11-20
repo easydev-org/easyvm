@@ -306,8 +306,17 @@ details>summary{outline:none}
 	}
 	b.WriteString("</div>\n")
 
-	for _, v := range videos {
-		fmt.Fprintf(&b, `<video controls preload="metadata" src="%s"></video>`+"\n", html.EscapeString(v))
+	// THE VIDEO IS COLLAPSED AND BOUNDED. MEASURED on a real report: an open `<video>` took the whole
+	// first screen and pushed every step below the fold, so the page a person opens to find the
+	// failure showed a film instead. It is also not what a reader comes for - the steps are.
+	if len(videos) > 0 {
+		fmt.Fprintf(&b, `<details><summary class="sub" style="cursor:pointer;margin:0 0 12px">`+
+			`recording (%d file(s))</summary>`+"\n", len(videos))
+		for _, v := range videos {
+			fmt.Fprintf(&b, `<video controls preload="metadata" style="max-height:360px;width:auto" src="%s"></video>`+"\n",
+				html.EscapeString(v))
+		}
+		b.WriteString("</details>\n")
 	}
 
 	// THE STEPS.
@@ -319,13 +328,35 @@ details>summary{outline:none}
 
 	// THE LIBRARY: the named pictures, in the order they were captured.
 	if len(library) > 0 {
-		b.WriteString(`<h2>Picture library</h2>` + "\n" + `<div class="library">` + "\n")
+		b.WriteString(`<h2>Picture library</h2>` + "\n")
+		// THE LIBRARY IS LISTED BY CONTENT, NOT BY CAPTURE. A loop that `see:`s the same unchanged
+		// screen eight times writes eight rows - each is a real event with a time and a step - and
+		// they all point at ONE stored picture. MEASURED on a real report: four rows with the same
+		// hash were drawn as four identical thumbnails, which reads as "the library has four copies"
+		// when it has one.
+		byHash := map[string][]journal.Image{}
+		var order []string
 		for _, im := range library {
+			if _, seen := byHash[im.Sha]; !seen {
+				order = append(order, im.Sha)
+			}
+			byHash[im.Sha] = append(byHash[im.Sha], im)
+		}
+		fmt.Fprintf(&b, `<div class="sub" style="margin:0 0 12px">%d capture(s) of %d distinct picture(s)</div>`+"\n",
+			len(library), len(order))
+		b.WriteString(`<div class="library">` + "\n")
+		for _, sha := range order {
+			im := byHash[sha][0]
+			times := len(byHash[sha])
 			b.WriteString("<figure>")
 			fmt.Fprintf(&b, `<img loading="lazy" src="assets/%s.png" alt="%s">`,
-				html.EscapeString(im.Sha), html.EscapeString(im.Name))
+				html.EscapeString(sha), html.EscapeString(im.Name))
+			caption := fmt.Sprintf("%s", html.EscapeString(im.Name))
+			if times > 1 {
+				caption += fmt.Sprintf(` <b>&times;%d</b>`, times)
+			}
 			fmt.Fprintf(&b, "<figcaption>%s<br><span style=\"font-size:11px\">%s</span></figcaption></figure>",
-				html.EscapeString(im.Name), html.EscapeString(im.Sha))
+				caption, html.EscapeString(sha))
 		}
 		b.WriteString("</div>\n")
 	}
