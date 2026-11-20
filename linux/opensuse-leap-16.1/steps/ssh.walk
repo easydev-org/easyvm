@@ -100,8 +100,29 @@ walkthrough "linux-opensuse-tumbleweed - sshd"
   #
   # THE SUCCESS TEST IS THE SHELL PROMPT. `vmuser@` is what a logged-in prompt starts with and what a
   # `login:` prompt cannot contain, so the two screens cannot be confused for one another.
+  #
+  # AND THE TYPING IS SLOW, BECAUSE THIS GUEST DROPS CHARACTERS AT 0.10s. MEASURED on the pod, whose
+  # screen afterwards held:
+  #
+  #	localhost login: vmser                     <- the `u` of `vmuser` never arrived
+  #
+  # - so getty rejected a name that was never the account's, the loop's next pass typed the real name
+  # into a shell that had not opened, and the screen filled with
+  #
+  #	vmuser@localhost:> vmuser
+  #	vmuser: command not found
+  #
+  # 0.25s per character is what every other console login in this repository uses, and a text console
+  # on tty1 has no buffering to hide a dropped keystroke - the character is simply gone.
+  #
+  # AND EACH PASS STARTS WITH A RETURN, WHICH IS THE OPPOSITE OF WHAT THIS STEP USED TO DO. A bare
+  # Return at `login:` is an empty user name and getty answers "Login incorrect" - that is why it was
+  # removed. But it is the ONLY stroke that returns a console left in a shell by a previous pass to a
+  # fresh `login:`, and after a dropped character the console can be in a shell whose command line
+  # still holds half a name. A pass that begins there types `vmuser` into a prompt that is already
+  # logged in, and the next pass has no clean prompt left to start from.
   step "log in on the console, retrying until the shell answers"
-    loop == {check: {from: console, mode: text, name: logged_in, rect: [0, 100, 1920, 1000], rect_at: [1920, 1080], scale: 1, words: [[vmuser@]]}, do: [{type: "{{ user }}", type_gap: 0.10, settle: 5}, {key: ret, settle: 8}, {type: "{{ password }}", type_gap: 0.10, settle: 5}, {key: ret, settle: 14}], max: 5, see: {name: console}, until: {fact: logged_in}}
+    loop == {check: {from: console, mode: text, name: logged_in, rect: [0, 100, 1920, 1000], rect_at: [1920, 1080], scale: 1, words: [[vmuser@]]}, do: [{key: ret, settle: 3}, {type: "{{ user }}", type_gap: 0.25, settle: 5}, {key: ret, settle: 8}, {type: "{{ password }}", type_gap: 0.25, settle: 5}, {key: ret, settle: 14}], max: 5, see: {name: console}, until: {fact: logged_in}}
   step "unlock sudo once for this session"
     run == printf '%s\n' {{ password }} | sudo -S -v
     settle == 4
