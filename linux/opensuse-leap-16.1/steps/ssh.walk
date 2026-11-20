@@ -317,6 +317,21 @@ walkthrough "linux-opensuse-tumbleweed - sshd"
     terminal_wait == 0
   step "prove sshd is active"
     run == systemctl is-active sshd
+    settle == 4
+    terminal_wait == 0
+  # THE LOCAL HALF OF THE AUTHENTICATION, ASKED BEFORE THE NETWORK HALF.
+  #
+  # MEASURED ON RUN 50fbdf8: `/etc/pam.d/sshd` was created (154 bytes, 5 lines), `common-auth` names
+  # pam_unix, sshd is active - and the client is STILL refused with "unable to authenticate, attempted
+  # methods [none password keyboard-interactive]". So the daemon side is now complete and the
+  # question has moved to the account: a password that PAM cannot verify.
+  #
+  # THESE TWO LINES SAY WHICH. `passwd -S` prints the shadow entry's state - `P` for a usable
+  # password, `NP` for none, `L` for locked - and `chage -l` prints whether it has expired. A locked
+  # or expired account is refused by pam_unix with exactly the message above, and no sshd setting
+  # can change it.
+  step "is the account's password usable to PAM"
+    run == sudo passwd -S vmuser; sudo chage -l vmuser | head -4
     settle == 5
     terminal_wait == 0
   step "open the firewall for ssh"
