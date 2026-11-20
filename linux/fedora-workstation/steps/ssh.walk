@@ -71,8 +71,19 @@ walkthrough "linux-fedora-workstation - sshd"
   #
   # The other Linux media create `vmuser` inside their installer, which is why their ssh stages meet
   # a greeter. This one does not, and the greeter steps above are optional for exactly that reason.
+  # FORTY ATTEMPTS WAS 200 SECONDS, AND THIS DISK TAKES MINUTES TO FINISH BOOTING.
+  #
+  # MEASURED ON THE POD, manually, with the published `linux-fedora-workstation` disk: step 7 ran its
+  # forty attempts and the screen at the end was STILL THE BOOT SPLASH - Fedora's ring of gears on the
+  # gradient background - and the check reported `read "ies"`, one fragment of a word it caught through
+  # the animation. The next step then pressed Tab into a machine that was not there and the QMP
+  # connection was closed by the timeout.
+  #
+  # A first boot of an installed Fedora regenerates the initramfs and starts GNOME Initial Setup; on a
+  # cold disk that is several minutes. The budget is fifteen, and `settle: 10` between looks so the
+  # forty looks are not spent describing the same splash.
   step "the setup wizard is up"
-    loop == {check: {from: wizard, mode: text, name: up, rect: [450, 620, 1470, 900], rect_at: [1920, 1080], scale: 1, words: [[welcome, to, fedora], [setup, will, guide]]}, do: [{settle: 5}], max: 40, see: {name: wizard}, until: {fact: up}}
+    loop == {check: {from: wizard, mode: text, name: up, rect: [450, 620, 1470, 900], rect_at: [1920, 1080], scale: 1, words: [[welcome, to, fedora], [setup, will, guide]]}, do: [{settle: 10}], max: 90, see: {name: wizard}, until: {fact: up}}
     optional == true
   # THE CLICK AT THE BUTTON'S OWN CENTRE DID NOT TAKE, SO THE BUTTON IS REACHED BY KEYBOARD.
   #
@@ -176,6 +187,45 @@ walkthrough "linux-fedora-workstation - sshd"
     settle == 3
   press Return, waiting 10s, named "submit the account page"
   # AND THE PAGES AFTER IT, IN THE SAME [Tab, Tab, Return] SHAPE THAT GOT THIS FAR.
+  # TIME ZONE IS A PAGE THAT DOES NOT ADVANCE ON Tab+Return, AND THE LAST RUN LEFT THE WHOLE STAGE
+  # INSIDE ITS SEARCH BOX.
+  #
+  # MEASURED ON RUN c2d6a1f: frames from 375 s to the end at 1225 s are all the Time Zone page, and
+  # its search box holds
+  #
+  #	"ervice=ssh sudo firewall-cmd --reload sudo firewall-cmd --list-services"
+  #
+  # - the tail of this stage's own `open the firewall` command, typed into the wizard because the
+  # wizard was still up. Its Next stays grey until a city is picked, and Tab+Return only moves the
+  # focus between the map and the box.
+  #
+  # SO THE PAGE IS ANSWERED, IN ITS OWN WORDS: type a city into the box it focuses for you, wait for
+  # the suggestion list, press Return to take the first one, and then continue with Tab+Return.
+  # "los angeles" is the same zone macos' files use, so the chains agree on where the clock is.
+  #
+  # THE RECT AND THE RANGE COME FROM `tools/reflike.py suggest`, NOT FROM MY EYE.
+  #
+  # The first rectangle I tried framed the page's HEADING, and against the pages either side of it
+  # that scored 0.8962 - a white card with a title looks the same on every page of this wizard, and a
+  # threshold below 0.90 would have called those pages "Time Zone" and typed a city into them.
+  #
+  # `suggest` searched instead and found `[800, 700, 1200, 900]`, which is the "Please search for a
+  # nearby city" card over the map - present here and nowhere else:
+  #
+  #	1.0000  this page, two different frames
+  #	0.0951  the page before it  (worst reject)
+  #
+  # A gap of 0.90, so `range: [0.12, 1.0]` is the tool's own suggestion with its 0.02 margin.
+  step "a Time Zone page, if the wizard is showing one"
+    loop == {check: {from: timezone, mode: like, name: showing, rect: [800, 700, 1200, 900], rect_at: [1920, 1080], reference: reference/timezone-page.png, range: [0.12, 1.0]}, do: [{settle: 5}], max: 6, see: {name: timezone}, until: {fact: showing}}
+    optional == true
+  step "name a city, which is what enables Next on that page"
+    type == los angeles
+    type_gap == 0.09
+    settle == 4
+  step "the suggestion list has drawn"
+    settle == 4
+  press Return, waiting 12s, named "take the first city suggestion"
   step "walk the rest of the setup wizard"
     do == [{key: tab, settle: 1}, {key: tab, settle: 1}, {key: ret, settle: 7}, {key: tab, settle: 1}, {key: tab, settle: 1}, {key: ret, settle: 7}, {key: tab, settle: 1}, {key: tab, settle: 1}, {key: ret, settle: 9}]
   press Escape, waiting 2s, named "clear a context menu if the wizard had already closed"

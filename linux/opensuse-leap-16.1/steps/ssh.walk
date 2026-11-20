@@ -273,15 +273,43 @@ walkthrough "linux-opensuse-tumbleweed - sshd"
   # message the client printed: "unable to authenticate, attempted methods [none password
   # keyboard-interactive]".
   #
-  # WHAT IS IN THE DIRECTORY decides how to fix it, so it is listed first; then the file is created
-  # from the same skeleton openSUSE's own `login` stack uses, which is the one that reads /etc/shadow.
-  step "look at what PAM has, since sshd now needs a file it does not have"
-    run == sudo ls /etc/pam.d/ | head -20; echo === ; sudo cat /etc/pam.d/login 2>/dev/null | head -12
-    settle == 5
+  # THERE IS NO /etc/pam.d/login EITHER - THIS DISTRIBUTION USES `common-*`, AND THE PROOF IS BELOW.
+  #
+  # MEASURED ON RUN 45a2cb5's console. `/etc/pam.d/` holds exactly these:
+  #
+  #	common-account   common-account-pc        common-auth      common-auth-pc
+  #	common-password  common-password-pc      common-session   common-session-pc
+  #	postlogin-account  postlogin-auth  postlogin-password  postlogin-session  (+ -pc variants)
+  #
+  # and the copy from `login` failed with the message that says so:
+  #
+  #	cp: cannot stat '/etc/pam.d/login': No such file or directory
+  #
+  # SO THE FILE IS BUILT FROM THE `common-*` MODULES THEMSELVES, which is how this distribution's own
+  # services do it. `common-auth` reads /etc/shadow (pam_unix), `common-account` checks the account is
+  # not locked, and `common-session` sets up the session; `postlogin-*` is what openSUSE adds on top
+  # for sshd's login class, and it is included because it exists here.
+  #
+  # THE ORDER IS PAM'S OWN: account, auth, password, session.
+  step "build /etc/pam.d/sshd, one line at a time"
+    run == echo "auth include common-auth" | sudo tee /etc/pam.d/sshd
+    settle == 3
     terminal_wait == 0
-  step "give sshd the PAM stack that reads /etc/shadow"
-    run == test -f /etc/pam.d/sshd || sudo cp /etc/pam.d/login /etc/pam.d/sshd; sudo ls -l /etc/pam.d/sshd; sudo grep -c . /etc/pam.d/sshd
-    settle == 5
+  step "give sshd the account rule"
+    run == echo "account include common-account" | sudo tee -a /etc/pam.d/sshd
+    settle == 3
+    terminal_wait == 0
+  step "give sshd the password rule"
+    run == echo "password include common-password" | sudo tee -a /etc/pam.d/sshd
+    settle == 3
+    terminal_wait == 0
+  step "give sshd the session rules"
+    run == echo "session include common-session" | sudo tee -a /etc/pam.d/sshd; echo "session include postlogin-session" | sudo tee -a /etc/pam.d/sshd
+    settle == 3
+    terminal_wait == 0
+  step "prove the stack is there and reads the shadow database"
+    run == sudo ls -l /etc/pam.d/sshd; sudo grep -c . /etc/pam.d/sshd; sudo grep -l pam_unix /etc/pam.d/common-auth
+    settle == 4
     terminal_wait == 0
   step "start sshd"
     run == sudo systemctl restart sshd 2>&1 | tail -3; sleep 2; systemctl is-active sshd
