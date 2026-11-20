@@ -64,6 +64,30 @@ on:
           guests before it merges, without publishing over `:latest`.
         type: string
         default: "latest"
+      # WHICH REPOSITORY'S PACKAGE HOLDS THE IMAGE, AND IT IS NOT ALWAYS THE CALLER'S.
+      #
+      # `ghcr.io/${{ github.repository }}` WAS RIGHT WHILE EVERY CALLER LIVED IN easydev-org/easyvm.
+      # It stopped being right the day the walkthroughs moved into easyvm-windows, easyvm-macos,
+      # easyvm-linux, easyvm-android and easyvm-bsd: in a called workflow `github.repository` is the
+      # CALLER, so the expression would have looked for
+      #
+      #	ghcr.io/easydev-org/easyvm-linux:latest
+      #
+      # - a package that does not exist, because the IMAGE is built here, by `image.yml`, and the
+      # walkthrough repositories hold no Go code to build one from. GitHub's failure for a missing
+      # image on a `container:` job is not a helpful message: the run fails to start the container
+      # and reports it as an infrastructure error with no log.
+      #
+      # SO IT IS AN INPUT WITH THE OLD BEHAVIOUR AS ITS DEFAULT. A caller inside easyvm passes
+      # nothing and gets `${{ github.repository }}`; a walkthrough repository passes
+      # `easydev-org/easyvm`.
+      image_repository:
+        description: >-
+          the ghcr repository that holds the stage image. Empty means the caller's own repository,
+          which is what every in-repository call wants; a walkthrough repository names
+          `easydev-org/easyvm`, because the image is built there.
+        type: string
+        default: ""
 
 # NO WORKFLOW-LEVEL `concurrency` HERE. THE CALLER OWNS THE RUN.
 #
@@ -79,7 +103,7 @@ jobs:
     # a default chosen for a 70-minute Windows stage.
     timeout-minutes: ${{ matrix.timeout }}
     container:
-      image: ghcr.io/${{ github.repository }}:${{ inputs.image_tag }}
+      image: ghcr.io/${{ inputs.image_repository || github.repository }}:${{ inputs.image_tag }}
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
