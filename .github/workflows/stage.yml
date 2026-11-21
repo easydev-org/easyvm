@@ -410,6 +410,12 @@ jobs:
           need_gib=$(( need_mib / 1024 ))
           total_kib=$(awk '/^MemTotal:/{print $2}' /proc/meminfo)
           total_gib=$(( total_kib / 1024 / 1024 ))
+          # THE NUMBER IS PRINTED EVEN WHEN IT PASSES, because "this runner has 7 GiB" is the one
+          # fact a reader needs when the same commit succeeds in one repository and fails in another.
+          # MEASURED 2026-11-21: three different hosted runners in one group all reported 7, while a
+          # run of the same stage.yml from easydev-org/easyvm an hour earlier had enough for an
+          # 8 GiB guest - so the size is not something a repository can assume about its runners.
+          echo "runner memory: ${total_gib} GiB total ($(( total_kib / 1024 )) MiB); this guest asks for ${need_gib} GiB plus 2 GiB of margin"
           # TWO GIBABYTES OF MARGIN: qemu's own RSS on top of the guest was measured at 12.01 GiB for
           # a 12 GiB guest, so the guest is essentially all of it and the margin is for the daemon.
           if [ "$(( need_gib + 2 ))" -gt "$total_gib" ]; then
