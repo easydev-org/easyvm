@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 	"time"
 
 	"github.com/easydev-org/easyvm/internal/asset"
@@ -800,6 +801,16 @@ func (e *Executor) doSCP(s walk.Step) error {
 			"earlier `write:` or `fetch:` produced; if that step ran, look at where IT wrote",
 			local, e.Work, statErr)
 	}
+	// A TEXT FILE A STEP CARRIES IS RENDERED LIKE A STEP'S OWN KEYS. The loader substitutes
+	// `{{ name }}` inside the walk file and nowhere else, so a helper script copied verbatim kept its
+	// placeholders. MEASURED ON RUN 44900459640:
+	//
+	//	/tmp/run-xcode-install.sh: line 30: user: command not found
+	//
+	// for `WORK=/Users/{{ user }}/xcode-expand`. The rendered copy goes to a temporary file beside the
+	// original and is deleted after the transfer, so the repository keeps its placeholders and the
+	// guest receives values.
+	local = e.renderForCopy(s, local)
 	if err := scpFile(client, local, remote); err != nil {
 		return fail(s.Name, "scp %s -> %s: %v", filepath.Base(local), remote, err)
 	}
@@ -1498,4 +1509,44 @@ func normalisePair(a, b image.Image) (image.Image, image.Image) {
 		return out
 	}
 	return scale(a), scale(b)
+}
+
+// renderForCopy returns a path to a copy of local with `{{ name }}` substituted, or local unchanged
+// when it is binary or has no placeholders.
+//
+// IT IS DELIBERATELY CONSERVATIVE: only a file that is valid UTF-8 and actually contains `{{` is
+// copied. A disk image, an ISO or a .pkg must not be slurped into memory and rewritten, and a file
+// with no placeholder has nothing to gain from an extra copy.
+func (e *Executor) renderForCopy(s walk.Step, local string) string {
+	if e.File == nil {
+		return local
+	}
+	data, err := os.ReadFile(local)
+	if err != nil {
+		return local
+	}
+	if !strings.Contains(string(data), "{{") || !utf8.Valid(data) {
+		return local
+	}
+	rendered, err := e.File.Render(string(data))
+	if err != nil {
+		e.Driver.Log(fmt.Sprintf("  %s: %v (copied unchanged)", filepath.Base(local), err))
+		return local
+	}
+	out, err := os.CreateTemp(filepath.Dir(local), filepath.Base(local)+".rendered-*")
+	if err != nil {
+		return local
+	}
+	mode := os.FileMode(0o644)
+	if fi, statErr := os.Stat(local); statErr == nil {
+		mode = fi.Mode().Perm()
+	}
+	_, writeErr := out.WriteString(rendered)
+	closeErr := out.Close()
+	if writeErr != nil || closeErr != nil {
+		return local
+	}
+	_ = os.Chmod(out.Name(), mode)
+	e.Driver.Log(fmt.Sprintf("  rendered %s with this file's vars", filepath.Base(local)))
+	return out.Name()
 }

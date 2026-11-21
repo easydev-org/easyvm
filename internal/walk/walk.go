@@ -480,3 +480,27 @@ func has(mapping map[string]any, key string) bool {
 func isWalkFile(path string) bool {
 	return strings.HasSuffix(path, ".walk")
 }
+
+// Render substitutes `{{ name }}` in a string with the file's vars, using the same rules a step's
+// own keys get.
+//
+// IT EXISTS FOR FILES A STEP CARRIES RATHER THAN WRITES. A `scp:` copies a script verbatim, and the
+// loader only substitutes inside the walk file - so a helper that names `{{ user }}` arrives at the
+// guest as that literal text. MEASURED ON RUN 44900459640:
+//
+//	/tmp/run-xcode-install.sh: line 30: user: command not found
+//
+// The script had `WORK=/Users/{{ user }}/xcode-expand`, and bash read `user` as a command between two
+// slashes. A missing var is still an error, for the same reason it is in a step: a blank is a value
+// that hides the mistake.
+func (f *File) Render(text string) (string, error) {
+	if f == nil {
+		return text, nil
+	}
+	out, err := substitute(text, f.Vars)
+	if err != nil {
+		return "", err
+	}
+	s, _ := out.(string)
+	return s, nil
+}
