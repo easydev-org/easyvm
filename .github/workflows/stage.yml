@@ -57,6 +57,25 @@ on:
           write to the package its own repository holds.
         type: string
         default: ""
+      # THE FREE DISK THIS LEG NEEDS, IN GB, BECAUSE THE ANSWER DIFFERS BY AN ORDER OF MAGNITUDE.
+      #
+      # MEASURED ON 2026-11-21: `runner-check` reported
+      #
+      #	/__w/easyvm-bsd/easyvm-bsd has 11 GiB free; 40 GiB needed
+      #
+      # on a job running THIS stage.yml, from THIS commit, that the easydev-org/easyvm run at the same
+      # minute PASSED - GitHub's hosted runners do not all carry the same free space, and `prune: true`
+      # cannot help from inside a `container:` job: what it deletes is the HOST's SDKs, which a
+      # container job cannot see.
+      #
+      # AND ONE NUMBER FOR EVERY GUEST WAS ALREADY WRONG. A BSD install reads a 1.3 GiB ISO; a Windows
+      # install reads 7.7 GiB twice. The caller knows which it is; this workflow does not.
+      disk_gb:
+        description: >-
+          free GB this leg needs on the runner. 0 skips the check. Sized for the working copy, the
+          compressed result and the recording - not the disk's virtual size.
+        type: string
+        default: "40"
       image_tag:
         description: >-
           the image tag this stage runs inside. `latest` is the product and is what every operating
@@ -173,9 +192,23 @@ jobs:
           tun: true
           # THE RECORDING, THE INPUT DISK AND THE OUTPUT DISK ARE ALL ON THIS MOUNT, and the largest
           # single input is a 7.7 GiB Windows ISO that is read twice.
-          disk-gb: '40'
+          disk-gb: ${{ inputs.disk_gb }}
           token: ${{ github.token }}
 
+      # A SECOND, SMALLER FLOOR, BECAUSE THE FIRST ONE IS A GUESS ABOUT SOMEBODY ELSE'S RUNNER.
+      #
+      # MEASURED ON A SPLIT REPOSITORY, 2026-11-21: `runner-check` reported
+      #
+      #	/__w/easyvm-bsd/easyvm-bsd has 11 GiB free; 40 GiB needed
+      #
+      # on a job that runs the SAME stage.yml as easydev-org/easyvm, from the same commit, on the same
+      # runner image - and the run in easydev-org/easyvm at the same minute PASSED the same check.
+      # GitHub's hosted runners do not all carry the same free space, and `prune: true` cannot help
+      # from inside a `container:` job: what it deletes is the HOST's SDKs, which this job cannot see.
+      #
+      # SO THE DISK IS A PROPERTY OF THE STAGE RATHER THAN A CONSTANT. A BSD install reads a 1.3 GiB
+      # ISO; a Windows install reads 7.7 GiB twice. One number for both is a number that is wrong for
+      # one of them.
       - name: the tools the files use
         # NAMED SO A MISSING ONE IS THIS STEP RATHER THAN A FAILURE FORTY MINUTES INTO AN INSTALL that
         # needed `xorriso` to build an answer CD.
