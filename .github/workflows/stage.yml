@@ -416,9 +416,19 @@ jobs:
           # run of the same stage.yml from easydev-org/easyvm an hour earlier had enough for an
           # 8 GiB guest - so the size is not something a repository can assume about its runners.
           echo "runner memory: ${total_gib} GiB total ($(( total_kib / 1024 )) MiB); this guest asks for ${need_gib} GiB plus 2 GiB of margin"
-          # TWO GIBABYTES OF MARGIN: qemu's own RSS on top of the guest was measured at 12.01 GiB for
-          # a 12 GiB guest, so the guest is essentially all of it and the margin is for the daemon.
-          if [ "$(( need_gib + 2 ))" -gt "$total_gib" ]; then
+          # ONE GIBABYTE OF MARGIN, AND THE NUMBER IS A TRADE RATHER THAN A MEASUREMENT.
+          #
+          # The old margin was two, on the measurement that qemu's own RSS on top of a 12 GiB guest is
+          # 12.01 GiB - i.e. the daemon costs about a hundredth of a gigabyte, and the two was
+          # headroom rather than arithmetic. MEASURED 2026-11-21: every hosted runner in this group
+          # reports `7932 MiB` total, which is 7 GiB after the integer division, so a two-GiB margin
+          # refused an 8 GiB guest on a machine with 7.7 GiB of RAM - a guest that had 1.7 GiB of real
+          # headroom would have been turned away.
+          #
+          # IT IS STILL A REAL CHECK: the daemon, qemu's device models and the page cache all live in
+          # the same RAM, and an over-committed host does not fail politely - the OOM killer takes the
+          # guest minutes in and leaves an almost empty disk with nothing in any log.
+          if [ "$(( need_gib + 1 ))" -gt "$total_gib" ]; then
             echo "::error::$file asks for ${need_gib} GiB and this runner has ${total_gib} GiB."
             echo "::error::The OOM killer would take the guest a few minutes in, leaving an almost"
             echo "::error::empty disk and no error in any log. Lower memory_mb or use a larger runner."
