@@ -275,6 +275,20 @@ jobs:
           tag="${{ matrix.pull }}"
           [ -n "$tag" ] || { echo "this leg has no pull:"; exit 0; }
           echo "=== pull $tag"
+          # THE SCRIPT COMES FROM THE CALLER'S CHECKOUT, AND THAT IS A DEPENDENCY A CALLER CAN
+          # FORGET. MEASURED on the first split run:
+          #
+          #	sh: 0: cannot open /__w/easyvm-bsd/easyvm-bsd/.github/pull-artifact.sh: No such file
+          #
+          # - the job then reported `iso-freebsd is not in the package`, which names the CATALOGUE and
+          # not the missing file. A reusable workflow cannot read its own repository at runtime, so
+          # the caller must carry it; this guard is what turns the next such mistake into a sentence.
+          [ -f "$GITHUB_WORKSPACE/.github/pull-artifact.sh" ] || {
+            echo "::error::this repository has no .github/pull-artifact.sh, and stage.yml needs it to"
+            echo "::error::read the package. Copy it from easydev-org/easyvm; without it this leg"
+            echo "::error::reports a missing TAG for what is a missing SCRIPT."
+            exit 1
+          }
           sh "$GITHUB_WORKSPACE/.github/pull-artifact.sh" \
              ghcr.io "$(printf '%s' "${{ inputs.disks_repository }}" | tr '[:upper:]' '[:lower:]')" \
              "$tag" "$GITHUB_WORKSPACE/work/disk.qcow2" || {
