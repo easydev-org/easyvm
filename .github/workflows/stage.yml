@@ -468,6 +468,21 @@ jobs:
           # starts, which is the rule this stage is built on. This is the belt for the one step that
           # forgets, and it is the fork's own name rather than a second default.
           export DISKS_REPOSITORY="$(printf '%s' "${{ inputs.publish_repository || github.repository }}" | tr '[:upper:]' '[:lower:]')"
+          # THE DAEMON'S OWN FETCHES NEED THE SAME TOKEN THE STEPS USE, AND THIS IS WHERE THE
+          # `vm-configure` LEG LEARNED IT.
+          #
+          # MEASURED ON RUN 44886759231 (`windows-vm-configure`, step 4/28 "unpack the agent and its
+          # driver from the prepared ISO"):
+          #
+          #	error: the virtio-win ISO is not here and could not be fetched: pulling iso-virtio-win
+          #	from easydev-org/easyvm-windows: ... needs credentials (401); a public artifact needs none
+          #
+          # THAT SENTENCE IS TRUE AND THE FAULT WAS HERE. A `fetch:` step runs INSIDE THE DAEMON, not
+          # in the step that started it, so the token each pull step exports for itself never reaches
+          # this process. In easydev-org/easyvm the package is public and an anonymous pull answers
+          # 200, so the omission was invisible; in a repository whose package is private it fails at
+          # the one step that fetched a driver mid-walk.
+          export GITHUB_TOKEN="${{ github.token }}"
           # THE MACHINES THIS LEG MAY START. A caller that ships its own shapes points at them, and
           # the daemon loads THOSE INSTEAD of the image's six - a name it did not write is a refusal
           # rather than a machine the image happened to carry.
