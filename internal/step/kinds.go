@@ -44,6 +44,11 @@ func checkKind(key Key, value any) error {
 		}
 	case KindPair:
 		return checkNumbers(key, value, 2, "[x, y]")
+	case KindPairOrMapping:
+		if _, ok := value.(map[string]any); ok {
+			return nil
+		}
+		return checkNumbers(key, value, 2, "[x, y] or {button: [x, y]} / {colour: [r, g, b]}")
 	case KindRect:
 		return checkNumbers(key, value, 4, "[x0, y0, x1, y1]")
 	case KindWords:

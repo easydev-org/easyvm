@@ -553,7 +553,34 @@ func (e *Executor) dispatchRest(s walk.Step) error {
 
 // --- the actions ---------------------------------------------------------------------
 
+// doClick presses at a point. THE VALUE SAYS HOW THE POINT IS NAMED.
+//
+// v0.0.1 HAD SIX STEP KEYS FOR ONE VERB - `click`, `double`, `at_button`, `at_color`, `at_bottom`
+// and `at_fallback` - and a reader looking for "how does this file press things" had to know all
+// six. They differ only in the ADDRESS FORM of the point, which is what a mapping value is for.
+//
+//	click: [936, 628]                              a coordinate
+//	click: {button: [703, 336]}                    inside a window, by position
+//	click: {button: [703, 336], fallback: [10,10]} and a second place if the first has no window
+//	click: {colour: [255, 0, 0]}                   the largest blob of one colour
+//	click: [936, 628], double: true                a double-click
+//	click: [936, 628], anchor: bottom              measured from the bottom edge
+//
+// THE OLD SPELLINGS STILL WORK AND STILL MEAN THE SAME THING, because 306 uses of them are in
+// files that are not being rewritten in this release; they are simply no longer the vocabulary a
+// new file should reach for. `click:` with a mapping is the folded form.
 func (e *Executor) doClick(s walk.Step) error {
+	if m, ok := s.Spec["click"].(map[string]any); ok {
+		return e.doClickAddressed(s, m)
+	}
+	if s.Has("double") || s.Get("anchor") == "bottom" {
+		// `click:` BESIDE `double:` / `anchor:` IS THE FOLDED FORM OF TWO OLD KEYS. Dispatched here
+		// so the file writes ONE verb with a modifier rather than a second key name.
+		if s.Has("double") {
+			return e.doDoubleClick(s)
+		}
+		return e.doAtBottom(s)
+	}
 	x, y, err := pair(s, "click")
 	if err != nil {
 		return err
@@ -582,6 +609,58 @@ func (e *Executor) doClick(s walk.Step) error {
 	}
 	e.Driver.Log(fmt.Sprintf("  clicked (%d, %d)", x, y))
 	return e.settle(s)
+}
+
+// translateClick turns the mapping form of `click:` into the step that carries the old key.
+//
+// IT IS A PURE FUNCTION SO A TEST CAN ASSERT THE TRANSLATION without a guest: every path after it is
+// the implementation that was already measured, so the only new code is this mapping.
+func translateClick(spec map[string]any) map[string]any {
+	m, ok := spec["click"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	out := make(map[string]any, len(spec)+2)
+	for k, v := range spec {
+		if k != "click" {
+			out[k] = v
+		}
+	}
+	switch {
+	case m["button"] != nil:
+		out["at_button"] = m["button"]
+		if m["fallback"] != nil {
+			out["at_fallback"] = m["fallback"]
+		}
+	case m["colour"] != nil:
+		out["at_color"] = m["colour"]
+	default:
+		return nil
+	}
+	return out
+}
+
+// doClickAddressed reads the mapping form of `click:`.
+//
+// The mapping is translated into a COPY of the step that carries the old key, so every existing
+// implementation (and every guard in it) is reused rather than duplicated: `{button: [...]}` is
+// `at_button: [...]`, and the resolve-then-click path, its framebuffer check and its logging are
+// the ones already measured.
+func (e *Executor) doClickAddressed(s walk.Step, m map[string]any) error {
+	spec := translateClick(s.Spec)
+	if spec == nil {
+		return fail(s.Name, "`click:` as a mapping needs `button:` or `colour:` - "+
+			"`click: {button: [x, y]}`, `click: {button: [x, y], fallback: [x, y]}`, or "+
+			"`click: {colour: [r, g, b]}`")
+	}
+	sub := walk.Step{Index: s.Index, Name: s.Name, Spec: spec}
+	switch {
+	case spec["at_button"] != nil:
+		return e.doAtButton(sub)
+	case spec["at_color"] != nil:
+		return e.doAtColor(sub)
+	}
+	return fail(s.Name, "`click:` mapping did not translate")
 }
 
 func (e *Executor) doDoubleClick(s walk.Step) error {

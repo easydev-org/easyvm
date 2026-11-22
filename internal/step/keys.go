@@ -43,6 +43,12 @@ const (
 	KindFloat
 	// KindPair is [x, y].
 	KindPair
+	// KindPairOrMapping is [x, y] OR a mapping that says how the point is named.
+	//
+	// IT EXISTS FOR `click:` AND FOR NOTHING ELSE, and it is the fold that removes five step keys:
+	// `{button: [x, y]}`, `{button: [x, y], fallback: [x, y]}` and `{colour: [r, g, b]}` used to be
+	// `at_button:`, `at_fallback:` and `at_color:`. The value form is what makes ONE verb cover them.
+	KindPairOrMapping
 	// KindRect is [x0, y0, x1, y1].
 	KindRect
 	// KindWords is a phrase, or a list of words that must all be present.
@@ -344,9 +350,12 @@ var Keys = map[string]Key{
 	// NO COMPATIBILITY ENTRY FOR `at:`. The rule in this repository is that a name is renamed in the
 	// same commit as its files, and a table of old spellings is a second vocabulary that drifts from
 	// the first - the same argument that deleted the `python:` entries.
-	"click": {Name: "click", Kind: KindPair,
-		Summary: "click this [x, y]. Fixed coordinates, never OCR - a button's position is a " +
-			"measured fact about a screen, and a search for it is a guess that moves"},
+	"click": {Name: "click", Kind: KindPairOrMapping,
+		Summary: "click at a point. `[x, y]` is a coordinate; `{button: [x, y]}` is a point " +
+			"inside a window; `{button: [x, y], fallback: [x, y]}` adds a second place to try; " +
+			"`{colour: [r, g, b]}` is the largest blob of one colour. Fixed positions, never OCR " +
+			"- a button's position is a measured fact about a screen, and a search for it is a " +
+			"guess that moves"},
 	"double": {Name: "double", Kind: KindPair,
 		Summary: "double-click [x, y]; separate from `click` because the gap between the two " +
 			"clicks is what makes it a double-click"},
