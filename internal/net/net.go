@@ -277,7 +277,9 @@ func Up(sshPort int, forwards []int) error {
 	// would answer for traffic the first is also reading.
 	StopUDPRelay()
 	if relay, err := StartUDPRelay(GuestIP); err != nil {
-		fmt.Printf("udp relay: %v (the guest's UDP will not be proxied)\n", err)
+		// THROUGH logf, NOT fmt.Printf: see SetLogf. This is the line that was invisible in a
+		// container's daemon log, where a stage could not see why its guest's UDP was timing out.
+		logf("udp relay: %v (the guest's UDP will not be proxied)", err)
 	} else if relay != nil {
 		udpRelay = relay
 	}

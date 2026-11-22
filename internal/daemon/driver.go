@@ -1086,6 +1086,13 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 	// Preflight REFUSES WITH A SENTENCE when the container lacks /dev/net/tun or NET_ADMIN, and
 	// that sentence is the whole reason it exists - the raw failure is
 	// `RTNETLINK answers: Operation not permitted`, which reads as a broken network.
+	// AND THE NETWORK PACKAGE'S MESSAGES GO INTO THIS RUN'S LOG. Without this the relay's one
+	// explanation - "the udp relay's tun device: ... (the guest's UDP will not be proxied)" - went to
+	// stdout, where a container's daemon log does not read it, and the guest's QUIC timing out twenty
+	// minutes later was the only symptom.
+	easyvmnet.SetLogf(func(format string, args ...any) {
+		d.Log(fmt.Sprintf(format, args...))
+	})
 	if err := easyvmnet.Up(d.port, nil); err != nil {
 		return err
 	}
