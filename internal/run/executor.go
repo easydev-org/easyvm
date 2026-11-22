@@ -1037,6 +1037,23 @@ func stepNeedsAGuest(s walk.Step) bool {
 	// just been shut down, which is the point - qemu holds the write lock while it runs.
 	case s.Has("esp_fallback"):
 		return false
+	// AND `save:` IS THE SAME KIND OF THING - IT COPIES THE DISK FILE. `save:` is what `stop`'s
+	// publishing half compiles to, and the ordinary ending of a walk is:
+	//
+	//	step "stop the installer"          stop kill
+	//	step "copy the loader to ..."      esp_fallback
+	//	step "publish the disk"            save "{{ out }}"
+	//
+	// The first stops the machine, the second rewrites the qcow2, and the third copies it. NONE of
+	// them asks the guest anything, and all three must run with qemu gone - qemu holds the disk's
+	// write lock while it runs.
+	//
+	// MEASURED on android blissos16 install, run 45065093494: steps 1 to 31 passed, and the 32nd -
+	// `save` - was refused with "the guest is no longer running, so this step cannot be done. The
+	// machine exited during the step before it", which is a true sentence about a step whose whole
+	// job is to copy the file that machine left behind.
+	case s.Has("save"):
+		return false
 	case hasKey(s, "record"):
 		// `record: false` stops the sampler; the string form starts one and needs a screen.
 		//
