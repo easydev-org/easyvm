@@ -284,6 +284,20 @@ func Load(path string, overrides map[string]string) (*File, error) {
 				"one thing, and the check would never run - the dispatcher takes the reading and "+
 				"returns. Split it into two steps", path, name)
 		}
+		// A `settle:` THAT IS FOLLOWED BY A `check:` OF THE SAME REGION IS A GUESS WHERE A FACT
+		// EXISTS. MEASURED when this repository was audited: 28 of the 818 timed pauses in these
+		// files were immediately followed by a real measurement of the same screen, and two of them
+		// failed on CI - cachyos and endeavouros - because the number was right on the measuring
+		// machine and wrong on the runner.
+		//
+		// THE CHECK MAY BE IN A LATER STEP, so this looks at the whole file once the steps are
+		// loaded; the pair is reported here, at the pause that should have been the wait.
+		if has(mapping, "settle") && has(mapping, "check") {
+			return nil, fmt.Errorf("%s: step %q waits `settle:` AND asks a `check:` - "+
+				"the answer is a fact, so wait for it with `loop: {check: ..., until: ...}` and keep "+
+				"a short `settle:` inside the loop's `do:` between attempts. A `settle:` is for a "+
+				"pause with NO fact to wait on", path, name)
+		}
 		substituted, err := substitute(mapping, f.Vars)
 		if err != nil {
 			return nil, fmt.Errorf("%s: step %q: %w", path, name, err)
