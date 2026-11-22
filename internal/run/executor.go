@@ -441,6 +441,20 @@ func (e *Executor) runOne(s walk.Step) error {
 	// stop - qemu holds the qcow2's write lock while it runs - so the two facts are one step.
 	case s.Has("stop"):
 		return e.doStop(s)
+	// `save:` IS `stop`'s SECOND HALF AS A STEP OF ITS OWN, and it had no branch here at all.
+	//
+	// THE VOCABULARY DECLARED IT - `Actions["save"]` says "publish the disk to this path: the
+	// second half of `stop:`" - so `easyvm check` accepted a file that wrote it and said nothing was
+	// wrong. At run time `runOne` fell through every case and the step did NOTHING, silently:
+	//
+	//	=== publish the disk
+	//	(no output, no error, no file)
+	//
+	// MEASURED on android blissos16 install, run 45068115059: the installer finished, the ESP was
+	// rewritten, and the last step printed its name and returned. Every walk in every repository
+	// ends this way, so it was the one step that could never have worked.
+	case s.Has("save"):
+		return e.doStop(s)
 
 	// ---- the statement -----------------------------------------------------------------
 	case s.Has("repeat"):

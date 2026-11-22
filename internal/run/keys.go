@@ -19,6 +19,9 @@ func ExecutableKeys() []string {
 		// THE MACHINE.
 		"disk", "disk_settle",
 		"acpi", "qga", "wait_until", "esp_fallback",
+		// THE ENDING: `save` is `stop`'s publishing half as a step of its own, which every walk in
+		// every repository uses as its last step.
+		"save",
 		// THE SCREEN SHAPES.
 		"read", "screenshot", "desktop", "at_color", "at_bottom", "at_button",
 		// THE GATES AND THE PAUSES.
