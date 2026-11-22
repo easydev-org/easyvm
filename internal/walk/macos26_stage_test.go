@@ -20,32 +20,32 @@ import (
 // half-installed disk behind the tag. `until:` reads the screen once and fails the walk when the
 // words are absent, which is the assertion this stage needs.
 func TestMacos26FailsWhenTheSetupAssistantIsAbsent(t *testing.T) {
-	raw, err := os.ReadFile("../../macos/26/steps/setup.yaml")
+	raw, err := os.ReadFile("../../macos/26/steps/setup.walk")
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
 	src := string(raw)
 
 	// the final gate is the step whose name says so
-	re := regexp.MustCompile(`(?s)- name: the Setup Assistant is up, OR THIS STAGE FAILS\n(.*?)\n- name: `)
+	re := regexp.MustCompile(`(?s)step "the Setup Assistant is up, OR THIS STAGE FAILS"\n(.*?)\n  step "`)
 	m := re.FindStringSubmatch(src)
 	if m == nil {
 		t.Fatal("the final gate step is gone; a stage that cannot fail on a missing Setup " +
 			"Assistant is a stage that publishes whatever it has")
 	}
 	step := m[1]
-	if !strings.Contains(step, "until_any:") {
+	if !strings.Contains(step, "until_any ==") {
 		t.Error("the final gate is not `until_any:`; a `check:` only binds a boolean and lets the " +
 			"walk succeed on a black frame (measured: run 44248083728, assistant = false, published)")
 	}
-	// a REAL `check:` key, not the word inside the comment that explains why it was removed
+	// a REAL `check:` line, not the word inside the comment that explains why it was removed
 	for _, line := range strings.Split(step, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "#") {
 			continue
 		}
-		if strings.HasPrefix(trimmed, "check:") {
-			t.Errorf("the final gate still carries a `check:` key (%q); it must be an assertion",
+		if strings.HasPrefix(trimmed, "check ==") {
+			t.Errorf("the final gate still carries a `check:` line (%q); it must be an assertion",
 				trimmed)
 		}
 	}
@@ -61,7 +61,7 @@ func TestMacos26FailsWhenTheSetupAssistantIsAbsent(t *testing.T) {
 // installer blanks its own screen at "About 21 minutes remaining" and keeps writing for another
 // twenty minutes, so a pattern that accepts a black frame ends the look mid-install.
 func TestMacos26LooksDoNotEndOnABlackFrame(t *testing.T) {
-	raw, err := os.ReadFile("../../macos/26/steps/setup.yaml")
+	raw, err := os.ReadFile("../../macos/26/steps/setup.walk")
 	if err != nil {
 		t.Fatalf("%v", err)
 	}

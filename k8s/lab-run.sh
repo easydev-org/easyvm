@@ -15,8 +15,8 @@
 # thrown away unless this leg publishes to its own name. That is the same mechanism CI uses across
 # `oras` - only the transport is absent, so a failure here cannot be a registry failure.
 #
-# THE YAML IS THE REPOSITORY'S, UNCHANGED. Nothing in /walks is edited for this: the file still says
-# `fetch: linux_iso` and `compress: {{ out }}`, and what changes is where the files are.
+# THE WALKTHROUGH IS THE REPOSITORY'S, UNCHANGED. Nothing in /walks is edited for this: the file still
+# says `fetch: linux_iso` and `compress == {{ out }}`, and what changes is where the files are.
 set -eu
 
 os=${1:?os}
@@ -40,16 +40,16 @@ esac
 # listed falls back to its own name, which is right for ubuntu, windows, freebsd and the rest.
 case "$leg" in
     install) case "$os" in
-                 macos)    walk=/walks/macos-setup.yaml ;;
-                 *)        walk="/walks/$os-install.yaml" ;;
+                 macos)    walk=/walks/macos-setup.walk ;;
+                 *)        walk="/walks/$os-install.walk" ;;
              esac ;;
-    # freebsd falls through to the generic `$os-install.yaml`, `$os-ssh.yaml` and
-    # `$os-vm-configure.yaml` below - which is why those files are named exactly that way.
-    setup)   walk=/walks/macos-setup.yaml ;;
-    ssh)     walk="/walks/$os-ssh.yaml" ;;
-    vm*)     walk="/walks/$os-vm-configure.yaml" ;;
-    dev)     walk="/walks/$os-dev.yaml" ;;
-    *)       walk="/walks/$os-$leg.yaml" ;;
+    # freebsd falls through to the generic `$os-install.walk`, `$os-ssh.walk` and
+    # `$os-vm-configure.walk` below - which is why those files are named exactly that way.
+    setup)   walk=/walks/macos-setup.walk ;;
+    ssh)     walk="/walks/$os-ssh.walk" ;;
+    vm*)     walk="/walks/$os-vm-configure.walk" ;;
+    dev)     walk="/walks/$os-dev.walk" ;;
+    *)       walk="/walks/$os-$leg.walk" ;;
 esac
 
 [ -n "$walk" ] || { echo "no walkthrough for $os/$leg; /walks holds:" >&2; ls /walks >&2; exit 2; }

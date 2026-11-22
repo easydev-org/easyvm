@@ -229,26 +229,18 @@ func countKeyUse(t *testing.T) map[string]int {
 		if !strings.Contains(path, string(filepath.Separator)+"steps"+string(filepath.Separator)) {
 			return nil
 		}
-		// A `.walk` WINS OVER THE `.yaml` IT REPLACED. The merge brought the upstream `.yaml` files
-		// back, and counting them would report keys as still in use by a file that is on its way out -
-		// the number this test exists to keep honest would be measured against the OLD files.
-		//
-		// A `.walk` IS COUNTED BY ITS CONVERTED DOCUMENT rather than by text: its syntax is sentences,
-		// so the regex below would find nothing at all.
-		if strings.HasSuffix(path, ".yaml") {
-			walk := strings.TrimSuffix(path, ".yaml") + ".walk"
-			if _, err := os.Stat(walk); err == nil {
-				return nil
-			}
-		}
+		// `.walk` IS THE ONLY FORMAT NOW, so this counts the format that exists. Reading it as YAML
+		// would find nothing - it is a sentence language - so a `.walk` is counted by its OWN line
+		// shape, `key == value`, which is the same question asked of the same file.
 		raw, err := os.ReadFile(path)
 		if err != nil {
 			return nil
 		}
-		// ONLY `.yaml` IS COUNTED, AND THAT IS THE HONEST NUMBER FOR THIS TEST: a key marked MIGRATED
-		// must be used ZERO times, and a `.walk` file cannot write those keys at all - its verbs are
-		// phrases, so a retired key is unreachable from one by construction.
-		countYAMLKeys(raw, use)
+		if strings.HasSuffix(path, ".walk") {
+			countWalkKeys(raw, use)
+		} else if strings.HasSuffix(path, ".yaml") {
+			countYAMLKeys(raw, use)
+		}
 		return nil
 	})
 	if err != nil {
@@ -265,6 +257,23 @@ func countYAMLKeys(raw []byte, use map[string]int) {
 	// `wait:`, and that is exactly the mistake this counter made - 67 phantom uses of a key that no
 	// file writes any more.
 	line := regexp.MustCompile(`^\s*-?\s*([a-z][a-z0-9_]*):`)
+	for _, l := range strings.Split(string(raw), "\n") {
+		trimmed := strings.TrimSpace(l)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if m := line.FindStringSubmatch(l); m != nil {
+			use[m[1]]++
+		}
+	}
+}
+
+// countWalkKeys counts `key == value` lines in a `.walk`, which is how that format writes a step key.
+//
+// IT IS THE `.walk` HALF OF `countYAMLKeys`: a key marked MIGRATED must be used zero times in the
+// files that exist, and the files that exist are `.walk`.
+func countWalkKeys(raw []byte, use map[string]int) {
+	line := regexp.MustCompile(`^\s*-?\s*([a-z][a-z0-9_]*)\s*==`)
 	for _, l := range strings.Split(string(raw), "\n") {
 		trimmed := strings.TrimSpace(l)
 		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
@@ -315,15 +324,14 @@ func TestADirectoryMarkedDoneHasNoOldKey(t *testing.T) {
 func countKeyInDir(t *testing.T, dir, key string) int {
 	t.Helper()
 	root := filepath.Join("..", "..", dir)
-	pattern := regexp.MustCompile(`^\s+` + regexp.QuoteMeta(key) + `:`)
+	// BOTH SPELLINGS: a `.walk` writes a step key as `key == value`, a `.yaml` as `key: value`.
+	pattern := regexp.MustCompile(`^\s+(` + regexp.QuoteMeta(key) + `)\s*(==|:)`)
 	n := 0
 	_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".yaml") {
+		if err != nil || info.IsDir() {
 			return nil
 		}
-		// A `.yaml` WITH A `.walk` BESIDE IT IS THE MIGRATED ONE, and the `.yaml` the merge brought
-		// back is the file being replaced. Counting both would measure the old copy.
-		if _, err := os.Stat(strings.TrimSuffix(path, ".yaml") + ".walk"); err == nil {
+		if !strings.HasSuffix(path, ".yaml") && !strings.HasSuffix(path, ".walk") {
 			return nil
 		}
 		raw, err := os.ReadFile(path)

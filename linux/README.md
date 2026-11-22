@@ -185,8 +185,8 @@ selector.
 machine. A local check of a file needs no machine at all:
 
 ```
-easyvm check linux/cachyos/steps/install.yaml
-easyvm list  linux/cachyos/steps/install.yaml
+easyvm check linux/cachyos/steps/install.walk
+easyvm list  linux/cachyos/steps/install.walk
 ```
 
 The CI legs are `linux/<name>-install` in each `.github/workflows/<name>.yml`, and each one publishes
@@ -244,7 +244,7 @@ GPT: yes
   part2: 131069 MiB  name='EFI System Partition'
 ```
 
-So `fedora-workstation/steps/install.yaml` walks the storage editor: create a GPT table, create the
+So `fedora-workstation/steps/install.walk` walks the storage editor: create a GPT table, create the
 root partition (taking the dialog's own ext4 default rather than opening the list), shrink it to
 136 GB, and create the ESP from the space that frees. The ESP is the one place the Type list IS
 opened, because there the dialog's default is not what that partition needs.

@@ -164,8 +164,8 @@ A `read` with no block is a TEXT reading; a `read` with a `measuring` block asks
 ## The rules that make it exact
 
 1. **Every line becomes exactly one key.** There is no line that becomes two, and no
-   key that has no line. `easyvm walk --to-yaml` prints the YAML a `.walk` produces,
-   and `easyvm walk --diff` proves it is byte-identical to a hand-written file.
+   key that has no line. The step's `key == value` form is the exact one, so any key
+   in the vocabulary can be written even when no sentence exists for it.
 2. **A sentence is a name.** The step name is the line itself, so a log line and a
    source line are the same words. `named "..."` overrides it.
 3. **Quoted strings are values; bare words are enum values.** `click "next"` names a
@@ -179,13 +179,12 @@ A `read` with no block is a TEXT reading; a `read` with a `measuring` block asks
 
 ## Why this is not a second engine
 
-The conversion is a single pass over lines into the same `map[string]any` the YAML
-decoder produces. Everything after that — validation, `see:` measurement, the
-dispatcher, the recordings — is untouched, so:
+The parse is a single pass over lines into the same `map[string]any` a YAML document
+would produce. Everything after that — validation, `see:` measurement, the dispatcher,
+the recordings — is untouched, and `.walk` is now the only format a walkthrough is
+written in. Two properties keep it exact, and both are tested:
 
-* a `.walk` and its `.yaml` behave identically, and a test asserts it by converting
-  every real YAML file to `.walk` and back;
-* a key added to the vocabulary works in both formats with no change to the
-  converter, because the converter copies the verb through;
-* a `.walk` file cannot express something the YAML cannot, which is the property that
-  stops the two drifting.
+* every real `.walk` is read, re-emitted and read again to the same document
+  (`TestEveryRealWalkthroughRoundTripsThroughWalk`);
+* a step's `key == value` form expresses any key in the vocabulary, so a new key can
+  be written before a sentence exists for it.

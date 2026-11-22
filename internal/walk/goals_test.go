@@ -878,7 +878,7 @@ func TestAnInstallerIsWaitedForTheWayItAppears(t *testing.T) {
 // the base system.
 func TestTheNixOSConfigurationEditDoesNotAssumeItsShape(t *testing.T) {
 	root := filepath.Join("..", "..")
-	path := filepath.Join(root, "linux", "nixos", "steps", "vm-configure.yaml")
+	path := filepath.Join(root, "linux", "nixos", "steps", "vm-configure.walk")
 	doc, err := Load(path, nil)
 	if err != nil {
 		t.Skipf("no nixos vm-configure here (%v)", err)
@@ -1207,8 +1207,8 @@ func TestAnInstallLegPublishesItsDisk(t *testing.T) {
 	root := filepath.Join("..", "..")
 	var files []string
 	for _, pat := range []string{
-		filepath.Join(root, "linux", "*", "steps", "install.yaml"),
-		filepath.Join(root, "bsd", "*", "steps", "install.yaml"),
+		filepath.Join(root, "linux", "*", "steps", "install.walk"),
+		filepath.Join(root, "bsd", "*", "steps", "install.walk"),
 	} {
 		got, err := filepath.Glob(pat)
 		if err != nil {
@@ -1268,8 +1268,8 @@ func TestAnInstallStopsTheMachineBeforePublishingTheDisk(t *testing.T) {
 	root := filepath.Join("..", "..")
 	var files []string
 	for _, pat := range []string{
-		filepath.Join(root, "linux", "*", "steps", "install.yaml"),
-		filepath.Join(root, "bsd", "*", "steps", "install.yaml"),
+		filepath.Join(root, "linux", "*", "steps", "install.walk"),
+		filepath.Join(root, "bsd", "*", "steps", "install.walk"),
 	} {
 		got, err := filepath.Glob(pat)
 		if err != nil {
@@ -2128,19 +2128,20 @@ func TestEveryAssetNameIsAKind(t *testing.T) {
 		t.Fatal("no asset kinds were found in internal/asset/asset.go, so this checks nothing")
 	}
 
-	files, err := filepath.Glob(filepath.Join("..", "..", "**", "steps", "*.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	// `**` is not expanded by filepath.Glob; walk the tree instead.
-	files = nil
+	// `**` is not expanded by filepath.Glob; walk the tree instead. BOTH FORMATS ARE READ: `.walk` is
+	// the format on disk now, and the lines inside it write `fetch == opencore`.
+	var files []string
 	err = filepath.Walk(filepath.Join("..", ".."), func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-		if !info.IsDir() && strings.HasSuffix(path, ".yaml") && strings.Contains(path, "/steps/") {
-			files = append(files, path)
+		if info.IsDir() || !strings.Contains(path, "/steps/") {
+			return nil
 		}
+		if !strings.HasSuffix(path, ".yaml") && !strings.HasSuffix(path, ".walk") {
+			return nil
+		}
+		files = append(files, path)
 		return nil
 	})
 	if err != nil {
@@ -2155,14 +2156,21 @@ func TestEveryAssetNameIsAKind(t *testing.T) {
 		}
 		for i, line := range strings.Split(string(body), "\n") {
 			trimmed := strings.TrimSpace(line)
-			// `fetch:` IS THE NAME NOW; `asset:` IS READ TOO so an unmigrated file is still
-			// checked rather than silently skipped by this guardian.
-			if strings.HasPrefix(trimmed, "#") ||
-				(!strings.HasPrefix(trimmed, "fetch:") && !strings.HasPrefix(trimmed, "asset:")) {
+			// `fetch:` IS THE OLD YAML SPELLING AND `fetch ==` THE `.walk` ONE; both are read so this
+			// guardian sees whichever format a file is in.
+			if strings.HasPrefix(trimmed, "#") {
 				continue
 			}
-			name := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(trimmed, "fetch:"), "asset:"))
-			name = strings.Trim(name, `"'`)
+			var value string
+			switch {
+			case strings.HasPrefix(trimmed, "fetch:"), strings.HasPrefix(trimmed, "asset:"):
+				value = strings.TrimSpace(strings.SplitN(trimmed, ":", 2)[1])
+			case strings.HasPrefix(trimmed, "fetch =="), strings.HasPrefix(trimmed, "asset =="):
+				value = strings.TrimSpace(strings.SplitN(trimmed, "==", 2)[1])
+			default:
+				continue
+			}
+			name := strings.Trim(strings.TrimSpace(value), `"'`)
 			checked++
 			// `guest_agent` IS A NAME THE ASSET LAYER RESOLVES, NOT A KIND IT STORES, and the
 			// distinction is the whole reason this list has an exception.

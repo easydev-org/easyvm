@@ -480,7 +480,8 @@ func TestEveryDesktopEnvironmentKeyIsDispatched(t *testing.T) {
 // no branch for is a wait that can never be satisfied, and the failure reads as a guest that never
 // booted.
 func TestEveryWalkthroughNamesADispatchedDesktop(t *testing.T) {
-	files, err := filepath.Glob(filepath.Join("..", "..", "linux", "*", "steps", "install.yaml"))
+	// `.walk` IS THE ONLY FORMAT, and a `desktop` line in it reads `desktop == linux/gnome`.
+	files, err := filepath.Glob(filepath.Join("..", "..", "linux", "*", "steps", "install.walk"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -498,13 +499,20 @@ func TestEveryWalkthroughNamesADispatchedDesktop(t *testing.T) {
 		}
 		for _, line := range strings.Split(string(body), "\n") {
 			trimmed := strings.TrimSpace(line)
-			if !strings.HasPrefix(trimmed, "desktop:") {
+			var value string
+			switch {
+			case strings.HasPrefix(trimmed, "desktop:"):
+				value = strings.TrimSpace(strings.TrimPrefix(trimmed, "desktop:"))
+			case strings.HasPrefix(trimmed, "desktop =="):
+				value = strings.TrimSpace(strings.TrimPrefix(trimmed, "desktop =="))
+			default:
 				continue
 			}
-			value := strings.TrimSpace(strings.TrimPrefix(trimmed, "desktop:"))
 			if value == "" || strings.HasPrefix(value, "-") {
 				continue
 			}
+			// A `desktop:` ASKED BY SIMILARITY CARRIES ITS OWN `reference:`, and the family is then
+			// only a label - so the dispatch question is asked of the plain form.
 			if !known[value] {
 				t.Errorf("%s: `desktop: %s` has no branch in the dispatch table", filepath.Base(filepath.Dir(filepath.Dir(f))), value)
 			}

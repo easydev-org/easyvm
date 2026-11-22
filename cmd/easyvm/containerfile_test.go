@@ -318,12 +318,15 @@ func TestMacOSSetupHasTimeForTheInstallItWaitsFor(t *testing.T) {
 
 	// THE WORK, FROM THE WALKTHROUGH ITSELF. Every limit of ten minutes or more is a wait for something
 	// real - the install, and the boot and recovery-menu gates - and they are what the job must fit.
-	wf, err := os.ReadFile("../../macos/15/steps/setup.yaml")
+	wf, err := os.ReadFile("../../macos/15/steps/setup.walk")
 	if err != nil {
-		t.Skipf("no setup.yaml here (%v)", err)
+		t.Skipf("no setup.walk here (%v)", err)
 	}
 	var work int
-	for _, m := range regexp.MustCompile(`(?m)^\s+timeout:\s*(\d+)\s*$`).FindAllStringSubmatch(string(wf), -1) {
+	// A `.walk` WRITES IT `timeout == 7200`, so both spellings are read - the file that is there now
+	// and any that still says `timeout:`.
+	limits := regexp.MustCompile(`(?m)^\s+(?:timeout\s*==|timeout:)\s*(\d+)\s*$`)
+	for _, m := range limits.FindAllStringSubmatch(string(wf), -1) {
 		n, err := strconv.Atoi(m[1])
 		if err != nil {
 			continue

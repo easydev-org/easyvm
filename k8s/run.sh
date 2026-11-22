@@ -11,15 +11,15 @@
 # its own last disk, overlay, frames or stale network device. "From the beginning, keeping nothing" is
 # a property of THIS script, not something the caller has to remember.
 #
-# THE YAML COMES FROM THE CONFIGMAP. /walks/<os>/<leg>.yaml is the file the repository holds; nothing
-# is rewritten for the local case, so a step that fails here fails in CI for the same reason.
+# THE WALKTHROUGH COMES FROM THE CONFIGMAP. /walks/<os>/<leg>.walk is the file the repository holds;
+# nothing is rewritten for the local case, so a step that fails here fails in CI for the same reason.
 set -eu
 
 os=${1:-}
 leg=${2:-install}
 [ -n "$os" ] || { echo "usage: run.sh <os> [leg]" >&2; exit 2; }
 
-walk="/walks/$os/$leg.yaml"
+walk="/walks/$os/$leg.walk"
 [ -f "$walk" ] || { echo "no walkthrough at $walk" >&2; ls -R /walks | head -20 >&2; exit 2; }
 
 run="/disks/run-$os-$leg"

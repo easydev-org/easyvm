@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
-	"strings"
 	"testing"
 
 	"github.com/easydev-org/easyvm/internal/step"
@@ -127,48 +126,12 @@ func TestAWalkFileAndItsYAMLAreTheSameWalk(t *testing.T) {
 	}
 }
 
-// EVERY REAL YAML WALKTHROUGH CONVERTS, which is the claim that the format covers the vocabulary.
+// THE CONVERTER COVERS THE VOCABULARY, and the round-trip test below is the proof.
 //
-// IT CONVERTS RATHER THAN ROUND-TRIPS, because writing a YAML emitter would be a second thing to keep
-// in step and the property worth testing is that the CONVERTER understands every verb the real files
-// use. A verb it cannot read is a verb the format does not cover, and that is the finding.
-func TestEveryRealWalkthroughUsesVerbsTheFormatCovers(t *testing.T) {
-	root := filepath.Join("..", "..")
-	files, err := filepath.Glob(filepath.Join(root, "*", "*", "steps", "*.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(files) < 20 {
-		t.Fatalf("found only %d walkthroughs; the glob must be wrong", len(files))
-	}
-	var unconvertible []string
-	for _, path := range files {
-		doc, err := Load(path, nil)
-		if err != nil {
-			continue // a file that does not load is another test's subject
-		}
-		// THE CONVERSION IS TESTED ON THE VERBS, so a walkthrough with any step whose verb this file
-		// does not know is named rather than silently skipped.
-		for _, s := range doc.Steps {
-			for key := range s.Spec {
-				if key == "name" {
-					continue
-				}
-				if _, ok := walkVerbFor(key); !ok {
-					unconvertible = append(unconvertible, filepath.Base(path)+": "+key)
-				}
-			}
-		}
-	}
-	sort.Strings(unconvertible)
-	if len(unconvertible) > 0 {
-		t.Errorf("these keys are used by real walkthroughs and the .walk format has no verb for them, "+
-			"so the format does not cover the vocabulary yet:\n\t%s",
-			strings.Join(uniqueStrings(unconvertible), "\n\t"))
-	}
-	t.Logf("checked %d walkthroughs", len(files))
-}
-
+// THE OLD VERSION OF THIS TEST ASKED `walkVerbFor` WHETHER EVERY KEY HAD A PHRASE, which could never
+// fail: the exact form - `step "name"` with `key == value` lines - expresses any key at all, so "the
+// format cannot say this" was unreachable. The honest property is the round trip: the emitter writes
+// every real file back out, and the parser reads what it wrote to the same document.
 // stepValidateForTest asks the vocabulary whether a step is legal, without importing step into a
 // test that already has enough to read.
 func stepValidateForTest(name string, spec map[string]any) error {
@@ -277,12 +240,17 @@ func TestTheTwoConversionsThatWereWrong(t *testing.T) {
 
 // THE MIGRATION IS PROVED BY ROUND-TRIPPING, not by reading the result.
 //
-// EVERY REAL WALKTHROUGH IS CONVERTED TO `.walk` AND BACK, AND THE TWO DOCUMENTS MUST BE EQUAL. That is
-// the property the whole migration rests on: a hand transcription of 6675 lines gets one coordinate
-// wrong and the failure arrives forty minutes into a CI run, while this test compares the data.
+// EVERY REAL WALKTHROUGH IS READ, RE-EMITTED, AND READ AGAIN, AND THE TWO DOCUMENTS MUST BE EQUAL.
+// That is the property the whole format rests on: a hand transcription of 6675 lines gets one
+// coordinate wrong and the failure arrives forty minutes into a CI run, while this test compares the
+// data.
+//
+// THE DIRECTION IS `.walk` -> DOCUMENT -> `.walk` -> DOCUMENT, because `.walk` is now the only format
+// on disk. The first pass proves the emitter can write what the reader reads; the second proves the
+// emitter's own output parses back to the same document, which is the round trip.
 func TestEveryRealWalkthroughRoundTripsThroughWalk(t *testing.T) {
 	root := filepath.Join("..", "..")
-	files, err := filepath.Glob(filepath.Join(root, "*", "*", "steps", "*.yaml"))
+	files, err := filepath.Glob(filepath.Join(root, "*", "*", "steps", "*.walk"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -297,7 +265,13 @@ func TestEveryRealWalkthroughRoundTripsThroughWalk(t *testing.T) {
 		}
 		var want map[string]any
 		if err := yaml.Unmarshal(original, &want); err != nil {
-			continue // a file that does not decode is another test's subject
+			// A `.walk` IS NOT YAML; its document is what the reader produces from it.
+			want, err = WalkToYAML(string(original))
+			if err != nil {
+				t.Errorf("%s: cannot read as .walk: %v", filepath.Base(path), err)
+				bad++
+				continue
+			}
 		}
 		walkSrc, err := YAMLToWalk(want)
 		if err != nil {

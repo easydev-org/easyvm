@@ -3,7 +3,7 @@
 #
 #   k8s/lab-test.sh fedora-workstation ssh /tmp/w/linux/fedora-workstation/steps/ssh.walk
 #
-# WHY THIS EXISTS SEPARATELY FROM lab-run.sh: that script resolves `/walks/<os>-<leg>.yaml` by a
+# WHY THIS EXISTS SEPARATELY FROM lab-run.sh: that script resolves `/walks/<os>-<leg>.walk` by a
 # naming convention the repository no longer uses - the files are `.walk` now, and a leg under test
 # is usually a WORKING COPY at /tmp/w, not the mounted /walks. This takes the walkthrough path as an
 # argument, so a file can be tested before it is committed.

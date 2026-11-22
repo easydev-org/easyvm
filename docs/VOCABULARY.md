@@ -363,7 +363,7 @@ The sentence "a verdict is data" has to be enforced or it decays:
 
 1. `see:` with the five measurements and `text:`, plus `want:` with `all/any/not`
    and the `rect` forms. Accept them beside the old keys; the loader translates.
-2. Rewrite `linux/mint/steps/install.yaml`'s desktop wait in the new shape and
+2. Rewrite `linux/mint/steps/install.walk`'s desktop wait in the new shape and
    DELETE `IsCinnamonDesktop`. If the numbers do not reproduce the verdict, the
    design is wrong and it stops there - one file, one night, no image.
 3. Delete `region_at` once every `ocr:` uses the header's `resolution:`.

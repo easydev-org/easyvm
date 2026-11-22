@@ -34,7 +34,10 @@ func YAMLToWalk(doc map[string]any) (string, error) {
 	if name == "" {
 		return "", fmt.Errorf("a walkthrough needs a `name:`")
 	}
-	fmt.Fprintf(&b, "walkthrough %s\n", quote(name))
+	// THE TITLE IS ALWAYS QUOTED: `parseTitle` requires quotes even for a one-word name, because a
+	// value the log echoes is quoted. `quote()` quotes conditionally and would emit
+	// `walkthrough labels`, which the reader refuses.
+	fmt.Fprintf(&b, "walkthrough %s\n", alwaysQuote(name))
 
 	// ---- the header, in the order a person reads it ------------------------------------
 	if r, ok := doc["resolution"].([]any); ok && len(r) == 2 {
@@ -184,6 +187,15 @@ func shortcut(s map[string]any, name string) (string, bool) {
 			if hasOnly(append(base, extra...)...) {
 				x, y, ok := pairOfAny(pt)
 				if !ok {
+					return "", false
+				}
+				// THE LABEL MUST NOT CONTAIN " at ", because the parser splits the coordinates at the
+				// FIRST " at " in the line. MEASURED: the fedora ssh stage has a step named "point the
+				// map at Los Angeles, ..." whose label holds that word, so the phrase emitted
+				// `click "point the map at Los Angeles ..." at 640 690` and the reader took "Los" for
+				// the x coordinate. Such a step falls through to the exact form, which cannot be
+				// misread.
+				if strings.Contains(labelOf(name), " at ") {
 					return "", false
 				}
 				line := fmt.Sprintf("click %s at %d %d", quote(labelOf(name)), x, y)
@@ -359,6 +371,11 @@ func quote(s string) string {
 }
 
 func bareOrQuote(s string) string { return quote(s) }
+
+// alwaysQuote writes a value in quotes whatever it contains, for the places the reader requires them.
+func alwaysQuote(s string) string {
+	return `"` + strings.ReplaceAll(s, `"`, `\"`) + `"`
+}
 
 func pairOfAny(v any) (int, int, bool) {
 	list, ok := v.([]any)

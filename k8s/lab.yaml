@@ -2,14 +2,14 @@
 #
 # THREE THINGS THIS BUYS, ALL OF THEM ABOUT USING THE SAME CODE AS CI WITHOUT USING THE SAME STORAGE:
 #
-#  1. THE YAML IS A CONFIGMAP. Every walkthrough, the answer file, and the answer template live in
-#     `easyvm-walks`, mounted read-only at /walks. Halting and re-creating the pod IS the reset, and
+#  1. THE WALKTHROUGHS ARE A CONFIGMAP. Every `.walk` file, the answer file, and the answer template
+#     live in `easyvm-walks`, mounted read-only at /walks. Halting and re-creating the pod IS the reset, and
 #     `kubectl create configmap --from-file ... --dry-run=client -o yaml | kubectl apply -f -`
 #     replaces it without touching the pod spec - so a change to a step is one command and a rerun.
 #
 #  2. THE DISKS AND ISOs ARE ON A PVC. `fetch: linux_iso` and `easyvm pull` both look in the work
 #     directory FIRST and only reach ghcr when the file is absent, so a pre-seeded PVC means the
-#     local loop never touches the network. THE YAML IS BYTE-IDENTICAL TO CI'S: no tag is edited, no
+#     local loop never touches the network. THE FILE IS BYTE-IDENTICAL TO CI'S: no tag is edited, no
 #     registry is overridden, and `--repository` is not passed. What changes is only whether the file
 #     is already there.
 #
