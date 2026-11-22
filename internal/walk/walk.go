@@ -37,6 +37,12 @@ type File struct {
 	// because a port conflict is a fact about the runner while the file describes the guest.
 	SSHPort int
 	SSHUser string
+	// SSHKeyPath is a PRIVATE KEY FILE the ssh client offers before the password.
+	//
+	// `header ssh_key == /path/to/id_ed25519` - the same top-level form `ssh_user` uses. It exists for
+	// an image whose sshd cannot complete a password in this client: MEASURED on openSUSE Leap 16.1,
+	// whose openssh-server is built without PAM (see Target.Key).
+	SSHKeyPath string
 	// BootDiskFromCaller says this file's disk arrives as --boot-disk.
 	//
 	// IT EXISTS SO A FILE CAN SAY WHERE ITS DISK COMES FROM. A stage that continues from another
@@ -181,6 +187,7 @@ func Load(path string, overrides map[string]string) (*File, error) {
 		f.BootDiskFromCaller = true
 	}
 	f.SSHUser, _ = doc["ssh_user"].(string)
+	f.SSHKeyPath, _ = doc["ssh_key"].(string)
 	if f.SSHUser == "" {
 		f.SSHUser = "vmuser"
 	}

@@ -878,6 +878,7 @@ func (e *Executor) target() guest.Target {
 		Port:     e.SSHPort,
 		User:     e.File.SSHUser,
 		Password: e.Password,
+		Key:      mustKey(e),
 	}
 }
 
@@ -1100,4 +1101,22 @@ func stepNeedsAGuest(s walk.Step) bool {
 // the zero value has to work. `Put` returns the content address the picture is known by.
 type ArtifactLibrary interface {
 	Put(path string) (string, error)
+}
+
+// mustKey loads the walk's `ssh_key:` file, logging rather than failing when it cannot be read.
+//
+// A KEY THAT WAS NAMED AND CANNOT BE READ IS REPORTED ON THE LINE THAT NAMED IT, and the walk then
+// proceeds with the password path - which is what a stage without the key would have done anyway. The
+// alternative (failing the whole run at target() time) would turn a missing optional input into a
+// stage that cannot do anything at all.
+func mustKey(e *Executor) []byte {
+	if e.File == nil || e.File.SSHKeyPath == "" {
+		return nil
+	}
+	key, err := guest.LoadKey(e.File.SSHKeyPath)
+	if err != nil {
+		e.Driver.Log(fmt.Sprintf("  %v (the password path is still offered)", err))
+		return nil
+	}
+	return key
 }

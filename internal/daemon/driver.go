@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"log"
 	"net"
 	"os"
 	"os/exec"
@@ -212,6 +213,7 @@ func NewDriver(owner *Daemon, f *walk.File, work, bootDisk string, port int,
 		Port:     port,
 		User:     f.SSHUser,
 		Password: password,
+		Key:      mustKeyFile(f.SSHKeyPath),
 	}
 	d.ssh = newSSHSession(func() (*guest.Client, error) {
 		return guest.Dial(d.sshTarget, 30*time.Second)
@@ -2034,4 +2036,17 @@ func (d *Driver) auditCall(kind journal.CallKind, detail string, started time.Ti
 		return
 	}
 	d.audit.call(kind, detail, started, ok, err, rel)
+}
+
+// mustKeyFile is guest.LoadKey with a log line instead of an error, for the daemon's own session.
+func mustKeyFile(path string) []byte {
+	if path == "" {
+		return nil
+	}
+	key, err := guest.LoadKey(path)
+	if err != nil {
+		log.Printf("easyvm: %v", err)
+		return nil
+	}
+	return key
 }

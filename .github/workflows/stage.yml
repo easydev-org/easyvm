@@ -70,6 +70,12 @@ on:
       #
       # AND ONE NUMBER FOR EVERY GUEST WAS ALREADY WRONG. A BSD install reads a 1.3 GiB ISO; a Windows
       # install reads 7.7 GiB twice. The caller knows which it is; this workflow does not.
+      password:
+        description: >-
+          the guest account's password, when a caller needs to override the walk's own `password:`
+          line. Empty by default, because the walk knows what its disk was built with.
+        type: string
+        default: ""
       disk_gb:
         description: >-
           free GB this leg needs on the runner. 0 skips the check. Sized for the working copy, the
@@ -544,12 +550,34 @@ jobs:
           if [ -f "$GITHUB_WORKSPACE/work/disk.qcow2" ]; then
             disk_args="--boot-disk $GITHUB_WORKSPACE/work/disk.qcow2"
           fi
+          # THE PASSWORD COMES FROM THE WALK, NOT FROM THIS LINE.
+          #
+          # MEASURED ON THE PUBLISHED `linux-opensuse-leap-16.1` DISK, booted in a local pod and asked
+          # directly. The console logins fine with the password its own install walk set (`Qz7vLp2w`),
+          # and sshd then reports
+          #
+          #	sshd-session[11671]: pam_unix(sshd:auth): authentication failure; ... user=vmuser
+          #	sshd-session[11671]: Failed password for vmuser from 172.30.0.1 port 54708 ssh2
+          #
+          # because THIS LINE PASSES `--password admin`, WHICH OVERRIDES THE WALK'S DEFAULT. A walk that
+          # says `password Qz7vLp2w` is parsed as `{from: args.password, default: Qz7vLp2w}`, so this
+          # flag replaces the one value the file chose and the guest never had.
+          #
+          # EVERY GUEST WHOSE PASSWORD IS NOT `admin` was therefore unusable over ssh, however correct
+          # its walk - opensuse-leap-16.1 is the one that failed loudly enough to be measured.
+          #
+          # `${{ inputs.password }}` IS EMPTY UNLESS A CALLER ASKS FOR ONE, so the walk's own default
+          # stands by default and a caller can still override it deliberately.
+          pw_args=""
+          if [ -n "${{ inputs.password }}" ]; then
+            pw_args="--password ${{ inputs.password }}"
+          fi
           # shellcheck disable=SC2086
           easyvm run "$GITHUB_WORKSPACE/${{ matrix.file }}" \
             --work "$GITHUB_WORKSPACE/work" \
             $disk_args \
             --out "$GITHUB_WORKSPACE/work/${{ matrix.out }}" \
-            --password admin \
+            $pw_args \
             || {
               echo "=== THE DAEMON REFUSED THE RUN ==="
               cat "$GITHUB_WORKSPACE/work/daemon.log"

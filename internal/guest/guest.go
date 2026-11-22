@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"strings"
 	"time"
 
@@ -28,6 +29,15 @@ type Target struct {
 	// User and Password are the account the disk was built with.
 	User     string
 	Password string
+	// Key is an optional private key (PEM/OpenSSH) tried BEFORE the password.
+	//
+	// WHY IT EXISTS: an image whose sshd is built WITHOUT PAM cannot authenticate a password in the
+	// way this client offers it. MEASURED on openSUSE Leap 16.1 (openssh-server 10.3p1, `ldd sshd` has
+	// no libpam): `ssh.Password` answers "no supported methods remain" and `ssh.KeyboardInteractive`
+	// answers the same, while the GUEST's own `ssh` with a password succeeds - so the daemon can offer
+	// a method this build does honour. A key is that method, and it is checked first so a walk that
+	// has one does not depend on the password path at all.
+	Key []byte
 }
 
 // Addr is host:port.
@@ -69,10 +79,20 @@ func Dial(t Target, timeout time.Duration) (*Client, error) {
 	if t.User == "" {
 		t.User = "vmuser"
 	}
+	var auths []ssh.AuthMethod
+	// THE KEY COMES FIRST WHEN THERE IS ONE, because it is the only method an sshd built without PAM
+	// can complete in this client. A key that does not parse is reported rather than silently dropped:
+	// a walk that asked for key auth and got a password failure would be looking in the wrong place.
+	if len(t.Key) > 0 {
+		signer, err := ssh.ParsePrivateKey(t.Key)
+		if err != nil {
+			return nil, fmt.Errorf("the guest's private key does not parse: %w", err)
+		}
+		auths = append(auths, ssh.PublicKeys(signer))
+	}
 	config := &ssh.ClientConfig{
 		User: t.User,
-		Auth: []ssh.AuthMethod{
-			ssh.Password(t.Password),
+		Auth: append(auths, ssh.Password(t.Password),
 			// A guest whose sshd has keyboard-interactive enabled answers that instead, and the
 			// password is the same answer. Both are offered rather than guessing which one a
 			// given image's sshd_config asks for.
@@ -82,8 +102,7 @@ func Dial(t Target, timeout time.Duration) (*Client, error) {
 					answers[i] = t.Password
 				}
 				return answers, nil
-			}),
-		},
+			})),
 		// THE HOST KEY IS NOT A FACT ABOUT THIS DISK. Every guest is fresh, on a forwarded port
 		// that differs per run, so a known-hosts file would either grow without bound or refuse
 		// the connection after a rebuild. There is no security claim being made here that a host
@@ -282,4 +301,20 @@ func oneLine(s string) string {
 		return s[:120] + "..."
 	}
 	return s
+}
+
+// LoadKey reads a private key file, or returns nil when the path is empty.
+//
+// A FILE THAT WAS NAMED AND CANNOT BE READ IS AN ERROR, not a silent fall back to the password: a walk
+// that asked for key auth and then failed a password check would send its reader to the wrong file,
+// which is the class of mistake this package's error messages exist to prevent.
+func LoadKey(path string) ([]byte, error) {
+	if path == "" {
+		return nil, nil
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("`ssh_key:` names %s, which cannot be read: %w", path, err)
+	}
+	return b, nil
 }
