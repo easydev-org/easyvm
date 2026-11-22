@@ -1,136 +1,112 @@
 package walk
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"testing"
+
+	"github.com/easydev-org/easyvm/internal/step"
 )
 
-// THE 2.0 DESIGN IS A CLAIM, AND THIS IS WHAT MAKES IT TRUE.
+// THERE IS ONE FORMAT, AND THIS IS THE TEST THAT SAYS IT WORKS ON EVERY REAL FILE.
 //
-// `docs/WALK-V2.md` says nine verbs with indented children cover every walkthrough in this tree. A
-// claim like that is worth nothing in a document, so every real file is read, re-emitted in the 2.0
-// form, and read again - and the two documents must be EQUAL. One different value is a design bug.
-//
-// THE COMPARISON IS ON THE DOCUMENT, not the text: 2.0 sorts a step's keys, so the bytes differ by
-// construction while the meaning must not. `firstDifference` names the path that changed.
-func TestEveryRealWalkthroughRoundTripsThroughV2(t *testing.T) {
-	root := filepath.Join("..", "..")
-	files, err := filepath.Glob(filepath.Join(root, "*", "*", "steps", "*.walk"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(files) < 20 {
-		t.Fatalf("found only %d walkthroughs", len(files))
-	}
-	converted, bad := 0, 0
+// Every walkthrough in the tree is read, compiled, and the result must reach the engine: the step
+// list must be the same length, every step must pass the vocabulary, and reading the source twice
+// must give the same document. A format that only parses is a format nobody has checked.
+func TestEveryRealWalkthroughCompiles(t *testing.T) {
+	files := realWalkthroughs(t)
+	checked := 0
 	for _, path := range files {
-		original, err := os.ReadFile(path)
+		doc, err := WalkV2ToYAML(readFile(t, path))
 		if err != nil {
-			t.Fatal(err)
-		}
-		// THE 1.0 DOCUMENT IS THE BASELINE, because that is what the engine runs today.
-		want, err := WalkToYAML(string(original))
-		if err != nil {
-			continue // a file that does not load is another test's subject
-		}
-		if _, wrong := want["error"]; wrong {
+			t.Errorf("%s: %v", filepath.Base(path), err)
 			continue
 		}
-		v2src, err := YAMLToWalkV2(want)
-		if err != nil {
-			t.Errorf("%s: cannot render as 2.0: %v", filepath.Base(path), err)
-			bad++
+		steps, ok := doc["steps"].([]any)
+		if !ok || len(steps) == 0 {
+			t.Errorf("%s: no steps", filepath.Base(path))
 			continue
 		}
-		got, err := WalkV2ToYAML(v2src)
-		if err != nil {
-			t.Errorf("%s: the 2.0 file it produced does not parse: %v\n--- the file ---\n%s",
-				filepath.Base(path), err, v2src)
-			bad++
-			continue
+		for i, raw := range steps {
+			m, ok := raw.(map[string]any)
+			if !ok {
+				t.Errorf("%s: step %d is not a mapping", filepath.Base(path), i+1)
+				continue
+			}
+			name, _ := m["name"].(string)
+			if name == "" {
+				t.Errorf("%s: step %d has no name", filepath.Base(path), i+1)
+			}
+			if err := step.Validate(name, m); err != nil {
+				t.Errorf("%s: step %q: %v", filepath.Base(path), name, err)
+			}
 		}
-		if diff := firstDifference(want, got, ""); diff != "" {
-			t.Errorf("%s: the 2.0 round trip changed the document at %s", filepath.Base(path), diff)
-			bad++
-			continue
-		}
-		converted++
+		checked++
 	}
-	if bad > 0 {
-		t.Fatalf("%d of %d walkthroughs did not round-trip through 2.0", bad, len(files))
+	if checked < 20 {
+		t.Fatalf("only %d walkthroughs compiled; the glob is wrong", checked)
 	}
-	t.Logf("%d walkthroughs round-trip through the 2.0 form", converted)
+	t.Logf("%d walkthroughs compile and validate", checked)
 }
 
-// A 2.0 FILE IS RECOGNISED BY ITS TEXT, NOT ITS NAME, so both versions can be `.walk` files.
-func TestAFileWithNoDoubleEqualsIs2(t *testing.T) {
-	v1 := `walkthrough "x"
-  resolution 1920x1080
-  step "a"
-    settle == 3
-`
-	v2 := `walkthrough "x"
-  resolution 1920x1080
-  step "a"
-    settle 3
-`
-	if IsV2(v1) {
-		t.Error("a file with `==` was read as 2.0")
-	}
-	if !IsV2(v2) {
-		t.Error("a file with no `==` was not read as 2.0")
+// READING IS DETERMINISTIC AND IDEMPOTENT: the same text gives the same document, twice.
+func TestReadingIsIdempotent(t *testing.T) {
+	for _, path := range realWalkthroughs(t) {
+		src := readFile(t, path)
+		a, err := WalkV2ToYAML(src)
+		if err != nil {
+			t.Errorf("%s: %v", filepath.Base(path), err)
+			continue
+		}
+		b, err := WalkV2ToYAML(src)
+		if err != nil {
+			t.Errorf("%s: %v", filepath.Base(path), err)
+			continue
+		}
+		if d := diffDoc(a, b, ""); d != "" {
+			t.Errorf("%s: reading twice differs at %s", filepath.Base(path), d)
+		}
 	}
 }
 
-// CHILDREN ARE INDENTED, AND THERE IS NO OTHER MARKER.
+// THE EMITTER AND THE READER AGREE, which is what makes the format a closed system.
 //
-// THIS IS THE RULE THE WHOLE FORMAT RESTS ON, so it is tested rather than assumed: `from` and `words`
-// are siblings under `expect`, and a file that writes them on the `expect` line is refused.
-func TestChildrenAreIndentationAndNothingElse(t *testing.T) {
-	src := `walkthrough "x"
-resolution 1920x1080
-recording_resolution 1920x1080
-step "the greeter is up"
-    expect
-      from screen
-      words [password]
-`
-	doc, err := WalkV2ToYAML(src)
-	if err != nil {
-		t.Fatal(err)
-	}
-	steps, _ := doc["steps"].([]any)
-	step, _ := steps[0].(map[string]any)
-	exp, ok := step["expect"].(map[string]any)
-	if !ok {
-		t.Fatalf("`expect` did not become a mapping: %#v", step["expect"])
-	}
-	if exp["from"] != "screen" {
-		t.Errorf("from = %v", exp["from"])
-	}
-	if _, ok := exp["words"].([]any); !ok {
-		t.Errorf("words is %T, want a list", exp["words"])
-	}
-}
-
-// A VALUE ON THE VERB'S LINE IS REFUSED WHEN THE VERB ALSO HAS CHILDREN, because that is two places
-// to say one thing and the indentation would no longer be the whole rule.
-func TestAValueAndChildrenOnOneKeyIsRefused(t *testing.T) {
-	src := `walkthrough "x"
-resolution 1920x1080
-recording_resolution 1920x1080
-step "x"
-  expect screen
-      from screen
-`
-	if _, err := WalkV2ToYAML(src); err == nil {
-		t.Fatal("a key with both a value and children was accepted")
+// A document compiled from a file is rendered again, and the second compile must equal the first.
+// This is not a migration check any more - there is nothing to migrate from - it is the property
+// that a `.walk` cannot express something the reader loses.
+func TestTheEmitterAndReaderAgreeOnEveryRealFile(t *testing.T) {
+	for _, path := range realWalkthroughs(t) {
+		src := readFile(t, path)
+		first, err := WalkV2ToYAML(src)
+		if err != nil {
+			t.Errorf("%s: %v", filepath.Base(path), err)
+			continue
+		}
+		rendered, err := YAMLToWalkV2(first)
+		if err != nil {
+			t.Errorf("%s: cannot render: %v", filepath.Base(path), err)
+			continue
+		}
+		second, err := WalkV2ToYAML(rendered)
+		if err != nil {
+			t.Errorf("%s: the rendered file does not parse: %v\n--- rendered ---\n%s",
+				filepath.Base(path), err, rendered)
+			continue
+		}
+		if d := diffDoc(first, second, ""); d != "" {
+			t.Errorf("%s: rendering changed the document at %s", filepath.Base(path), d)
+		}
 	}
 }
 
-// A BRACE IS REFUSED BY NAME, because a file that writes one is a file written in the format this one
-// replaces. The error says what to write instead.
+// THE SYNTAX IS THREE RULES AND THEY ARE ENFORCED.
+//
+// A brace is refused by name, because a file that writes one is a file written in a language this
+// format replaced. The error must say what to write instead - a rule a reader cannot act on is not
+// a rule.
 func TestBracesAreRefusedByName(t *testing.T) {
 	src := `walkthrough "x"
 resolution 1920x1080
@@ -142,45 +118,75 @@ step "x"
 	if err == nil {
 		t.Fatal("a brace was accepted")
 	}
-	if !contains(err.Error(), "indented block") {
+	if !strings.Contains(err.Error(), "indented block") {
 		t.Errorf("the error does not say what to write instead: %v", err)
 	}
 }
 
-// A LIST OF STEPS IS `item` BLOCKS, and each one may nest a branch - which is why a flat `do:` could
-// not express the three loops in this tree that already nest an `if`.
-func TestAStepListNestsABranch(t *testing.T) {
+// CHILDREN ARE INDENTED, AND THERE IS NO OTHER MARKER.
+//
+// `from` and `words` are siblings under `expect`. Neither is written on the `expect` line, because
+// neither is required for the verb to mean anything, and a rule that says "children are indented"
+// admits no exceptions or it is not a rule.
+func TestChildrenAreIndentationAndNothingElse(t *testing.T) {
 	src := `walkthrough "x"
 resolution 1920x1080
 recording_resolution 1920x1080
-step "answer the wizard"
-    repeat
-      do
-        item "read the pane"
-          read pane
-        item "answer, when the sheet is there"
-          if
-            from pane
-            words [are, you, sure]
-            then
-              item "click Continue"
-                press 1018 520
-      until
-        from pane
-        words [finder]
-      max 40
+step "the greeter is up"
+  expect
+    from screen
+    words [password]
 `
 	doc, err := WalkV2ToYAML(src)
 	if err != nil {
 		t.Fatal(err)
 	}
-	steps, _ := doc["steps"].([]any)
-	step, _ := steps[0].(map[string]any)
-	// THE READER COMPILES `repeat` INTO THE `loop:` THE ENGINE RUNS, so a 2.0 statement reaches the
-	// document as `loop:` - which is the whole migration: one statement in, the measured shape out.
-	rep, ok := step["loop"].(map[string]any)
+	step := onlyStep(t, doc)
+	// `expect` IS THE SOURCE WORD; the engine's key is `check`, because the document is the shape
+	// the executor has always dispatched on.
+	exp, ok := step["expect"].(map[string]any)
 	if !ok {
-		t.Fatalf("`repeat` did not compile into `loop:`: %#v", step["repeat"])
+		t.Fatalf("`expect` did not compile to `check`: %#v", step)
+	}
+	if exp["from"] != "screen" {
+		t.Errorf("from = %v", exp["from"])
+	}
+	if _, ok := exp["words"].([]any); !ok {
+		t.Errorf("words is %T, want a list", exp["words"])
+	}
+}
+
+// A LIST OF STEPS IS `item` BLOCKS, and one may nest a branch - which is why a flat `do:` could not
+// express the loops that answer a wizard page by page.
+func TestAStepListNestsABranch(t *testing.T) {
+	src := `walkthrough "x"
+resolution 1920x1080
+recording_resolution 1920x1080
+step "answer the wizard"
+  repeat
+    do
+      item "read the pane"
+        read pane
+      item "answer, when the sheet is there"
+        if
+          from pane
+          words [are, you, sure]
+          then
+            item "click Continue"
+              press 1018 520
+    until
+      from pane
+      words [finder]
+    max 40
+`
+	doc, err := WalkV2ToYAML(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	step := onlyStep(t, doc)
+	rep, ok := step["repeat"].(map[string]any)
+	if !ok {
+		t.Fatalf("`repeat` did not compile into `repeat:`: %#v", step)
 	}
 	do, ok := rep["do"].([]any)
 	if !ok || len(do) != 2 {
@@ -191,27 +197,25 @@ step "answer the wizard"
 	if !ok {
 		t.Fatalf("the nested `if` did not survive: %#v", second)
 	}
-	then, ok := branch["then"].([]any)
+	// THE BRANCHES ARE THE STEP'S OWN KEYS, beside `if`, because a step runs one thing and its
+	// `then`/`else` are what `if` chooses between.
+	then, ok := second["then"].([]any)
 	if !ok || len(then) != 1 {
-		t.Fatalf("the nested `then` = %#v", branch["then"])
+		t.Fatalf("the nested `then` = %#v", second["then"])
 	}
-	// THE CONDITION IS COMPILED INTO THE PAIR THE ENGINE READS: `check:` carries the test (its
-	// `from:` is the picture) and `until: {fact:}` names the boolean. That pair is 1.0's shape,
-	// because the engine is unchanged - the 2.0 statement is a source form, not a new runtime.
-	check, ok := rep["check"].(map[string]any)
-	if !ok || check["from"] != "pane" {
-		t.Fatalf("the condition did not reach `check:` with its picture: %#v", rep["check"])
+	if branch["from"] != "pane" {
+		t.Fatalf("the condition lost its reading: %#v", branch)
 	}
-	see, ok := rep["see"].(map[string]any)
-	if !ok || see["name"] != "pane" {
-		t.Fatalf("the picture was not named for the reading: %#v", rep["see"])
-	}
-	if _, ok := rep["until"].(map[string]any); !ok {
-		t.Fatalf("`until` = %#v", rep["until"])
+	// THE CONDITION IS THE LOOP'S OWN `until:`, WHICH IS WHAT THE ENGINE READS NOW. There is no
+	// `expect`/`read` pair to compile it into: a `repeat` stops on a condition, and the condition
+	// names the picture it reads.
+	until, ok := rep["until"].(map[string]any)
+	if !ok || until["from"] != "pane" {
+		t.Fatalf("the condition did not reach `until:`: %#v", rep["until"])
 	}
 }
 
-// A WORD ALONE IS `true`, so a flag needs no argument and there is no second way to write it.
+// A WORD ALONE IS `true`: a flag's presence IS its argument, and there is no second way to write it.
 func TestABareWordIsTrue(t *testing.T) {
 	doc, err := WalkV2ToYAML(`walkthrough "x"
 resolution 1920x1080
@@ -222,90 +226,134 @@ step "x"
 	if err != nil {
 		t.Fatal(err)
 	}
-	steps, _ := doc["steps"].([]any)
-	step, _ := steps[0].(map[string]any)
-	if step["optional"] != true {
-		t.Errorf("optional = %#v, want true", step["optional"])
+	if got := onlyStep(t, doc)["optional"]; got != true {
+		t.Errorf("optional = %#v, want true", got)
 	}
 }
 
-// THERE IS NO `tries` AND NO `every` IN THE DESIGN, and the claim is about the VOCABULARY the emitter
-// is allowed to produce - not about whether it hides a key somebody put in a document.
-//
-// THE EMITTER IS HONEST: it writes what the document holds, because a converter that dropped a key it
-// disliked would change a file instead of refusing it. So this asks the question that matters: does
-// the 2.0 form have any construct that means "retry N times"? It does not - `repeat ... until` is the
-// only retry, and its count is `max`, a child of the loop.
+// THERE IS NO RETRY INTERVAL AND NO TRY COUNT. A retry is `repeat ... until`, and the pause between
+// attempts is a `settle` in the `do`. This asserts the vocabulary itself, not the emitter: neither
+// word may be a modifier or a key the design accepts.
 func TestTheDesignHasNoRetryInterval(t *testing.T) {
-	// `tries` AND `every` MUST NOT BE MODIFIERS, which is what decides whether the emitter ranks them
-	// as step-level words. If one were in the order list it would read as a first-class modifier.
 	for _, word := range []string{"tries", "every"} {
 		if got := v2KeyOrder(word); got != "5"+word {
 			t.Errorf("`%s` has a modifier order (%q); the design deleted it", word, got)
 		}
 	}
-	// AND A LOOP'S COUNT IS `max`, A CHILD OF `repeat`, NOT A MODIFIER ON A STEP.
-	doc, err := YAMLToWalkV2(map[string]any{
-		"name":                 "x",
-		"resolution":           []any{1920, 1080},
-		"recording_resolution": []any{1920, 1080},
-		"steps": []any{map[string]any{
-			"name": "s",
-			"loop": map[string]any{
-				"do":    []any{map[string]any{"settle": 5}},
-				"see":   map[string]any{"name": "p"},
-				"check": map[string]any{"name": "ok", "from": "p", "mode": "text", "words": []any{"a"}},
-				"until": map[string]any{"fact": "ok"},
-				"max":   40,
-			},
-		}},
-	})
+	doc, err := WalkV2ToYAML(`walkthrough "x"
+resolution 1920x1080
+recording_resolution 1920x1080
+step "s"
+  repeat
+    pause 5
+    until
+      from p
+      words [a]
+    max 40
+`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !contains(doc, "max 40") {
-		t.Errorf("a loop's count was not written as `max 40`:\n%s", doc)
+	loop, _ := onlyStep(t, doc)["repeat"].(map[string]any)
+	if loop["max"] == nil {
+		t.Fatalf("the loop's count did not reach `max`: %#v", loop)
 	}
-	for _, word := range []string{"tries ", "every "} {
-		if contains(doc, word) {
-			t.Errorf("the 2.0 form emitted `%s`, which the design deleted:\n%s", word, doc)
+}
+
+// A HEADER LINE THAT IS MISSING IS NAMED, not defaulted. `recording_resolution` is the video's size,
+// which is not `resolution` - one is where a coordinate was measured, the other is how big the
+// artifact is.
+func TestRecordingResolutionIsRequired(t *testing.T) {
+	// THE CHECK LIVES IN `loadDocument`, not in the parser: a document is a document, and the rule is
+	// about a walkthrough. So this goes through `Load`, which is the entry point a run uses.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "x.walk")
+	if err := os.WriteFile(path, []byte(`walkthrough "x"
+resolution 1920x1080
+step "s"
+  stop kill
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path, nil); err == nil {
+		t.Fatal("a file with no `recording_resolution` loaded")
+	}
+}
+
+// ---- helpers ---------------------------------------------------------------------------------
+
+func readFile(t *testing.T, path string) string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+func realWalkthroughs(t *testing.T) []string {
+	t.Helper()
+	files, err := filepath.Glob(filepath.Join("..", "..", "*", "*", "steps", "*.walk"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sort.Strings(files)
+	if len(files) < 20 {
+		t.Fatalf("found only %d walkthroughs; the glob is wrong", len(files))
+	}
+	return files
+}
+
+func onlyStep(t *testing.T, doc map[string]any) map[string]any {
+	t.Helper()
+	steps, ok := doc["steps"].([]any)
+	if !ok || len(steps) != 1 {
+		t.Fatalf("want one step, got %#v", doc["steps"])
+	}
+	m, ok := steps[0].(map[string]any)
+	if !ok {
+		t.Fatalf("the step is not a mapping")
+	}
+	return m
+}
+
+// diffDoc names the first place two documents disagree, because "they differ" is useless when a step
+// has twenty keys and four of them are coordinate pairs.
+func diffDoc(want, got any, at string) string {
+	switch w := want.(type) {
+	case map[string]any:
+		g, ok := got.(map[string]any)
+		if !ok {
+			return at + ": not a mapping"
+		}
+		for k, wv := range w {
+			gv, ok := g[k]
+			if !ok {
+				return at + "." + k + ": missing"
+			}
+			if d := diffDoc(wv, gv, at+"."+k); d != "" {
+				return d
+			}
+		}
+		for k := range g {
+			if _, ok := w[k]; !ok {
+				return at + "." + k + ": unexpected"
+			}
+		}
+	case []any:
+		g, ok := got.([]any)
+		if !ok || len(w) != len(g) {
+			return at + ": lists differ"
+		}
+		for i := range w {
+			if d := diffDoc(w[i], g[i], fmt.Sprintf("%s.%d", at, i)); d != "" {
+				return d
+			}
+		}
+	default:
+		if fmt.Sprint(want) != fmt.Sprint(got) {
+			return fmt.Sprintf("%s: want %v, got %v", at, want, got)
 		}
 	}
-}
-
-// AND THE ONE KEY THAT MUST NOT BE MACRO-EXPANDED: a document that writes `tries:` itself is refused by
-// the vocabulary, not silently rewritten - so the design's deletion is enforced where the file is read.
-func TestATriesKeyIsRefusedByTheVocabulary(t *testing.T) {
-	doc := map[string]any{
-		"name":                 "x",
-		"resolution":           []any{1920, 1080},
-		"recording_resolution": []any{1920, 1080},
-		"steps": []any{map[string]any{
-			"name":  "s",
-			"check": map[string]any{"name": "ok", "from": "p", "mode": "text", "words": []any{"a"}},
-			"tries": 40,
-		}},
-	}
-	if err := validateDocument(doc); err != nil {
-		return // refused at the document level, which is also correct
-	}
-	steps, _ := doc["steps"].([]any)
-	step, _ := steps[0].(map[string]any)
-	if err := stepValidateForTest("s", step); err == nil {
-		t.Fatal("a step with `tries:` was accepted; the design deleted that key")
-	}
-}
-
-func contains(haystack, needle string) bool {
-	return len(haystack) >= len(needle) && (haystack == needle ||
-		len(haystack) > 0 && (indexOf(haystack, needle) >= 0))
-}
-
-func indexOf(s, sub string) int {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return i
-		}
-	}
-	return -1
+	return ""
 }

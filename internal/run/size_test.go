@@ -30,7 +30,7 @@ func TestASizeRangeBindsABoolean(t *testing.T) {
 		ex.seen = map[string][]string{"disk": wordsOfText(c.reading)}
 		step := walk.Step{Name: "size", Spec: map[string]any{
 			"name": "size",
-			"check": map[string]any{
+			"expect": map[string]any{
 				"name":  "ok",
 				"from":  "disk",
 				"mode":  "size_between",
@@ -60,15 +60,15 @@ func TestASizeBranchTakesTheRightSide(t *testing.T) {
 		ex.seen = map[string][]string{"disk": wordsOfText(tc.reading)}
 		if err := ex.doCheck(walk.Step{Name: "size", Spec: map[string]any{
 			"name": "size",
-			"check": map[string]any{"name": "ok", "from": "disk", "mode": "size_between",
+			"expect": map[string]any{"name": "ok", "from": "disk", "mode": "size_between",
 				"range": []any{60.0, 200.0}},
 		}}); err != nil {
 			t.Fatal(err)
 		}
 		if err := ex.doIf(walk.Step{Name: "take?", Spec: map[string]any{
 			"if":   "ok",
-			"then": []any{map[string]any{"key": "ret"}},
-			"else": []any{map[string]any{"key": "down"}},
+			"then": []any{map[string]any{"press": true, "key": "ret"}},
+			"else": []any{map[string]any{"press": true, "key": "down"}},
 		}}); err != nil {
 			t.Fatal(err)
 		}
@@ -141,7 +141,7 @@ func TestEveryCheckModeComparesWhatItSays(t *testing.T) {
 		for k, v := range c.args {
 			check[k] = v
 		}
-		step := walk.Step{Name: c.mode, Spec: map[string]any{"name": c.mode, "check": check}}
+		step := walk.Step{Name: c.mode, Spec: map[string]any{"name": c.mode, "expect": check}}
 		if err := ex.doCheck(step); err != nil {
 			t.Fatalf("%s %q: %v", c.mode, c.reading, err)
 		}
@@ -157,7 +157,7 @@ func TestAnUnknownModeIsRefusedAndListsTheModes(t *testing.T) {
 	ex.seen = map[string][]string{"screen": {"x"}}
 	err := ex.doCheck(walk.Step{Name: "s", Spec: map[string]any{
 		"name":  "s",
-		"check": map[string]any{"name": "ok", "from": "screen", "mode": "says_everything"},
+		"expect": map[string]any{"name": "ok", "from": "screen", "mode": "says_everything"},
 	}})
 	if err == nil {
 		t.Fatal("an unknown mode must be refused")

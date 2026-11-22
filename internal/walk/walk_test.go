@@ -279,16 +279,16 @@ steps:
 	}
 }
 
-// A STEP THAT CARRIES `ocr:` AND `check:` TOGETHER IS REFUSED, BECAUSE THE SECOND HALF NEVER RUNS.
+// A STEP THAT CARRIES `ocr:` AND `expect:` TOGETHER IS REFUSED, BECAUSE THE SECOND HALF NEVER RUNS.
 //
 // THE DISPATCHER'S FIRST MATCHING BRANCH WINS: `case s.Has("ocr")` calls `doOCR` and returns, so a
-// `check:` in the same step is read from the file, accepted by the vocabulary, and silently skipped.
+// `expect:` in the same step is read from the file, accepted by the vocabulary, and silently skipped.
 // MEASURED on bsd/ghostbsd/steps/gbi.yaml, whose step read a screen and decided from it:
 //
 //	is the X driver menu the thing on screen: 37 word(s) -> ocr/screen.txt      <- the reading
-//	                                                                             <- and no `check:`
+//	                                                                             <- and no `expect:`
 //
-// and the next step failed with `if: menu` names a boolean no `check:` step has made - a true
+// and the next step failed with `if: menu` names a boolean no `expect:` step has made - a true
 // statement about a file that looks like it made one.
 //
 // THE RULE IS THE ONE THE WHOLE DSL RESTS ON: one step does one thing. A reading and a decision are
@@ -297,7 +297,7 @@ steps:
 // A STEP THAT READS AND DECIDES IN ONE MAPPING IS REFUSED, because the dispatcher runs the first
 // branch it matches and returns - so the second half would never run, in a file that loaded.
 //
-// `see:` IS THE READING NOW (`ocr:` was the same operation restricted to a word list), and the rule
+// `read:` IS THE READING NOW (`ocr:` was the same operation restricted to a word list), and the rule
 // is unchanged: one step does one thing.
 func TestAReadingStepCannotAlsoCheck(t *testing.T) {
 	dir := t.TempDir()
@@ -306,18 +306,18 @@ func TestAReadingStepCannotAlsoCheck(t *testing.T) {
 recording_resolution: [1920, 1080]
 steps:
 - name: read and decide
-  see: {name: screen, of: [text], rect: [0, 0, 100, 100], rect_at: [1920, 1080], wait: 0}
-  check: {name: done, from: screen, mode: says_any, words: [[ok]]}
+  read: {name: screen, of: [text], rect: [0, 0, 100, 100], rect_at: [1920, 1080], wait: 0}
+  expect: {name: done, from: screen, mode: says_any, words: [[ok]]}
 `
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	_, err := Load(path, nil)
 	if err == nil {
-		t.Fatal("a step with both `see:` and `check:` loaded, and the `check:` would never run - the " +
+		t.Fatal("a step with both `read:` and `expect:` loaded, and the `expect:` would never run - the " +
 			"dispatcher takes the reading branch and returns. Split it into two steps.")
 	}
-	if !strings.Contains(err.Error(), "one thing") && !strings.Contains(err.Error(), "check") {
+	if !strings.Contains(err.Error(), "one thing") && !strings.Contains(err.Error(), "expect") {
 		t.Fatalf("the error should say why: %v", err)
 	}
 }

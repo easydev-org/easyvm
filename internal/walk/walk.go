@@ -150,26 +150,21 @@ func Load(path string, overrides map[string]string) (*File, error) {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
 	var doc map[string]any
-	// A `.walk` FILE IS CONVERTED TO THE SAME DOCUMENT THE YAML DECODER WOULD PRODUCE, so everything
-	// below this line - validation, the dispatcher, the measurements - is unaware of the format. The
-	// extension decides, and it is the only place the two differ.
+	// THERE IS ONE FORMAT. A `.walk` FILE IS READ BY THE 2.0 READER, which compiles it into the
+	// document the engine dispatches on - validation, the dispatcher and the measurements are
+	// unaware of the source language.
 	//
-	// THE 2.0 FORM IS READ FIRST WHERE THE TEXT SAYS SO, because both versions are `.walk` files and a
-	// version is a fact about the TEXT rather than about the name: a 2.0 file has no `==` anywhere.
-	if isWalkFile(path) && IsV2(string(raw)) {
+	// A `.yaml` FILE IS STILL ACCEPTED, because a document is a document and several tests build one
+	// directly. It is not a walkthrough FORMAT: there is no hand-written YAML walkthrough in this
+	// tree, and the 2.0 form is the only thing a person writes.
+	if isWalkFile(path) {
 		converted, err := WalkV2ToYAML(string(raw))
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", path, err)
 		}
 		return loadDocument(path, converted, overrides)
 	}
-	if isWalkFile(path) {
-		converted, err := WalkToYAML(string(raw))
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", path, err)
-		}
-		doc = converted
-	} else if err := yaml.Unmarshal(raw, &doc); err != nil {
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
 		// A DUPLICATE KEY IS A WORKFLOW THE RUNNER REFUSES TO LOAD, and `yaml.Unmarshal` keeps the
 		// last one silently. That happened: a second `outputs:` block made GitHub reject the
 		// whole workflow while every local check passed. yaml.v3 reports it, so the error is
@@ -480,6 +475,8 @@ var documentKeys = map[string]string{
 		"`steps:` for the panes, typing and waiting - so a sandbox can start the machine " +
 		"without running the program against it. A file without this block is unchanged: its " +
 		"leading `disk:`/`fetch:`/`boot:` steps ARE its machine",
+	"needs": "files that must exist before the stage runs; the reader puts them back as the " +
+		"first step, because checking a stage's inputs is the first thing a run should do",
 	"steps":             "the steps, in file order",
 	"waits_for":         "a pane file's arrival gate: the words that mean the first pane is up",
 	"boot_timeout":      "how long a guest may take to reach its desktop",

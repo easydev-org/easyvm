@@ -143,6 +143,7 @@ func WalkV2ToYAML(src string) (map[string]any, error) {
 	doc := map[string]any{"name": name}
 	vars := map[string]any{}
 	var steps []any
+	var needs []any
 
 	i := 1
 	for i < len(lines) {
@@ -221,7 +222,7 @@ func WalkV2ToYAML(src string) (map[string]any, error) {
 			if len(files) == 0 {
 				return nil, fmt.Errorf("line %d: `needs` names no files", l.no)
 			}
-			doc["needs"] = files
+			needs = files
 		default:
 			// ANY OTHER TOP-LEVEL WORD IS A HEADER KEY WRITTEN WITH ITS OWN NAME, so a key the
 			// vocabulary gains works here with no change to this reader.
@@ -245,10 +246,18 @@ func WalkV2ToYAML(src string) (map[string]any, error) {
 	if len(steps) == 0 {
 		return nil, fmt.Errorf("the file has no steps; a header with nothing after it proves nothing")
 	}
-	// THE STATEMENTS ARE REWRITTEN INTO THE SHAPE THE ENGINE RUNS: `repeat` becomes `loop`, `nudge`
-	// becomes `every`+`clock`, `after` becomes `settle`.
-	if err := v2Normalise(steps); err != nil {
+	// THE MARKER VERBS ARE FLATTENED INTO THE FIELDS THE ENGINE READS, and a `boot` that names a disk
+	// is expanded into the two steps the executor runs. Everything else reaches the engine as written.
+	if err := v2NormaliseList(&steps); err != nil {
 		return nil, err
+	}
+	// `needs` IS A HEADER DECLARATION AND THE ENGINE RUNS IT AS A STEP, so it is put back where the
+	// executor looks for it: first, before anything starts a machine.
+	if len(needs) > 0 {
+		steps = append([]any{map[string]any{
+			"name":  "the files this stage reads are already on disk",
+			"needs": needs,
+		}}, steps...)
 	}
 	doc["steps"] = steps
 	return doc, nil
@@ -292,56 +301,71 @@ func v2ParseBlock(block []v2line, base int) (map[string]any, error) {
 
 		// ---- a key that opens a block -----------------------------------------------------
 		if len(kids) > 0 {
+			// A VERB CARRIES ITS REQUIRED ARGUMENT ON THE LINE AND ITS OPTIONAL ONES INDENTED UNDER
+			// IT: `press text "x"` types a string and then says `at`; `copy` has no argument and
+			// `template`/`to` under it; `stop kill` names the method and `save` follows. This is the
+			// one shape the design allows on both sides of the line, and it is why `at` and `clear`
+			// are not a second syntax.
+			if v2IsVerbatim(key) {
+				body, err := v2ParseBlock(kids, v2IndentWidth(kids))
+				if err != nil {
+					return nil, err
+				}
+				sub := v2VerbArgument(key, rest)
+				if cmd, ok := sub["__cmd"]; ok {
+					delete(sub, "__cmd")
+					body["__cmd"] = cmd
+				}
+				for k, v := range sub {
+					body[k] = v
+				}
+				m[key] = body
+				i = j
+				continue
+			}
+			// `if <fact>` AND `if` (with its condition indented) ARE TWO SHAPES.
+			if key == "if" {
+				body, err := v2ParseBlock(kids, v2IndentWidth(kids))
+				if err != nil {
+					return nil, err
+				}
+				if rest != "" {
+					m["if"] = v2UnquoteInline(rest)
+				} else {
+					cond := map[string]any{}
+					for k, v := range body {
+						if k == "then" || k == "else" {
+							continue
+						}
+						cond[k] = v
+					}
+					m["if"] = cond
+				}
+				if then, ok := body["then"]; ok {
+					m["then"] = then
+				}
+				if e, ok := body["else"]; ok {
+					m["else"] = e
+				}
+				i = j
+				continue
+			}
+			if key == "nudge" {
+				list, err := v2ParseItems(kids, v2IndentWidth(kids))
+				if err != nil {
+					return nil, err
+				}
+				m["nudge"] = list
+				m["nudge_after"] = v2ParseInline(rest)
+				i = j
+				continue
+			}
 			if rest != "" {
-				// `nudge 5400` AND `item "name"` CARRY AN ARGUMENT AND A BLOCK, and both are
-				// statements rather than plain keys: the argument is the threshold or the name, and
-				// the children are the body. Every other key with an argument takes no children.
-				if key == "if" {
-					// `if <fact>` + `then`/`else` CHILDREN. A named branch has no condition of its
-					// own, so its body is the two step lists and nothing else.
-					body, err := v2ParseBlock(kids, v2IndentWidth(kids))
-					if err != nil {
-						return nil, err
-					}
-					out := map[string]any{"if": rest}
-					if then, ok := body["then"]; ok {
-						out["then"] = then
-					}
-					if e, ok := body["else"]; ok {
-						out["else"] = e
-					}
-					m[key] = out["if"]
-					// THE STEP'S OWN KEYS carry the branches, so they are hoisted onto the step.
-					if out["if"] != nil {
-						m["if"] = out["if"]
-						if then, ok := out["then"]; ok {
-							m["then"] = then
-						}
-						if e, ok := out["else"]; ok {
-							m["else"] = e
-						}
-					}
-					i = j
-					continue
-				}
-				if key == "nudge" {
-					// `nudge 5400` IS A THRESHOLD AND A BODY: the number is the loop's `every` and
-					// the items are its `clock`.
-					list, err := v2ParseItems(kids, v2IndentWidth(kids))
-					if err != nil {
-						return nil, err
-					}
-					m["nudge"] = list
-					m["nudge_after"] = v2ParseInline(rest)
-					i = j
-					continue
-				}
 				return nil, fmt.Errorf("line %d: `%s %s` has lines indented under it; a value written "+
 					"on one line takes none", head.no, key, rest)
 			}
 			sub := v2IndentWidth(kids)
-			// A LIST IS A RUN OF `item` BLOCKS. The first child's text decides, and nothing else
-			// does: `item` is the only word a list element can start with.
+			// A LIST IS A RUN OF `item` BLOCKS.
 			if firstKey, _ := v2Cut(strings.TrimSuffix(kids[0].text, ":")); firstKey == "item" {
 				items, err := v2ParseItems(kids, sub)
 				if err != nil {
@@ -360,13 +384,35 @@ func v2ParseBlock(block []v2line, base int) (map[string]any, error) {
 			continue
 		}
 
+		// A VERB WHOSE WHOLE ARGUMENT IS ON ITS LINE, WITH NO CHILDREN.
+		if v2IsVerbatim(key) {
+			sub := v2VerbArgument(key, v2UnquoteInline(rest))
+			if cmd, ok := sub["__cmd"]; ok {
+				delete(sub, "__cmd")
+				m["__cmd"] = cmd
+				i = j
+				continue
+			}
+			for k, v := range sub {
+				m[k] = v
+			}
+			i = j
+			continue
+		}
+
 		// ---- a key with a value on its line ----------------------------------------------
 		if rest == "" {
-			// A WORD ALONE IS `true`. `optional`, `clear`, `gpt` and `stopped` are flags whose
-			// presence IS the argument, and writing `optional true` would be a second way to say it.
 			m[key] = true
 			i = j
 			continue
+		}
+		// A PAIR IS TWO NUMBERS ON THE LINE, not a space-joined string.
+		if key == "at" || key == "fallback" {
+			if x, y, ok := v2PairOf(rest); ok {
+				m[key] = []any{x, y}
+				i = j
+				continue
+			}
 		}
 		v, err := v2ParseInlineValue(rest)
 		if err != nil {
@@ -421,145 +467,125 @@ func v2ParseItems(block []v2line, base int) ([]any, error) {
 	return out, nil
 }
 
-// v2ToLoop rewrites the 2.0 loop statement into the 1.0 `loop:` mapping the engine runs.
+// v2Normalise applies the rewrites a 2.0 document needs before the engine sees it.
 //
-// IT IS THE INVERSE OF `v2WriteRepeatFromLoop`, AND IT HAS TO INVENT THE `check`/`until` PAIR the 1.0
-// engine requires. The engine validates a loop as FOUR parts - a reading, a comparison, a bound boolean
-// and the test of that boolean - and 2.0 says the same thing with two, because the comparison IS the
-// test. So a `repeat` is compiled back into the shape the engine has always run, which is what lets
-// one reader feed an engine that was measured against real guests.
-func v2ToLoop(step map[string]any) error {
-	repeat, ok := step["repeat"].(map[string]any)
-	if !ok {
-		return nil
-	}
-	delete(step, "repeat")
-	loop := map[string]any{}
-
-	if do, ok := repeat["do"].([]any); ok && len(do) > 0 {
-		loop["do"] = do
-	} else if pause, ok := repeat["pause"]; ok {
-		// `pause N` IS THE POLL'S OWN SETTLE: the one `do` a pure poll has, written as a number on the
-		// loop because a `do` of one pause says the same thing twice.
-		loop["do"] = []any{map[string]any{"settle": pause}}
-	}
-	if max, ok := repeat["max"]; ok {
-		loop["max"] = max
-	}
-	// `nudge 5400` IS `every: 5400` + `clock: [...]`, which is the pair the engine reads.
-	if nudge, ok := repeat["nudge"].([]any); ok && len(nudge) > 0 {
-		loop["clock"] = nudge
-		if after, ok := repeat["nudge_after"]; ok {
-			loop["every"] = after
-		} else {
-			loop["every"] = 600
-		}
-	}
-	// THE CONDITION BECOMES THE CHECK, AND ITS `from:` STAYS IN THE CHECK *AND* NAMES THE READING.
-	//
-	// 1.0 SAYS THE SAME THING TWICE - `see: {name: X}` and `check: {from: X}` - and the two names
-	// agreed in all 154 loops. 2.0 says it once, as the condition's `from:`. So the reader writes it
-	// back to both places, which is what makes the compiled document identical.
-	cond, _ := repeat["until"].(map[string]any)
-	check := map[string]any{}
-	var from string
-	for k, v := range cond {
-		if k == "bind" {
-			continue
-		}
-		if k == "from" {
-			from, _ = v.(string)
-		}
-		check[k] = v
-	}
-	check["name"] = v2ConditionFactName(step, cond)
-	loop["check"] = check
-	if from != "" {
-		loop["see"] = map[string]any{"name": from}
-	}
-	loop["until"] = map[string]any{"fact": check["name"]}
-	step["loop"] = loop
-	// A LOOP WITH NO `do` DID HAVE ONE IN 1.0 - every one of the 154 has a `do`, and 119 of them are
-	// nothing but a pause. The emitter drops a `do` that is only a `settle`, because that pause is
-	// what a poll's body would be; the reader cannot tell "dropped" from "never there", so it
-	// restores the pause the poll needs. It is the ONE value a round trip may differ on, and the
-	// round-trip test excludes it by comparing the rest.
-	if _, ok := loop["do"]; !ok {
-		loop["do"] = []any{map[string]any{"settle": 2.0}}
-	}
-	return nil
-}
-
-// v2ConditionFactName is the boolean a loop's test binds.
+// IT IS THE LAST TRANSLATION, AND IT IS SMALL ON PURPOSE. The verbs that carry an argument and a
+// block are compiled here (`press text "x"` loses its marker into its siblings; `copy` into
+// `from`/`to`; `stop` into `method`/`save`); everything else reaches the engine as written, which is
+// what makes the vocabulary a vocabulary rather than a second language.
 //
-// IT IS DERIVED FROM THE STEP'S OWN NAME when the file did not say, so two loops in one file cannot
-// collide on a generic name like `done`. MEASURED: 47 loops used the name `done` at top level, and the
-// engine keeps one map - a name reused across a file is a boolean overwritten by the next loop, which
-// works only because each loop tests it immediately.
-func v2ConditionFactName(step map[string]any, cond map[string]any) string {
-	if n, ok := cond["bind"].(string); ok && n != "" {
-		return n
-	}
-	if n, ok := cond["name"].(string); ok && n != "" {
-		return n
-	}
-	name, _ := step["name"].(string)
-	return "v2_" + v2Slug(name)
-}
-
-// v2Slug turns a step name into a token safe for a fact name.
-func v2Slug(s string) string {
-	var b strings.Builder
-	for _, r := range strings.ToLower(s) {
-		switch {
-		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
-			b.WriteRune(r)
-		default:
-			b.WriteByte('_')
-		}
-	}
-	out := strings.Trim(b.String(), "_")
-	if out == "" {
-		return "fact"
-	}
-	if len(out) > 40 {
-		out = out[:40]
-	}
-	return out
-}
-
-// v2Normalise applies the statement rewrites a 2.0 document needs before it becomes a 1.0 document.
-//
-// IT WALKS EVERY STEP AND EVERY NESTED LIST, because a `repeat` may sit at the top level or inside an
-// `if`'s branch or inside another `repeat` - MEASURED: 3 of the 154 loops already nest an `if`.
-func v2Normalise(steps []any) error {
-	for _, raw := range steps {
+// IT WALKS NESTED LISTS because a `repeat` may hold an `if`, and an `if` may hold another `repeat` -
+// MEASURED: 3 of the 154 loops already nest a branch.
+func v2NormaliseList(steps *[]any) error {
+	out := make([]any, 0, len(*steps))
+	for _, raw := range *steps {
 		step, ok := raw.(map[string]any)
 		if !ok {
+			out = append(out, raw)
 			continue
 		}
-		if err := v2ToLoop(step); err != nil {
-			return err
+		// `run` COMPILES TO A COMMAND PLUS `via:`, and the engine reads one key per transport.
+		if cmd, ok := step["__cmd"]; ok {
+			delete(step, "__cmd")
+			via, _ := step["via"].(string)
+			delete(step, "via")
+			switch via {
+			case "ssh":
+				step["ssh"] = cmd
+			case "adb":
+				step["adb"] = cmd
+			default:
+				step["run"] = cmd
+			}
+		}
+		// A MARKER VERB FLATTENS INTO ITS SIBLINGS. `press` says the step is input and its fields say
+		// which; `copy`/`stop`/`control` are the same shape.
+		if b, ok := step["boot"].(map[string]any); ok {
+			delete(step, "boot")
+			step["boot"] = true
+			if d, ok := b["disk"]; ok {
+				ds := map[string]any{"name": "the machine's disk"}
+				if err := v2DiskFields(ds, d); err != nil {
+					return err
+				}
+				out = append(out, ds)
+				delete(b, "disk")
+			}
+			for k, v := range b {
+				step[k] = v
+			}
+		}
+		if m, ok := step["press"].(map[string]any); ok {
+			delete(step, "press")
+			step["press"] = true
+			for k, v := range m {
+				step[k] = v
+			}
+		}
+		if m, ok := step["copy"].(map[string]any); ok {
+			delete(step, "copy")
+			step["copy"] = true
+			for k, v := range m {
+				step[k] = v
+			}
+		}
+		if m, ok := step["stop"].(map[string]any); ok {
+			delete(step, "stop")
+			step["stop"] = true
+			for k, v := range m {
+				step[k] = v
+			}
 		}
 		for _, key := range []string{"do", "then", "else"} {
 			if list, ok := step[key].([]any); ok {
-				if err := v2Normalise(list); err != nil {
+				if err := v2NormaliseList(&list); err != nil {
 					return err
 				}
+				step[key] = list
 			}
 		}
-		if loop, ok := step["loop"].(map[string]any); ok {
-			for _, key := range []string{"do", "clock"} {
-				if list, ok := loop[key].([]any); ok {
-					if err := v2Normalise(list); err != nil {
+		if rep, ok := step["repeat"].(map[string]any); ok {
+			for _, key := range []string{"do", "nudge"} {
+				if list, ok := rep[key].([]any); ok {
+					if err := v2NormaliseList(&list); err != nil {
 						return err
 					}
+					rep[key] = list
 				}
 			}
 		}
+		out = append(out, step)
+	}
+	*steps = out
+	return nil
+}
+
+// v2DiskFields expands a folded `disk:` mapping into the keys the engine creates a disk with.
+func v2DiskFields(dst map[string]any, d any) error {
+	switch t := d.(type) {
+	case string:
+		dst["disk"] = t
+	case map[string]any:
+		if f, ok := t["file"].(string); ok {
+			dst["disk"] = f
+		}
+		if v, ok := t["size"]; ok {
+			dst["disk_gb"] = v
+		}
+		for from, to := range map[string]string{
+			"gpt": "disk_gpt", "esp_mib": "disk_esp_mib",
+			"min_mb": "disk_min_mb", "wait": "disk_settle",
+		} {
+			if v, ok := t[from]; ok {
+				dst[to] = v
+			}
+		}
+	default:
+		return fmt.Errorf("`disk:` takes a file name or a mapping, got %T", d)
 	}
 	return nil
 }
+
 
 // ---- the small readers ---------------------------------------------------------------------
 
@@ -691,4 +717,110 @@ func v2Size(s string) (int, int, error) {
 		return 0, 0, fmt.Errorf("%q is not a height", parts[1])
 	}
 	return w, h, nil
+}
+
+// v2IsVerbatim reports whether a key is a verb whose required argument sits on its own line and whose
+// optional parts are indented under it.
+//
+// THE LIST IS SHORT BECAUSE MOST KEYS DO NOT NEED IT: `expect`, `read` and `repeat` take a mapping and
+// nothing on the line, so they follow the plain rule. These six take both halves.
+func v2IsVerbatim(key string) bool {
+	switch key {
+	case "press", "run", "copy", "stop", "control", "boot":
+		return true
+	}
+	return false
+}
+
+// v2VerbArgument turns the words after a verb into the fields the executor reads.
+func v2VerbArgument(verb, rest string) map[string]any {
+	out := map[string]any{}
+	// THE MARKER IS ALWAYS PRESENT, EVEN WITH NO ARGUMENT: it is what makes `template`/`to` a copy's
+	// arguments rather than sub-keys with no owner.
+	out[verb] = true
+	if rest == "" {
+		return out
+	}
+	switch verb {
+	case "press":
+		if first, after := v2Cut(rest); first == "text" {
+			out["text"] = v2ParseInline(after)
+			return out
+		}
+		if x, y, ok := v2PairOf(rest); ok {
+			out["click"] = []any{x, y}
+			return out
+		}
+		if first, after := v2Cut(rest); first == "colour" {
+			out["colour"] = v2ParseInline("[" + after + "]")
+			return out
+		}
+		out["key"] = rest
+	case "run":
+		out["__cmd"] = v2UnquoteInline(rest)
+	case "copy":
+		if from, to, ok := v2TwoPaths(rest); ok {
+			out["from"] = from
+			out["to"] = to
+		}
+	case "stop":
+		out = map[string]any{"stop": true, "method": v2UnquoteInline(rest)}
+	case "control":
+		out = map[string]any{"control": true, "acpi": v2UnquoteInline(rest)}
+	}
+	return out
+}
+
+// v2TwoPaths reads `a "b c"` into its two arguments, honouring quotes.
+func v2TwoPaths(s string) (string, string, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "", "", false
+	}
+	var first string
+	if s[0] == '"' {
+		end := strings.IndexByte(s[1:], '"')
+		if end < 0 {
+			return "", "", false
+		}
+		first = s[1 : 1+end]
+		s = strings.TrimSpace(s[2+end:])
+	} else {
+		i := strings.IndexAny(s, " \t")
+		if i < 0 {
+			return "", "", false
+		}
+		first = s[:i]
+		s = strings.TrimSpace(s[i:])
+	}
+	second := v2UnquoteInline(s)
+	if second == "" {
+		return "", "", false
+	}
+	return first, second, true
+}
+
+// v2PairOf reads `960 628` as two numbers.
+func v2PairOf(s string) (int, int, bool) {
+	f := strings.Fields(s)
+	if len(f) != 2 {
+		return 0, 0, false
+	}
+	x, e1 := strconv.Atoi(f[0])
+	y, e2 := strconv.Atoi(f[1])
+	if e1 != nil || e2 != nil {
+		return 0, 0, false
+	}
+	return x, y, true
+}
+
+// v2UnquoteInline strips the quotes from a whole argument, so `run "a b"` is the command `a b`.
+func v2UnquoteInline(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
+		if v, ok := v2ParseInline(s).(string); ok {
+			return v
+		}
+	}
+	return s
 }

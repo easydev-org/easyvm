@@ -45,7 +45,7 @@ func TestRectAtScalesByTheScreenItWasWrittenFor(t *testing.T) {
 // This test reads it the way the executor does.
 func TestRectAtIsReadFromInsideTheSeeMapping(t *testing.T) {
 	spec := map[string]any{
-		"see": map[string]any{
+		"read": map[string]any{
 			"name": "recovery", "of": []any{"text"},
 			"rect": []any{760, 200, 1400, 560},
 			// THE FILE'S OWN LINE, copied from macos/15/steps/setup.walk.
@@ -53,7 +53,7 @@ func TestRectAtIsReadFromInsideTheSeeMapping(t *testing.T) {
 			"scale":   float64(6), "wait": float64(5),
 		},
 	}
-	raw := spec["see"].(map[string]any)
+	raw := spec["read"].(map[string]any)
 	at, ok := pairOfMapping(raw, "rect_at")
 	if !ok {
 		t.Fatal("`rect_at:` inside the `see:` mapping was not found - it is not on the step")

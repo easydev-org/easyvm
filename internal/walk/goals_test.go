@@ -1230,18 +1230,18 @@ func TestAnInstallLegPublishesItsDisk(t *testing.T) {
 		// A STEP THAT WRITES THE ARTIFACT.
 		publishes := false
 		for _, s := range doc.Steps {
-			if strings.Contains(s.Get("compress"), "out") {
+			if strings.Contains(s.Get("save"), "out") || strings.Contains(s.Get("compress"), "out") {
 				publishes = true
 			}
 		}
 		if !publishes {
-			t.Errorf("%s has no `compress:` step, so `--out` writes nothing and the workflow's "+
+			t.Errorf("%s has no `save:` on its stop step, so `--out` writes nothing and the workflow's "+
 				"`\"out\"` file is never created - measured on zorin-install, whose `-disk` artifact "+
 				"was 518 bytes while its `-vm-disk` was 10 GiB", rel)
 		}
 		// AND THE VARIABLE IT NAMES IS DECLARED.
 		if _, ok := doc.Vars["out"]; !ok {
-			t.Errorf("%s has a `compress:` naming `{{ out }}` but declares no `out` variable, so the "+
+			t.Errorf("%s has a `save:` naming `{{ out }}` but declares no `out` variable, so the "+
 				"engine cannot resolve the path", rel)
 		}
 	}
@@ -1251,7 +1251,7 @@ func TestAnInstallLegPublishesItsDisk(t *testing.T) {
 	t.Logf("checked %d install walkthrough(s)", checked)
 }
 
-// A `compress:` BEFORE A `shutdown:` CANNOT WORK, BECAUSE QEMU HOLDS THE DISK OPEN.
+// A `save:` BEFORE A `stop:` CANNOT WORK, BECAUSE QEMU HOLDS THE DISK OPEN.
 //
 // MEASURED ON zorin-install, WHICH ANSWERED ALL 21 STEPS AND FAILED ON THE LAST ONE:
 //
@@ -1290,15 +1290,22 @@ func TestAnInstallStopsTheMachineBeforePublishingTheDisk(t *testing.T) {
 		checked++
 		shutdownAt, compressAt := -1, -1
 		for i, s := range doc.Steps {
-			if s.Has("shutdown") {
+			// `stop:` IS THE ONE VERB THAT STOPS THE MACHINE; `save:` is the verb that publishes the
+			// disk. They may be one step or two, and either is fine as long as the stop comes first.
+			if s.Has("stop") || s.Has("shutdown") {
 				shutdownAt = i
+				if s.Has("save") || s.Has("compress") {
+					compressAt = i
+				}
 			}
-			if s.Has("compress") {
-				compressAt = i
+			if s.Has("save") || s.Has("compress") {
+				if compressAt < 0 {
+					compressAt = i
+				}
 			}
 		}
 		if compressAt < 0 {
-			t.Errorf("%s has no `compress:` step, so `--out` writes nothing", rel)
+			t.Errorf("%s has no `save:` on its stop step, so `--out` writes nothing", rel)
 			continue
 		}
 		if shutdownAt < 0 {
@@ -1326,7 +1333,7 @@ func TestAnInstallStopsTheMachineBeforePublishingTheDisk(t *testing.T) {
 		// `kill` IS NOT A COMPROMISE: THE INSTALLER HAS ALREADY FINISHED, because the step above waits
 		// for the install to complete. The journal replay it costs is paid by the next boot, which is
 		// the stage after this one.
-		shutdown := doc.Steps[shutdownAt].Get("shutdown")
+		shutdown := stopMethod(doc.Steps[shutdownAt])
 		if shutdown != "kill" {
 			t.Errorf("%s uses `shutdown: %s`. An install leg must use `kill`: there is no ssh to ask "+
 				"with, a live installer ignores ACPI, and waiting for a button nothing presses ends "+
@@ -1518,7 +1525,7 @@ func TestAnSSHLegWritesTheDiskItsWorkflowPublishes(t *testing.T) {
 		// assistant file writes none, and demanding `compress:` from those would be wrong.
 		produces := false
 		for _, s := range doc.Steps {
-			if s.Has("compress") {
+			if s.Has("save") || s.Has("compress") {
 				produces = true
 				break
 			}
@@ -1534,7 +1541,7 @@ func TestAnSSHLegWritesTheDiskItsWorkflowPublishes(t *testing.T) {
 			// was publishing nothing. `install.yaml` remains for the other BSD and Linux files.
 			case "ssh.yaml", "vm-configure.yaml", "dev.yaml", "install.yaml", "gbi.yaml":
 				checked++
-				t.Errorf("%s has no `compress:` step, so its workflow publishes a disk that is "+
+				t.Errorf("%s has no `save:` on its stop step, so its workflow publishes a disk that is "+
 					"never written. Measured twice: linux-ubuntu-ssh's every proof passed and "+
 					"`publish the disk` reported `no disk to publish at .../linux-ubuntu-ssh.qcow2`, "+
 					"and windows-vm-configure said the same for windows11-vm-configure.qcow2 after "+
@@ -1769,7 +1776,7 @@ func TestEveryCreatedDiskIs128GiB(t *testing.T) {
 // `[disk, utility]` therefore waits out its whole budget on a menu that is plainly on screen, which
 // it did for thirty minutes on every attempt.
 //
-// THE GATE IS NOW A `loop:` WITH ITS THREE PARTS WRITTEN DOWN - a wait, an `ocr:` reading, and a
+// THE GATE IS NOW A `repeat:` WITH ITS THREE PARTS WRITTEN DOWN - a wait, an `ocr:` reading, and a
 // condition - so the rectangle and its enlargement are beside the reading rather than inside the
 // condition that uses them.
 func TestTheMacOSRecoveryGateAcceptsReadableRows(t *testing.T) {
@@ -1788,47 +1795,37 @@ func TestTheMacOSRecoveryGateAcceptsReadableRows(t *testing.T) {
 	if gate == nil {
 		t.Fatal("no `wait for the recovery menu` step")
 	}
-	loop, ok := gate.Spec["loop"].(map[string]any)
+	loop, ok := gate.Spec["repeat"].(map[string]any)
 	if !ok {
-		t.Fatal("the recovery gate is not a `loop:`. The three parts - the wait, the `ocr:` reading " +
+		t.Fatal("the recovery gate is not a `repeat:`. The three parts - the wait, the `ocr:` reading " +
 			"and the condition - have to be visible, because the reading's region and enlargement " +
 			"are what make it work at 640x480")
 	}
-	// THE ENLARGEMENT BELONGS TO THE READ, AND THE READ IS THE `check:`.
-	//
-	// `see:` captures a frame and names it; it has no `scale:`, because scaling is a property of
-	// asking a question of small text rather than of taking the picture. A file that needs a
-	// 640x480 row to be legible says `scale: 6` where it reads that row.
-	check, ok := loop["check"].(map[string]any)
-	if !ok {
-		t.Fatal("the loop has no `check:` - a condition with no comparison decides nothing")
-	}
-	if scale, _ := toFloat(check["scale"]); scale < 6 {
-		t.Errorf("the reading crops at scale %.0f. Measured on the real 640x480 frame: at scale 6 "+
-			"four rows read, at scale 2 only two", scale)
-	}
-	if _, has := loop["see"]; !has {
-		t.Fatal("the loop has no `see:` - a condition with no capture reads the screen itself")
-	}
+	// THE ENLARGEMENT BELONGS TO THE QUESTION, and the question is the loop's own `until:`. A
+	// `read:` captures a frame and names it and has no `scale:`; a file that needs a 640x480 row to
+	// be legible says `scale: 6` where it asks about that row.
 	until, ok := loop["until"].(map[string]any)
 	if !ok {
+		t.Fatal("the loop has no `until:` - a condition with no comparison decides nothing")
+	}
+	if scale, _ := toFloat(until["scale"]); scale < 6 {
+		t.Errorf("the condition crops at scale %.0f. Measured on the real 640x480 frame: at scale 6 "+
+			"four rows read, at scale 2 only two", scale)
+	}
+	if _, has := until["from"]; !has {
+		t.Fatal("the loop's condition names no picture - it would read the screen itself")
+	}
+	if _, ok := loop["until"].(map[string]any); !ok {
 		t.Fatal("the loop has no `until:`")
 	}
-	// `until:` TESTS A BOOLEAN AND NOTHING ELSE - the comparison belongs to `check:`.
-	if _, ok := until["fact"]; !ok {
-		t.Error("`until:` is not `{fact: ...}`. A loop's stop test must be a boolean reference: " +
-			"when it also carried the word-sets it both named a reading and decided what it " +
-			"meant, so \"the text was wrong\" and \"stop the loop\" were one expression")
+	// `until:` TESTS A BOOLEAN AND NOTHING ELSE - the comparison belongs to `expect:`.
+	// THE CONDITION CARRIES THE COMPARISON ITSELF: a `repeat`'s `until` IS the test, so there is
+	// no separate `expect` whose boolean the loop then reads.
+	if mode, _ := until["mode"].(string); mode != "says_any" && mode != "text" && mode != "" {
+		t.Errorf("the condition's mode is %q, want says_any or text - the recovery menu is four "+
+			"labelled rows and any one of them is enough", mode)
 	}
-	check, ok = loop["check"].(map[string]any)
-	if !ok {
-		t.Fatal("the loop has no `check:` - the comparison that turns the reading into a boolean")
-	}
-	if mode, _ := check["mode"].(string); mode != "says_any" && mode != "text" {
-		t.Errorf("the check's mode is %q, want says_any - the recovery menu is four labelled rows "+
-			"and any one of them is enough", mode)
-	}
-	sets, _ := check["words"].([]any)
+	sets, _ := until["words"].([]any)
 	if len(sets) < 3 {
 		t.Errorf("the condition accepts %d row(s). The menu has four labelled rows and two hits is "+
 			"the Python implementation's own rule, because one row can be cut off by a redraw; "+
@@ -1938,7 +1935,7 @@ func TestEveryOCRStepNamesItsRegionAndSize(t *testing.T) {
 				}
 			}
 			// a loop carries its reading under `ocr:` too
-			if loop, ok := m["loop"].(map[string]any); ok {
+			if loop, ok := m["repeat"].(map[string]any); ok {
 				check(loop, where+" (loop)")
 			}
 			for _, sub := range []string{"do", "actions"} {
@@ -1975,9 +1972,9 @@ func TestEveryOCRStepNamesItsRegionAndSize(t *testing.T) {
 // declared key with no branch is exactly the "step that reports success and does nothing" the
 // vocabulary exists to refuse.
 //
-// A LOOP IS `loop:`. A FIXED NUMBER OF PRESSES IS A `do:` LIST. Both are visible in the file, which
+// A LOOP IS `repeat:`. A FIXED NUMBER OF PRESSES IS A `do:` LIST. Both are visible in the file, which
 // `repeat: [10, 4]` never was - it could not even say WHICH presses it meant.
-func TestThereIsNoRepeatKey(t *testing.T) {
+func TestThereIsNoLoopKey(t *testing.T) {
 	root := filepath.Join("..", "..")
 	files := globStepsAny(root)
 	checked := 0
@@ -1993,10 +1990,10 @@ func TestThereIsNoRepeatKey(t *testing.T) {
 			if !ok {
 				return
 			}
-			if _, ok := m["repeat"]; ok {
-				t.Errorf("%s: %s still has `repeat:`. It had no implementation - the presses it "+
-					"described never happened - so it is removed from the vocabulary. Use `loop:` "+
-					"for a loop and a `do:` list for a fixed number of presses", rel, where)
+			// `loop` WAS THE 1.0 NAME. `repeat` is the one statement now, and a document that still
+			// holds `loop:` is a document compiled by the engine the migration replaced.
+			if _, ok := m["loop"]; ok {
+				t.Errorf("%s: %s still has `loop:`; the one loop is `repeat:`", rel, where)
 			}
 			for k, v := range m {
 				switch t := v.(type) {
@@ -2017,7 +2014,7 @@ func TestThereIsNoRepeatKey(t *testing.T) {
 	t.Logf("checked %d step(s)", checked)
 }
 
-// A RETRY IS A `loop:`, NOT A `timeout:` ON A CONDITION.
+// A RETRY IS A `repeat:`, NOT A `timeout:` ON A CONDITION.
 //
 // 43 STEPS USED TO HIDE A RETRY IN THE EXECUTOR: `until_any:` plus `timeout: 1800` plus `poll: 10`
 // was a `for` loop in Go, so the file said WHAT it looked for and never HOW MANY TIMES it would look,
@@ -2031,7 +2028,7 @@ func TestThereIsNoRepeatKey(t *testing.T) {
 //     max: 180                      <- how many times
 //     do: [{wait: 10}]              <- what it waits, and any nudge, between attempts
 //     ocr: {name: recovery, ...}    <- what it reads (a TEXT variable)
-//     check: {name: up, from: recovery, says_any: [...]}   <- the comparison (a BOOLEAN)
+//     expect: {name: up, from: recovery, says_any: [...]}   <- the comparison (a BOOLEAN)
 //     until: {fact: up}             <- the test, and nothing else
 //
 // SO `timeout:` ON A CONDITION IS REFUSED, because accepting it would silently restore the loop.
@@ -2074,8 +2071,8 @@ func TestAConditionDoesNotCarryATimeout(t *testing.T) {
 						break
 					}
 					if _, ok := m[k]; ok {
-						t.Errorf("%s: %s has a condition with %q. A retry is a `loop:` with "+
-							"`max:`, `do:`, `ocr:`, `check:` and `until: {fact: ...}` - a `timeout:` "+
+						t.Errorf("%s: %s has a condition with %q. A retry is a `repeat:` with "+
+							"`max:`, `do:`, `ocr:`, `expect:` and `until: {fact: ...}` - a `timeout:` "+
 							"on a condition is a hidden loop in the executor, where the file cannot "+
 							"say how many times it looks", rel, where, k)
 					}
@@ -2161,12 +2158,16 @@ func TestEveryAssetNameIsAKind(t *testing.T) {
 			if strings.HasPrefix(trimmed, "#") {
 				continue
 			}
+			// THREE SPELLINGS: `fetch: x` and `fetch == x` are the two older forms, and `fetch x` is
+			// the 2.0 one - a key and its value on one line, which is what the tree holds now.
 			var value string
 			switch {
 			case strings.HasPrefix(trimmed, "fetch:"), strings.HasPrefix(trimmed, "asset:"):
 				value = strings.TrimSpace(strings.SplitN(trimmed, ":", 2)[1])
 			case strings.HasPrefix(trimmed, "fetch =="), strings.HasPrefix(trimmed, "asset =="):
 				value = strings.TrimSpace(strings.SplitN(trimmed, "==", 2)[1])
+			case strings.HasPrefix(trimmed, "fetch "), strings.HasPrefix(trimmed, "asset "):
+				value = strings.TrimSpace(strings.SplitN(trimmed, " ", 2)[1])
 			default:
 				continue
 			}
@@ -2284,7 +2285,7 @@ func TestEveryStageRequiresTheAssetsItsLegPulls(t *testing.T) {
 		doc, err := Load(path, nil)
 		if err != nil {
 			// AN UPSTREAM `.yaml` THAT HAS NOT BEEN CONVERTED YET is skipped rather than failed: it
-			// still writes `require:` and the old `see:` shape, which this vocabulary no longer
+			// still writes `require:` and the old `read:` shape, which this vocabulary no longer
 			// accepts. The list of those files is `*.yaml` WITHOUT a `.walk` beside it, and
 			// `TestEveryWalkthroughLoads` reports them separately so the count stays honest.
 			if strings.HasSuffix(path, ".yaml") && fileExistsNoWalk(root, stage) {
@@ -2379,7 +2380,7 @@ func globSteps(root, family string) []string {
 	// file is being migrated TO.
 	//
 	// THIS IS A TEMPORARY RULE AND IT IS NAMED AS ONE: the upstream `.yaml` files came back with the
-	// merge and still use `ocr:` and the old `see:` shape, which this vocabulary no longer accepts.
+	// merge and still use `ocr:` and the old `read:` shape, which this vocabulary no longer accepts.
 	// They are kept until they are converted, and `TestEveryWalkthroughLoads` must not fail on a file
 	// whose replacement is already there.
 	seen := map[string]bool{}
@@ -2431,19 +2432,19 @@ func walkPathFor(root, rel string) string {
 
 // A LOOP WITHOUT `until:` RUNS FOREVER, AND NOTHING BEFORE A GUEST IS STARTED SAYS SO.
 //
-// MEASURED. Adding page-arrival waits to cachyos cut each wait's `check:` block short, and the
+// MEASURED. Adding page-arrival waits to cachyos cut each wait's `expect:` block short, and the
 // `until: {fact: here}` on SEVEN of them went with it. The tree still loaded, `easyvm check` still
 // printed all sixty steps, and `go test ./internal/walk/` was green - because `until:` is enforced
 // in `internal/run/loop.go` when the loop RUNS:
 //
-//	error: the location page arrives after welcome: `loop:` must say `until: {fact: <name>}` -
-//	       the boolean a `check:` step produced
+//	error: the location page arrives after welcome: `repeat:` must say `until: {fact: <name>}` -
+//	       the boolean a `expect:` step produced
 //
 // - which is step 18 of 60, three minutes into an install, on a machine that was already up. A
 // loop with no `until:` presses or waits until the stage's timeout, so the cost of catching this
 // late is the whole budget of every loop in the file.
 //
-// THE RULE IS CHEAP AND TOTAL: every `loop:` names the boolean it ends on.
+// THE RULE IS CHEAP AND TOTAL: every `repeat:` names the boolean it ends on.
 func TestEveryLoopSaysWhatEndsIt(t *testing.T) {
 	root := filepath.Join("..", "..")
 	// `globStepsAny` RATHER THAN A `.yaml` GLOB, so a mid-migration tree is read in the format each
@@ -2458,24 +2459,24 @@ func TestEveryLoopSaysWhatEndsIt(t *testing.T) {
 			continue // TestEveryWalkthroughLoads reports the reason
 		}
 		for _, s := range f.Steps {
-			if !s.Has("loop") {
+			if !s.Has("repeat") {
 				continue
 			}
 			loops++
-			inner, ok := s.Spec["loop"].(map[string]any)
+			inner, ok := s.Spec["repeat"].(map[string]any)
 			if !ok {
-				t.Errorf("%s: %q: `loop:` is not a mapping", rel, s.Name)
+				t.Errorf("%s: %q: `repeat:` is not a mapping", rel, s.Name)
 				continue
 			}
 			if _, ok := inner["until"]; !ok {
-				t.Errorf("%s: %q: `loop:` has no `until:`, so it ends only when the stage times "+
-					"out. Say `until: {fact: <name>}` naming the boolean its `check:` binds",
+				t.Errorf("%s: %q: `repeat:` has no `until:`, so it ends only when the stage times "+
+					"out. Say `until: {fact: <name>}` naming the boolean its `expect:` binds",
 					rel, s.Name)
 			}
 		}
 	}
 	if loops == 0 {
-		t.Fatal("no `loop:` found anywhere, so this test checked nothing")
+		t.Fatal("no `repeat:` found anywhere, so this test checked nothing")
 	}
 }
 
@@ -2537,20 +2538,20 @@ func TestNoCheckNamesAPhrase(t *testing.T) {
 			continue // TestEveryWalkthroughLoads reports the reason
 		}
 		for _, s := range f.Steps {
-			if c, ok := s.Spec["check"].(map[string]any); ok {
+			if c, ok := s.Spec["expect"].(map[string]any); ok {
 				visit(rel, s.Name, c)
 			}
-			if lp, ok := s.Spec["loop"].(map[string]any); ok {
-				if c, ok := lp["check"].(map[string]any); ok {
+			if lp, ok := s.Spec["repeat"].(map[string]any); ok {
+				if c, ok := lp["expect"].(map[string]any); ok {
 					visit(rel, s.Name, c)
 				}
 			}
 		}
 	}
 	if checks == 0 {
-		t.Fatal("no `check:` found anywhere, so this test checked nothing")
+		t.Fatal("no `expect:` found anywhere, so this test checked nothing")
 	}
-	t.Logf("checked %d `check:` block(s)", checks)
+	t.Logf("checked %d `expect:` block(s)", checks)
 }
 
 // stepsOf turns the raw list inside a `loop: do:` or an `if: then:` into Steps, so a scan can descend
@@ -2627,7 +2628,7 @@ func TestEveryCoordinateFitsTheFrameItDeclares(t *testing.T) {
 					}
 				}
 				// And the steps inside a loop or a branch are steps too.
-				if lp, ok := s.Spec["loop"].(map[string]any); ok {
+				if lp, ok := s.Spec["repeat"].(map[string]any); ok {
 					if inner, ok := lp["do"].([]any); ok {
 						scan(stepsOf(inner))
 					}
@@ -2666,11 +2667,11 @@ func TestNoLoopWaitsOnAWordThatCannotAppear(t *testing.T) {
 			continue
 		}
 		for _, s := range f.Steps {
-			lp, ok := s.Spec["loop"].(map[string]any)
+			lp, ok := s.Spec["repeat"].(map[string]any)
 			if !ok {
 				continue
 			}
-			check, ok := lp["check"].(map[string]any)
+			check, ok := lp["until"].(map[string]any)
 			if !ok {
 				continue
 			}
@@ -2711,7 +2712,7 @@ func TestNoLoopWaitsOnAWordThatCannotAppear(t *testing.T) {
 // UPSTREAM file the merge brought back and test the wrong one, or find nothing at all.
 //
 // THE `.yaml` BRANCH IS TEMPORARY AND NAMED AS ONE: the upstream files came back with the merge and
-// still write `ocr:` and the old `see:` shape, which this vocabulary no longer accepts. Until each is
+// still write `ocr:` and the old `read:` shape, which this vocabulary no longer accepts. Until each is
 // converted, a test must read the `.walk` beside it.
 func globBoth(root, family, stage string) []string {
 	for _, ext := range []string{".walk", ".yaml"} {
@@ -2734,4 +2735,12 @@ func fileExistsNoWalk(root, stage string) bool {
 	}
 	_, err := os.Stat(filepath.Join(root, base+".yaml"))
 	return err == nil
+}
+
+// stopMethod is how a step stops the machine, whichever spelling the document holds.
+func stopMethod(s Step) string {
+	if m := s.Get("method"); m != "" {
+		return m
+	}
+	return s.Get("shutdown")
 }

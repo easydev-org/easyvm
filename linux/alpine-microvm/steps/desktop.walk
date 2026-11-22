@@ -26,26 +26,41 @@
 #    With only `ttyS0` the guest is perfectly healthy and the video is black.
 
 walkthrough "alpine microvm - a desktop on the VGA adapter, and a recording of it"
-  resolution 1024x768
-  # THE VIDEO IS THE ARTIFACT, so its size is stated rather than inherited.
-  recording_resolution 1024x768
+resolution 1024x768
+# THE VIDEO IS THE ARTIFACT, so its size is stated rather than inherited.
+recording_resolution 1024x768
 
-  needs alpine-vmlinuz alpine-initramfs alpine.qcow2
+step "needs alpine-vmlinuz alpine-initramfs alpine.qcow2"
+  needs [alpine-vmlinuz, alpine-initramfs, alpine.qcow2]
 
   # THE ROOT FILESYSTEM, BUILT BY THE CI STEP AND NOT INSTALLED BY THIS FILE.
   # A microvm has no firmware and no installer: the disk arrives ready, which is what makes the run
   # ninety seconds rather than forty minutes.
+step "disk alpine.qcow2"
   disk alpine.qcow2
 
-  boot as a microvm from kernel "alpine-vmlinuz" and initramfs "alpine-initramfs" with "console=tty0 console=ttyS0 root=/dev/vda rw rootfstype=ext4", waiting up to 180s
+step "boot as a microvm from kernel \"alpine-vmlinuz\" and initramfs \"alpine-initramfs\" with \"console=tty0 console=ttyS0 root=/dev/vda rw rootfstype=ext4\", waiting up to 180s"
+  boot
+  initrd alpine-initramfs
+  kernel alpine-vmlinuz
+  kernel_append "console=tty0 console=ttyS0 root=/dev/vda rw rootfstype=ext4"
+  microvm
+  os microvm
+  timeout 180
 
   # THE GUEST SAYS THIS ON ITS OWN SERIAL LINE, and it is the fact the boot worked: init finished and
   # getty is asking for a login.
-  the console will say "login"
+step "the console will say \"login\""
+  until login
+  from console
+  timeout 180
 
   # AND THIS IS THE PART THE OLD FILE COULD NOT DO. The recording runs for the whole walk, so these
   # twenty seconds are twenty frames of a login prompt drawn on the VGA adapter - which is what makes
   # the mp4 a picture of the guest rather than a black field.
-  wait 20s
+step "wait 20s"
+  settle 20
 
-  stop the machine by killing it, waiting up to 60s
+step "stop the machine by killing it, waiting up to 60s"
+  stop kill
+  timeout 60

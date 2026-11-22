@@ -178,6 +178,105 @@ func v2WriteBody(b *strings.Builder, indent string, m any) error {
 	if !ok {
 		return fmt.Errorf("expected a mapping, got %T", m)
 	}
+	// `press` IS A MARKER AND ITS SHAPE IS IN ITS SIBLINGS, so the step is rendered as one line
+	// rather than a key at a time.
+	// `stop` IS A MARKER WITH ITS METHOD BESIDE IT, so it is written as one line: `stop kill`.
+	if _, isStop := mm["stop"]; isStop {
+		method, _ := mm["method"].(string)
+		if method == "" {
+			method = "kill"
+		}
+		fmt.Fprintf(b, "%sstop %s\n", indent, v2Scalar(method))
+		inner := indent + v2Indent
+		if sv, ok := mm["save"]; ok {
+			fmt.Fprintf(b, "%ssave %s\n", inner, v2Inline(sv))
+		}
+		rest := map[string]any{}
+		for k, vv := range mm {
+			switch k {
+			case "stop", "method", "save", "name":
+				continue
+			}
+			rest[k] = vv
+		}
+		if len(rest) > 0 {
+			return v2WriteBody(b, indent, rest)
+		}
+		return nil
+	}
+	// `copy` IS A MARKER WITH `from`/`to` BESIDE IT: `copy a.sh /tmp/a.sh`.
+	if _, isCopy := mm["copy"]; isCopy {
+		from, _ := mm["from"].(string)
+		to, _ := mm["to"].(string)
+		inner := indent + v2Indent
+		if from != "" && to != "" {
+			fmt.Fprintf(b, "%scopy %s %s\n", indent, v2Scalar(from), v2Scalar(to))
+		} else if tpl, ok := mm["template"]; ok {
+			// A RENDERED COPY: `copy` then `template` and `to`. The template is what the engine
+			// renders, so there is no local file to name.
+			fmt.Fprintf(b, "%scopy\n", indent)
+			fmt.Fprintf(b, "%stemplate %s\n", inner, v2Inline(tpl))
+			fmt.Fprintf(b, "%sto %s\n", inner, v2Scalar(to))
+		} else {
+			fmt.Fprintf(b, "%scopy\n", indent)
+			if to != "" {
+				fmt.Fprintf(b, "%sto %s\n", inner, v2Scalar(to))
+			}
+		}
+		rest := map[string]any{}
+		for k, vv := range mm {
+			switch k {
+			case "copy", "from", "to", "template", "name":
+				continue
+			}
+			rest[k] = vv
+		}
+		if len(rest) > 0 {
+			return v2WriteBody(b, indent, rest)
+		}
+		return nil
+	}
+	if _, isInput := mm["press"]; isInput {
+		if line, ok := v2PressLine(mm); ok {
+			fmt.Fprintf(b, "%spress %s\n", indent, line)
+			// THE CHILDREN ARE THE OPTIONAL PARTS: `at` is where to click before typing, `double`
+			// makes it a double-click, `anchor` measures from the bottom. They are written indented,
+			// under the verb, because that is the rule for everything that is not required.
+			inner := indent + v2Indent
+			for _, k := range []string{"at", "double", "anchor", "fallback", "gap"} {
+				if vv, ok := mm[k]; ok {
+					if bv, isbool := vv.(bool); isbool && bv {
+						fmt.Fprintf(b, "%s%s\n", inner, k)
+						continue
+					}
+					fmt.Fprintf(b, "%s%s %s\n", inner, k, v2Inline(vv))
+				}
+			}
+			rest := map[string]any{}
+			for k, vv := range mm {
+				switch k {
+				case "press", "click", "text", "key", "colour", "button", "at", "double", "anchor",
+					"fallback", "gap", "clear", "modifier", "type_gap", "name":
+					continue
+				}
+				rest[k] = vv
+			}
+			// `clear` and `modifier` belong to the typing, and are written under it.
+			for _, k := range []string{"clear", "modifier", "type_gap"} {
+				if vv, ok := mm[k]; ok {
+					if bv, isbool := vv.(bool); isbool && bv {
+						fmt.Fprintf(b, "%s%s\n", inner, k)
+						continue
+					}
+					fmt.Fprintf(b, "%s%s %s\n", inner, k, v2Inline(vv))
+				}
+			}
+			if len(rest) > 0 {
+				return v2WriteBody(b, indent, rest)
+			}
+			return nil
+		}
+	}
 	// A NAMED BRANCH PUTS ITS `then`/`else` INSIDE THE `if`, because they are its children and a
 	// sibling `else` would read as a second statement. MEASURED: `if: uninitialised` + `else: [...]` is
 	// a real step in macos/26, with no `then` at all - a branch that runs only when the fact is FALSE.
@@ -242,7 +341,9 @@ func v2WriteEntry(b *strings.Builder, indent, key string, v any) error {
 		// once-only nudge.
 		return v2WriteRepeatFromLoop(b, indent, v)
 	case "repeat":
-		return v2WriteRepeat(b, indent, v)
+		// THE ENGINE READS `repeat` DIRECTLY, so the emitter writes what the document holds: `do`,
+		// `until`, `max`, `pause`, `nudge 5400`.
+		return v2WriteRepeatDirect(b, indent, v)
 	case "if":
 		return v2WriteIf(b, indent, v)
 	case "then", "else":
@@ -656,10 +757,72 @@ func v2LooksNumeric(s string) bool {
 	return false
 }
 
+// alwaysQuote writes a value in quotes whatever it contains, for the places the reader requires them.
+func alwaysQuote(s string) string {
+	return `"` + strings.ReplaceAll(s, `"`, `\"`) + `"`
+}
+
 // v2Pair renders a two-number list the way a header wants it: `1920x1080`.
 func v2Pair(v []any) string {
 	if len(v) != 2 {
 		return v2Inline(v)
 	}
 	return v2Inline(v[0]) + "x" + v2Inline(v[1])
+}
+
+// v2PressLine renders the one input verb from the fields beside the marker.
+func v2PressLine(m map[string]any) (string, bool) {
+	if t, ok := m["text"].(string); ok {
+		return "text " + v2Scalar(t), true
+	}
+	if at, ok := m["click"].([]any); ok && len(at) == 2 {
+		return v2Inline(at[0]) + " " + v2Inline(at[1]), true
+	}
+	if k, ok := m["key"].(string); ok {
+		return k, true
+	}
+	if c, ok := m["colour"].([]any); ok {
+		return "colour " + strings.Trim(v2Inline(c), "[]"), true
+	}
+	return "", false
+}
+
+// v2WriteRepeatDirect writes a `repeat` the engine already holds, so nothing is translated.
+func v2WriteRepeatDirect(b *strings.Builder, indent string, v any) error {
+	raw, ok := v.(map[string]any)
+	if !ok {
+		return fmt.Errorf("`repeat` takes a mapping")
+	}
+	fmt.Fprintf(b, "%srepeat\n", indent)
+	inner := indent + v2Indent
+	if do, ok := raw["do"].([]any); ok && len(do) > 0 {
+		if err := v2WriteStepList(b, inner, "do", do); err != nil {
+			return err
+		}
+	}
+	if until, ok := raw["until"].(map[string]any); ok {
+		fmt.Fprintf(b, "%suntil\n", inner)
+		if err := v2WriteBody(b, inner+v2Indent, until); err != nil {
+			return err
+		}
+	}
+	for _, k := range []string{"max", "pause"} {
+		if vv, ok := raw[k]; ok {
+			fmt.Fprintf(b, "%s%s %s\n", inner, k, v2Inline(vv))
+		}
+	}
+	if clock, ok := raw["nudge"].([]any); ok && len(clock) > 0 {
+		after := ""
+		if vv, ok := raw["nudge_after"]; ok {
+			after = " " + v2Inline(vv)
+		}
+		fmt.Fprintf(b, "%snudge%s\n", inner, after)
+		for _, item := range clock {
+			im, _ := item.(map[string]any)
+			if err := v2WriteStep(b, inner+v2Indent, im, "item"); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }

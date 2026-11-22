@@ -1,32 +1,38 @@
 walkthrough "linux-zorin - sshd"
-  resolution 1920x1080
-  password admin
-  var out == {default: out/distro.qcow2, from: args.out}
-  # THE ACCOUNT THIS DISK HAS IS `vmuservmuser` - see the manjaro header for the measurement.
-  #
-  # ubiquity fills the username from the full name as it is typed, so its two `type:` steps
-  # APPEND and the account is created with the value twice.
-  # `ssh_user` IS THE HEADER KEY THE SSH CLIENT READS - `var user` IS NOT.
-  #
-  # MEASURED ON RUN 44611943331 (manjaro), whose failure was NOT a refused port but
-  #
-  #	wait for sshd: the port is open but no shell answers: ssh: handshake failed: ssh: unable to
-  #	authenticate, attempted methods [none password], no supported methods remain
-  #
-  # - the daemon reached the guest and offered the WRONG NAME. `require_ssh:` and every `ssh ==`
-  # step authenticate as `File.SSHUser`, which is parsed from a top-level `ssh_user:` key
-  # (internal/walk/walk.go) and defaults to `vmuser`. Setting `var user` changes what gets TYPED on
-  # the console; it does not change who the client logs in as.
-  header ssh_user == vmuservmuser
-  var user == {default: vmuservmuser, from: args.user}
-  header recording_resolution == [1920, 1080]
+resolution 1920x1080
+recording_resolution 1920x1080
+# THE ACCOUNT THIS DISK HAS IS `vmuservmuser` - see the manjaro header for the measurement.
+#
+# ubiquity fills the username from the full name as it is typed, so its two `type:` steps
+# APPEND and the account is created with the value twice.
+# `ssh_user` IS THE HEADER KEY THE SSH CLIENT READS - `var user` IS NOT.
+#
+# MEASURED ON RUN 44611943331 (manjaro), whose failure was NOT a refused port but
+#
+#	wait for sshd: the port is open but no shell answers: ssh: handshake failed: ssh: unable to
+#	authenticate, attempted methods [none password], no supported methods remain
+#
+# - the daemon reached the guest and offered the WRONG NAME. `require_ssh:` and every `ssh ==`
+# step authenticate as `File.SSHUser`, which is parsed from a top-level `ssh_user:` key
+# (internal/walk/walk.go) and defaults to `vmuser`. Setting `var user` changes what gets TYPED on
+# the console; it does not change who the client logs in as.
+user vmuservmuser
+var out
+  default out/distro.qcow2
+  from args.out
+password admin
+var user
+  default vmuservmuser
+  from args.user
 
-  step "boot the disk"
-    boot == true
-    os == linux
-    # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
-    memory_mb == 4096
-    timeout == 900
+
+step "boot the disk"
+  boot
+  # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
+  memory_mb 4096
+  os linux
+  timeout 900
+
   # THE GREETER IS ASKED FOR BEFORE ANYTHING IS CLICKED, BECAUSE IT IS NOT THERE YET.
   #
   # MEASURED ON RUN 44472625613, whose recording is BLACK at 15 seconds and shows the greeter at
@@ -38,21 +44,38 @@ walkthrough "linux-zorin - sshd"
   # THE BAND IS THE GREETER'S OWN MIDDLE: the user tile and the password field, x 740..1340 and
   # y 470..770. Read back from that recording at scale 2 it yields "Password vmuser"; at scale 1 it
   # yields nothing, which is why the scale is 2 and not the default.
-  step "the greeter is drawn"
-    loop == {check: {from: greeter, mode: text, name: up, rect: [740, 470, 1340, 770], rect_at: [1920, 1080], scale: 2, words: [[password], [vmuser]]}, do: [{key: esc, settle: 4}], max: 60, see: {name: greeter}, until: {fact: up}}
-  step "greeter - the user tile"
-    when == [password, vmuser]
-    click == [960, 488]
-  step "greeter - the password box"
-    when == [password, vmuser]
-    clear == false
-    click == [960, 627]
-    settle == 4
-    type == '{{ password }}'
-  step "greeter - submit"
-    when == [password, vmuser]
-    key == ret
-    settle == 12
+step "the greeter is drawn"
+  repeat
+    do
+      item
+        press esc
+        settle 4
+    until
+      bind up
+      from greeter
+      mode text
+      rect [740, 470, 1340, 770]
+      rect_at [1920, 1080]
+      scale 2
+      words [[password], [vmuser]]
+    max 60
+
+step "greeter - the user tile"
+  press 960 488
+  when [password, vmuser]
+
+step "greeter - the password box"
+  clear false
+  press text "{{ password }}"
+    at 960 627
+  settle 4
+  when [password, vmuser]
+
+step "greeter - submit"
+  press ret
+  settle 12
+  when [password, vmuser]
+
   # ZORIN'S FIRST-RUN "Start Tour" PANEL IS A MODAL THAT TAKES THE KEYBOARD, AND IT MUST GO FIRST.
   #
   # MEASURED ON RUN 58323ec's zorin ssh: the recording shows the terminal with only FOUR commands in
@@ -66,11 +89,18 @@ walkthrough "linux-zorin - sshd"
   # a blanked screen.
   #
   # `No Thanks` is at 873,797. Escape follows for a panel that is already dismissed.
-  step "dismiss the first-run tour panel, which takes the keyboard"
-    when == [password, vmuser]
-    click == [873, 797]
-  press Escape, waiting 2s, named "clear anything the panel left behind"
-  press ctrl+alt+t, waiting 20s, named "open the terminal"
+step "dismiss the first-run tour panel, which takes the keyboard"
+  press 873 797
+  when [password, vmuser]
+
+step "clear anything the panel left behind"
+  press esc
+  settle 2
+
+step "open the terminal"
+  press ctrl+alt+t
+  settle 20
+
   # NO `terminal_wait:` HERE, AND THAT IS THE FIX RATHER THAN AN OMISSION.
   #
   # `terminal_wait:` OPENS A TERMINAL (ctrl+alt+t) AND THEN TYPES. The step above has already
@@ -148,11 +178,25 @@ walkthrough "linux-zorin - sshd"
   #
   # Three Escapes and two Cancel clicks are what it takes, and pressing them when the panel is
   # already gone costs nothing: Escape on a desktop closes an overview that is not open.
-  step "dismiss the updater's authentication panel"
-    do == [{key: esc, settle: 2}, {key: esc, settle: 2}, {click: [860, 700], settle: 2}, {key: esc, settle: 2}]
-  step "keep the screen on, with the tool this guest actually has"
-    run == gsettings set org.gnome.desktop.session idle-delay 0
-    settle == 4
+step "dismiss the updater's authentication panel"
+  do
+    item
+      press esc
+      settle 2
+    item
+      press esc
+      settle 2
+    item
+      press 860 700
+      settle 2
+    item
+      press esc
+      settle 2
+
+step "keep the screen on, with the tool this guest actually has"
+  run "gsettings set org.gnome.desktop.session idle-delay 0"
+  settle 4
+
   # THE SOFTWARE UPDATER STEALS FOCUS AND THE LONG COMMANDS ARRIVE IN PIECES.
   #
   # MEASURED ON RUN 44588531483, whose terminal at 150 s reads fragments - 'echo SCRE', 'SCREEN_KEP',
@@ -165,20 +209,23 @@ walkthrough "linux-zorin - sshd"
   # MEASURED: "pkill: killing pid 1022 failed: Operation not permitted" - the updater runs as root,
   # so the unprivileged pkill this file used did nothing and the panel kept coming back. Authenticate
   # once, then kill it with the authority to do so.
-  step "unlock sudo once for this session"
-    run == printf '%s\n' {{ password }} | sudo -S -v
-    settle == 5
-    type_gap == 0.06
-  step "stop the updater that keeps raising the panel"
-    run == sudo pkill -f update-notifier
-    settle == 3
-    type_gap == 0.06
-    terminal_wait == 0
-  step "stop the software centre"
-    run == sudo pkill -f gnome-software
-    settle == 3
-    type_gap == 0.06
-    terminal_wait == 0
+step "unlock sudo once for this session"
+  run "printf '%s\\n' {{ password }} | sudo -S -v"
+  settle 5
+  type_gap 0.06
+
+step "stop the updater that keeps raising the panel"
+  run "sudo pkill -f update-notifier"
+  settle 3
+  terminal_wait 0
+  type_gap 0.06
+
+step "stop the software centre"
+  run "sudo pkill -f gnome-software"
+  settle 3
+  terminal_wait 0
+  type_gap 0.06
+
   # `apt-get update` FIRST: this disk's index can point at a version the archive has replaced,
   # which answers 404 and reads like a network problem (measured on popos, same family).
   # THE SOFTWARE UPDATER RAISES POLKIT'S 'Authentication Required' OVER THE TERMINAL, UNPROMPTED.
@@ -215,54 +262,67 @@ walkthrough "linux-zorin - sshd"
   # SO EVERY COMMAND IS SHORT, and `type_gap` is wide enough that each key is released before the
   # next is sent. A short command that doubles a character still names a real unit; a long one that
   # doubles a `-` fails on its first word.
-  step "stop the update notifier, one short command at a time"
-    run == sudo systemctl stop packagekit
-    settle == 3
-    type_gap == 0.09
-  step "stop the unattended upgrades"
-    run == sudo systemctl stop unattended-upgrades
-    settle == 3
-    type_gap == 0.09
-  step "stop the timers that start them again"
-    run == sudo systemctl stop apt-daily.timer apt-daily-upgrade.timer
-    settle == 3
-    type_gap == 0.09
-  step "refresh the package index"
-    run == sudo apt-get update
-    settle == 60
-    type_gap == 0.09
-  step "install openssh-server"
-    run == sudo apt-get install -y openssh-server
-    settle == 90
-    type_gap == 0.09
-  step "allow password authentication"
-    run == sudo sed -i "s/^#\?\s*PasswordAuthentication.*/PasswordAuthentication yes/" /etc/ssh/sshd_config ; sudo grep -i "^PasswordAuthentication" /etc/ssh/sshd_config
-    settle == 3
-    type_gap == 0.09
+step "stop the update notifier, one short command at a time"
+  run "sudo systemctl stop packagekit"
+  settle 3
+  type_gap 0.09
+
+step "stop the unattended upgrades"
+  run "sudo systemctl stop unattended-upgrades"
+  settle 3
+  type_gap 0.09
+
+step "stop the timers that start them again"
+  run "sudo systemctl stop apt-daily.timer apt-daily-upgrade.timer"
+  settle 3
+  type_gap 0.09
+
+step "refresh the package index"
+  run "sudo apt-get update"
+  settle 60
+  type_gap 0.09
+
+step "install openssh-server"
+  run "sudo apt-get install -y openssh-server"
+  settle 90
+  type_gap 0.09
+
+step "allow password authentication"
+  run "sudo sed -i \"s/^#\\?\\s*PasswordAuthentication.*/PasswordAuthentication yes/\" /etc/ssh/sshd_config ; sudo grep -i \"^PasswordAuthentication\" /etc/ssh/sshd_config"
+  settle 3
+  type_gap 0.09
+
   # THE ENABLE IS NOT DECORATION: `policy-rc.d returned 101` means the package install was told NOT
   # to start the service, so this is the step that makes sshd run at all.
-  step "enable ssh at boot"
-    run == sudo systemctl enable ssh
-    settle == 5
-    type_gap == 0.09
-  step "start ssh now"
-    run == sudo systemctl start ssh
-    settle == 8
-    type_gap == 0.09
-  step "wait for sshd"
-    require_ssh == true
-    timeout == 600
-  step "prove the kernel over ssh"
-    ssh == uname -a
-    timeout == 120
-  step "prove the account over ssh"
-    ssh == id -un; hostname
-    timeout == 120
-  step "ask the guest to power off"
-    ssh == printf '%s\n' '{{ password }}' | sudo -S -p '' poweroff
-    timeout == 300
-  step "wait for the machine to stop"
-    timeout == 300
-    wait_until == stopped
-  step "publish the disk"
-    compress == '{{ out }}'
+step "enable ssh at boot"
+  run "sudo systemctl enable ssh"
+  settle 5
+  type_gap 0.09
+
+step "start ssh now"
+  run "sudo systemctl start ssh"
+  settle 8
+  type_gap 0.09
+
+step "wait for sshd"
+  require_ssh
+  timeout 600
+
+step "prove the kernel over ssh"
+  ssh "uname -a"
+  timeout 120
+
+step "prove the account over ssh"
+  ssh "id -un; hostname"
+  timeout 120
+
+step "ask the guest to power off"
+  ssh "printf '%s\\n' '{{ password }}' | sudo -S -p '' poweroff"
+  timeout 300
+
+step "wait for the machine to stop"
+  wait_until stopped
+  timeout 300
+
+step "publish the disk"
+    save "{{ out }}"

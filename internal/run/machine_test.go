@@ -298,11 +298,16 @@ func TestADiskThatAlreadyExistsIsNotGivenASize(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "mem.walk")
 	body := `walkthrough "a rootfs a microvm boots"
-  resolution 1024x768
-  recording_resolution 1024x768
-  needs alpine-vmlinuz alpine-initramfs
-  disk alpine.qcow2
-  boot as a microvm from kernel "alpine-vmlinuz" and initramfs "alpine-initramfs" with "console=ttyS0" without a display with memory 768
+resolution 1024x768
+recording_resolution 1024x768
+needs alpine-vmlinuz alpine-initramfs
+step "boot the root filesystem"
+  boot
+    os microvm
+    disk alpine.qcow2
+    kernel alpine-vmlinuz
+    initrd alpine-initramfs
+    memory_mb 768
 `
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)

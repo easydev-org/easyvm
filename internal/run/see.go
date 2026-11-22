@@ -93,7 +93,7 @@ func (e *Executor) storePicture(path, name, kind string, w, h int) {
 
 // seeName reads the name a `see:` binds, accepting both `see: {name: x}` and `see: x`.
 func seeName(s walk.Step) string {
-	switch v := s.Spec["see"].(type) {
+	switch v := s.Spec["read"].(type) {
 	case string:
 		return strings.TrimSpace(v)
 	case map[string]any:
@@ -109,7 +109,7 @@ func seeName(s walk.Step) string {
 // capture a frame and bind a name, its `check:` would find no words, and the failure would point at
 // the check rather than at the step that was written in the old language.
 func refuseLegacySee(s walk.Step) error {
-	raw, ok := s.Spec["see"].(map[string]any)
+	raw, ok := s.Spec["read"].(map[string]any)
 	if !ok {
 		return nil
 	}

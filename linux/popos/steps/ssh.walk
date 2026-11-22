@@ -1,17 +1,23 @@
 walkthrough "linux-popos - sshd"
-  resolution 1920x1080
-  password admin
-  var out == {default: out/distro.qcow2, from: args.out}
-  var ssh_user == vmuser
-  var user == {default: vmuser, from: args.user}
-  header recording_resolution == [1920, 1080]
+resolution 1920x1080
+recording_resolution 1920x1080
+var out
+  default out/distro.qcow2
+  from args.out
+password admin
+var ssh_user vmuser
+var user
+  default vmuser
+  from args.user
 
-  step "boot the disk"
-    boot == true
-    os == linux
-    # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
-    memory_mb == 4096
-    timeout == 900
+
+step "boot the disk"
+  boot
+  # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
+  memory_mb 4096
+  os linux
+  timeout 900
+
   # THIS DISK COMES UP ON A FULL-DISK-ENCRYPTION PROMPT, AND THE WALK HAS TO ANSWER IT.
   #
   # MEASURED ON RUN 44550974321, whose ssh recording at 120 s is
@@ -30,26 +36,47 @@ walkthrough "linux-popos - sshd"
   # both. It is typed blind into plymouth - there is no field to click - and Return submits it.
   # `optional` is NOT used here: a disk that needs no unlock must not hang, so the type is guarded
   # by the prompt's own words.
-  step "the disk asks for its passphrase, when it is encrypted"
-    loop == {check: {from: unlock, mode: text, name: locked, rect: [600, 480, 1320, 600], rect_at: [1920, 1080], scale: 1, words: [[unlock, disk], [cryptsetup]]}, do: [{settle: 5}], max: 40, see: {name: unlock}, until: {fact: locked}}
-    optional == true
-  step "answer the passphrase prompt"
-    when == [unlock]
-    settle == 2
-    type == '{{ password }}'
-  press Return, waiting 20s, named "submit the passphrase"
-  step "greeter - the password box"
-    when == [password, vmuser]
-    click == [1120, 283]
-  step "greeter - log in"
-    when == [password, vmuser]
-    settle == 3
-    type == '{{ password }}'
-  step "greeter - submit"
-    when == [password, vmuser]
-    key == ret
-    settle == 12
-  click "open the terminal" at 1092 1048, waiting 20s, named "open the terminal"
+step "the disk asks for its passphrase, when it is encrypted"
+  repeat
+    pause 5
+    until
+      bind locked
+      from unlock
+      mode text
+      rect [600, 480, 1320, 600]
+      rect_at [1920, 1080]
+      scale 1
+      words [[unlock, disk], [cryptsetup]]
+    max 40
+  optional
+
+step "answer the passphrase prompt"
+  settle 2
+  press text "{{ password }}"
+  when [unlock]
+
+step "submit the passphrase"
+  press ret
+  settle 20
+
+step "greeter - the password box"
+  press 1120 283
+  when [password, vmuser]
+
+step "greeter - log in"
+  settle 3
+  press text "{{ password }}"
+  when [password, vmuser]
+
+step "greeter - submit"
+  press ret
+  settle 12
+  when [password, vmuser]
+
+step "open the terminal"
+  press 1092 1048
+  settle 20
+
   # NO `terminal_wait:` HERE, AND THAT IS THE FIX RATHER THAN AN OMISSION.
   #
   # `terminal_wait:` OPENS A TERMINAL (ctrl+alt+t) AND THEN TYPES. The step above has already
@@ -72,9 +99,10 @@ walkthrough "linux-popos - sshd"
   # admin' lost its first two characters) or 'sudo: no password was provided'. Both are the same
   # fault - the password travels in the command line - and both are cured by authenticating once
   # and letting sudo keep the timestamp.
-  step "unlock sudo once for this session"
-    run == printf '%s\n' {{ password }} | sudo -S -v
-    settle == 4
+step "unlock sudo once for this session"
+  run "printf '%s\\n' {{ password }} | sudo -S -v"
+  settle 4
+
   # THE PACKAGE INDEX IN THIS DISK IS STALE, AND THE FIRST ATTEMPT GOT A 404.
   #
   # MEASURED ON RUN 44557723577's successor, whose terminal reads
@@ -88,32 +116,41 @@ walkthrough "linux-popos - sshd"
   # sudo was already unlocked and the terminal was fine - the failure is the index: this disk's
   # apt lists point at a package version pop-os has since replaced. `apt-get update` first, which is
   # what the error message itself recommends.
-  step "refresh the package index"
-    run == sudo apt-get update 2>&1 | tail -3
-    settle == 45
-  step "install openssh-server"
-    run == sudo apt-get install -y openssh-server
-    settle == 60
-  step "allow password authentication"
-    run == sudo sed -i "s/^#\?\s*PasswordAuthentication.*/PasswordAuthentication yes/" /etc/ssh/sshd_config ; sudo grep -i "^PasswordAuthentication" /etc/ssh/sshd_config
-    settle == 3
-  step "enable ssh at boot"
-    run == sudo systemctl enable --now ssh
-    settle == 8
-  step "wait for sshd"
-    require_ssh == true
-    timeout == 600
-  step "prove the kernel over ssh"
-    ssh == uname -a
-    timeout == 120
-  step "prove the account over ssh"
-    ssh == id -un; hostname
-    timeout == 120
-  step "ask the guest to power off"
-    ssh == printf '%s\n' '{{ password }}' | sudo -S -p '' poweroff
-    timeout == 300
-  step "wait for the machine to stop"
-    timeout == 300
-    wait_until == stopped
-  step "publish the disk"
-    compress == '{{ out }}'
+step "refresh the package index"
+  run "sudo apt-get update 2>&1 | tail -3"
+  settle 45
+
+step "install openssh-server"
+  run "sudo apt-get install -y openssh-server"
+  settle 60
+
+step "allow password authentication"
+  run "sudo sed -i \"s/^#\\?\\s*PasswordAuthentication.*/PasswordAuthentication yes/\" /etc/ssh/sshd_config ; sudo grep -i \"^PasswordAuthentication\" /etc/ssh/sshd_config"
+  settle 3
+
+step "enable ssh at boot"
+  run "sudo systemctl enable --now ssh"
+  settle 8
+
+step "wait for sshd"
+  require_ssh
+  timeout 600
+
+step "prove the kernel over ssh"
+  ssh "uname -a"
+  timeout 120
+
+step "prove the account over ssh"
+  ssh "id -un; hostname"
+  timeout 120
+
+step "ask the guest to power off"
+  ssh "printf '%s\\n' '{{ password }}' | sudo -S -p '' poweroff"
+  timeout 300
+
+step "wait for the machine to stop"
+  wait_until stopped
+  timeout 300
+
+step "publish the disk"
+    save "{{ out }}"

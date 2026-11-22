@@ -1,16 +1,22 @@
 walkthrough "linux-mint - sshd"
-  resolution 1920x1080
-  password admin
-  var out == {default: out/distro.qcow2, from: args.out}
-  var user == {default: vmuser, from: args.user}
-  header recording_resolution == [1920, 1080]
+resolution 1920x1080
+recording_resolution 1920x1080
+var out
+  default out/distro.qcow2
+  from args.out
+password admin
+var user
+  default vmuser
+  from args.user
 
-  step "boot the disk"
-    boot == true
-    os == linux
-    # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
-    memory_mb == 4096
-    timeout == 900
+
+step "boot the disk"
+  boot
+  # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
+  memory_mb 4096
+  os linux
+  timeout 900
+
   # THE GREETER IS ASKED FOR BEFORE IT IS CLICKED. MEASURED ON THIS MEDIUM'S OWN RECORDING.
   #
   # RUN 44547606326's mint ssh stage ends with the greeter showing, in amber,
@@ -25,19 +31,44 @@ walkthrough "linux-mint - sshd"
   #
   # THE BAND IS THAT CARD: x 80..480, y 480..640, which reads 'Vmuser User' and 'Password' at scale
   # 1 and 2 on that frame.
-  step "the greeter is drawn"
-    loop == {check: {from: greeter, mode: text, name: up, rect: [80, 480, 480, 640], rect_at: [1920, 1080], scale: 1, words: [[vmuser], [password]]}, do: [{key: esc, settle: 3}], max: 60, see: {name: greeter}, until: {fact: up}}
-  click "greeter - the password box" at 259 568, waiting 2s, named "greeter - the password box"
-  step "greeter - log in"
-    settle == 3
-    type == '{{ password }}'
-  press Return, waiting 12s, named "greeter - submit"
+step "the greeter is drawn"
+  repeat
+    do
+      item
+        press esc
+        settle 3
+    until
+      bind up
+      from greeter
+      mode text
+      rect [80, 480, 480, 640]
+      rect_at [1920, 1080]
+      scale 1
+      words [[vmuser], [password]]
+    max 60
+
+step "greeter - the password box"
+  press 259 568
+  settle 2
+
+step "greeter - log in"
+  settle 3
+  press text "{{ password }}"
+
+step "greeter - submit"
+  press ret
+  settle 12
+
   # THE SESSION TAKES LONGER THAN THE TWELVE SECONDS AFTER `Return`, AND A CHORD PRESSED IN THAT
   # GAP GOES TO THE GREETER. This is the same gate the same medium's install walk uses.
-  step "wait for the desktop"
-    desktop == linux/cinnamon
-    timeout == 900
-  press ctrl+alt+t, waiting 20s, named "open the terminal"
+step "wait for the desktop"
+  desktop linux/cinnamon
+  timeout 900
+
+step "open the terminal"
+  press ctrl+alt+t
+  settle 20
+
   # NO `terminal_wait:` HERE, AND THAT IS THE FIX RATHER THAN AN OMISSION.
   #
   # `terminal_wait:` OPENS A TERMINAL (ctrl+alt+t) AND THEN TYPES. The step above has already
@@ -60,32 +91,41 @@ walkthrough "linux-mint - sshd"
   # admin' lost its first two characters) or 'sudo: no password was provided'. Both are the same
   # fault - the password travels in the command line - and both are cured by authenticating once
   # and letting sudo keep the timestamp.
-  step "unlock sudo once for this session"
-    run == printf '%s\n' {{ password }} | sudo -S -v
-    settle == 4
-  step "install openssh-server"
-    run == sudo apt-get install -y openssh-server
-    settle == 60
-  step "allow password authentication"
-    run == sudo sed -i "s/^#\?\s*PasswordAuthentication.*/PasswordAuthentication yes/" /etc/ssh/sshd_config ; sudo grep -i "^PasswordAuthentication" /etc/ssh/sshd_config
-    settle == 3
-  step "enable ssh at boot"
-    run == sudo systemctl enable --now ssh
-    settle == 8
-  step "wait for sshd"
-    require_ssh == true
-    timeout == 600
-  step "prove the kernel over ssh"
-    ssh == uname -a
-    timeout == 120
-  step "prove the account over ssh"
-    ssh == id -un; hostname
-    timeout == 120
-  step "ask the guest to power off"
-    ssh == printf '%s\n' '{{ password }}' | sudo -S -p '' poweroff
-    timeout == 300
-  step "wait for the machine to stop"
-    timeout == 300
-    wait_until == stopped
-  step "publish the disk"
-    compress == '{{ out }}'
+step "unlock sudo once for this session"
+  run "printf '%s\\n' {{ password }} | sudo -S -v"
+  settle 4
+
+step "install openssh-server"
+  run "sudo apt-get install -y openssh-server"
+  settle 60
+
+step "allow password authentication"
+  run "sudo sed -i \"s/^#\\?\\s*PasswordAuthentication.*/PasswordAuthentication yes/\" /etc/ssh/sshd_config ; sudo grep -i \"^PasswordAuthentication\" /etc/ssh/sshd_config"
+  settle 3
+
+step "enable ssh at boot"
+  run "sudo systemctl enable --now ssh"
+  settle 8
+
+step "wait for sshd"
+  require_ssh
+  timeout 600
+
+step "prove the kernel over ssh"
+  ssh "uname -a"
+  timeout 120
+
+step "prove the account over ssh"
+  ssh "id -un; hostname"
+  timeout 120
+
+step "ask the guest to power off"
+  ssh "printf '%s\\n' '{{ password }}' | sudo -S -p '' poweroff"
+  timeout 300
+
+step "wait for the machine to stop"
+  wait_until stopped
+  timeout 300
+
+step "publish the disk"
+    save "{{ out }}"

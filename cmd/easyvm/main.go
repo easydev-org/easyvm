@@ -60,7 +60,6 @@ TWO MODES, AND THEY DIFFER IN WHEN THE MACHINE STOPS:
 
   easyvm check   FILE                            validate without any machine at all
   easyvm list    FILE                            one line per step
-  easyvm walk    FILE...                          convert YAML to the sentence form
   easyvm versions                                what this build expects of qemu
 
 run flags:
@@ -82,8 +81,6 @@ func main() {
 	switch os.Args[1] {
 	case "check", "list":
 		os.Exit(cmdInspect(os.Args[1], args))
-	case "walk":
-		os.Exit(cmdWalk(args))
 	case "versions":
 		os.Exit(cmdVersions())
 	case "serve":

@@ -1007,7 +1007,14 @@ func shorten(s string, n int) string {
 
 // --- a host-side log, for a step that witnesses rather than judges ---------------------
 func (e *Executor) doRun(s walk.Step) error {
+	// `run:` TAKES A COMMAND OR A MAPPING WITH `cmd:` AND `via:`. The mapping form is how 2.0 says
+	// WHERE the command runs, so the body is read from whichever shape the step holds.
 	body := s.Get("run")
+	if m, ok := s.Spec["run"].(map[string]any); ok {
+		if c, ok := m["cmd"].(string); ok {
+			body = c
+		}
+	}
 	if strings.TrimSpace(body) == "" {
 		return fail(s.Name, "`run:` must contain a command")
 	}

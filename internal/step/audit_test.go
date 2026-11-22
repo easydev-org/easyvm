@@ -272,8 +272,12 @@ func countYAMLKeys(raw []byte, use map[string]int) {
 //
 // IT IS THE `.walk` HALF OF `countYAMLKeys`: a key marked MIGRATED must be used zero times in the
 // files that exist, and the files that exist are `.walk`.
+//
+// THE 2.0 FORM HAS NO `==`: a step key is `key value` on its own line, indented under its step. So this
+// accepts both spellings, because the tree now holds 2.0 files and a key marked MIGRATED must still be
+// counted as used if one of them somehow writes it.
 func countWalkKeys(raw []byte, use map[string]int) {
-	line := regexp.MustCompile(`^\s*-?\s*([a-z][a-z0-9_]*)\s*==`)
+	line := regexp.MustCompile(`^\s*(?:-\s*)?([a-z][a-z0-9_]*)\s*(?:==\s|\s|$)`)
 	for _, l := range strings.Split(string(raw), "\n") {
 		trimmed := strings.TrimSpace(l)
 		if trimmed == "" || strings.HasPrefix(trimmed, "#") {

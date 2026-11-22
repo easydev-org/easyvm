@@ -108,7 +108,6 @@ var Roles = map[string]Role{
 	"recovery":  RoleArgument,
 	"answer_cd": RoleArgument,
 	"driver_cd": RoleArgument,
-	"cpu":       RoleArgument,
 
 	// --- how big the guest is ------------------------------------------------------------
 	"memory_mb":       RoleArgument,
@@ -116,23 +115,15 @@ var Roles = map[string]Role{
 	"kernel":          RoleArgument,
 	"initrd":          RoleArgument,
 	"microvm":         RoleArgument,
-	"microvm_display": RoleArgument,
 	"kernel_append":   RoleArgument,
 	"shutdown":        RoleAction,
 	"acpi":            RoleAction,
 	"qga":             RoleAction,
 	"wait_until":      RoleAction,
-	"minimum":         RoleArgument,
-	"argv":            RoleArgument,
-	"body":            RoleArgument,
 	"compress":        RoleAction,
-	"boot_from":       RoleAction,
 
 	// --- the disk ------------------------------------------------------------------------
 	"disk":         RoleAction, // names a file; with `disk_gb:` it creates one
-	"disk_from":    RoleArgument,
-	"disk_copy":    RoleArgument,
-	"disk_overlay": RoleArgument,
 	"disk_gb":      RoleArgument,
 	"disk_gpt":     RoleArgument,
 	"disk_esp_mib": RoleArgument,
@@ -143,7 +134,6 @@ var Roles = map[string]Role{
 	"click":           RoleAction,
 	"double":          RoleAction,
 	"at_button":       RoleAction,
-	"at_fallback":     RoleArgument,
 	"at_color":        RoleAction,
 	"color_tolerance": RoleArgument,
 	"color_region":    RoleArgument,
@@ -155,7 +145,6 @@ var Roles = map[string]Role{
 	"type_gap":        RoleArgument,
 	"run":             RoleAction,
 	"terminal_wait":   RoleArgument,
-	"line_gap":        RoleArgument,
 
 	// --- the screen: read ---------------------------------------------------------------
 	"blind_after":      RoleArgument,
@@ -174,7 +163,6 @@ var Roles = map[string]Role{
 	"adb":              RoleAction,
 	"adb_privileged":   RoleAction,
 	"adb_connect":      RoleAction,
-	"adb_serial":       RoleArgument,
 
 	// --- panes: the macOS shape ---------------------------------------------------------
 	"when":         RoleGate,
@@ -182,57 +170,47 @@ var Roles = map[string]Role{
 	"release":      RoleArgument,
 	"write":        RoleAction,
 	"esp_fallback": RoleAction,
-	"esp_from":     RoleArgument,
 
 	// --- the three-step model -----------------------------------------------------------
-	"see": RoleAction,
+	"text": RoleArgument,
+	"colour": RoleArgument,
+	"button": RoleArgument,
+	"at": RoleArgument,
+	"anchor": RoleArgument,
+	"fallback": RoleArgument,
+	"gap": RoleArgument,
+	"method": RoleArgument,
+	"save": RoleArgument,
+	"via": RoleArgument,
+	"copy":  RoleAction,
+	"stop":  RoleAction,
+	"read":  RoleAction,
+	"press": RoleAction,
 
 	// --- `check:` and the relations inside it --------------------------------------------
-	"check":        RoleAction,
+	"expect":        RoleAction,
 	"mode":         RoleSubkey,
 	"must":         RoleSubkey, // `check: {must: true}` - a false answer fails the step
 	"words":        RoleSubkey,
 	"without":      RoleSubkey,
 	"range":        RoleSubkey,
-	"text":         RoleSubkey,
 	"pattern":      RoleSubkey,
-	"as":           RoleSubkey,
 	"if":           RoleAction, // the conditional step, an action with `then:`/`else:`
 	"then":         RoleSubkey,
 	"else":         RoleSubkey,
 	"fact":         RoleSubkey,
-	"loop":         RoleAction,
+	"repeat":         RoleAction,
 	"max":          RoleSubkey,
 	"every":        RoleSubkey,
 	"clock":        RoleSubkey,
 	"fetch":        RoleAction,
 	"template":     RoleArgument,
-	"contains":     RoleSubkey,
 	"contains_any": RoleSubkey,
 	"not_contains": RoleSubkey,
-	"equals":       RoleSubkey,
-	"matches":      RoleSubkey,
-	"like":         RoleSubkey,
-	"fuzzy":        RoleSubkey,
-	"ratio":        RoleSubkey,
-	"mean":         RoleSubkey,
-	"spread":       RoleSubkey,
-	"sat":          RoleSubkey,
-	"flat_rows":    RoleSubkey,
-	"contrast":     RoleSubkey,
-	"vs":           RoleSubkey,
-	"min":          RoleSubkey,
-	"less_than":    RoleSubkey,
 	"greater_than": RoleSubkey,
-	"at_least":     RoleSubkey,
-	"at_most":      RoleSubkey,
-	"between":      RoleSubkey,
 	"rect":         RoleSubkey, // inside `see:`/`loop:`, not a step of its own
 	"rect_at":      RoleSubkey,
 	"of":           RoleSubkey,
-	"colour":       RoleSubkey,
-	"any_of":       RoleSubkey,
-	"from":         RoleSubkey,
 	"to":           RoleSubkey,
 	"reference":    RoleSubkey,
 	"path":         RoleSubkey, // `qga: {path: ...}` at step level
@@ -250,30 +228,29 @@ var Roles = map[string]Role{
 // is an action on its own and an argument of `type`. That is deliberate and it is the general
 // problem this whole design is about - an argument may belong to more than one action.
 var Consumes = map[string][]string{
-	"type":       {"click", "clear", "modifier", "type_gap"},
-	"boot":       {"os", "iso", "recovery", "answer_cd", "driver_cd", "kernel", "initrd", "memory_mb", "cpus", "cpu", "microvm", "microvm_display", "kernel_append", "boot_from"},
-	"disk":       {"disk_gb", "disk_gpt", "disk_esp_mib", "disk_min_mb"},
-	"write":      {"os", "release"},
-	"fetch":      {"os", "release", "recovery", "template"},
-	"run":        {"terminal_wait", "type_gap", "line_gap"},
-	"shutdown":   {},
-	"compress":   {"disk_min_mb"},
-	"see":        {"rect", "rect_at", "of", "scale", "reference"},
-	"check":      {"mode", "words", "without", "range", "text", "pattern", "as", "from"},
-	"desktop":    {"os", "timeout", "reference", "range", "rect", "rect_at"},
-	"adb":        {"adb_serial"},
-	"until":      {"from", "blind_after", "poll", "as", "rect", "rect_at", "scale"},
-	"until_any":  {"from", "blind_after", "poll", "as", "rect", "rect_at", "scale"},
-	"expect":     {"rect", "rect_at", "scale"},
+	"press": {"click", "key", "clear", "modifier", "type_gap", "double"},
+	"type": {"click", "clear", "modifier", "type_gap"},
+	"boot": {"os", "iso", "recovery", "answer_cd", "driver_cd", "kernel", "initrd", "memory_mb", "cpus", "microvm", "kernel_append"},
+	"disk": {"disk_gb", "disk_gpt", "disk_esp_mib", "disk_min_mb"},
+	"write": {"os", "release"},
+	"fetch": {"os", "release", "recovery", "template"},
+	"run": {"terminal_wait", "type_gap"},
+	"shutdown": {},
+	"stop": {"method", "save", "disk_min_mb", "timeout"},
+	"copy": {"from", "to", "template"},
+	"compress": {"disk_min_mb"},
+	"read": {"rect", "rect_at", "of", "scale", "reference", "name"},
+	"expect": {"mode", "words", "without", "range", "pattern", "name", "must", "reference", "file", "desktop"},
+	"repeat": {"do", "until", "max"},
+	"desktop": {"os", "timeout", "reference", "range", "rect", "rect_at"},
+	"adb": {},
+	"until": {"from", "blind_after", "poll", "rect", "rect_at", "scale"},
+	"until_any": {"from", "blind_after", "poll", "rect", "rect_at", "scale"},
 	"expect_any": {"rect", "rect_at", "scale"},
-	"qga":        {"argv", "path", "body", "mode", "timeout"},
-	"scp":        {"template", "to"},
-	// THE GATES READ THE SCREEN TOO, so they take the same crop arguments an `until:` does. A step
-	// that says `when_not: [allow]` beside `rect:` is naming a REGION FOR THE READING - the click
-	// that follows does not use it, which is why `dispatchRest` strips region and scale before the
-	// action runs.
-	"when":         {"rect", "rect_at", "scale"},
-	"when_not":     {"rect", "rect_at", "scale"},
+	"qga": {"path", "mode", "timeout"},
+	"scp": {"template", "to"},
+	"when": {"rect", "rect_at", "scale"},
+	"when_not": {"rect", "rect_at", "scale"},
 	"when_not_any": {"rect", "rect_at", "scale"},
 }
 
@@ -429,14 +406,7 @@ func plural(n int) string {
 // and fails if this list and the source disagree. Without that check this table would be a second
 // place to be wrong.
 var dispatchOrder = []string{
-	"boot", "boot_from", "shutdown", "disk", "compress",
-	"see", "check", "loop", "if", "needs", "require", "require_ssh", "ssh",
-	"when", "do", "when_not", "when_not_any",
-	"until", "until_any", "run", "esp_fallback", "adb_connect", "adb_privileged", "adb",
-	"at_color", "at_bottom", "at_button", "disk_settle", "screenshot", "write",
-	"fetch", "asset", "build", "generate",
-	"scp", "desktop", "type", "key", "double", "click", "acpi", "qga", "wait_until",
-	"wait", "settle",
+	"boot", "press", "run", "copy", "read", "expect", "control", "if", "stop", "repeat", "when", "when_not", "when_not_any", "do", "until", "until_any", "needs", "require", "require_ssh", "disk", "disk_settle", "fetch", "asset", "build", "generate", "write", "esp_fallback", "desktop", "at_color", "at_bottom", "at_button", "wait", "settle",
 }
 
 var dispatchRank = func() map[string]int {

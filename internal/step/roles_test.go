@@ -155,13 +155,13 @@ func TestOneActionAndItsArguments(t *testing.T) {
 		},
 		{
 			name: "check does not read click",
-			spec: map[string]any{"check": map[string]any{"name": "x"}, "click": []any{1, 2}},
+			spec: map[string]any{"expect": map[string]any{"name": "x"}, "click": []any{1, 2}},
 			ok:   false,
 			why:  "`doCheck` never reads a click, and the dispatcher takes the check branch first",
 		},
 		{
 			name: "check does not read double",
-			spec: map[string]any{"check": map[string]any{"name": "x"}, "double": []any{1, 2}},
+			spec: map[string]any{"expect": map[string]any{"name": "x"}, "double": []any{1, 2}},
 			ok:   false,
 			why:  "same shape, measured on linux/mint",
 		},

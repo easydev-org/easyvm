@@ -49,10 +49,10 @@ func TestASubkeyBeneathItsOwnerIsAccepted(t *testing.T) {
 			"until": "DVD-ROM", "from": "console", "blind_after": float64(60),
 		}},
 		{"a loop with a ceiling", map[string]any{
-			"loop": map[string]any{"max": float64(3), "do": []any{}},
+			"repeat": map[string]any{"max": float64(3), "do": []any{}},
 		}},
 		{"a check comparing a reference", map[string]any{
-			"check": map[string]any{"from": "shot", "rect": []any{0, 0, 1, 1},
+			"expect": map[string]any{"from": "shot", "rect": []any{0, 0, 1, 1},
 				"rect_at": []any{1920, 1080}, "mode": "like", "reference": "x.png"},
 		}},
 	} {
@@ -77,7 +77,7 @@ func TestNoKeyIsInBothTables(t *testing.T) {
 func TestASubkeysKindIsChecked(t *testing.T) {
 	// `mode:` must be a string; a mapping here is a file that meant something else.
 	err := Validate("probe", map[string]any{
-		"check": map[string]any{"from": "shot"}, "mode": map[string]any{"x": 1},
+		"expect": map[string]any{"from": "shot"}, "mode": map[string]any{"x": 1},
 	})
 	if err == nil {
 		t.Fatal("`mode:` was accepted as a mapping")

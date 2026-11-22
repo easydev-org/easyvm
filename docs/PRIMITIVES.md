@@ -1,339 +1,187 @@
 # easyvm walkthrough — every primitive, in one table
 
-The complete vocabulary. Every key is listed exactly once, in the section that says
-what KIND of thing it is, with the number of times the 57 real walkthroughs use it.
+THE VOCABULARY IS 2.0'S. A step is one of nine verbs with its argument, plus modifiers.
+The 1.0 names are refused by name; see the last section.
 
-**The counts and the completeness are enforced, not asserted**:
-`internal/step/audit_test.go` fails when the table names a key the code lacks, when
-the code declares a key the table omits, and when a key marked MIGRATED is still
-used by a file.
+Checked by `internal/step/audit_test.go`.
 
-```
-147 keys declared in code
- 81 are STEP keys        — 45 operations, the rest modifiers and gates
- 66 are SUBKEYS          — written inside another key, never on a step
- 42 rows of RETIRED keys — replaced, migrated, or dead
-```
+## 1. The nine verbs
 
-## The model: three verbs, and a picture is a value
+| key | what it does |
+|---|---|
+| `boot` | start the machine this file owns. Its arguments are SIBLING keys - os, iso, kernel, initrd, memory_mb, cpus, cpu, recovery, answer_cd, driver_cd - and the disk is the one an earlier `disk:` step named |
+| `copy` | copy one file into the guest: the local path, and the remote path as a child |
+| `stop` | stop the machine: kill, ssh, acpi or guest_agent |
+| `press` | click at a point. `[x, y]` is a coordinate; `{button: [x, y]}` is a point inside a window; `{button: [x, y], fallback: [x, y]}` adds a second place to try; `{colour: [r, g, b]}` is the largest blob of one colour. Fixed positions, never OCR - a button's position is a measured fact about a screen, and a search for it is a guess that moves |
+| `run` | a shell line typed into the guest's own terminal, one line at a time |
+| `read` | capture one frame and bind it under `name:`. Every `expect:` that follows asks its own question about THAT frame, with its own `rect:` |
+| `expect` | compare a named reading and bind a BOOLEAN: {name, from, mode, ...}. `mode:` says HOW to compare. `must: true` makes a FALSE answer fail the step, which is what a file means when it says the screen IS the reference |
+| `if` | run `then:` when this named boolean is true and `else:` when it is false. The boolean comes from a `expect:` step; a branch is a plain step list |
+| `repeat` | the parts written down: `max:`, `do:` (the action), `ocr:` (the reading -> text), `expect:` (the comparison -> boolean), `until: {fact: ...}` (tests the boolean). Optionally `every: <seconds>` with `clock: [...]` - an action that runs ONCE when that long has passed, whatever the screen says |
 
-```yaml
-- do:    { click: [936, 628] }          # change the machine
-- see:   { name: bottom, rect: bottom 4.5%, of: [spread, flat_rows] }
-                                          # MEASURE -> binds NAMED NUMBERS
-- want:  { name: up, any: [...] }        # DECIDE  -> binds a BOOLEAN
-```
+## 2. Modifiers
 
-**A measurement is code; a verdict is data.** `see:` is the only place pixels are
-touched; `want:` never reads the screen. That is what makes a new screen shape one
-line in a file instead of a Go function and an image rebuild — measured as the
-reason `internal/screen` grew to 1219 lines with nine `Is…Desktop` predicates.
+| key | what it does |
+|---|---|
+| `name` | what the log calls this step; required |
+| `optional` | a step that may fail without failing the stage - only for a check whose NEGATIVE result is information, never for a verdict |
+| `when_not` | the negative gate: run this step only if the screen does NOT show these words |
+| `timeout` | seconds THIS step may wait. THE DEFAULT DEPENDS ON THE VERB, because the waits are not one thing: ssh and require_ssh 900, until from: console 180, disk_settle 3600, adb_connect 300, adb 60, a desktop 900, a shutdown grace 0. AND ON A `boot:` IT IS THE BUDGET THE FOLLOWING WAIT INHERITS, because a boot returns before the guest is up - previously the number was written 53 times and read by nothing |
+| `when` | run this step only if the screen shows these words. `when: {none: [[a], [b, c]]}` is the NEGATIVE form: run only if NONE of those word-sets is present (it replaces `when_not_any:`) |
 
----
+## 3. Arguments — the shapes a verb takes
 
-# 1. `do:` — change the machine (24 keys)
+| key | what it does |
+|---|---|
+| `needs` | files that must be on disk before this stage runs; the first step of every stage names its medium here so a missing input fails in the first second rather than forty minutes in |
+| `when_not_any` | the alternatives form of `when_not:`: the step runs only if the screen shows NONE of these word-sets |
+| `os` | which family the machine is: windows, macos, linux, android |
+| `iso` | an installer ISO. Windows and Linux boot it directly; macOS has none and is refused by name if given one |
+| `recovery` | macOS's recovery image, attached as removable media. It is the install medium AND the source of the APFS driver OpenCore needs, so it is attached on every macOS boot |
+| `answer_cd` | a second CD-ROM carrying Windows' answer file. Setup finds it nowhere on the install ISO |
+| `driver_cd` | a third CD-ROM carrying the virtio drivers, for the installed system to pick up network and ballooning |
+| `memory_mb` | the guest's RAM in MiB; 4096 when not said. A guest that installs from a memdisk needs more than the default |
+| `cpus` | how many vCPUs the guest gets; 4 when not said |
+| `kernel` | with `microvm:`: the kernel qemu hands the guest, because a microvm has no firmware to read a boot sector |
+| `initrd` | with `microvm:`: the initramfs beside the kernel |
+| `kernel_append` | with `microvm:`: the guest's OWN kernel command line. Required for any microvm whose root is a real filesystem - the default is Alpine's diskless `modloop=/dev/vda`, which mounts OVER the root disk and drops the guest to an emergency shell |
+| `microvm` | with `boot:`: the smallest machine that can boot a modern Linux kernel - no firmware, no devices the guest does not need, a direct kernel hand-off. For a walkthrough whose job is to prove the vocabulary drives a guest, not to install a distribution through its GUI |
+| `shutdown` | a NAMED method: guest_agent, ssh, acpi, or kill. EVERY ONE OF THEM STOPS THE MACHINE AND WAITS FOR IT TO GO - a method that only waited was here for one commit and did not belong: `shutdown:` names how to stop it, so a verb that stopped nothing was a word that lied. Waiting for qemu to release the disk is a precondition of `compress:` and lives there |
+| `acpi` | send one ACPI message: `power` (the power button) or `reset`. It SENDS ONLY - whether the guest goes is `wait_until: stopped`, a step of its own |
+| `qga` | run one qemu-guest-agent command: ping, info, shutdown, exec, file-read, file-write, set-time, interfaces. The only channel into a guest with no sshd and no ACPI handler |
+| `compress` | flatten the overlay into this artifact; the path is relative to the repository root, not to the work directory |
+| `disk` | the disk file, or a mapping that creates it with its own size and layout. Alone it names the disk `boot:` starts; as a mapping it creates that disk, and the fields are listed in Subkeys |
+| `disk_gb` | size of a disk this step creates |
+| `disk_gpt` | partition the created disk: a 260 MiB ESP typed EF00 at LBA 2048, Linux on the rest |
+| `disk_esp_mib` | size of that ESP; 260 is what the installer draws as 0.25GB |
+| `disk_settle` | wait until the target qcow2 stops growing for this many quiet seconds |
+| `disk_min_mb` | with disk_settle: only start waiting once it holds this many allocated MiB |
+| `click` | with `press:`: where the pointer goes, as [x, y] |
+| `text` | with `press:`: the string to type |
+| `colour` | with `press:`: click the largest blob of this [r, g, b] |
+| `button` | with `press:`: click the control found by this label |
+| `at` | with `press text:`: the point to click before typing |
+| `anchor` | with `press:`: measure the point from `bottom` instead of the top-left |
+| `fallback` | with `press button:`: the point to use when no control carries that label |
+| `gap` | with `press text:`: seconds between keystrokes |
+| `method` | with `stop:`: how to stop the machine - kill, ssh, acpi or guest_agent |
+| `save` | with `stop:`: publish the disk to this path after the machine is gone |
+| `via` | with `run:`: where it runs - console, ssh or adb |
+| `double` | double-click [x, y]; separate from `press` because the gap between the two clicks is what makes it a double-click |
+| `at_button` | [x0, y0, x1, y1] - click the centre of the coloured fill inside this region. The ONE lookup this repository allows, for a control whose position moves per pane and whose fill is the only one of its kind in that strip |
+| `at_color` | [r, g, b] - click the centre of the largest blob of this colour. For a control the window draws in a fixed colour, which is how a macOS window button is found without knowing where the window is |
+| `color_tolerance` | with `at_color`: how far a pixel may be from the target colour and still count, for antialiasing. 45 matches macOS's window buttons |
+| `color_region` | with `at_color`: [x0, y0, x1, y1] to search inside, when the colour could appear somewhere else on the screen too |
+| `at_bottom` | [x, dy] - click x at dy pixels above the window's bottom edge |
+| `key` | a qemu qcode, or a + combo such as ctrl+alt+t |
+| `type` | text to type; combined with `at` it clicks the field first and clears it |
+| `clear` | clear the field before typing (select-all, then backspace) |
+| `modifier` | the select-all modifier for this family: ctrl on Linux, meta_l on macOS |
+| `type_gap` | seconds between keystrokes; 0.02 suits a POSIX shell, 0.15 a Windows one |
+| `terminal_wait` | seconds to wait for the terminal after `run` opens it |
+| `blind_after` | with until_console: go on after this many seconds whether or not the text appeared, for media that boot with no prompt at all |
+| `until` | words that end a wait loop |
+| `until_any` | the alternatives form of `until:`: ONE of these word-sets must be on screen. `doUntil` reads it beside `until:` and joins the two into one list of alternatives |
+| `poll` | seconds between looks in an until: loop |
+| `scale` | enlargement for a cropped read; small text needs it |
+| `screenshot` | save the screen to this path, for a post-mortem nobody had to ask for |
+| `desktop` | wait until a desktop is on screen; options include family and timeout |
+| `ssh` | a command run over ssh IN the guest; the exit status is the verdict |
+| `require_ssh` | wait for sshd before the steps that use it |
+| `ssh_probe` | the command that wait runs; `true` is not a Windows command |
+| `ssh_after_reboot` | on a require_ssh: wait out the old daemon first, or the wait passes on the process that is about to die |
+| `scp` | copy a file in. [local-file, remote-path], or {template: KIND, to: REMOTE} to render a bootstrap file (launcher, macos_agent_plist, windows_task) and copy it |
+| `adb` | a command run over adb IN the guest; Android's remote access is adbd and there is no sshd until a stage installs one |
+| `adb_privileged` | prove the adb shell can change system state - a write that reads back. NOT `adb root`: this guest is a `user` build with ro.debuggable=0 and no `su`, and the shell it already has owns appops, settings, cmd and setprop |
+| `adb_connect` | attach to the guest's adbd on its forwarded port and prove it answers |
+| `do` | a pane's actions, in order, run in one pass |
+| `release` | which OS release is being driven; the Apple Account pane differs by release |
+| `write` | write one of the login/bootstrap files on the HOST, for the scp: after it. Kinds: launcher, macos_agent_plist, macos_mount_script, macos_mount_plist, windows_task |
+| `esp_fallback` | copy a disk's EFI loader tree to \\EFI\\BOOT and repair its config search. The value is the disk (`disk` for the one this stage built) or {disk, from}, where `from` is the loader directory inside the ESP |
+| `settle` | seconds to wait where there is NO fact to wait on; the older `wait:` and `wait_after:` both become this |
+| `wait_until` | wait for a CONDITION about the machine: `stopped` - its process has gone. A file that sent `acpi: power` or `ssh: poweroff` says this next, and a file that did not gets a clear message instead of a disk qemu still holds open |
+| `fetch` | produce one host-side input: an installer image, a guest agent, a firmware, an answer CD. The value names WHAT, not how it is obtained |
+| `template` | with `generate: answer_iso`: the answer file to substitute into. It is a path in the repository because the placeholders are the file's vocabulary, not a download |
 
-## 1.1 The machine itself
+## 4. Subkeys — written INSIDE another key
 
-| key | value | what it does | uses |
-|---|---|---|---|
-| `boot` | mapping | start the machine this file owns | 56 |
-| `shutdown` | `kill` | kill the machine; every other way to stop a guest is a step of its own | 16 |
-| `acpi` | `power` `reset` | send one ACPI message - it does not wait | 1 |
-| `qga` | `ping` `info` `shutdown` `exec` `file-read` `file-write` `set-time` `interfaces` | one guest-agent command | 0 |
-| `wait_until` | `stopped` | wait for the machine's process to go | 0 |
-| `disk` | mapping | the file `boot:` starts from | 29 |
-| `compress` | path | flatten the overlay into an artifact | 49 |
-| `esp_fallback` | disk / `{disk, from}` | copy a disk's EFI loader to `\EFI\BOOT` and repair its search | 1 |
+| key | what it does |
+|---|---|
+| `file` | with `disk:`: the disk file the step names or creates |
+| `size` | with `disk:`: the size in GiB to create it at (was `disk_gb:`) |
+| `gpt` | with `disk:`: write a GPT partition table (was `disk_gpt:`) |
+| `esp_mib` | with `disk:`: the size of the EFI system partition (was `disk_esp_mib:`) |
+| `min_mb` | with `disk:`: the smallest a finished disk may be (was `disk_min_mb:`) |
+| `wait` | with `disk:`: wait this long for the file to stop growing (was `disk_settle:`) |
+| `rect` | the region to measure: as a FRACTION of the frame (`middle`, `bottom 4.5%`), or `[x0, y0, x1, y1]` pixels. With `check:`, the region asked about; with `desktop: {reference:}`, the part of the picture compared - which is how a wallpaper is compared without the installer window that comes to sit over it |
+| `rect_at` | with a PIXEL `rect:`: [width, height] the rectangle was measured at, so it can be scaled for a guest drawing at another size |
+| `of` | with the retired `see:`: which numbers to bind - mean, spread, sat, flat_rows, contrast, min, max, or text. A question is a `check:` now |
+| `reference` | the image to compare against, relative to the walkthrough: with a `check:` of `mode: like`, the region; with `desktop:`, the whole frame - which replaces six brightness thresholds with one measurement |
+| `mode` | with `check:`: HOW the frame is questioned - like, mean_between, sat_between, spread_between, text |
+| `words` | with `check: mode: text`: the word-sets, any one of which satisfies it |
+| `without` | with `check: mode: text`: words that must NOT be on screen |
+| `range` | with a `check:` mode that compares a number: [low, high] |
+| `pattern` | with `check: mode: matches`: the regular expression |
+| `as` | the name the boolean a gate or wait produces is bound under |
+| `from` | with `expect:`: the frame a `read:` captured, by its name; with `until:`/`repeat:`: the source (`console`) |
+| `must` | with `check:`: a FALSE answer fails the step. Without it a check only binds the boolean, for an `if:` or a `loop: until:` to consume |
+| `contains` | a substring the reading must hold |
+| `contains_any` | any one of these word-sets must appear |
+| `not_contains` | a substring the reading must not hold |
+| `equals` | the reading equals this, normalised |
+| `matches` | the reading matches this expression |
+| `like` | the reading is similar to this string |
+| `fuzzy` | how similar, for a fuzzy comparison |
+| `ratio` | the share of words that must match |
+| `mean` | mean brightness, 0..255 |
+| `spread` | mean absolute deviation of brightness |
+| `sat` | mean HSV saturation, 0..1 |
+| `flat_rows` | rows one colour across the full width |
+| `contrast` | how much the region varies |
+| `vs` | the reading a comparison is made against |
+| `min` | the darkest pixel in the region |
+| `any_of` | any one of these values |
+| `less_than` | a comparison: below this |
+| `greater_than` | a comparison: above this |
+| `at_least` | a comparison: this or more |
+| `at_most` | a comparison: this or less |
+| `between` | a comparison: within this range |
+| `max` | with `loop:`: the attempt ceiling. Required - a loop with no ceiling presses a key until the stage times out |
+| `every` | with `loop:`: seconds after which the `clock:` actions run once, independent of the reading |
+| `clock` | with `loop: every:`: the actions to run once when the clock runs out. It is named `clock` because a bare YAML key spelled o-n parses as the boolean true |
+| `fact` | with `until:`: the boolean a loop ends on |
+| `then` | with `if:`: the steps that run when it is true |
+| `else` | with `if:`: the steps that run when it is false |
+| `path` | with `qga: file-read`/`file-write`: the file in the GUEST |
+| `to` | with `scp: {template: KIND}`: the remote path it is copied to |
 
-## 1.2 Input — the pointer and the keyboard
+## 5. File header — not step keys
 
-| key | value | what it does | uses |
-|---|---|---|---|
-| `click` | `[x, y]` | one click | 299 |
-| `double` | `[x, y]` | one double-click, moving once | 6 |
-| `at_button` | `[x, y]` | click inside a window, by position not title | 9 |
-| `at_color` | `[r, g, b]` | click the largest blob of one colour | 1 |
-| `key` | qcode or `ctrl+alt+t` | one keystroke or chord | 170 |
-| `type` | text | type at the focus; with `at:` clicks the field first | 124 |
-| `write` | kind | write one host-side file for a later `scp:` | 17 |
-| `fetch` | kind | produce one host-side input (was `asset:`/`build:`/`generate:`) | 4 |
-| `needs` | list | files that must be on disk before this stage runs | 22 |
+| key | what it does |
+|---|---|
+| `name` | what the log calls this walkthrough |
+| `resolution` | [width, height] the coordinates were measured at |
+| `recording_resolution` | [width, height] the VIDEO's size; required, not derived |
+| `user` | the account the walk logs in as |
+| `password` | the guest account's password |
+| `var` | one variable, as a block of `default`/`from` |
+| `needs` | files that must exist before the stage runs |
 
-## 1.3 Channels into the guest
+## 6. Retired — names a 1.0 file wrote
 
-| key | value | what it does | uses |
-|---|---|---|---|
-| `run` | shell text | type a command into the guest's own terminal | 78 |
-| `ssh` | shell text | one command over ssh; exit status is the verdict | 266 |
-| `scp` | `[local, remote]` | one copy, size-checked on both sides | 25 |
-| `adb` | shell text | one command over the Android Debug Bridge | 16 |
-| `require_ssh` | bool | wait for sshd before the steps that use it | 40 |
-
-# 2. `see:` — measure the screen (4 keys)
-
-| key | value | what it binds | uses |
-|---|---|---|---|
-| `see` | `{name, rect, of}` — `of: [text]` gives a word list, which is what `ocr:` was | `name.mean` `.spread` `.sat` `.flat_rows` `.contrast` `.min` `.max`, or `name.words` | **new** |
-| `when_not` | words | run only if the screen does NOT say these | 10 |
-| `when_not_any` | word-sets | the alternatives form of `when_not:` | 0 |
-| `desktop` | `linux` `kde` `gnome` `cinnamon` `xfce` `windows` `macos` `android` | waits until that desktop's measurement passes | 22 |
-| `screenshot` | path | saves a frame for a post-mortem; binds nothing | 3 |
-
-`rect:` IS A FRACTION OF THE FRAME, NEVER A PIXEL PAIR — `middle`, `top 4.5%`,
-`bottom 40px`, or `[x0, y0, x1, y1]` as fractions. A fraction cannot be measured at
-the wrong size, which is the failure the files record verbatim: *"a coordinate
-measured at 1920x1080 but the framebuffer is 640x480"*.
-
-That is why `region_at:` is gone: it was written 42 times and was always the
-header's own `resolution:`.
-
-# 3. `want:` — decide (6 keys)
-
-| key | value | what it does | uses |
-|---|---|---|---|
-| `check` | `{name, text?, colour?, any_of?, region?, must?}` | ONE capture, every criterion against it, one boolean | 128 |
-| `when` | words | run this step only if the screen says these words | 16 |
-| `do` | list | run these steps in order under one name | 8 |
-| `if` | fact | branches: `{then: [...], else: [...]}` | 19 |
-| `loop` | `{max, do, until}` | repeat `do:` until the fact is true, up to `max` | 79 |
-
-## `check:` is the merged primitive
-
-One capture, any number of criteria, one boolean out:
-
-```yaml
-- check:
-    name: page
-    region: middle
-    text:
-      - contains: [erase, disk]        # exact words, case/punctuation folded
-      - contains: [ext4], fuzzy: 1     # within ONE edit per word
-      - like: "install now"            # whole region ~ this sentence
-        ratio: 0.85
-      - not_contains: [installing]
-    colour:
-      - rect: bottom 4.5%
-        mean:      {between: [20, 60]}
-        spread:    {less_than: 42}
-        flat_rows: {at_least: 3}
-        vs: {rect: middle, mean: {greater_than: 40}}
-    any_of:
-      - colour: [{rect: top 4.5%, flat_rows: {at_least: 3}}]
-    unless: [welcome, setup]
-```
-
-**WHY ONE STEP AND NOT `see:`+`want:` FOR THIS**: every `Driver.Frame()` is a real
-screendump, so two steps read two different moments — and on a repainting pane the
-numbers then describe no frame that ever existed. The single capture is a
-correctness requirement, not an optimisation.
-
-**THREE TEXT COMPARISONS, MEASURED, BECAUSE THEY ANSWER THREE QUESTIONS**:
-
-```
-contains: [erase, disk]    on 'Erase disk and install Ubuntu'    yes    (it CONTAINS them)
-like: "erase disk"         on 'Erase disk and install Ubuntu'    0.345  no  (it is not that)
-like: "install now"        on 'insall now'                       0.909  yes (one glyph)
-contains: [ext4], fuzzy: 1 on 'ext'                              yes    (distance 1)
-```
-
-`fuzzy:` is an **edit distance per word**, default 0, capped at 2. A ratio is the
-wrong unit for a short word: `disk`→`dsk` is one glyph and scores 0.750, so any ratio
-threshold refuses a pane's own button label. `like:` is the only ratio, and it is
-right only for a whole region that is one sentence.
-
-# 4. Modifiers — each names a question (11 keys)
-
-| key | value | the question | uses |
-|---|---|---|---|
-| `name` | text | what does the log call this? | 1526 |
-| `when` | fact / words | does this step apply at all? | 16 |
-| `optional` | bool | may it fail without failing the walk? | 30 |
-| `timeout` | seconds | how long may the whole step take? | 533 |
-| `settle` | seconds | how long to wait with **no fact** to wait on | 818 |
-| `poll` | seconds | how often does a wait look? **only when not the default** | 1 |
-| `type_gap` | seconds | how fast to type? | 16 |
-| `terminal_wait` | seconds | open a terminal first, then wait this long | 68 |
-| `clear` | bool | select-all and clear the field before typing | 17 |
-| `modifier` | `ctrl` / `meta_l` | the select-all modifier for this family | 4 |
-
-`settle:` absorbs `wait:` and `wait_after:` — the same key under two names, 818 uses
-between them. `wait_after` was a timed GUESS in one step of three, and 28 of those
-guesses were immediately followed by a real measurement of the same screen. That is
-the bug class that failed cachyos and endeavouros on CI, where the guess was right on
-the measuring machine and wrong on the runner.
-
-# 5. Subkeys — written INSIDE another key (11 groups)
-
-A SUBCKEY IS NOT A STEP KEY. `mode:` is written inside `check:`, and `rect:` inside `see:`; a step that
-writes one at its own level is a step whose only key is an argument to a question nobody asked. Two
-tables enforce that split - `Keys` for what a step may say, `Subkeys` for what belongs inside a value -
-and `Validate` refuses `{mean: 40}` while accepting `{click: ..., when_not: ..., rect: ...}` (the gate
-reads the region, the click does not).
-
-| key | parent | value | uses |
-|---|---|---|---|
-| `rect`, `rect_at`, `scale` | `check`, `see`, `when`, `when_not`, `until` | the region to read, the size a pixel rect was measured at, the enlargement | 291 |
-| `from` | `check`, `until` | the frame a `see:` captured, or the source (`console`) | 46 |
-| `mode` | `check` | how the frame is questioned: `like`, `mean_between`, `sat_between`, `spread_between`, `text` | 128 |
-| `words`, `without`, `range` | `check` | the words that satisfy it, the words that must not be there, the numeric bounds | 128 |
-| `reference` | `check` | the image a `mode: like` compares the region against | 0 |
-| `must` | `check` | a FALSE answer fails the step; without it a check only binds the boolean for an `if:` or a `loop:` | 0 |
-| `as`, `pattern`, `text` | `check` | the name a gate binds, a regular expression, the text a comparison is about | 46 |
-| `max`, `every`, `clock`, `fact` | `loop` | the ceiling, the seconds the clock runs, the actions it fires, the boolean it stops on | 79 |
-| `then`, `else` | `if` | the branches | 21 |
-| `of` | — | **DEAD**: the `see:` that measured numbers is gone; a question is a `check:` | 0 |
-| `to`, `path`, `body`, `argv` | `scp`, `qga` | the remote path, the guest file, the bytes, the command line | 0 |
-| `file`, `size`, `gpt`, `esp_mib`, `min_mb`, `wait` | `disk` | the folded form of `disk_gb:`, `disk_gpt:`, `disk_esp_mib:`, `disk_min_mb:` and `disk_settle:` — `disk: {file: disk.qcow2, size: 128}` | new |
-
-## Step-level arguments that are NOT subkeys
-
-These are written BESIDE the action that reads them (`boot: true` with `os:` on the next line), so
-they live in `Keys` and `Validate` accepts them at step level. The list is here because a reader
-looking for `os:` expects to find it in a table, and the difference from the section above is where
-the file puts the key rather than what it means.
-
-| key | parent | value | uses |
-|---|---|---|---|
-| `os` | `boot`, `write`, `fetch`, `desktop` | `linux` `windows` `macos` `freebsd` `android` | 56 |
-| `iso`, `recovery`, `answer_cd`, `driver_cd` | `boot` | the media the machine starts from | 58 |
-| `cpu`, `memory_mb`, `microvm`, `microvm_display` | `boot` | how much machine to build | 7 |
-| `kernel`, `initrd`, `kernel_append` | `boot` | the kernel a microvm is handed, because there is no boot sector | new |
-| `disk_gb`, `disk_gpt`, `disk_esp_mib`, `disk_min_mb`, `disk_settle` | `disk`, `compress` | the target's size, layout and the wait for it to stop growing | 30 |
-| `esp_from` | `esp_fallback` | the loader directory inside the ESP | 1 |
-| `template` | `scp`, `fetch` | what to render | 9 |
-| `ssh_probe`, `ssh_after_reboot` | `require_ssh` | how to probe, and whether to wait out the old daemon | 11 |
-| `adb_connect`, `adb_privileged` | `adb` | connection and privilege | 2 |
-| `minimum` | `wait_until` | the threshold a `console_idle`/`disk_idle`/`frame_still` wait needs | 0 |
-| `blind_after` | `until` | with `from: console`: go on after this long with no text | 2 |
-| `colour`, `any_of`, `contains`, `equals`, `matches`, `like`, `fuzzy`, `ratio`, `not_contains`, `contains_any` | `check` | the text and pixel comparisons | 119 |
-| `mean`, `spread`, `sat`, `flat_rows`, `contrast`, `min`, `max`, `vs`, `at_least`, `at_most`, `between`, `greater_than`, `less_than` | `check` | the measurements and the bounds they are held to | 291 |
-
-
-<!-- A HANDFUL OF ARGUMENTS LOOK LIKE SUBCKEYS AND ARE NOT: `os`, `iso`, `disk_gb`, `template` and
-their neighbours are written BESIDE the action that reads them, so they are step keys and live in
-`Keys`. The difference is where the file puts them, and a reader can see it: `boot: {os: ...}` has the
-argument inside the mapping, `boot: true` with `os: linux` beside it has it at step level. Both forms
-exist, which is why `os` is an argument in `Consumes` rather than a subkey. -->
-
-
-# 6. File header — not step keys (5 rows, 7 names)
-
-| key | value | what it says |
-|---|---|---|
-| `name` | text | what this walkthrough is |
-| `resolution` | `[w, h]` | the size every fraction and coordinate was measured at |
-| `vars` | mapping | `{from: args.x, default: y}` |
-| `ssh_user`, `ssh_port` | text / int | the account later stages log in as |
-| `ends`, `waits_for`, `ends_at` | list / mapping | the old `panes:` model, read only by unported files |
-
-`ends:`, `waits_for:` and `ends_at:` are the old `panes:` model. No current file uses
-them; they are read only by files that have not been ported.
-
-# 7. Retired — 34 rows
-
-Three words, and they are not interchangeable:
-
-* **MIGRATED** — the successor exists and **no file anywhere** uses this key any more. A key
-  marked MIGRATED that a file still uses fails `audit_test.go`, so this claim cannot rot.
-* **DONE in `<dir>/`** — the migration is finished for those files and not the others. It is a
-  fact with a scope, verified by counting the keys in that directory.
-* **DEAD** — nothing uses it anywhere and there is no successor; a key nobody needed.
-
-THE SCOPE MATTERS BECAUSE THE MIGRATION IS PER DIRECTORY, AND IT IS NOT FINISHED EVERYWHERE. The four
-families that were converted - `windows/11`, `macos/15`, `linux/ubuntu`, `bsd/freebsd` - say
-`settle:`. THE OTHER DISTRIBUTIONS STILL SAY `wait_after:`, because their `.yaml` files came back with
-the upstream merge and have not been converted yet: cachyos, endeavour, fedora-workstation, kubuntu,
-manjaro, mint, mx, nixos, opensuse-leap-16.1, popos and zorin. Each is converted in its own time.
-
-| key | uses | becomes |
-|---|---|---|
-| `mem_mb` | 0 | `memory_mb` — **MIGRATED** |
-| `wait_after` | 0 | `settle:` — **MIGRATED**, 891 uses across 33 files |
-| `wait` (the step verb) | 0 | `settle:` — **MIGRATED**. 118 `wait:` remain INSIDE `ocr:`, where it is the reading's own pause |
-| `region`, `region_at` | 0 | `rect:`, `rect_at:` — **MIGRATED** |
-| `ocr` | 0 | `see: {of: [text]}` — **MIGRATED**, 118 uses; the two produced identical readings |
-
-| `scale` | 42 | `check: {scale: N}` |
-| `require`, `requires` | 0 | `needs:` — **DELETED from the vocabulary**: `requires:` was never read by any code, so all 21 uses were silently ignored |
-| `expect`, `expect_any` | 0 | `check: {must: true, text: …}` — **MIGRATED** |
-| `until`, `until_any` | 79 | `loop: {until:}` |
-| `family` | 0 | `os:` — **MIGRATED** |
-| `asset`, `build`, `generate` | 0 | `fetch:` — **MIGRATED** |
-| `script`, `script_shell`, `script_name` | 0 | `scp:` a file beside the walkthrough + `ssh:` — **DELETED**: the 16 bodies became real files, and windows/11/steps/dev.walk went from 46,315 to 6,932 bytes |
-| `at_bottom` | 8 | `at_button:` |
-| `skip_when_unfinished` | 5 | `if: finished` |
-| `release` | 4 | `os: macos-15` |
-| `color_tolerance`, `color_region` | 3 | `at_color: {tolerance:, within:}` |
-| `at_fallback` | 1 | `at_button: {fallback:}` |
-| `once` | 1 | `loop: {max: 1}` |
-| `else` as a sibling | 2 | `if: {else: [...]}` |
-| `unless`, `unless_any` | 0 | `when_not:`, `when_not_any:` — **MIGRATED** |
-| `repeat_until` | 0 | `loop:` — **DELETED**: zero uses and no branch remains |
-| `once`, `end`, `stuck_after`, `until_any` | 0 | the pane state machine — **DELETED** |
-| `wait_for` | 0 | `check: {colour: …}` — **DELETED**: zero uses and no branch remains |
-| `wait_for_change` | 0 | `check:` + `loop:` — **DEAD** |
-| `until_dark` | 0 | `check: {colour: {mean: {less_than: N}}}` — **DEAD** |
-| `change_settle`, `change_timeout` | 0 | `settle:`, `timeout:` — **DEAD** |
-| `desktop_family` | 0 | `desktop:` — **DEAD** |
-| `boot_from`, `disk_from`, `disk_copy`, `disk_overlay` | 0 | the mapping forms of `boot:`/`disk:` — **DEAD** |
-| `snapshot` | 0 | — **DELETED**: zero uses and its branch called `notImplemented` |
-| `reboot` | 0 | — **DELETED**: zero uses; a `boot:` of a running machine is a no-op already |
-| `graceful` | 0 | `shutdown: {method:}` — **DEAD** |
-| `press`, `sweep` | 0 | `at_button:`, `loop: {do: [{click: …}]}` — **DEAD** |
-| `demo_script` | 0 | `write:` — **DELETED**: zero uses and it only ever answered `notImplemented` |
-| `host_log`, `line_gap`, `adb_serial`, `share_dir`, `end`, `stuck_after`, `as`, `cpus` | 0 | — **DEAD** |
-| `want`, `all`, `any`, `not`, `minus` | 0 | `check:` - **DELETED**: 265 lines of recursive group evaluation and zero walkthroughs ever wrote one, while `check:` was used 29 times |
-| `mean`, `spread`, `sat`, `less_than`, `between` (as `check:` criteria) | 0 | **DELETED** with the retired `check: text`/`check: colour` syntax: those criteria were only ever read by `want:`, which nothing wrote |
-| `record` | 0 | automatic - **DELETED**: the recording starts with the run and `finishRecording` encodes it however the walk ended |
-| `until_console` | 0 | `until: {from: console}` - **DELETED**: it was `until:` with a different source, which is a parameter |
-| `host_log` (step) | 0 | — **DELETED**: zero uses and no branch remains |
-| `share_serve`, `share_mount`, `share_family` | 0 | the share is always on - **DELETED**: `share_mount:` had not mounted since the transport became HTTP, `share_serve:` set one variable, and `share_family:`'s `macos` and `linux` took the same branch |
-| `keep_alive` | 0 | the wake is unconditional — **MIGRATED** |
-| `desktop_family` | 0 | `desktop:` — **DELETED** |
-
-## Why 29 keys are retired
-
-They are not retired because nobody needed them. **Twenty of them are DEAD because a
-better key arrived and the old one was never removed**, which is how a vocabulary
-reaches 131 keys: `until:` was declared, documented, and used ZERO times while `loop:`
-did the work 79 times. A vocabulary that cannot retire a key grows forever, so
-`audit_test.go` reports a dead key as a failure rather than a curiosity.
-
-## The rule that keeps it from growing back
-
-**A key is a verb or a question, never a goal.** `dismiss:`, `copy_in:`,
-`select_disk:` and `apple_account:` were removed for this reason already — each hid a
-loop, a click sequence or a tolerance inside Go, so the file said one thing and the
-code did three.
-
----
-
-# The arithmetic this vocabulary makes possible
-
-These numbers were measured from the frames already in `internal/screen/testdata`,
-with no Go involved, and they are what `measure_test.go` asserts:
-
-```
-                       body            edge            edge diff   flat rows   verdict
-mint   1920x1080   mean 39.9   bottom 4.5%  spread 8.5      7.1     11/49       desktop
-zorin  1280x720    mean 140.9  top 4.5%     spread 25.7    61.8      2/32       desktop
-mx grub 1920x1080  mean 56.4   bottom 4.5%  spread 40.7     4.6      0/49       NOT a desktop
-```
-
-One rule covers all three — so `IsLinuxDesktop` and `IsCinnamonDesktop` (the 80 lines
-of Go added for mint, whose panel is the same colour as its wallpaper) both become:
-
-```yaml
-- check:
-    name: desktop_up
-    any_of:
-      - colour: [{rect: top 4.5%,    spread: {less_than: 42}, vs: {rect: middle, mean: {greater_than: 40}}, sat: {greater_than: 0.05}}]
-      - colour: [{rect: bottom 4.5%, spread: {less_than: 42}, vs: {rect: middle, mean: {greater_than: 40}}, sat: {greater_than: 0.05}}]
-      - colour: [{rect: top 4.5%,    flat_rows: {at_least: 3}}]
-      - colour: [{rect: bottom 4.5%, flat_rows: {at_least: 3}}]
-```
-
-`IsMacOSDesktop` is 499 lines and stays Go, reached as a named measurement: forcing a
-photograph of one operating system's dock into arithmetic would be the same mistake
-inverted.
+| key | becomes |
+|---|---|
+| `see` | `read` |
+| `ocr` | `read` |
+| `screenshot` | `read` |
+| `check` | `expect` |
+| `loop` | `repeat` |
+| `click` | `press` |
+| `type` | `press text` |
+| `key` | `press` |
+| `shutdown` | `stop` |
+| `compress` | `stop with `save`` |
+| `scp` | `copy` |
+| `at_color` | `press colour` |
+| `at_button` | `press button` |
+| `at_bottom` | `press anchor bottom` |

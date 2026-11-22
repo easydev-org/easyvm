@@ -1,16 +1,22 @@
 walkthrough "linux-fedora-workstation - sshd"
-  resolution 1920x1080
-  password admin
-  var out == {default: out/distro.qcow2, from: args.out}
-  var user == {default: vmuser, from: args.user}
-  header recording_resolution == [1920, 1080]
+resolution 1920x1080
+recording_resolution 1920x1080
+var out
+  default out/distro.qcow2
+  from args.out
+password admin
+var user
+  default vmuser
+  from args.user
 
-  step "boot the disk"
-    boot == true
-    os == linux
-    # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
-    memory_mb == 4096
-    timeout == 900
+
+step "boot the disk"
+  boot
+  # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
+  memory_mb 4096
+  os linux
+  timeout 900
+
   # THE GREETER IS ASKED FOR BEFORE ANYTHING IS CLICKED, BECAUSE IT IS NOT THERE YET.
   #
   # MEASURED ON RUN 44472625613, whose recording is BLACK at 15 seconds and shows the greeter at
@@ -97,9 +103,20 @@ walkthrough "linux-fedora-workstation - sshd"
   # EVERY PAGE OF GNOME INITIAL SETUP CARRIES "Previous" AND "Next" in the header - the welcome page
   # included, where they are drawn but disabled. That pair is the wizard's chrome and nothing else on
   # this desktop wears it.
-  step "the setup wizard is up"
-    loop == {check: {from: wizard, mode: text, name: up, rect: [0, 150, 1920, 1080], rect_at: [1920, 1080], scale: 1, words: [[welcome, to, fedora], [setup, will, guide], [start, setup], [privacy, controls], [previous], [third, party]]}, do: [{settle: 10}], max: 90, see: {name: wizard}, until: {fact: up}}
-    optional == true
+step "the setup wizard is up"
+  repeat
+    pause 10
+    until
+      bind up
+      from wizard
+      mode text
+      rect [0, 150, 1920, 1080]
+      rect_at [1920, 1080]
+      scale 1
+      words [[welcome, to, fedora], [setup, will, guide], [start, setup], [privacy, controls], [previous], [third, party]]
+    max 90
+  optional
+
   # THE CLICK AT THE BUTTON'S OWN CENTRE DID NOT TAKE, SO THE BUTTON IS REACHED BY KEYBOARD.
   #
   # MEASURED ON RUN 44557723577's successor: 'start the setup wizard [clicked (960, 844)]' in the
@@ -109,8 +126,14 @@ walkthrough "linux-fedora-workstation - sshd"
   # `Start Setup` is the only focusable control on that page, so Tab reaches it and Return presses
   # it. A click that lands a few pixels off is a click that does nothing; a keyboard focus ring is
   # not ambiguous.
-  press Tab, waiting 2s, named "focus the wizard's only button"
-  press Return, waiting 15s, named "start the setup wizard, by keyboard"
+step "focus the wizard's only button"
+  press tab
+  settle 2
+
+step "start the setup wizard, by keyboard"
+  press ret
+  settle 15
+
   # THE WIZARD HAS MANY PAGES AND ONE BUTTON THAT MOVES FORWARD.
   #
   # MEASURED ON RUN 44557723577's successor: after Start Setup the wizard walks itself to
@@ -266,23 +289,27 @@ walkthrough "linux-fedora-workstation - sshd"
   # THE PRIVACY PAGE IS LEFT THE SAME WAY - one click on Next, at (1413, 193), the coordinate the
   # wizard draws it at on every page. Its location switch is left alone: this stage is not about
   # location services, and clicking the page's centre would toggle it.
-  step "leave the privacy page"
-    click == [1413, 193]
-    settle == 5
+step "leave the privacy page"
+  press 1413 193
+  settle 5
+
   #
   # (640, 690) IS A LANDMARK, NOT A NAVIGATION. It is Los Angeles on the map, and clicking it sets a
   # time zone worth having - confirmed by the page's own bubble reading
   # "PST (UTC-08) Los Angeles, United States". It is NOT what makes the page pass: measured, Next on
   # an unanswered Time Zone page is the same blue button and moves the wizard on to Third-Party.
-  step "point the map at Los Angeles, when the wizard is showing one"
-    click == [640, 690]
-    settle == 3
-  step "leave the time zone page"
-    click == [1413, 193]
-    settle == 5
-  step "leave the third-party repositories page"
-    click == [1413, 193]
-    settle == 5
+step "point the map at Los Angeles, when the wizard is showing one"
+  press 640 690
+  settle 3
+
+step "leave the time zone page"
+  press 1413 193
+  settle 5
+
+step "leave the third-party repositories page"
+  press 1413 193
+  settle 5
+
   # THE ACCOUNT FORM IS RECOGNISED BY A PICTURE, NOT BY WORDS OR A GUESS ABOUT FOCUS.
   #
   # MEASURED ON THIS WIZARD, six runs: the words on the page are not unique to it (Privacy, the update
@@ -303,51 +330,78 @@ walkthrough "linux-fedora-workstation - sshd"
   #
   # THIS STEP IS NOT OPTIONAL. The four pages above are a route; this is the destination, and a route
   # that ends anywhere else has failed.
-  step "look at the page the route ended on"
-    see == {name: account_form}
-    settle == 2
-  step "the create-account form is up, with the cursor in Full Name"
-    check == {from: account_form, mode: like, name: ready, rect: [700, 300, 1100, 420], rect_at: [1920, 1080], reference: reference/about-you-create-account.png, range: [0.78, 1.0], must: true}
+step "look at the page the route ended on"
+  read
+    name account_form
+  settle 2
+
+step "the create-account form is up, with the cursor in Full Name"
+  expect
+    from account_form
+    mode like
+    must
+    name ready
+    range [0.78, 1]
+    rect [700, 300, 1100, 420]
+    rect_at [1920, 1080]
+    reference reference/about-you-create-account.png
+
   # THE FIELDS ARE TYPED NOW THAT THE PAGE IS PROVEN, AND THE PROOF IS ABOVE RATHER THAN A `when:`.
   #
   # A `when: [ready]` GATE WAS TRIED AND REJECTED: `doCheck` only binds the fact when the check RUNS,
   # and inside an `optional` loop a page that never matched left the name unbound and the gate skipped
   # the typing silently - the same "optional step that let the miss through" fault this file's header
   # complains about. A non-optional check has none of that ambiguity: it fails, or it proves.
-  step "the full name"
-    type == '{{ user }}'
-    type_gap == 0.09
-    settle == 3
-  press Tab, waiting 2s, named "on to the user name"
-  step "clear the auto-filled user name"
-    key == ctrl+a
-    settle == 1
-  step "the user name"
-    type == '{{ user }}'
-    type_gap == 0.09
-    settle == 3
-  press Return, waiting 10s, named "submit the account page"
+step "the full name"
+  settle 3
+  press text "{{ user }}"
+  type_gap 0.09
+
+step "on to the user name"
+  press tab
+  settle 2
+
+step "clear the auto-filled user name"
+  press ctrl+a
+  settle 1
+
+step "the user name"
+  settle 3
+  press text "{{ user }}"
+  type_gap 0.09
+
+step "submit the account page"
+  press ret
+  settle 10
+
   # THE PASSWORD PAGE HAS TWO FIELDS AND TAB DOES NOT REACH THE SECOND ONE.
   #
   # MEASURED ON THE POD: after typing the password and pressing Tab, the confirmation field was still
   # empty - the focus had not moved into it. Clicking it at (960, 627) put the cursor there and the
   # password was accepted, so the click is what this does. The two fields then match, Next enables, and
   # the wizard finishes on "All done!".
-  step "the password"
-    type == '{{ password }}'
-    type_gap == 0.09
-    settle == 2
-  step "put the cursor in the confirmation field, which Tab does not reach"
-    click == [960, 627]
-    settle == 1
-  step "the password, again"
-    type == '{{ password }}'
-    type_gap == 0.09
-    settle == 2
-  step "leave the password page"
-    click == [1413, 193]
-    settle == 4
-  press Return, waiting 20s, named "finish the wizard"
+step "the password"
+  settle 2
+  press text "{{ password }}"
+  type_gap 0.09
+
+step "put the cursor in the confirmation field, which Tab does not reach"
+  press 960 627
+  settle 1
+
+step "the password, again"
+  settle 2
+  press text "{{ password }}"
+  type_gap 0.09
+
+step "leave the password page"
+  press 1413 193
+  settle 4
+
+step "finish the wizard"
+  press ret
+  settle 20
+
   # THE TERMINAL IS OPENED BY SEARCHING IN THE OVERVIEW, AND THE WAY IN IS THE ESCAPE KEY, NOT meta_l.
   #
   # MEASURED ON THE POD, AND THIS IS WHY EVERY COMMAND AFTER IT WAS DEAD. The previous version opened
@@ -370,10 +424,14 @@ walkthrough "linux-fedora-workstation - sshd"
   # `meta_l` LEAVES THE PREVIOUS CONTENT IN THE BOX, which is the whole difference: the wizard's last
   # keystrokes were still in it, so Return ran a search for a command line instead of starting a
   # program.
-  step "start from a clean desktop"
-    key == esc
-    settle == 2
-  press meta_l, waiting 3s, named "open the overview"
+step "start from a clean desktop"
+  press esc
+  settle 2
+
+step "open the overview"
+  press meta_l
+  settle 3
+
   # THE SEARCH BOX IS CLICKED BEFORE ANYTHING IS TYPED INTO IT, AND `meta_l` ALONE IS NOT ENOUGH.
   #
   # MEASURED ON THE POD: `meta_l` draws the overview with its search field showing "Type to search" -
@@ -388,12 +446,14 @@ walkthrough "linux-fedora-workstation - sshd"
   # A click at (960, 59) - the field's own centre - puts the cursor in it, and the same eight
   # characters then produced the Terminal tile immediately. The coordinate is the field's, measured
   # from a frame of this screen, not a guess about where a search box usually sits.
-  step "put the cursor in the overview's search field"
-    click == [960, 59]
-    settle == 2
-  step "search for the terminal"
-    type == terminal
-    type_gap == 0.08
+step "put the cursor in the overview's search field"
+  press 960 59
+  settle 2
+
+step "search for the terminal"
+  press text terminal
+  type_gap 0.08
+
   # THE RESULT IS WAITED FOR, THEN CLICKED, AND THE DIFFERENCE IS MEASURED.
   #
   # MEASURED ON THE POD in both directions:
@@ -408,15 +468,27 @@ walkthrough "linux-fedora-workstation - sshd"
   # SO THE TILE IS WAITED FOR, BY ITS OWN WORD. A search that has produced nothing draws no word in
   # that row; one that has produced the app draws "Terminal". The loop presses nothing - a key here
   # would go into the search box and change what is being searched for.
-  step "the Terminal result has been drawn"
-    # THE RECT IS THE TILE AND ITS LABEL, NOT THE WHOLE RESULT AREA. MEASURED with tesseract on a
-    # frame of this screen: the wider box `[700, 90, 1250, 240]` returns NOTHING - the tile's icon is
-    # a gradient and the text is small against it - while `[860, 150, 1060, 250]` reads "Terminal".
-    # A gate whose rectangle cannot see the word it is waiting for fails for ever, quietly.
-    loop == {check: {from: results, mode: text, name: drawn, rect: [860, 150, 1060, 250], rect_at: [1920, 1080], scale: 1, words: [[terminal]]}, do: [{settle: 2}], max: 10, see: {name: results}, until: {fact: drawn}}
-  step "open the terminal on the first result"
-    click == [960, 178]
-    settle == 20
+step "the Terminal result has been drawn"
+  # THE RECT IS THE TILE AND ITS LABEL, NOT THE WHOLE RESULT AREA. MEASURED with tesseract on a
+  # frame of this screen: the wider box `[700, 90, 1250, 240]` returns NOTHING - the tile's icon is
+  # a gradient and the text is small against it - while `[860, 150, 1060, 250]` reads "Terminal".
+  # A gate whose rectangle cannot see the word it is waiting for fails for ever, quietly.
+  repeat
+    pause 2
+    until
+      bind drawn
+      from results
+      mode text
+      rect [860, 150, 1060, 250]
+      rect_at [1920, 1080]
+      scale 1
+      words [[terminal]]
+    max 10
+
+step "open the terminal on the first result"
+  press 960 178
+  settle 20
+
   # THE TERMINAL HAS TO BE PROVEN OPEN BEFORE ANY COMMAND IS TYPED INTO IT.
   #
   # THIS STEP WOULD HAVE CAUGHT THE FAULT ABOVE ON ITS FIRST RUN. The stage typed eight commands
@@ -434,8 +506,19 @@ walkthrough "linux-fedora-workstation - sshd"
   # THE LOOP ONLY LOOKS. Its `do:` is a `settle:` and nothing else: the window takes a few seconds to
   # map, and a loop that PRESSED a key to "help" would be pressing it into whatever had the focus -
   # which is exactly how the commands ended up in the search box.
-  step "the terminal is open, with a prompt"
-    loop == {check: {from: shell, mode: text, name: ready, rect: [300, 280, 1330, 810], rect_at: [1920, 1080], scale: 1, words: [[vmuser@fedora]]}, do: [{settle: 4}], max: 4, see: {name: shell}, until: {fact: ready}}
+step "the terminal is open, with a prompt"
+  repeat
+    pause 4
+    until
+      bind ready
+      from shell
+      mode text
+      rect [300, 280, 1330, 810]
+      rect_at [1920, 1080]
+      scale 1
+      words [[vmuser@fedora]]
+    max 4
+
   # NO `terminal_wait:` HERE, AND THAT IS THE FIX RATHER THAN AN OMISSION.
   #
   # `terminal_wait:` OPENS A TERMINAL (ctrl+alt+t) AND THEN TYPES. The step above has already
@@ -458,46 +541,58 @@ walkthrough "linux-fedora-workstation - sshd"
   # admin' lost its first two characters) or 'sudo: no password was provided'. Both are the same
   # fault - the password travels in the command line - and both are cured by authenticating once
   # and letting sudo keep the timestamp.
-  step "unlock sudo once for this session"
-    run == printf '%s\n' {{ password }} | sudo -S -v
-    settle == 4
-  step "install openssh-server"
-    run == sudo dnf install -y openssh-server
-    settle == 60
-  step "allow password authentication"
-    run == sudo sed -i "s/^#\?\s*PasswordAuthentication.*/PasswordAuthentication yes/" /etc/ssh/sshd_config ; sudo grep -i "^PasswordAuthentication" /etc/ssh/sshd_config
-    settle == 3
-  step "enable ssh at boot"
-    run == sudo systemctl enable --now sshd
-    settle == 8
+step "unlock sudo once for this session"
+  run "printf '%s\\n' {{ password }} | sudo -S -v"
+  settle 4
+
+step "install openssh-server"
+  run "sudo dnf install -y openssh-server"
+  settle 60
+
+step "allow password authentication"
+  run "sudo sed -i \"s/^#\\?\\s*PasswordAuthentication.*/PasswordAuthentication yes/\" /etc/ssh/sshd_config ; sudo grep -i \"^PasswordAuthentication\" /etc/ssh/sshd_config"
+  settle 3
+
+step "enable ssh at boot"
+  run "sudo systemctl enable --now sshd"
+  settle 8
+
   # FEDORA SHIPS firewalld ENABLED, AND IT DROPS 22 UNTIL THE SERVICE IS ALLOWED.
   #
   # This medium is the one distribution in this tree that starts with its firewall on by default,
   # which is why every other ssh walk could get away without a line like this. `--add-service=ssh`
   # is the standard rule and it is what the default zone publishes.
-  step "open the firewall for ssh"
-    run == sudo firewall-cmd --permanent --add-service=ssh
-    settle == 4
-  step "reload the firewall"
-    run == sudo firewall-cmd --reload
-    settle == 5
-  step "show the zone's services"
-    run == sudo firewall-cmd --list-services
-    settle == 3
-  step "wait for sshd"
-    require_ssh == true
-    timeout == 600
-  step "prove the kernel over ssh"
-    ssh == uname -a
-    timeout == 120
-  step "prove the account over ssh"
-    ssh == id -un; hostname
-    timeout == 120
-  step "ask the guest to power off"
-    ssh == printf '%s\n' '{{ password }}' | sudo -S -p '' poweroff
-    timeout == 300
-  step "wait for the machine to stop"
-    timeout == 300
-    wait_until == stopped
-  step "publish the disk"
-    compress == '{{ out }}'
+step "open the firewall for ssh"
+  run "sudo firewall-cmd --permanent --add-service=ssh"
+  settle 4
+
+step "reload the firewall"
+  run "sudo firewall-cmd --reload"
+  settle 5
+
+step "show the zone's services"
+  run "sudo firewall-cmd --list-services"
+  settle 3
+
+step "wait for sshd"
+  require_ssh
+  timeout 600
+
+step "prove the kernel over ssh"
+  ssh "uname -a"
+  timeout 120
+
+step "prove the account over ssh"
+  ssh "id -un; hostname"
+  timeout 120
+
+step "ask the guest to power off"
+  ssh "printf '%s\\n' '{{ password }}' | sudo -S -p '' poweroff"
+  timeout 300
+
+step "wait for the machine to stop"
+  wait_until stopped
+  timeout 300
+
+step "publish the disk"
+    save "{{ out }}"

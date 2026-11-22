@@ -1,24 +1,57 @@
 walkthrough "android 13 (blissos 16.9.7) - start the installed disk"
-  resolution 1920x1080
-  var boot_timeout == {default: "600", from: args.boot_timeout}
-  var out == {default: out/blissos16-launch.qcow2, from: args.out}
-  header recording_resolution == [1920, 1080]
+resolution 1920x1080
+recording_resolution 1920x1080
+var boot_timeout
+  default "600"
+  from args.boot_timeout
+var out
+  default out/blissos16-launch.qcow2
+  from args.out
 
-  step "boot the installed disk"
-    boot == true
-    memory_mb == 4096
-    os == android
-    timeout == 300
-  step "the firmware found the ESP and GRUB is running"
-    loop == {check: {from: boot, mode: text, name: reached, rect: [548, 689, 1184, 868], rect_at: [1920, 1080], words: [[blissos], [android], [grub]]}, do: [{settle: 5}], max: 60, see: {name: boot}, until: {fact: reached}}
-  step "wait for the home-app chooser"
-    loop == {check: {from: chooser, mode: text, name: asked, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], words: [home, app]}, do: [{settle: 5}], max: 20, see: {name: chooser}, until: {fact: asked}}
-  click "choose Taskbar for Bliss OS" at 666 722, waiting 3s, named "choose Taskbar for Bliss OS"
-  click "always, so the next boot goes straight to the desktop" at 1238 986, waiting 6s, named "always, so the next boot goes straight to the desktop"
-  step "wait for Android's own UI"
-    desktop == android
-    poll == 10
-    timeout == '{{ boot_timeout }}'
-  step "stop the machine"
-    shutdown == kill
-    timeout == 120
+
+step "boot the installed disk"
+  boot
+  memory_mb 4096
+  os android
+  timeout 300
+
+step "the firmware found the ESP and GRUB is running"
+  repeat
+    pause 5
+    until
+      bind reached
+      from boot
+      mode text
+      rect [548, 689, 1184, 868]
+      rect_at [1920, 1080]
+      words [[blissos], [android], [grub]]
+    max 60
+
+step "wait for the home-app chooser"
+  repeat
+    pause 5
+    until
+      bind asked
+      from chooser
+      mode text
+      rect [0, 0, 1920, 1080]
+      rect_at [1920, 1080]
+      words [home, app]
+    max 20
+
+step "choose Taskbar for Bliss OS"
+  press 666 722
+  settle 3
+
+step "always, so the next boot goes straight to the desktop"
+  press 1238 986
+  settle 6
+
+step "wait for Android's own UI"
+  desktop android
+  poll 10
+  timeout "{{ boot_timeout }}"
+
+step "stop the machine"
+  stop kill
+  timeout 120

@@ -21,7 +21,7 @@ func TestCheckCanDecideOnASeeNumber(t *testing.T) {
 		if rng != nil {
 			m["range"] = rng
 		}
-		return map[string]any{"check": m}
+		return map[string]any{"expect": m}
 	}
 
 	t.Run("a bare name finds the one number it bound", func(t *testing.T) {
@@ -77,7 +77,7 @@ func TestCheckCanDecideOnASeeNumber(t *testing.T) {
 
 	t.Run("a word mode on a number is refused with the modes that work", func(t *testing.T) {
 		d := &fakeDriver{}
-		ex, steps := newExec(d, map[string]any{"check": map[string]any{
+		ex, steps := newExec(d, map[string]any{"expect": map[string]any{
 			"name": "bad", "from": "shot", "mode": "says_any", "words": []any{"x"}}})
 		ex.numbers = map[string]float64{"shot.similarity": 0.9}
 		ex.facts = map[string]bool{}

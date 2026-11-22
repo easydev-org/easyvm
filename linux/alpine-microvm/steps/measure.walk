@@ -9,25 +9,50 @@
 # nearly flat, and saying the words Alpine prints when it is up.
 
 walkthrough "the measurement primitives, on the smallest guest"
-  # THE FRAME IS WHAT `isa-vga` GIVES A MICROVM: 720x400, measured from a real screendump of this
-  # guest. A console has no resolution of its own, so qemu's default is the truth here.
-  resolution 720x400
-  recording_resolution 720x400
+# THE FRAME IS WHAT `isa-vga` GIVES A MICROVM: 720x400, measured from a real screendump of this
+# guest. A console has no resolution of its own, so qemu's default is the truth here.
+resolution 720x400
+recording_resolution 720x400
 
-  needs alpine.iso alpine-vmlinuz alpine-initramfs
+step "needs alpine.iso alpine-vmlinuz alpine-initramfs"
+  needs [alpine.iso, alpine-vmlinuz, alpine-initramfs]
 
-  make a disk "alpine.qcow2" of 1 GiB
-  boot as a microvm from kernel "alpine-vmlinuz" and initramfs "alpine-initramfs" and medium "alpine.iso", waiting up to 300s
+step "make a disk \"alpine.qcow2\" of 1 GiB"
+  disk alpine.qcow2
+  disk_gb 1
+
+step "boot as a microvm from kernel \"alpine-vmlinuz\" and initramfs \"alpine-initramfs\" and medium \"alpine.iso\", waiting up to 300s"
+  boot
+  initrd alpine-initramfs
+  iso alpine.iso
+  kernel alpine-vmlinuz
+  microvm
+  os microvm
+  timeout 300
 
   # THE KERNEL PRINTS ON THE SERIAL LINE before a framebuffer exists, so the first fact comes from
   # the console rather than the screen.
-  wait for the console to say "Welcome to Alpine", waiting up to 180s
+step "wait for the console to say \"Welcome to Alpine\", waiting up to 180s"
+  until "Welcome to Alpine"
+  from console
+  timeout 180
 
   # AND NOW THE SCREEN. One capture, two questions about it: the words, and the colour.
-  see the whole screen as "page"
+step "see the whole screen as \"page\""
+  read
+    name page
+
   # `want:` COMBINED THREE COMPARISONS INTO ONE BOOLEAN AND WAS USED NOWHERE. A `check:` binds one
   # boolean from one reading, so this is three steps - each one says which measurement it is about.
-  step "the screen says Alpine"
-    check == {name: page_says_alpine, from: page, mode: text, rect: [0, 0, 720, 400], rect_at: [720, 400], words: [[Alpine]]}
+step "the screen says Alpine"
+  expect
+    from page
+    mode text
+    name page_says_alpine
+    rect [0, 0, 720, 400]
+    rect_at [720, 400]
+    words [[Alpine]]
 
-  stop the machine by killing it, waiting up to 60s
+step "stop the machine by killing it, waiting up to 60s"
+  stop kill
+  timeout 60

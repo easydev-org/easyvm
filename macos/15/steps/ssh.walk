@@ -1,46 +1,412 @@
 walkthrough "macos 15 ssh - the setup assistant, remote login, and a graceful shutdown"
-  resolution 1920x1080
-  recording_resolution 1920x1080
-  user vmuser
-  password admin
-  var out == {default: out/macos15-ssh.qcow2, from: args.out}
-  var user == {default: vmuser, from: args.user}
-  header boot_disk == from_caller
-  header ssh_port == 2222
+resolution 1920x1080
+recording_resolution 1920x1080
+user vmuser
+var out
+  default out/macos15-ssh.qcow2
+  from args.out
+password admin
+var user
+  default vmuser
+  from args.user
+boot_disk from_caller
+ssh_port 2222
 
-  needs boot.img macos.rom macos.vars, named "the media this stage boots from is already on disk"
-  step "boot the disk"
-    boot == true
-    os == macos
-    # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
-    memory_mb == 12288
-    timeout == 900
-  step "answer the wizard until the desktop appears"
-    loop == {check: {from: wizard, mode: text, name: finished, without: [continue, back, later], words: [finder], rect: [31, 0, 119, 40], rect_at: [1920, 1080]}, do: [{name: "read the pane", see: {name: pane}}, {check: {from: pane, mode: text, name: analytics, words: [analytics, improve], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, name: "classify - analytics"}, {check: {from: pane, mode: text, name: privacy_pane, words: [privacy, fundamental], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, name: "classify - data and privacy"}, {check: {from: pane, mode: text, name: languages, words: [spoken, languages], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, name: "classify - spoken languages"}, {check: {from: pane, mode: text, name: accessibility, words: [accessibility, individual], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, name: "classify - accessibility"}, {check: {from: pane, mode: text, name: transfer, words: [transfer, data], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, name: "classify - transfer"}, {check: {from: pane, mode: text, name: country, words: [country, region], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, name: "classify - country"}, {check: {from: pane, mode: text, name: account, words: [create, mac, account], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, name: "classify - account"}, {check: {from: pane, mode: text, name: location, words: [approximate, location], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, name: "classify - location"}, {check: {from: pane, mode: text, name: screen_time, words: [screen, report], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, name: "classify - screen time"}, {check: {from: pane, mode: text, name: time_zone, words: [time, zone], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, name: "classify - time zone"}, {check: {from: pane, mode: text, name: look, words: [look, appearance], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, name: "classify - look"}, {check: {from: pane, mode: text, name: terms, words: [terms, conditions], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, name: "classify - terms"}, {check: {from: pane, mode: text, name: welcome, words: [welcome, mac], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, name: "classify - welcome"}, {check: {from: pane, mode: text, name: keyboard, words: [keyboard, assistant], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, name: "classify - keyboard"}, {check: {from: pane, mode: text, name: apple_account, words: [sign, in, to, your, apple, account], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, name: "classify - apple account"}, {check: {from: pane, mode: text, name: apple_sheet, words: [are, you, sure], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, name: "classify - the apple account sheet"}, {check: {from: pane, mode: text, name: update, words: [update, automatically], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, name: "classify - update"}, {if: analytics, name: "analytics - untick sharing first", then: [{click: [808, 513], name: "untick share analytics", settle: 3}, {click: [1306, 810], name: "analytics continue", settle: 10}]}, {if: privacy_pane, name: "data and privacy", then: [{click: [1306, 810], name: "privacy continue", settle: 8}]}, {if: languages, name: "spoken languages", then: [{click: [1306, 810], name: "languages continue", settle: 8}]}, {if: accessibility, name: accessibility, then: [{click: [1306, 806], name: "accessibility not now", settle: 12}]}, {if: transfer, name: "transfer your data", then: [{click: [825, 669], name: "choose not to transfer", settle: 4}, {click: [1306, 810], name: "transfer continue", settle: 10}]}, {if: country, name: "country or region", then: [{click: [900, 500], name: "focus the country list", settle: 2}, {click: [900, 500], name: "type the country", settle: 1}, {name: "country text", settle: 3, type: "united states"}, {click: [1306, 810], name: "country continue", settle: 8}]}, {if: account, name: "the account, which is what this whole stage exists for", then: [{click: [945, 447], name: "account user name", settle: 2}, {name: "account user text", settle: 3, type: "{{ user }}"}, {click: [850, 531], name: "account password", settle: 2}, {name: "account password text", settle: 3, type: "{{ password }}"}, {click: [1086, 531], name: "account verify", settle: 2}, {name: "account verify text", settle: 3, type: "{{ password }}"}, {click: [1306, 810], name: "account continue", settle: 180}]}, {if: location, name: "location services", then: [{click: [1306, 810], name: "location continue", settle: 6}, {click: [960, 632], name: "dont use focus", settle: 3}, {key: ret, name: "dont use confirm", settle: 6}]}, {if: screen_time, name: "screen time", then: [{click: [619, 806], name: "screen time later", settle: 8}]}, {if: time_zone, name: "time zone", then: [{click: [1306, 806], name: "time zone continue", settle: 10}]}, {if: look, name: "choose your look", then: [{click: [1306, 805], name: "look continue", settle: 12}]}, {if: terms, name: "terms and conditions", then: [{click: [1298, 806], name: "terms agree", settle: 8}, {click: [1019, 616], name: "licence agree", settle: 10}]}, {if: welcome, name: "welcome to mac", then: [{click: [960, 990], name: "welcome continue", settle: 12}]}, {if: keyboard, name: "the keyboard assistant, which eats the next keystroke", then: [{click: [1222, 818], name: "keyboard continue", settle: 12}]}, {if: apple_account, name: "apple account - set up later", then: [{click: [619, 806], name: "apple account later", settle: 10}]}, {if: apple_sheet, name: "the apple account confirmation sheet", then: [{click: [1018, 641], name: "skip the apple account", settle: 10}]}, {if: update, name: "update mac automatically", then: [{click: [1306, 810], name: "update continue", settle: 15}]}], max: 40, see: {name: wizard}, until: {fact: finished}}
-  press Escape, waiting 2s, named "dismiss anything over the login window"
-  click "click the password field" at 965 981, waiting 2s, named "click the password field"
-  step "type the password"
-    settle == 2
-    type == '{{ password }}'
-  press Return, waiting 20s, named "press return"
-  step "dismiss the overlays macOS puts up on a first login"
-    do == [{click: [1228, 826], settle: 4}, {click: [1228, 826], settle: 4}, {click: [1228, 826], settle: 4}, {key: esc, settle: 2}, {key: meta_l+q, settle: 2}, {key: esc, settle: 2}]
-  step "wait for the desktop"
-    loop == {check: {from: desk, mode: text, name: ready, without: [continue, back, later], words: [finder], rect: [31, 0, 119, 40], rect_at: [1920, 1080]}, do: [{settle: 10}, {key: esc}], max: 30, see: {name: desk}, until: {fact: ready}}
-  press Escape, waiting 2s, named "dismiss anything over the desktop"
-  press meta_l+spc, waiting 4s, named "open spotlight"
-  step "type the settings app name"
-    settle == 7
-    type == system settings
-  press Return, waiting 14s, named "open it"
-  step "the settings window is up"
-    loop == {check: {from: screen, mode: text, name: done, words: [[system, settings], [general], [wi-fi]], rect: [590, 290, 1350, 690], rect_at: [1920, 1080]}, do: [{settle: 3}], max: 30, see: {name: screen}, until: {fact: done}}
-  step "search for remote login"
-    clear == true
-    click == [715, 267]
-    modifier == meta_l
-    settle == 10
-    type == remote login
+step "the media this stage boots from is already on disk"
+  needs [boot.img, macos.rom, macos.vars]
+
+step "boot the disk"
+  boot
+  # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
+  memory_mb 12288
+  os macos
+  timeout 900
+
+step "answer the wizard until the desktop appears"
+  repeat
+    do
+      item "read the pane"
+        read
+          name pane
+      item "classify - analytics"
+        expect
+          from pane
+          mode text
+          name analytics
+          rect [0, 0, 1920, 1080]
+          rect_at [1920, 1080]
+          words [analytics, improve]
+      item "classify - data and privacy"
+        expect
+          from pane
+          mode text
+          name privacy_pane
+          rect [0, 0, 1920, 1080]
+          rect_at [1920, 1080]
+          words [privacy, fundamental]
+      item "classify - spoken languages"
+        expect
+          from pane
+          mode text
+          name languages
+          rect [0, 0, 1920, 1080]
+          rect_at [1920, 1080]
+          words [spoken, languages]
+      item "classify - accessibility"
+        expect
+          from pane
+          mode text
+          name accessibility
+          rect [0, 0, 1920, 1080]
+          rect_at [1920, 1080]
+          words [accessibility, individual]
+      item "classify - transfer"
+        expect
+          from pane
+          mode text
+          name transfer
+          rect [0, 0, 1920, 1080]
+          rect_at [1920, 1080]
+          words [transfer, data]
+      item "classify - country"
+        expect
+          from pane
+          mode text
+          name country
+          rect [0, 0, 1920, 1080]
+          rect_at [1920, 1080]
+          words [country, region]
+      item "classify - account"
+        expect
+          from pane
+          mode text
+          name account
+          rect [0, 0, 1920, 1080]
+          rect_at [1920, 1080]
+          words [create, mac, account]
+      item "classify - location"
+        expect
+          from pane
+          mode text
+          name location
+          rect [0, 0, 1920, 1080]
+          rect_at [1920, 1080]
+          words [approximate, location]
+      item "classify - screen time"
+        expect
+          from pane
+          mode text
+          name screen_time
+          rect [0, 0, 1920, 1080]
+          rect_at [1920, 1080]
+          words [screen, report]
+      item "classify - time zone"
+        expect
+          from pane
+          mode text
+          name time_zone
+          rect [0, 0, 1920, 1080]
+          rect_at [1920, 1080]
+          words [time, zone]
+      item "classify - look"
+        expect
+          from pane
+          mode text
+          name look
+          rect [0, 0, 1920, 1080]
+          rect_at [1920, 1080]
+          words [look, appearance]
+      item "classify - terms"
+        expect
+          from pane
+          mode text
+          name terms
+          rect [0, 0, 1920, 1080]
+          rect_at [1920, 1080]
+          words [terms, conditions]
+      item "classify - welcome"
+        expect
+          from pane
+          mode text
+          name welcome
+          rect [0, 0, 1920, 1080]
+          rect_at [1920, 1080]
+          words [welcome, mac]
+      item "classify - keyboard"
+        expect
+          from pane
+          mode text
+          name keyboard
+          rect [0, 0, 1920, 1080]
+          rect_at [1920, 1080]
+          words [keyboard, assistant]
+      item "classify - apple account"
+        expect
+          from pane
+          mode text
+          name apple_account
+          rect [0, 0, 1920, 1080]
+          rect_at [1920, 1080]
+          words [sign, in, to, your, apple, account]
+      item "classify - the apple account sheet"
+        expect
+          from pane
+          mode text
+          name apple_sheet
+          rect [0, 0, 1920, 1080]
+          rect_at [1920, 1080]
+          words [are, you, sure]
+      item "classify - update"
+        expect
+          from pane
+          mode text
+          name update
+          rect [0, 0, 1920, 1080]
+          rect_at [1920, 1080]
+          words [update, automatically]
+      item "analytics - untick sharing first"
+        if analytics
+          then
+            item "untick share analytics"
+              press 808 513
+              settle 3
+            item "analytics continue"
+              press 1306 810
+              settle 10
+      item "data and privacy"
+        if privacy_pane
+          then
+            item "privacy continue"
+              press 1306 810
+              settle 8
+      item "spoken languages"
+        if languages
+          then
+            item "languages continue"
+              press 1306 810
+              settle 8
+      item "accessibility"
+        if accessibility
+          then
+            item "accessibility not now"
+              press 1306 806
+              settle 12
+      item "transfer your data"
+        if transfer
+          then
+            item "choose not to transfer"
+              press 825 669
+              settle 4
+            item "transfer continue"
+              press 1306 810
+              settle 10
+      item "country or region"
+        if country
+          then
+            item "focus the country list"
+              press 900 500
+              settle 2
+            item "type the country"
+              press 900 500
+              settle 1
+            item "country text"
+              settle 3
+              press text "united states"
+            item "country continue"
+              press 1306 810
+              settle 8
+      item "the account, which is what this whole stage exists for"
+        if account
+          then
+            item "account user name"
+              press 945 447
+              settle 2
+            item "account user text"
+              settle 3
+              press text "{{ user }}"
+            item "account password"
+              press 850 531
+              settle 2
+            item "account password text"
+              settle 3
+              press text "{{ password }}"
+            item "account verify"
+              press 1086 531
+              settle 2
+            item "account verify text"
+              settle 3
+              press text "{{ password }}"
+            item "account continue"
+              press 1306 810
+              settle 180
+      item "location services"
+        if location
+          then
+            item "location continue"
+              press 1306 810
+              settle 6
+            item "dont use focus"
+              press 960 632
+              settle 3
+            item "dont use confirm"
+              press ret
+              settle 6
+      item "screen time"
+        if screen_time
+          then
+            item "screen time later"
+              press 619 806
+              settle 8
+      item "time zone"
+        if time_zone
+          then
+            item "time zone continue"
+              press 1306 806
+              settle 10
+      item "choose your look"
+        if look
+          then
+            item "look continue"
+              press 1306 805
+              settle 12
+      item "terms and conditions"
+        if terms
+          then
+            item "terms agree"
+              press 1298 806
+              settle 8
+            item "licence agree"
+              press 1019 616
+              settle 10
+      item "welcome to mac"
+        if welcome
+          then
+            item "welcome continue"
+              press 960 990
+              settle 12
+      item "the keyboard assistant, which eats the next keystroke"
+        if keyboard
+          then
+            item "keyboard continue"
+              press 1222 818
+              settle 12
+      item "apple account - set up later"
+        if apple_account
+          then
+            item "apple account later"
+              press 619 806
+              settle 10
+      item "the apple account confirmation sheet"
+        if apple_sheet
+          then
+            item "skip the apple account"
+              press 1018 641
+              settle 10
+      item "update mac automatically"
+        if update
+          then
+            item "update continue"
+              press 1306 810
+              settle 15
+    until
+      bind finished
+      from wizard
+      mode text
+      rect [31, 0, 119, 40]
+      rect_at [1920, 1080]
+      without [continue, back, later]
+      words [finder]
+    max 40
+
+step "dismiss anything over the login window"
+  press esc
+  settle 2
+
+step "click the password field"
+  press 965 981
+  settle 2
+
+step "type the password"
+  settle 2
+  press text "{{ password }}"
+
+step "press return"
+  press ret
+  settle 20
+
+step "dismiss the overlays macOS puts up on a first login"
+  do
+    item
+      press 1228 826
+      settle 4
+    item
+      press 1228 826
+      settle 4
+    item
+      press 1228 826
+      settle 4
+    item
+      press esc
+      settle 2
+    item
+      press meta_l+q
+      settle 2
+    item
+      press esc
+      settle 2
+
+step "wait for the desktop"
+  repeat
+    do
+      item
+        settle 10
+      item
+        press esc
+    until
+      bind ready
+      from desk
+      mode text
+      rect [31, 0, 119, 40]
+      rect_at [1920, 1080]
+      without [continue, back, later]
+      words [finder]
+    max 30
+
+step "dismiss anything over the desktop"
+  press esc
+  settle 2
+
+step "open spotlight"
+  press meta_l+spc
+  settle 4
+
+step "type the settings app name"
+  settle 7
+  press text "system settings"
+
+step "open it"
+  press ret
+  settle 14
+
+step "the settings window is up"
+  repeat
+    pause 3
+    until
+      bind done
+      from screen
+      mode text
+      rect [590, 290, 1350, 690]
+      rect_at [1920, 1080]
+      words [[system, settings], [general], [wi-fi]]
+    max 30
+
+step "search for remote login"
+  clear
+  press text "remote login"
+    at 715 267
+    modifier meta_l
+  settle 10
+
   # THE STEP IS CALLED "the remote login RESULT", AND IT WAS WAITING FOR THE PANEL'S CONTENTS.
   #
   # MEASURED ON RUN 44346450614, which failed after 45 attempts at step 16 of 31:
@@ -54,41 +420,86 @@ walkthrough "macos 15 ssh - the setup assistant, remote login, and a graceful sh
   # and the next step was never reached because this one never passed.
   #
   # SO IT WAITS FOR THE ROW IT ACTUALLY NEEDS, which is the thing the click after it aims at.
-  step "the remote login result is on screen"
-    loop == {check: {from: screen, mode: text, name: done, words: [[remote, login]], rect: [622, 304, 748, 365], rect_at: [1920, 1080], scale: 2}, do: [{settle: 2}], max: 45, see: {name: screen}, until: {fact: done}}
-  click "open the remote login pane" at 703 336, waiting 12s, named "open the remote login pane"
-  step "open the remote login pane again"
-    click == [703, 336]
-    rect == [726, 300, 1200, 715]
-    rect_at == [1920, 1080]
-    scale == 2
-    settle == 12
-    when_not == [allow, full, disk, access]
-  step "the remote login pane is up"
-    loop == {check: {from: screen, mode: text, name: done, words: [[allow, full, disk, access]], rect: [731, 395, 907, 453], rect_at: [1920, 1080]}, do: [{settle: 3}], max: 30, see: {name: screen}, until: {fact: done}}
-  step "turn remote login on"
-    click == [1145, 353]
-    rect == [726, 300, 1200, 715]
-    rect_at == [1920, 1080]
-    scale == 2
-    settle == 4
-    when_not == [log, in, to, this, computer]
-  step "the switch reads on"
-    loop == {check: {from: screen, mode: text, name: done, words: [[log, in, to, this, computer]], rect: [787, 336, 953, 395], rect_at: [1920, 1080]}, do: [{settle: 3}], max: 10, see: {name: screen}, until: {fact: done}}
-  click "close the pane" at 1145 679, waiting 5s, named "close the pane"
-  step "wait for sshd"
-    require_ssh == true
-    timeout == 600
-  step "prove the build over ssh"
-    ssh == sw_vers -productVersion
-  step "prove the account over ssh"
-    ssh == id -un
-  step "prove disk utility works over ssh"
-    ssh == diskutil list | head -5
-  step "name the machine"
-    ssh == printf '%s\n' "{{ password }}" | sudo -S scutil --set LocalHostName {{ user }}
-  step "note what is absent"
-    ssh == command -v brew || true
+step "the remote login result is on screen"
+  repeat
+    pause 2
+    until
+      bind done
+      from screen
+      mode text
+      rect [622, 304, 748, 365]
+      rect_at [1920, 1080]
+      scale 2
+      words [[remote, login]]
+    max 45
+
+step "open the remote login pane"
+  press 703 336
+  settle 12
+
+step "open the remote login pane again"
+  press 703 336
+  rect [726, 300, 1200, 715]
+  rect_at [1920, 1080]
+  scale 2
+  settle 12
+  when_not [allow, full, disk, access]
+
+step "the remote login pane is up"
+  repeat
+    pause 3
+    until
+      bind done
+      from screen
+      mode text
+      rect [731, 395, 907, 453]
+      rect_at [1920, 1080]
+      words [[allow, full, disk, access]]
+    max 30
+
+step "turn remote login on"
+  press 1145 353
+  rect [726, 300, 1200, 715]
+  rect_at [1920, 1080]
+  scale 2
+  settle 4
+  when_not [log, in, to, this, computer]
+
+step "the switch reads on"
+  repeat
+    pause 3
+    until
+      bind done
+      from screen
+      mode text
+      rect [787, 336, 953, 395]
+      rect_at [1920, 1080]
+      words [[log, in, to, this, computer]]
+    max 10
+
+step "close the pane"
+  press 1145 679
+  settle 5
+
+step "wait for sshd"
+  require_ssh
+  timeout 600
+
+step "prove the build over ssh"
+  ssh "sw_vers -productVersion"
+
+step "prove the account over ssh"
+  ssh "id -un"
+
+step "prove disk utility works over ssh"
+  ssh "diskutil list | head -5"
+
+step "name the machine"
+  ssh "printf '%s\\n' \"{{ password }}\" | sudo -S scutil --set LocalHostName {{ user }}"
+
+step "note what is absent"
+  ssh "command -v brew || true"
+
   # `shutdown: ssh` RATHER THAN A HAND-WRITTEN `poweroff`, BECAUSE THE HAND-WRITTEN ONE CANNOT WIN.
   #
   # MEASURED ON RUN 44450353655, step 29 of 31 - the step before the last:
@@ -103,11 +514,13 @@ walkthrough "macos 15 ssh - the setup assistant, remote login, and a graceful sh
   # `macos/26/steps/ssh.walk` HAD THIS RIGHT ALL ALONG with `shutdown: ssh`, which is the method that
   # sends the command AND tolerates the connection ending. This file now uses it too, and the
   # `wait_until: stopped` after it is what actually confirms the machine went down.
-  step "stop the machine"
-    shutdown == ssh
-    timeout == 300
-  step "wait for the machine to stop"
-    wait_until == stopped
-    timeout == 300
-  step "publish the disk"
-    compress == '{{ out }}'
+step "stop the machine"
+  stop ssh
+  timeout 300
+
+step "wait for the machine to stop"
+  wait_until stopped
+  timeout 300
+
+step "publish the disk"
+    save "{{ out }}"

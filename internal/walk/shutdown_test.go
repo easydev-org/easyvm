@@ -63,7 +63,7 @@ func TestEveryPoweroffCarriesItsPassword(t *testing.T) {
 						"an empty password and refuses", rel, s.Name)
 				}
 			children:
-				if lp, ok := s.Spec["loop"].(map[string]any); ok {
+				if lp, ok := s.Spec["repeat"].(map[string]any); ok {
 					if inner, ok := lp["do"].([]any); ok {
 						walk(stepsOf(inner))
 					}

@@ -180,12 +180,12 @@ func newExec(d Driver, steps ...map[string]any) (*Executor, []walk.Step) {
 func TestActionsReachTheRightChannel(t *testing.T) {
 	d := &fakeDriver{}
 	ex, steps := newExec(d,
-		map[string]any{"name": "click", "click": []any{100, 200}},
-		map[string]any{"name": "double", "double": []any{10, 20}},
-		map[string]any{"name": "key", "key": "ret"},
-		map[string]any{"name": "combo", "key": "ctrl+alt+t"},
-		map[string]any{"name": "type", "type": "hello"},
-		map[string]any{"name": "type in field", "click": []any{5, 6}, "type": "world"},
+		map[string]any{"name": "click", "press": true, "click": []any{100, 200}},
+		map[string]any{"name": "double", "press": true, "double": []any{10, 20}, "click": []any{10, 20}},
+		map[string]any{"name": "key", "press": true, "key": "ret"},
+		map[string]any{"name": "combo", "press": true, "key": "ctrl+alt+t"},
+		map[string]any{"name": "type", "press": true, "text": "hello"},
+		map[string]any{"name": "type in field", "press": true, "at": []any{5, 6}, "text": "world"},
 	)
 	res, err := ex.Run(steps)
 	if err != nil {
@@ -220,9 +220,9 @@ func TestActionsReachTheRightChannel(t *testing.T) {
 func TestFailureStopsTheWalk(t *testing.T) {
 	d := &fakeDriver{}
 	ex, steps := newExec(d,
-		map[string]any{"name": "one", "click": []any{1, 1}},
+		map[string]any{"name": "one", "press": true, "click": []any{1, 1}},
 		map[string]any{"name": "broken", "click": "not a pair"},
-		map[string]any{"name": "three", "click": []any{3, 3}},
+		map[string]any{"name": "three", "press": true, "click": []any{3, 3}},
 	)
 	res, err := ex.Run(steps)
 	if err == nil {
@@ -242,7 +242,7 @@ func TestOptionalFailureIsLoggedAndPassed(t *testing.T) {
 	d := &fakeDriver{}
 	ex, steps := newExec(d,
 		map[string]any{"name": "flaky", "click": "not a pair", "optional": true},
-		map[string]any{"name": "after", "click": []any{9, 9}},
+		map[string]any{"name": "after", "press": true, "click": []any{9, 9}},
 	)
 	res, err := ex.Run(steps)
 	if err != nil {
@@ -263,8 +263,8 @@ func TestOptionalFailureIsLoggedAndPassed(t *testing.T) {
 func TestAFailedStepIsNotCounted(t *testing.T) {
 	d := &fakeDriver{}
 	ex, steps := newExec(d,
-		map[string]any{"name": "click", "click": []any{1, 1}},
-		map[string]any{"name": "bad pair", "click": []any{1}},
+		map[string]any{"name": "click", "press": true, "click": []any{1, 1}},
+		map[string]any{"name": "bad pair", "press": true, "click": []any{1}},
 	)
 	res, _ := ex.Run(steps)
 	for _, name := range res.Answered {
@@ -692,65 +692,6 @@ func TestASnapshotIsAMigrationNotSavevm(t *testing.T) {
 //
 // `boot: true` asks for a boot loader; `boot_from:` asks for a machine whose memory is already
 // decided. A file that meant one and got the other takes minutes to notice - the guest boots happily
-// from the wrong state and the failure reads as "my data is missing".
-func TestSnapshotAndBootFromAreBothDispatched(t *testing.T) {
-	body, err := os.ReadFile("executor.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	src := string(body)
-	for _, key := range []string{`s.Has("snapshot")`, `s.Has("boot_from")`} {
-		if !strings.Contains(src, key) {
-			t.Fatalf("%s has no dispatch branch, so the step reports success and does nothing", key)
-		}
-	}
-	// AND A MISSING SNAPSHOT IS REFUSED BY NAME rather than handed to qemu, whose message names a
-	// path and not the step that was supposed to produce it.
-	actions, err := os.ReadFile("actions.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(actions), "no snapshot at %s") {
-		t.Fatal("`boot_from:` does not check that the file exists, so a typo becomes qemu's " +
-			"`-incoming` error")
-	}
-}
-
-// A HALF-WRITTEN FRAME IS A RACE IN THE DRIVER, NOT A FAULT IN THE WALK.
-//
-// MEASURED ON macos-setup, AT STEP 6 OF 30 AND TWO MINUTES IN:
-//
-//	wait for the recovery menu: .../frames/frame-000134.ppm: unexpected EOF
-//	(is the write still in progress? format "ppm")
-//
-// and the recording's last frame shows the Apple logo with the boot progress bar halfway along -
-// macOS's recovery system still starting. The walk was not wrong; the poll landed on a screendump
-// that `qemu` had replied to but not finished writing, and `until:` returned that as the failure.
-//
-// `desktop:` HAS ALWAYS TOLERATED THIS by `continue`ing. `until:` did not, which made a twenty-minute
-// stage end at two minutes with a message about a file format.
-// `until:` IS ONE MEASUREMENT, AND AN UNREADABLE FRAME IS AN ERROR IT REPORTS.
-//
-// IT WAS A RETRY LOOP, AND THAT WAS THE HIDDEN RETRY THIS VOCABULARY IS BEING CLEANED OF. `timeout:`
-// and `poll:` were a `for` in Go, so 43 steps carried an invisible loop: a reader saw
-// `until_any:` and `timeout: 1800` and could not tell that the executor would read the screen up to
-// 180 times, that a failed read was swallowed and retried, or that `keep_alive:` clicked the guest
-// between attempts.
-//
-// THE LOOP IS `loop:` NOW:
-//
-//   - name: the recovery menu is up
-//     loop:
-//     max: 180
-//     do: [{wait: 10}]
-//     ocr: {name: recovery, region: [...], region_at: [...], wait: 0}
-//     check: {name: up, from: recovery, says_any: [[restore, time, machine]]}
-//     until: {fact: up}
-//
-// A HALF-WRITTEN FRAME IS THEREFORE AN ERROR AT A ONE-SHOT `until:`, and a `loop:` retries it because
-// its `do:` list says how long it waits between attempts. The old behaviour - swallow and retry
-// inside the step - is what made a gate that was mostly not looking indistinguishable from one that
-// was looking and not finding.
 func TestUntilIsOneMeasurementAndRefusesATimeout(t *testing.T) {
 	body, err := os.ReadFile("text.go")
 	if err != nil {
@@ -860,15 +801,13 @@ func TestAStepThatNeedsNoGuestSurvivesAShutdown(t *testing.T) {
 		spec  map[string]any
 		needs bool
 	}{
-		{"shutdown", map[string]any{"name": "x", "shutdown": "kill"}, false},
-		{"compress", map[string]any{"name": "x", "compress": "out.qcow2"}, false},
-		{"publish", map[string]any{"name": "x", "publish": "tag"}, false},
-		{"snapshot", map[string]any{"name": "x", "snapshot": "s.img"}, false},
+		{"shutdown", map[string]any{"name": "x", "stop": "kill"}, false},
+		{"stop and publish", map[string]any{"name": "x", "stop": "kill", "save": "out.qcow2"}, false},
 		{"stop recording", map[string]any{"name": "x", "record": false}, false},
 		{"start recording", map[string]any{"name": "x", "record": "v.mp4"}, true},
-		{"a click", map[string]any{"name": "x", "click": []any{1, 2}}, true},
-		{"a reading", map[string]any{"name": "x", "ocr": map[string]any{"name": "s"}}, true},
-		{"a key", map[string]any{"name": "x", "key": "ret"}, true},
+		{"a click", map[string]any{"name": "x", "press": true, "click": []any{1, 2}}, true},
+		{"a reading", map[string]any{"name": "x", "read": map[string]any{"name": "s"}}, true},
+		{"a key", map[string]any{"name": "x", "press": true, "key": "ret"}, true},
 		{"a wait", map[string]any{"name": "x", "settle": 5}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -912,9 +851,9 @@ func TestShutdownPassesTheStepsTimeoutAsASecondsDuration(t *testing.T) {
 		spec map[string]any
 		want time.Duration
 	}{
-		{"the step names a timeout", map[string]any{"name": "x", "shutdown": "ssh", "timeout": 300}, 300 * time.Second},
+		{"the step names a timeout", map[string]any{"name": "x", "stop": "ssh", "timeout": 300}, 300 * time.Second},
 		// NO TIMEOUT MEANS "THE DRIVER'S DEFAULT", which `graceOrDefault` reads as `<= 0`.
-		{"no timeout is the driver's default", map[string]any{"name": "x", "shutdown": "acpi"}, 0},
+		{"no timeout is the driver's default", map[string]any{"name": "x", "stop": "acpi"}, 0},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -232,7 +232,7 @@ func TestDoRunsItsActions(t *testing.T) {
 		t.Fatal(err)
 	}
 	exSrc := stripCommentsForTest(string(ex))
-	if !strings.Contains(exSrc, `case hasKey(s, "do"):`) {
+	if !strings.Contains(exSrc, `case s.Has("do"):`) {
 		t.Fatal("the dispatcher has no `do` branch, so the step reports `no implementation for this " +
 			"step's keys` - measured on macos-ssh")
 	}

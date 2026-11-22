@@ -56,15 +56,15 @@ func (e *Executor) journStep(s walk.Step, index, total int, kind journal.Kind, s
 // step is by the key it writes, and a second place to say it would be a second place to disagree.
 func kindOf(s walk.Step) journal.Kind {
 	switch {
-	case s.Has("check"):
+	case s.Has("expect"):
 		return journal.KindCheck
-	case s.Has("see"):
+	case s.Has("read"):
 		return journal.KindSee
 	case s.Has("run"):
 		return journal.KindRun
 	case s.Has("ssh"):
 		return journal.KindSSH
-	case s.Has("loop"), s.Has("until"), s.Has("until_any"):
+	case s.Has("repeat"), s.Has("until"), s.Has("until_any"):
 		return journal.KindLoop
 	}
 	return journal.KindStep

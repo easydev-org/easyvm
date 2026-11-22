@@ -35,7 +35,7 @@ func TestMustMakesAFalseReferenceComparisonFailTheStep(t *testing.T) {
 		if must {
 			ck["must"] = true
 		}
-		return map[string]any{"check": ck}
+		return map[string]any{"expect": ck}
 	}
 	newEx := func(frame string) *Executor {
 		return &Executor{

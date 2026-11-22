@@ -1,79 +1,564 @@
 walkthrough "macos 26 ssh - the setup assistant, remote login, and a graceful shutdown"
-  resolution 1920x1080
-  user vmuser
-  # `vmuser` IS THE USER NAME, NOT A PASSWORD, AND IT WAS IN THIS SLOT AS BOTH.
-  #
-  # `{{ password }}` is typed into the account's password field (line ~18's `account password text`)
-  # and into the login window, so a value equal to the account name would be typed as its own
-  # password. macos/15's ssh walk, which RUNS AND PASSES, uses `admin`.
-  password admin
-  var out == {default: out/macos26-ssh.qcow2, from: args.out}
-  var user == {default: vmuser, from: args.user}
-  header boot_disk == from_caller
-  header recording_resolution == [1920, 1080]
-  header ssh_port == 2222
+resolution 1920x1080
+recording_resolution 1920x1080
+user vmuser
+var out
+  default out/macos26-ssh.qcow2
+  from args.out
+# `vmuser` IS THE USER NAME, NOT A PASSWORD, AND IT WAS IN THIS SLOT AS BOTH.
+#
+# `{{ password }}` is typed into the account's password field (line ~18's `account password text`)
+# and into the login window, so a value equal to the account name would be typed as its own
+# password. macos/15's ssh walk, which RUNS AND PASSES, uses `admin`.
+password admin
+var user
+  default vmuser
+  from args.user
+boot_disk from_caller
+ssh_port 2222
 
-  needs boot.img macos.rom macos.vars, named "the media this stage boots from is already on disk"
-  step "boot the disk"
-    boot == true
-    memory_mb == 12288
-    os == macos
-    timeout == 900
-  step "answer the wizard until the desktop appears"
-    loop == {check: {from: wizard, mode: text, name: finished, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1, without: [continue, back, later], words: [finder]}, do: [{name: "read the pane", see: {name: pane}}, {name: "read the login window's clock", see: {name: clock}}, {check: {from: clock, mode: matches, name: at_login, pattern: "[0-9]+[:.][0-9]+", rect: [820, 90, 1100, 250], rect_at: [1920, 1080], scale: 1}, name: "classify - the login window"}, {check: {from: pane, mode: text, name: country, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1, words: [[select, your, country, or, region]]}, name: "classify - country or region"}, {check: {from: pane, mode: text, name: transfer, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1, words: [[transfer, your, information, to, this, mac]]}, name: "classify - transfer"}, {check: {from: pane, mode: text, name: account, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1, words: [[create, a, mac, account]]}, name: "classify - account"}, {check: {from: pane, mode: text, name: apple_account, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1, words: [[sign, in, to, your, apple, account]]}, name: "classify - apple account"}, {check: {from: pane, mode: text, name: apple_sheet, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1, words: [[sure, skip, signing]]}, name: "classify - the apple account sheet"}, {check: {from: pane, mode: text, name: terms, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1, words: [[terms, conditions]]}, name: "classify - terms"}, {check: {from: pane, mode: text, name: age, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1, words: [[age, range]]}, name: "classify - age"}, {check: {from: pane, mode: text, name: location, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1, words: [[enable, location, services]]}, name: "classify - location"}, {check: {from: pane, mode: text, name: location_sheet, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1, words: [[find, my, available]]}, name: "classify - the location sheet"}, {check: {from: pane, mode: text, name: time_zone, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1, words: [[time, zone]]}, name: "classify - time zone"}, {check: {from: pane, mode: text, name: analytics, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1, words: [[share, analytics, with, apple]]}, name: "classify - analytics"}, {check: {from: pane, mode: text, name: privacy_pane, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1, words: [[privacy, fundamental]]}, name: "classify - data and privacy"}, {check: {from: pane, mode: text, name: languages, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1, words: [[spoken, languages]]}, name: "classify - spoken languages"}, {check: {from: pane, mode: text, name: accessibility, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1, words: [[accessibility, individual]]}, name: "classify - accessibility"}, {check: {from: pane, mode: text, name: screen_time, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1, words: [[screen, time]]}, name: "classify - screen time"}, {check: {from: pane, mode: text, name: filevault, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1, words: [[ready, encrypting]]}, name: "classify - filevault"}, {check: {from: pane, mode: text, name: filevault_sheet, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1, words: [[securely, encrypted]]}, name: "classify - the filevault sheet"}, {check: {from: pane, mode: text, name: look, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1, words: [[choose, your, look]]}, name: "classify - look"}, {check: {from: pane, mode: text, name: update, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1, words: [[update, mac, automatically]]}, name: "classify - update"}, {check: {from: pane, mode: text, name: keyboard, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1, words: [[keyboard, assistant]]}, name: "classify - keyboard"}, {if: languages, name: "spoken languages", then: [{click: [1284, 799], name: "languages continue", settle: 7}]}, {if: accessibility, name: accessibility, then: [{click: [1284, 799], name: "accessibility not now", settle: 7}]}, {if: privacy_pane, name: "data and privacy", then: [{click: [1284, 799], name: "privacy continue", settle: 8}]}, {if: transfer, name: "transfer your data", then: [{click: [742, 712], name: "choose not to transfer", settle: 3}, {click: [1284, 799], name: "transfer continue", settle: 8}]}, {if: country, name: "country or region", then: [{click: [900, 470], name: "focus the country list", settle: 2}, {name: "type the country", settle: 3, type: "united states"}, {click: [1284, 799], name: "country continue", settle: 7}]}, {if: account, name: "the account, which is what this whole stage exists for", then: [{click: [959, 496], name: "account full name", settle: 2}, {name: "account full name text", settle: 2, type: "{{ user }}"}, {click: [959, 530], name: "account short name", settle: 2}, {key: meta_l+a, name: "clear the auto-filled short name", settle: 1}, {key: backspace, name: "delete it", settle: 1}, {name: "account short name text", settle: 2, type: "{{ user }}"}, {click: [841, 601], name: "account password", settle: 2}, {name: "account password text", settle: 2, type: "{{ password }}"}, {click: [1068, 601], name: "account verify", settle: 2}, {name: "account verify text", settle: 2, type: "{{ password }}"}, {click: [745, 663], name: "untick the apple account reset", settle: 2}, {click: [1284, 799], name: "account continue", settle: 180}]}, {if: apple_account, name: "apple account - other sign-in options, then later", then: [{click: [620, 800], name: "open other sign-in options", settle: 4}, {click: [682, 853], name: "sign in later", settle: 7}]}, {if: apple_sheet, name: "the apple account confirmation sheet", then: [{click: [1017, 644], name: "skip the apple account", settle: 8}]}, {if: terms, name: "terms and conditions", then: [{click: [1282, 799], name: "terms agree", settle: 7}, {click: [1019, 616], name: "licence agree", settle: 8}]}, {if: age, name: "age range", then: [{click: [959, 710], name: "choose adult", settle: 7}]}, {if: location, name: "location services", then: [{click: [1284, 799], name: "location continue", settle: 7}]}, {if: location_sheet, name: "the location confirmation sheet", then: [{click: [959, 575], name: "dont use location services", settle: 7}]}, {if: time_zone, name: "time zone", then: [{click: [1284, 799], name: "time zone continue", settle: 7}]}, {if: analytics, name: "analytics - untick sharing first", then: [{click: [745, 520], name: "untick share analytics", settle: 2}, {click: [1284, 799], name: "analytics continue", settle: 7}]}, {if: screen_time, name: "screen time", then: [{click: [1131, 799], name: "screen time later", settle: 7}]}, {if: filevault, name: filevault, then: [{click: [1129, 799], name: "filevault not now", settle: 8}]}, {if: filevault_sheet, name: "the filevault confirmation sheet", then: [{click: [1004, 598], name: "continue without filevault", settle: 8}]}, {if: look, name: "choose your look", then: [{click: [1284, 799], name: "look continue", settle: 9}]}, {if: keyboard, name: "the keyboard assistant, which eats the next keystroke", then: [{click: [1228, 826], name: "keyboard quit", settle: 10}]}, {if: update, name: "update mac automatically - reset past it", then: [{acpi: reset, name: "reset the guest", timeout: 300}, {name: "let it come back", settle: 60}]}, {if: at_login, name: "the login window - log in", then: [{click: [960, 983], name: "click the password field", settle: 3}, {name: "type the password", settle: 2, type: "{{ password }}"}, {key: ret, name: "press return", settle: 25}]}], max: 90, see: {name: wizard}, until: {fact: finished}}
-  step "wait for the desktop"
-    loop == {check: {from: desk, mode: text, name: ready, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1, without: [continue, back, later], words: [finder]}, do: [{settle: 10}, {key: esc}], max: 30, see: {name: desk}, until: {fact: ready}}
-  press Escape, waiting 2s, named "dismiss anything over the desktop"
-  press meta_l+spc, waiting 4s, named "open spotlight"
-  step "type the settings app name"
-    settle == 7
-    type == system settings
-  press Return, waiting 14s, named "open it"
-  step "the settings window is up"
-    loop == {check: {from: screen, mode: text, name: done, rect: [0, 0, 1920, 1080], rect_at: [1920, 1080], scale: 1, words: [[system, settings], [general], [wi-fi]]}, do: [{settle: 3}], max: 30, see: {name: screen}, until: {fact: done}}
-  step "search for remote login"
-    clear == true
-    click == [715, 267]
-    modifier == meta_l
-    settle == 10
-    type == remote login
-  step "the remote login result is on screen"
-    loop == {check: {from: screen, mode: text, name: done, rect: [480, 240, 760, 420], rect_at: [1920, 1080], scale: 2, words: [[sharing, remote], [allow, full, disk, access]]}, do: [{settle: 2}], max: 45, see: {name: screen}, until: {fact: done}}
-  click "open the remote login pane" at 703 336, waiting 12s, named "open the remote login pane"
-  step "open the remote login pane again"
-    click == [703, 336]
-    rect == [726, 300, 1200, 715]
-    rect_at == [1920, 1080]
-    scale == 2
-    settle == 12
-    when_not == [allow, full, disk, access]
-  step "the remote login pane is up"
-    loop == {check: {from: screen, mode: text, name: done, rect: [726, 300, 1200, 715], rect_at: [1920, 1080], scale: 2, words: [[allow, full, disk, access]]}, do: [{settle: 3}], max: 30, see: {name: screen}, until: {fact: done}}
-  step "turn remote login on"
-    click == [1145, 353]
-    rect == [726, 300, 1200, 715]
-    rect_at == [1920, 1080]
-    scale == 2
-    settle == 4
-    when_not == [log, in, to, this, computer]
-  step "the switch reads on"
-    loop == {check: {from: screen, mode: text, name: done, rect: [726, 300, 1200, 715], rect_at: [1920, 1080], scale: 2, words: [[log, in, to, this, computer]]}, do: [{settle: 3}], max: 10, see: {name: screen}, until: {fact: done}}
-  click "close the pane" at 1145 679, waiting 5s, named "close the pane"
-  step "wait for sshd"
-    require_ssh == true
-    timeout == 600
-  step "prove the build over ssh"
-    ssh == sw_vers -productVersion
-  step "prove the account over ssh"
-    ssh == id -un
-  step "prove disk utility works over ssh"
-    ssh == diskutil list | head -5
-  step "name the machine"
-    ssh == printf '%s\n' "{{ password }}" | sudo -S scutil --set LocalHostName {{ user }}
-  step "note what is absent"
-    ssh == command -v brew || true
-  step "stop the machine"
-    shutdown == ssh
-    timeout == 300
-  step "publish the disk"
-    compress == '{{ out }}'
+step "the media this stage boots from is already on disk"
+  needs [boot.img, macos.rom, macos.vars]
+
+step "boot the disk"
+  boot
+  memory_mb 12288
+  os macos
+  timeout 900
+
+step "answer the wizard until the desktop appears"
+  repeat
+    do
+      item "read the pane"
+        read
+          name pane
+      item "read the login window's clock"
+        read
+          name clock
+      item "classify - the login window"
+        expect
+          from clock
+          mode matches
+          name at_login
+          pattern "[0-9]+[:.][0-9]+"
+          rect [820, 90, 1100, 250]
+          rect_at [1920, 1080]
+          scale 1
+      item "classify - country or region"
+        expect
+          from pane
+          mode text
+          name country
+          rect [0, 0, 1920, 1080]
+          rect_at [1920, 1080]
+          scale 1
+          words [[select, your, country, or, region]]
+      item "classify - transfer"
+        expect
+          from pane
+          mode text
+          name transfer
+          rect [0, 0, 1920, 1080]
+          rect_at [1920, 1080]
+          scale 1
+          words [[transfer, your, information, to, this, mac]]
+      item "classify - account"
+        expect
+          from pane
+          mode text
+          name account
+          rect [0, 0, 1920, 1080]
+          rect_at [1920, 1080]
+          scale 1
+          words [[create, a, mac, account]]
+      item "classify - apple account"
+        expect
+          from pane
+          mode text
+          name apple_account
+          rect [0, 0, 1920, 1080]
+          rect_at [1920, 1080]
+          scale 1
+          words [[sign, in, to, your, apple, account]]
+      item "classify - the apple account sheet"
+        expect
+          from pane
+          mode text
+          name apple_sheet
+          rect [0, 0, 1920, 1080]
+          rect_at [1920, 1080]
+          scale 1
+          words [[sure, skip, signing]]
+      item "classify - terms"
+        expect
+          from pane
+          mode text
+          name terms
+          rect [0, 0, 1920, 1080]
+          rect_at [1920, 1080]
+          scale 1
+          words [[terms, conditions]]
+      item "classify - age"
+        expect
+          from pane
+          mode text
+          name age
+          rect [0, 0, 1920, 1080]
+          rect_at [1920, 1080]
+          scale 1
+          words [[age, range]]
+      item "classify - location"
+        expect
+          from pane
+          mode text
+          name location
+          rect [0, 0, 1920, 1080]
+          rect_at [1920, 1080]
+          scale 1
+          words [[enable, location, services]]
+      item "classify - the location sheet"
+        expect
+          from pane
+          mode text
+          name location_sheet
+          rect [0, 0, 1920, 1080]
+          rect_at [1920, 1080]
+          scale 1
+          words [[find, my, available]]
+      item "classify - time zone"
+        expect
+          from pane
+          mode text
+          name time_zone
+          rect [0, 0, 1920, 1080]
+          rect_at [1920, 1080]
+          scale 1
+          words [[time, zone]]
+      item "classify - analytics"
+        expect
+          from pane
+          mode text
+          name analytics
+          rect [0, 0, 1920, 1080]
+          rect_at [1920, 1080]
+          scale 1
+          words [[share, analytics, with, apple]]
+      item "classify - data and privacy"
+        expect
+          from pane
+          mode text
+          name privacy_pane
+          rect [0, 0, 1920, 1080]
+          rect_at [1920, 1080]
+          scale 1
+          words [[privacy, fundamental]]
+      item "classify - spoken languages"
+        expect
+          from pane
+          mode text
+          name languages
+          rect [0, 0, 1920, 1080]
+          rect_at [1920, 1080]
+          scale 1
+          words [[spoken, languages]]
+      item "classify - accessibility"
+        expect
+          from pane
+          mode text
+          name accessibility
+          rect [0, 0, 1920, 1080]
+          rect_at [1920, 1080]
+          scale 1
+          words [[accessibility, individual]]
+      item "classify - screen time"
+        expect
+          from pane
+          mode text
+          name screen_time
+          rect [0, 0, 1920, 1080]
+          rect_at [1920, 1080]
+          scale 1
+          words [[screen, time]]
+      item "classify - filevault"
+        expect
+          from pane
+          mode text
+          name filevault
+          rect [0, 0, 1920, 1080]
+          rect_at [1920, 1080]
+          scale 1
+          words [[ready, encrypting]]
+      item "classify - the filevault sheet"
+        expect
+          from pane
+          mode text
+          name filevault_sheet
+          rect [0, 0, 1920, 1080]
+          rect_at [1920, 1080]
+          scale 1
+          words [[securely, encrypted]]
+      item "classify - look"
+        expect
+          from pane
+          mode text
+          name look
+          rect [0, 0, 1920, 1080]
+          rect_at [1920, 1080]
+          scale 1
+          words [[choose, your, look]]
+      item "classify - update"
+        expect
+          from pane
+          mode text
+          name update
+          rect [0, 0, 1920, 1080]
+          rect_at [1920, 1080]
+          scale 1
+          words [[update, mac, automatically]]
+      item "classify - keyboard"
+        expect
+          from pane
+          mode text
+          name keyboard
+          rect [0, 0, 1920, 1080]
+          rect_at [1920, 1080]
+          scale 1
+          words [[keyboard, assistant]]
+      item "spoken languages"
+        if languages
+          then
+            item "languages continue"
+              press 1284 799
+              settle 7
+      item "accessibility"
+        if accessibility
+          then
+            item "accessibility not now"
+              press 1284 799
+              settle 7
+      item "data and privacy"
+        if privacy_pane
+          then
+            item "privacy continue"
+              press 1284 799
+              settle 8
+      item "transfer your data"
+        if transfer
+          then
+            item "choose not to transfer"
+              press 742 712
+              settle 3
+            item "transfer continue"
+              press 1284 799
+              settle 8
+      item "country or region"
+        if country
+          then
+            item "focus the country list"
+              press 900 470
+              settle 2
+            item "type the country"
+              settle 3
+              press text "united states"
+            item "country continue"
+              press 1284 799
+              settle 7
+      item "the account, which is what this whole stage exists for"
+        if account
+          then
+            item "account full name"
+              press 959 496
+              settle 2
+            item "account full name text"
+              settle 2
+              press text "{{ user }}"
+            item "account short name"
+              press 959 530
+              settle 2
+            item "clear the auto-filled short name"
+              press meta_l+a
+              settle 1
+            item "delete it"
+              press backspace
+              settle 1
+            item "account short name text"
+              settle 2
+              press text "{{ user }}"
+            item "account password"
+              press 841 601
+              settle 2
+            item "account password text"
+              settle 2
+              press text "{{ password }}"
+            item "account verify"
+              press 1068 601
+              settle 2
+            item "account verify text"
+              settle 2
+              press text "{{ password }}"
+            item "untick the apple account reset"
+              press 745 663
+              settle 2
+            item "account continue"
+              press 1284 799
+              settle 180
+      item "apple account - other sign-in options, then later"
+        if apple_account
+          then
+            item "open other sign-in options"
+              press 620 800
+              settle 4
+            item "sign in later"
+              press 682 853
+              settle 7
+      item "the apple account confirmation sheet"
+        if apple_sheet
+          then
+            item "skip the apple account"
+              press 1017 644
+              settle 8
+      item "terms and conditions"
+        if terms
+          then
+            item "terms agree"
+              press 1282 799
+              settle 7
+            item "licence agree"
+              press 1019 616
+              settle 8
+      item "age range"
+        if age
+          then
+            item "choose adult"
+              press 959 710
+              settle 7
+      item "location services"
+        if location
+          then
+            item "location continue"
+              press 1284 799
+              settle 7
+      item "the location confirmation sheet"
+        if location_sheet
+          then
+            item "dont use location services"
+              press 959 575
+              settle 7
+      item "time zone"
+        if time_zone
+          then
+            item "time zone continue"
+              press 1284 799
+              settle 7
+      item "analytics - untick sharing first"
+        if analytics
+          then
+            item "untick share analytics"
+              press 745 520
+              settle 2
+            item "analytics continue"
+              press 1284 799
+              settle 7
+      item "screen time"
+        if screen_time
+          then
+            item "screen time later"
+              press 1131 799
+              settle 7
+      item "filevault"
+        if filevault
+          then
+            item "filevault not now"
+              press 1129 799
+              settle 8
+      item "the filevault confirmation sheet"
+        if filevault_sheet
+          then
+            item "continue without filevault"
+              press 1004 598
+              settle 8
+      item "choose your look"
+        if look
+          then
+            item "look continue"
+              press 1284 799
+              settle 9
+      item "the keyboard assistant, which eats the next keystroke"
+        if keyboard
+          then
+            item "keyboard quit"
+              press 1228 826
+              settle 10
+      item "update mac automatically - reset past it"
+        if update
+          then
+            item "reset the guest"
+              acpi reset
+              timeout 300
+            item "let it come back"
+              settle 60
+      item "the login window - log in"
+        if at_login
+          then
+            item "click the password field"
+              press 960 983
+              settle 3
+            item "type the password"
+              settle 2
+              press text "{{ password }}"
+            item "press return"
+              press ret
+              settle 25
+    until
+      bind finished
+      from wizard
+      mode text
+      rect [0, 0, 1920, 1080]
+      rect_at [1920, 1080]
+      scale 1
+      without [continue, back, later]
+      words [finder]
+    max 90
+
+step "wait for the desktop"
+  repeat
+    do
+      item
+        settle 10
+      item
+        press esc
+    until
+      bind ready
+      from desk
+      mode text
+      rect [0, 0, 1920, 1080]
+      rect_at [1920, 1080]
+      scale 1
+      without [continue, back, later]
+      words [finder]
+    max 30
+
+step "dismiss anything over the desktop"
+  press esc
+  settle 2
+
+step "open spotlight"
+  press meta_l+spc
+  settle 4
+
+step "type the settings app name"
+  settle 7
+  press text "system settings"
+
+step "open it"
+  press ret
+  settle 14
+
+step "the settings window is up"
+  repeat
+    pause 3
+    until
+      bind done
+      from screen
+      mode text
+      rect [0, 0, 1920, 1080]
+      rect_at [1920, 1080]
+      scale 1
+      words [[system, settings], [general], [wi-fi]]
+    max 30
+
+step "search for remote login"
+  clear
+  press text "remote login"
+    at 715 267
+    modifier meta_l
+  settle 10
+
+step "the remote login result is on screen"
+  repeat
+    pause 2
+    until
+      bind done
+      from screen
+      mode text
+      rect [480, 240, 760, 420]
+      rect_at [1920, 1080]
+      scale 2
+      words [[sharing, remote], [allow, full, disk, access]]
+    max 45
+
+step "open the remote login pane"
+  press 703 336
+  settle 12
+
+step "open the remote login pane again"
+  press 703 336
+  rect [726, 300, 1200, 715]
+  rect_at [1920, 1080]
+  scale 2
+  settle 12
+  when_not [allow, full, disk, access]
+
+step "the remote login pane is up"
+  repeat
+    pause 3
+    until
+      bind done
+      from screen
+      mode text
+      rect [726, 300, 1200, 715]
+      rect_at [1920, 1080]
+      scale 2
+      words [[allow, full, disk, access]]
+    max 30
+
+step "turn remote login on"
+  press 1145 353
+  rect [726, 300, 1200, 715]
+  rect_at [1920, 1080]
+  scale 2
+  settle 4
+  when_not [log, in, to, this, computer]
+
+step "the switch reads on"
+  repeat
+    pause 3
+    until
+      bind done
+      from screen
+      mode text
+      rect [726, 300, 1200, 715]
+      rect_at [1920, 1080]
+      scale 2
+      words [[log, in, to, this, computer]]
+    max 10
+
+step "close the pane"
+  press 1145 679
+  settle 5
+
+step "wait for sshd"
+  require_ssh
+  timeout 600
+
+step "prove the build over ssh"
+  ssh "sw_vers -productVersion"
+
+step "prove the account over ssh"
+  ssh "id -un"
+
+step "prove disk utility works over ssh"
+  ssh "diskutil list | head -5"
+
+step "name the machine"
+  ssh "printf '%s\\n' \"{{ password }}\" | sudo -S scutil --set LocalHostName {{ user }}"
+
+step "note what is absent"
+  ssh "command -v brew || true"
+
+step "stop the machine"
+  stop ssh
+  timeout 300
+
+step "publish the disk"
+    save "{{ out }}"

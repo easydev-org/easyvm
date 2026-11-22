@@ -1,73 +1,240 @@
 walkthrough "macos 15 setup (recovery image to setup assistant)"
-  resolution 1920x1080
-  recording_resolution 1920x1080
-  var disk_name == default: main
-  var expected_gb == default: "68"
-  var out == {default: out/macos15.qcow2, from: args.out}
-  var shutdown == {default: kill, from: args.shutdown}
+resolution 1920x1080
+recording_resolution 1920x1080
+var disk_name
+  default main
+var expected_gb
+  default "68"
+var out
+  default out/macos15.qcow2
+  from args.out
+var shutdown
+  default kill
+  from args.shutdown
 
-  needs recovery.dmg boot.img macos.rom macos.vars, named "the media this stage boots from is already on disk"
-  step "create the empty disk"
-    disk == disk.qcow2
-    disk_gb == 128
-  step "boot the recovery image"
-    boot == true
-    os == macos
-    # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
-    memory_mb == 12288
-    recovery == recovery.dmg
-    timeout == 900
-  step "the recovery menu's rows"
-    see == recovery
-  step "wait for the recovery menu"
-    loop == {check: {from: recovery, mode: text, name: done, rect: [760, 200, 1400, 560], rect_at: [1920, 1080], scale: 6, words: [[restore, time, machine], [reinstall, macos], [safari], [disk, utility]]}, do: [{settle: 10}], max: 180, see: {name: recovery}, until: {fact: done}}
-  click "select disk utility" at 837 514, waiting 3s, named "select disk utility"
-  click "open disk utility" at 1142 586, waiting 5s, named "open disk utility"
-  step "make disk utility full screen"
-    at_color == [40, 200, 64]
-    color_region == [0, 30, 700, 400]
-    color_tolerance == 45
-    settle == 6
-  click "read the first disk" at 200 112, waiting 2s, named "read the first disk"
-  step "is the first disk the uninitialised one"
-    see == details
-  step "the first disk is the uninitialised one"
-    check == {from: details, mode: contains, name: uninitialised, rect: [360, 100, 1000, 160], rect_at: [1920, 1080], scale: 4, text: Uninitialized}
-  step "step down to the uninitialised disk"
-    else == [{loop: {check: {from: details, mode: contains, name: uninitialised, rect: [360, 100, 1000, 160], rect_at: [1920, 1080], scale: 4, text: Uninitialized}, do: [{key: down}, {settle: 1}], max: 4, see: {name: details}, until: {fact: uninitialised}}}]
-    if == uninitialised
-  step "erase - open the sheet"
-    loop == {check: {from: sheet, mode: text, name: sheet_up, words: [[erase, deleted], [free, space], [security, option], [cancel, erase]], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, do: [{click: [1681, 57]}, {settle: 3}], max: 6, see: {name: sheet}, until: {fact: sheet_up}}
-    settle == 4
-  press backspace, waiting 3s, named "erase - clear the name field"
-  step "erase - name the volume"
-    click == [960, 415]
-    settle == 4
-    type == '{{ disk_name }}'
-  click "erase - confirm" at 1150 647, waiting 5s, named "erase - confirm"
-  step "erase - wait for the report"
-    loop == {check: {from: screen, mode: text, name: done, words: [[erase, complete], [erase, process]], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, do: [{settle: 5}], max: 60, see: {name: screen}, until: {fact: done}}
-  click "erase - done" at 1143 601, waiting 5s, named "erase - done"
-  press meta_l+q, waiting 12s, named "close disk utility"
-  step "the recovery menu is back"
-    loop == {check: {from: screen, mode: text, name: done, words: [reinstall, macos], rect: [813, 300, 1007, 374], rect_at: [1920, 1080]}, do: [{settle: 5}], max: 60, see: {name: screen}, until: {fact: done}}
-  click "select reinstall macos" at 837 333, waiting 3s, named "select reinstall macos"
-  click "open the installer" at 1142 586, waiting 20s, named "open the installer"
-  step "wait for the installer to load"
-    loop == {check: {from: instaload, mode: text, name: loaded, words: [[agree, to, the, terms], [english, apple], [select, the, disk], [macos, sequoia]], rect: [600, 520, 1300, 640], rect_at: [1920, 1080]}, do: [{settle: 10}], max: 24, see: {name: instaload}, until: {fact: loaded}}
-  click welcome at 960 712, waiting 5s, named "welcome continue"
-  step "wait for the licence pane"
-    loop == {check: {from: licence, mode: text, name: licence_up, words: [[software, license, agreement], [please, read, this]], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, do: [{settle: 10}], max: 24, see: {name: licence}, until: {fact: licence_up}}
-  click "agree to the licence" at 1005 713, waiting 5s, named "agree to the licence"
-  step "wait for the licence sheet"
-    loop == {check: {from: sheet, mode: text, name: sheet_up, words: [[read, and, agree], [disagree, agree]], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, do: [{settle: 5}], max: 12, see: {name: sheet}, until: {fact: sheet_up}}
-  click "agree in the sheet" at 1018 520, waiting 10s, named "agree in the sheet"
-  click "select the destination card" at 850 550, waiting 5s, named "select the destination card"
-  click destination at 1005 712, waiting 10s, named "destination continue"
-  step "the copy runs until the Setup Assistant appears"
-    loop == {check: {from: screen, mode: text, name: done, words: [[select, your, country, or, region], [how, do, you, want, to, connect, to, the, internet], [transfer, your, information, to, this, mac], [choose, a, wireless, network], [sign, in, with, your, apple, id]], rect: [0, 0, 1920, 1080], rect_at: [1920, 1080]}, do: [{settle: 20}], max: 1080, see: {name: screen}, until: {fact: done}}
-  step "stop the machine"
-    shutdown == '{{ shutdown }}'
-    timeout == 300
-  step "publish the disk"
-    compress == '{{ out }}'
+step "the media this stage boots from is already on disk"
+  needs [recovery.dmg, boot.img, macos.rom, macos.vars]
+
+step "create the empty disk"
+  disk disk.qcow2
+  disk_gb 128
+
+step "boot the recovery image"
+  boot
+  # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
+  memory_mb 12288
+  os macos
+  recovery recovery.dmg
+  timeout 900
+
+step "the recovery menu's rows"
+  read recovery
+
+step "wait for the recovery menu"
+  repeat
+    pause 10
+    until
+      bind done
+      from recovery
+      mode text
+      rect [760, 200, 1400, 560]
+      rect_at [1920, 1080]
+      scale 6
+      words [[restore, time, machine], [reinstall, macos], [safari], [disk, utility]]
+    max 180
+
+step "select disk utility"
+  press 837 514
+  settle 3
+
+step "open disk utility"
+  press 1142 586
+  settle 5
+
+step "make disk utility full screen"
+  at_color [40, 200, 64]
+  color_region [0, 30, 700, 400]
+  color_tolerance 45
+  settle 6
+
+step "read the first disk"
+  press 200 112
+  settle 2
+
+step "is the first disk the uninitialised one"
+  read details
+
+step "the first disk is the uninitialised one"
+  expect
+    from details
+    mode contains
+    name uninitialised
+    rect [360, 100, 1000, 160]
+    rect_at [1920, 1080]
+    scale 4
+    text Uninitialized
+
+step "step down to the uninitialised disk"
+  if uninitialised
+    else
+      item
+        repeat
+          do
+            item
+              press down
+            item
+              settle 1
+          until
+            bind uninitialised
+            from details
+            mode contains
+            rect [360, 100, 1000, 160]
+            rect_at [1920, 1080]
+            scale 4
+            text Uninitialized
+          max 4
+
+step "erase - open the sheet"
+  repeat
+    do
+      item
+        press 1681 57
+      item
+        settle 3
+    until
+      bind sheet_up
+      from sheet
+      mode text
+      rect [0, 0, 1920, 1080]
+      rect_at [1920, 1080]
+      words [[erase, deleted], [free, space], [security, option], [cancel, erase]]
+    max 6
+  settle 4
+
+step "erase - clear the name field"
+  press backspace
+  settle 3
+
+step "erase - name the volume"
+  press text "{{ disk_name }}"
+    at 960 415
+  settle 4
+
+step "erase - confirm"
+  press 1150 647
+  settle 5
+
+step "erase - wait for the report"
+  repeat
+    pause 5
+    until
+      bind done
+      from screen
+      mode text
+      rect [0, 0, 1920, 1080]
+      rect_at [1920, 1080]
+      words [[erase, complete], [erase, process]]
+    max 60
+
+step "erase - done"
+  press 1143 601
+  settle 5
+
+step "close disk utility"
+  press meta_l+q
+  settle 12
+
+step "the recovery menu is back"
+  repeat
+    pause 5
+    until
+      bind done
+      from screen
+      mode text
+      rect [813, 300, 1007, 374]
+      rect_at [1920, 1080]
+      words [reinstall, macos]
+    max 60
+
+step "select reinstall macos"
+  press 837 333
+  settle 3
+
+step "open the installer"
+  press 1142 586
+  settle 20
+
+step "wait for the installer to load"
+  repeat
+    pause 10
+    until
+      bind loaded
+      from instaload
+      mode text
+      rect [600, 520, 1300, 640]
+      rect_at [1920, 1080]
+      words [[agree, to, the, terms], [english, apple], [select, the, disk], [macos, sequoia]]
+    max 24
+
+step "welcome continue"
+  press 960 712
+  settle 5
+
+step "wait for the licence pane"
+  repeat
+    pause 10
+    until
+      bind licence_up
+      from licence
+      mode text
+      rect [0, 0, 1920, 1080]
+      rect_at [1920, 1080]
+      words [[software, license, agreement], [please, read, this]]
+    max 24
+
+step "agree to the licence"
+  press 1005 713
+  settle 5
+
+step "wait for the licence sheet"
+  repeat
+    pause 5
+    until
+      bind sheet_up
+      from sheet
+      mode text
+      rect [0, 0, 1920, 1080]
+      rect_at [1920, 1080]
+      words [[read, and, agree], [disagree, agree]]
+    max 12
+
+step "agree in the sheet"
+  press 1018 520
+  settle 10
+
+step "select the destination card"
+  press 850 550
+  settle 5
+
+step "destination continue"
+  press 1005 712
+  settle 10
+
+step "the copy runs until the Setup Assistant appears"
+  repeat
+    pause 20
+    until
+      bind done
+      from screen
+      mode text
+      rect [0, 0, 1920, 1080]
+      rect_at [1920, 1080]
+      words [[select, your, country, or, region], [how, do, you, want, to, connect, to, the, internet], [transfer, your, information, to, this, mac], [choose, a, wireless, network], [sign, in, with, your, apple, id]]
+    max 1080
+
+step "stop the machine"
+  stop "{{ shutdown }}"
+  timeout 300
+
+step "publish the disk"
+    save "{{ out }}"

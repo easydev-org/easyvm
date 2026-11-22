@@ -1,13 +1,22 @@
 walkthrough "macos 26 - developer toolchain"
-  resolution 1920x1080
-  recording_resolution 1920x1080
-  user vmuser
-  password admin
-  var out == {default: out/distro.qcow2, from: args.out}
-  var shutdown == {default: ssh, from: args.shutdown}
-  var user == {default: vmuser, from: args.user}
-  header boot_disk == from_caller
-  header ssh_port == 2222
+resolution 1920x1080
+recording_resolution 1920x1080
+user vmuser
+var out
+  default out/distro.qcow2
+  from args.out
+password admin
+var shutdown
+  default ssh
+  from args.shutdown
+var user
+  default vmuser
+  from args.user
+boot_disk from_caller
+ssh_port 2222
+
+step "the media this stage boots from is already on disk"
+  needs [boot.img, macos.rom, macos.vars, Xcode_26.6_Universal.xip, node.pkg, python.pkg]
 
   # MACOS 26 GETS XCODE 26.6, AND THE TWO MACOS CHAINS DELIBERATELY USE DIFFERENT VERSIONS.
   #
@@ -30,60 +39,72 @@ walkthrough "macos 26 - developer toolchain"
   # THE REST OF THIS FILE IS macos/15's dev.walk WITH THE VERSION CHANGED, because none of these steps
   # touches the GUI - every one is `ssh:`, `scp:` or a script copied in and run. The coordinates that
   # cost the ssh stage eighteen fixes do not exist here.
-  needs boot.img macos.rom macos.vars Xcode_26.6_Universal.xip node.pkg python.pkg, named "the media this stage boots from is already on disk"
-  step "boot the disk"
-    boot == true
-    os == macos
-    timeout == 900
-  step "wait for sshd"
-    require_ssh == true
-    timeout == 900
-  step "copy xcode into the guest"
-    # THE .xip IS A PREPARED INPUT, PULLED BY THE WORKFLOW BEFORE THIS FILE RUNS. It used to be a
-    # `fetch:` step here, which meant a 1.5 GiB download inside a stage whose job has a wall clock -
-    # the same fault that cost run 43847000071 eighteen minutes before its first boot.
-    scp == [Xcode_26.6_Universal.xip, /tmp/Xcode.xip]
-  step "copy run-xcode-install.sh in"
-    scp == [run-xcode-install.sh, /tmp/run-xcode-install.sh]
-    timeout == 300
-  step "expand and select xcode"
-    ssh == "sh /tmp/run-xcode-install.sh"
-    timeout == 7200
-  step "remove the xip"
-    ssh == rm -f /Users/{{ user }}/Xcode.xip && df -h / | tail -1
-    timeout == 300
-  step "copy the packages into the guest"
-    # TWO FILES, NOT A TARBALL, AND THE NAME `packages.tar` WAS NEVER A FILE THIS REPOSITORY PRODUCED.
-    #
-    # `fetchDevPackages` pulls `dev-node-pkg` and `dev-python-pkg` and writes `node.pkg` and
-    # `python.pkg` - while the old step copied `packages.tar`, which nothing has ever created, and the
-    # two steps below then looked for `/tmp/node.pkg` and `/tmp/python.pkg`, which were never copied.
-    # The stage could not have worked. THE NAMES ON THE RIGHT ARE THE ONES THE INSTALLERS READ, and
-    # the ones on the left are what the workflow's `assets:` places; both ends are spelled the same
-    # way on purpose.
-    scp == [node.pkg, /tmp/node.pkg]
-  step "copy the python package into the guest"
-    # `scp:` COPIES ONE FILE PER STEP, so the second package needs its own.
-    scp == [python.pkg, /tmp/python.pkg]
-  step "copy install-node.sh in"
-    scp == [install-node.sh, /tmp/install-node.sh]
-    timeout == 300
+step "boot the disk"
+  boot
+  os macos
+  timeout 900
+
+step "wait for sshd"
+  require_ssh
+  timeout 900
+
+step "copy xcode into the guest"
+  # THE .xip IS A PREPARED INPUT, PULLED BY THE WORKFLOW BEFORE THIS FILE RUNS. It used to be a
+  # `fetch:` step here, which meant a 1.5 GiB download inside a stage whose job has a wall clock -
+  # the same fault that cost run 43847000071 eighteen minutes before its first boot.
+  copy Xcode_26.6_Universal.xip /tmp/Xcode.xip
+
+step "copy run-xcode-install.sh in"
+  copy run-xcode-install.sh /tmp/run-xcode-install.sh
+  timeout 300
+
+step "expand and select xcode"
+  ssh "sh /tmp/run-xcode-install.sh"
+  timeout 7200
+
+step "remove the xip"
+  ssh "rm -f /Users/{{ user }}/Xcode.xip && df -h / | tail -1"
+  timeout 300
+
+step "copy the packages into the guest"
+  # TWO FILES, NOT A TARBALL, AND THE NAME `packages.tar` WAS NEVER A FILE THIS REPOSITORY PRODUCED.
+  #
+  # `fetchDevPackages` pulls `dev-node-pkg` and `dev-python-pkg` and writes `node.pkg` and
+  # `python.pkg` - while the old step copied `packages.tar`, which nothing has ever created, and the
+  # two steps below then looked for `/tmp/node.pkg` and `/tmp/python.pkg`, which were never copied.
+  # The stage could not have worked. THE NAMES ON THE RIGHT ARE THE ONES THE INSTALLERS READ, and
+  # the ones on the left are what the workflow's `assets:` places; both ends are spelled the same
+  # way on purpose.
+  copy node.pkg /tmp/node.pkg
+
+step "copy the python package into the guest"
+  # `scp:` COPIES ONE FILE PER STEP, so the second package needs its own.
+  copy python.pkg /tmp/python.pkg
+
+step "copy install-node.sh in"
+  copy install-node.sh /tmp/install-node.sh
+  timeout 300
+
   # NODE FROM nodejs.org, x64 .pkg. The official installer puts it in /usr/local/bin and links
   # node/npm/npx there, which is on the default PATH.
-  step "install node"
-    ssh == "sh /tmp/install-node.sh"
-    timeout == 1800
-  step "copy install-python.sh in"
-    scp == [install-python.sh, /tmp/install-python.sh]
-    timeout == 300
+step "install node"
+  ssh "sh /tmp/install-node.sh"
+  timeout 1800
+
+step "copy install-python.sh in"
+  copy install-python.sh /tmp/install-python.sh
+  timeout 300
+
   # PYTHON FROM python.org, macos11 .pkg - the Intel-capable build. It installs into
   # /Library/Frameworks/Python.framework and links python3 into /usr/local/bin.
-  step "install python"
-    ssh == "sh /tmp/install-python.sh"
-    timeout == 1800
-  step "copy prove-toolchain.sh in"
-    scp == [prove-toolchain.sh, /tmp/prove-toolchain.sh]
-    timeout == 300
+step "install python"
+  ssh "sh /tmp/install-python.sh"
+  timeout 1800
+
+step "copy prove-toolchain.sh in"
+  copy prove-toolchain.sh /tmp/prove-toolchain.sh
+  timeout 300
+
   # THE CHECK IS THE PATH, NOT THE VERSION.
   #
   # /usr/bin/python3 exists on every macOS and answers --version perfectly - it is the one Xcode's
@@ -93,23 +114,29 @@ walkthrough "macos 26 - developer toolchain"
   # WITH HOMEBREW OUT, THE EXPECTED PREFIX IS DIFFERENT: node and python come from publishers' .pkg
   # files and land in /usr/local, while git and the compilers come from Xcode and live under
   # /Applications/Xcode.app or /usr/bin.
-  step "prove the toolchain"
-    ssh == "sh /tmp/prove-toolchain.sh"
-    timeout == 300
-  step "prove xcode is selected"
-    ssh == xcode-select -p && xcodebuild -version
-    timeout == 300
-  step "copy swift-check.sh in"
-    scp == [swift-check.sh, /tmp/swift-check.sh]
-    timeout == 300
-  step "prove swift compiles"
-    ssh == "sh /tmp/swift-check.sh"
-    timeout == 1800
-  step "note what is present"
-    ssh == export PATH=/usr/local/bin:$PATH; echo "node=$(node --version)"; echo "python=$(python3 --version)"; echo "git=$(git --version)"; echo "swift=$(swift --version 2>&1 | head -1)"; echo "xcode=$(xcodebuild -version | head -1)"
-    timeout == 300
-  step "stop the machine"
-    shutdown == '{{ shutdown }}'
-    timeout == 300
-  step "publish the disk"
-    compress == '{{ out }}'
+step "prove the toolchain"
+  ssh "sh /tmp/prove-toolchain.sh"
+  timeout 300
+
+step "prove xcode is selected"
+  ssh "xcode-select -p && xcodebuild -version"
+  timeout 300
+
+step "copy swift-check.sh in"
+  copy swift-check.sh /tmp/swift-check.sh
+  timeout 300
+
+step "prove swift compiles"
+  ssh "sh /tmp/swift-check.sh"
+  timeout 1800
+
+step "note what is present"
+  ssh "export PATH=/usr/local/bin:$PATH; echo \"node=$(node --version)\"; echo \"python=$(python3 --version)\"; echo \"git=$(git --version)\"; echo \"swift=$(swift --version 2>&1 | head -1)\"; echo \"xcode=$(xcodebuild -version | head -1)\""
+  timeout 300
+
+step "stop the machine"
+  stop "{{ shutdown }}"
+  timeout 300
+
+step "publish the disk"
+    save "{{ out }}"

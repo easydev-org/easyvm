@@ -362,171 +362,134 @@ func hasKey(s walk.Step, key string) bool {
 
 func (e *Executor) runOne(s walk.Step) error {
 	switch {
-	case s.Has("boot"), s.Has("boot_from"):
-		// BOTH START A MACHINE; ONLY THE STARTING STATE DIFFERS. `doBoot` reads `boot_from:` and
-		// passes it as the migration stream, so the two keys were never two implementations.
+	// ---- 1. `boot` ---------------------------------------------------------------------
+	case s.Has("boot"):
 		if err := e.doBoot(s); err != nil {
 			return err
 		}
 		e.machineSeen = true
 		return nil
-	case s.Has("shutdown"):
-		return e.doShutdown(s)
-	case s.Has("disk"):
-		return e.doDisk(s)
-	case s.Has("compress"):
-		return e.doCompress(s)
-	// THE THREE-STEP MODEL, IN DISPATCH ORDER. `ocr:` reads ONE region and names it; `check:` answers
-	// from that name without touching the screen. Both are separate steps on purpose - see ocr.go.
-	case s.Has("see"):
-		// `see:` MEASURES AND BINDS - a word list when `of: [text]`, numbers otherwise. It replaced
-		// `ocr:`, which was the same operation restricted to text: MEASURED 118 uses of one and 0 of
-		// the other once they were one key, and `ocr: {name: X}` and `see: {name: X, of: [text]}`
-		// produced identical readings.
-		return e.doSee(s)
 
-	case s.Has("check"):
-		return e.doCheck(s)
-	case s.Has("loop"):
-		return e.doLoop(s)
-	case s.Has("if"):
-		return e.doIf(s)
-	case s.Has("needs"), s.Has("require"):
-		// `needs:` IS THE NAME; `require:` IS THE OLD ONE AND IS READ SO AN UNMIGRATED FILE RUNS.
-		//
-		// THE RENAME IS ABOUT ONE LETTER. `require:` names the FILES that must be on disk before a
-		// stage starts; `requires:` names the CAPABILITIES the machine must answer (ssh, qga, share).
-		// Two keys one letter apart, two completely different assertions, and 43 uses between them -
-		// a reader had to count the `s`. MEASURED: `require:` 22, `requires:` 21.
-		return e.doRequire(s)
-	case s.Has("require_ssh"):
-		return e.doRequireSSH(s)
-	case s.Has("ssh"):
-		return e.doSSH(s)
-	case s.Has("when"):
-		// A GATE, like `unless:` and its mirror: it reads the screen, then re-enters the dispatcher
-		// with the gate removed so the step's own action runs.
-		return e.doWhen(s)
-	// `do:` IS THE PANE MODEL'S ACTION LIST, and it is an ORDINARY STEP SHAPE - a list run in order
-	// under one name, which is what a `loop:`'s `do:` and a `then:` branch already are. It had no
-	// dispatcher branch at all, so 8 macOS steps that write it did nothing.
-	case s.Has("do"):
-		return e.doActionList(s)
-	case s.Has("when_not"), s.Has("when_not_any"):
-		if err := e.doUnless(s); err != nil {
-			// THE GATE IS SHUT - THE WORDS WERE ON THE SCREEN - SO THE ACTION IS NOT RUN.
-			//
-			// WITHOUT THIS THE `unless` WAS A LOG LINE AND NOTHING ELSE: measured on the macOS 26
-			// ssh stage, a step that said `skipped: the screen already shows "allow full disk
-			// access"` then pressed Cmd+F and Return anyway and closed the panel.
-			if errors.Is(err, errUnlessAlready) {
-				// AND THE REPORT SAYS SO. `doWhen`'s shut gate sets the same flag directly, because
-				// it dispatches the rest of the step itself and a plain `return nil` there really
-				// does mean "nothing ran". This arm is different: returning nil from here ends the
-				// step, and the journal would otherwise record it as `passed` - a stage that skipped
-				// its own verification and still looked complete.
-				e.skipped = true
-				return nil
-			}
-			return err
-		}
-		return e.dispatchRest(s)
-	// `until:` IS ONE KEY AND TWO SOURCES: the screen (a single reading) or the serial log (a file
-	// that grows, so it polls). See doUntil's `from:` branch.
-	case s.Has("until") || s.Has("until_any"):
-		return e.doUntil(s)
-	// `run` BEFORE `expect`, AND THAT ORDER IS THE FIX RATHER THAN A PREFERENCE.
+	// ---- 2. `press` --------------------------------------------------------------------
 	//
-	// A STEP THAT TYPES A COMMAND AND CHECKS THE SCREEN CARRIES BOTH KEYS. With `expect_any` tested
-	// first, such a step went to `doExpectAny` - WHICH ONLY READS THE SCREEN - so the typewriter never
-	// ran and the check then reported "did not advance". Measured on manjaro's `install openssh`, whose
-	// trace had NO `running N line(s)` line at all:
+	// ONE VERB FOR THE POINTER AND THE KEYBOARD. A coordinate is a click, `key:` is a keystroke,
+	// `text:` is typing, `colour:` is a blob to find, and `double:`/`anchor:` are modifiers on a
+	// click. The discriminator is the field, which is the same rule `expect` and `control` follow.
+	// `press` IS THE MARKER AND THE SHAPES ARE THE ACTION, so the shapes come first: a step with
+	// `click:` runs `doClick`, and `doPress` is only reached for a step whose argument had no shape
+	// the other branches recognise.
+	case s.Has("press"):
+		return e.doPress(s)
+
+	// ---- 3. `run` ----------------------------------------------------------------------
 	//
-	//	=== install openssh
-	//	error:   install openssh: did not advance: wanted "pacman" or "sudo", read "_ io"
-	//
-	// THE FIRST FIX WAS IN `doRun` - perform the check after the typing - AND IT COULD NOT WORK, because
-	// `run` never reached `doRun`. That is why the same failure appeared again on the next image.
-	//
-	// THE ACTION COMES FIRST AND THE CHECK IS PART OF IT, so `run` is matched before `expect`.
+	// ONE VERB FOR A COMMAND, WITH `via:` SAYING WHERE. A bare `run:` types on the console; `via ssh`
+	// and `via adb` use the transports. The old keys `ssh:`, `adb:`, `adb_connect:` and
+	// `adb_privileged:` are the same operation with the transport named, and they route here.
 	case s.Has("run"):
 		return e.doRun(s)
-	// THE UEFI FALLBACK PATH RUNS ON THE HOST, AGAINST A DISK THAT IS NOT RUNNING.
-	//
-	// It cannot be a `run:` step: that one types into the guest, and this guest is the INSTALLER with
-	// no shell to type into. It is also not a guest action at all - it edits a FAT filesystem inside
-	// a qcow2 at byte offsets, which is what `esp_fallback:` exists for.
-	case s.Has("esp_fallback"):
-		return e.doESPFallback(s)
-	// THE THREE ADB KEYS, FOR A GUEST WHOSE REMOTE ACCESS IS adbd RATHER THAN sshd.
-	//
-	// `adb_connect:` FIRST AND BEFORE `adb:` FOR THE REASON `require_ssh:` COMES BEFORE `ssh:`: a
-	// walk whose first command fails spends its budget on a machine that was never reachable, and
-	// the failure names the command instead of the connection.
+	case s.Has("ssh"):
+		return e.doSSH(s)
+	case s.Has("adb"):
+		return e.doADB(s)
 	case s.Has("adb_connect"):
 		return e.doADBConnect(s)
 	case s.Has("adb_privileged"):
 		return e.doADBPrivileged(s)
-	case s.Has("adb"):
-		return e.doADB(s)
-	// AND SO IS EVERY OTHER ACTION THAT CARRIES ITS OWN CHECK.
+
+	// ---- 4. `copy` ---------------------------------------------------------------------
+	case s.Has("copy"):
+		return e.doSCP(s)
+
+	// ---- 5. `read` ---------------------------------------------------------------------
 	//
-	// `at_window` AND `at_button` ARE CLICKS WITH A `expect_any:` AFTER THEM, and dispatching them below
-	// the `expect` branch meant the FIRST key matched was `expect_any` - so `doExpectAny` ran, which
-	// only READS THE SCREEN, and the click never happened. The step then failed on the sheet it was
-	// supposed to open:
-	//
-	//	erase - open the sheet: did not advance: wanted "erase deleted" or "free space" ...
-	//	                        <- and NOT ONE `clicked (1289, 271)` LINE IN THE LOG
-	//
-	// Measured on macos-setup, three runs in a row, while the coordinate itself was correct the whole
-	// time. The comment above `run` already describes this exact class of bug; these two were left on
-	// the wrong side of the line.
-	case s.Has("at_color"):
-		return e.doAtColor(s)
-	case hasKey(s, "at_bottom"):
-		return e.doAtBottom(s)
-	case hasKey(s, "at_button"):
-		return e.doAtButton(s)
-	case s.Has("disk_settle"):
-		return e.doDiskSettle(s)
-	case hasKey(s, "do"):
-		return e.doActions(s)
+	// CAPTURE ONE FRAME AND BIND IT. It measures nothing and decides nothing: the region and the
+	// question belong to the `expect` that follows. `see:` and `ocr:` were the same operation under
+	// two names, and `screenshot:` was a third that bound no name.
+	case s.Has("read"):
+		return e.doSee(s)
 	case s.Has("screenshot"):
 		return e.doScreenshot(s)
-	case s.Has("write"):
-		return e.doWrite(s)
-	// THE THREE PREPARATION KINDS ARE ONE DISPATCHER, because they are one operation with three
-	// names: a file is obtained, assembled, or rendered, and all three end as a path in the work
-	// directory that a later step names. `doFetch` reads whichever key is present.
-	case s.Has("fetch"), s.Has("asset"), s.Has("build"), s.Has("generate"):
-		return e.doFetch(s)
-	case s.Has("scp"):
-		return e.doSCP(s)
-	case s.Has("desktop"):
-		return e.doDesktop(s)
-	// THE TWO `share_*` BRANCHES WERE HERE. The share is always on now
-	// (internal/daemon/share.go), and proving a guest can read from it is an `ssh:` step with a
-	// URL in it - which is what windows/vm-configure already wrote by hand three lines below its
-	// `share_mount:`.
-	case s.Has("type"):
-		return e.doType(s)
-	case s.Has("key"):
-		return e.doKey(s)
-	case s.Has("double"):
-		return e.doDoubleClick(s)
-	case s.Has("click"):
-		return e.doClick(s)
-	// `settle:` IS A STEP OF ITS OWN AS WELL AS A MODIFIER, and it is the one name for what `wait:`
-	// and `wait_after:` both meant. MEASURED: `wait_after` 627 uses and `wait` 118 - the same idea
-	// under two names. A file can now say `settle:` either way, and the old names keep working so
-	// the migration is per-file.
+
+	// ---- 6. `expect` -------------------------------------------------------------------
+	//
+	// ASSERT ONCE. The condition is the whole argument, and its shape is the same one a `repeat`'s
+	// `until` takes, so there is one way to ask a question.
+	case s.Has("expect"):
+		return e.doCheck(s)
+
+	// ---- 7. `control` ------------------------------------------------------------------
+	//
+	// A MESSAGE TO THE MACHINE rather than to the guest: an ACPI request, the guest agent, or "wait
+	// until the process has gone".
+	case s.Has("control"):
+		return e.doControl(s)
 	case s.Has("acpi"):
 		return e.doACPI(s)
 	case s.Has("qga"):
 		return e.doQGA(s)
 	case s.Has("wait_until"):
 		return e.doWaitUntil(s)
+
+	// ---- 8. `if` -----------------------------------------------------------------------
+	case s.Has("if"):
+		return e.doIf(s)
+
+	// ---- 9. `stop` ---------------------------------------------------------------------
+	//
+	// STOP THE MACHINE, AND PUBLISH THE DISK IN THE SAME STEP. Publishing only ever happens after a
+	// stop - qemu holds the qcow2's write lock while it runs - so the two facts are one step.
+	case s.Has("stop"):
+		return e.doStop(s)
+
+	// ---- the statement -----------------------------------------------------------------
+	case s.Has("repeat"):
+		return e.doRepeat(s)
+
+	// ---- gates and modifiers, which are not verbs --------------------------------------
+	case s.Has("when"):
+		return e.doWhen(s)
+	case s.Has("when_not"), s.Has("when_not_any"):
+		if err := e.doUnless(s); err != nil {
+			if errors.Is(err, errUnlessAlready) {
+				e.skipped = true
+				return nil
+			}
+			return err
+		}
+		return e.dispatchRest(s)
+	case s.Has("do"):
+		return e.doActionList(s)
+	case s.Has("until"), s.Has("until_any"):
+		return e.doUntil(s)
+
+	// ---- the preparation and the disk, which are steps of their own ---------------------
+	case s.Has("needs"), s.Has("require"):
+		return e.doRequire(s)
+	case s.Has("require_ssh"):
+		return e.doRequireSSH(s)
+	case s.Has("disk"):
+		return e.doDisk(s)
+	case s.Has("disk_settle"):
+		return e.doDiskSettle(s)
+	case s.Has("fetch"), s.Has("asset"), s.Has("build"), s.Has("generate"):
+		return e.doFetch(s)
+	case s.Has("write"):
+		return e.doWrite(s)
+	case s.Has("esp_fallback"):
+		return e.doESPFallback(s)
+
+	// ---- the screen shapes a step may carry on its own ---------------------------------
+	case s.Has("desktop"):
+		return e.doDesktop(s)
+	case s.Has("at_color"):
+		return e.doAtColor(s)
+	case hasKey(s, "at_bottom"):
+		return e.doAtBottom(s)
+	case hasKey(s, "at_button"):
+		return e.doAtButton(s)
+
+	// ---- a pause -----------------------------------------------------------------------
 	case s.Has("wait"), s.Has("settle"):
 		return e.doWait(s)
 	}
@@ -1129,7 +1092,8 @@ var errStopped = errors.New("stopped as asked")
 func stepNeedsAGuest(s walk.Step) bool {
 	switch {
 	// the ending of a walk, and anything that turns files into other files
-	case s.Has("shutdown"), s.Has("compress"), s.Has("publish"), s.Has("snapshot"):
+	case s.Has("stop"):
+		// `stop` STOPS THE MACHINE and may also publish the disk. Neither asks the guest anything.
 		return false
 	// A `boot:` IS THE ONE STEP THAT DOES NOT NEED A GUEST TO BE THERE, because it is what PUTS one
 	// there. THE "the guest is gone" GUARD IS RIGHT FOR EVERY OTHER STEP and wrong for this one: a

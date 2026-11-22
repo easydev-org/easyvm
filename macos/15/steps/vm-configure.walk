@@ -1,42 +1,63 @@
 walkthrough "macos 15 - configure the vm (share, login hook, guest agent)"
-  resolution 1920x1080
-  recording_resolution 1920x1080
-  user vmuser
-  password admin
-  var host == {default: "172.30.0.1", from: args.host}
-  var hostname == {default: easyvm-macos15, from: args.hostname}
-  var locale == {default: en_US.UTF-8, from: args.locale}
-  var out == {default: out/distro.qcow2, from: args.out}
-  var timezone == {default: America/Los_Angeles, from: args.timezone}
-  var user == {default: vmuser, from: args.user}
-  header boot_disk == from_caller
-  header ssh_port == 2222
+resolution 1920x1080
+recording_resolution 1920x1080
+user vmuser
+var host
+  default 172.30.0.1
+  from args.host
+var hostname
+  default easyvm-macos15
+  from args.hostname
+var locale
+  default en_US.UTF-8
+  from args.locale
+var out
+  default out/distro.qcow2
+  from args.out
+password admin
+var timezone
+  default America/Los_Angeles
+  from args.timezone
+var user
+  default vmuser
+  from args.user
+boot_disk from_caller
+ssh_port 2222
 
-  needs boot.img macos.rom macos.vars mac-guest-agent, named "the media this stage boots from is already on disk"
-  step "boot the disk"
-    boot == true
-    os == macos
-    # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
-    memory_mb == 12288
-    timeout == 900
-  step "wait for sshd"
-    require_ssh == true
-    timeout == 900
-  step "copy the agent into the guest"
-    scp == [mac-guest-agent, /tmp/mac-guest-agent]
-    timeout == 300
-  step "install the guest agent"
-    ssh == "chmod +x /tmp/mac-guest-agent &&\nprintf '%s\\n' '{{ password }}' | sudo -S -p '' /tmp/mac-guest-agent --install 2>&1 | tail -12 &&\nsleep 5 &&\nprintf '%s\\n' '{{ password }}' | sudo -S -p '' launchctl print system/org.mav2287.mac-guest-agent 2>&1 | head -6 ||\nprintf '%s\\n' '{{ password }}' | sudo -S -p '' pgrep -fl mac-guest-agent\n"
-    timeout == 600
-  step "prove the guest agent answers"
-    ssh == "printf '%s\\n' '{{ password }}' | sudo -S -p '' pgrep -fl mac-guest-agent &&\necho '--- serial ports the agent can use ---' &&\nls -l /dev/cu.serial* 2>/dev/null &&\necho '--- what it logged ---' &&\nprintf '%s\\n' '{{ password }}' | sudo -S -p '' tail -8 /var/log/mac-guest-agent.log 2>/dev/null || true\n"
-    timeout == 120
-  step "set the machine's name"
-    ssh == printf '%s\n' '{{ password }}' | sudo -S -p '' sh -c 'scutil --set HostName {{ hostname }}; scutil --set LocalHostName {{ hostname }}; scutil --set ComputerName {{ hostname }}'
-    timeout == 180
-  step "prove the name, all three of it"
-    ssh == sh -c 'for k in HostName LocalHostName ComputerName; do printf "%s = %s\n" "$k" "$(scutil --get $k)"; done; test "$(scutil --get HostName)" = "{{ hostname }}" && echo HOSTNAME_OK'
-    timeout == 60
+step "the media this stage boots from is already on disk"
+  needs [boot.img, macos.rom, macos.vars, mac-guest-agent]
+
+step "boot the disk"
+  boot
+  # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
+  memory_mb 12288
+  os macos
+  timeout 900
+
+step "wait for sshd"
+  require_ssh
+  timeout 900
+
+step "copy the agent into the guest"
+  copy mac-guest-agent /tmp/mac-guest-agent
+  timeout 300
+
+step "install the guest agent"
+  ssh "chmod +x /tmp/mac-guest-agent &&\nprintf '%s\\n' '{{ password }}' | sudo -S -p '' /tmp/mac-guest-agent --install 2>&1 | tail -12 &&\nsleep 5 &&\nprintf '%s\\n' '{{ password }}' | sudo -S -p '' launchctl print system/org.mav2287.mac-guest-agent 2>&1 | head -6 ||\nprintf '%s\\n' '{{ password }}' | sudo -S -p '' pgrep -fl mac-guest-agent\n"
+  timeout 600
+
+step "prove the guest agent answers"
+  ssh "printf '%s\\n' '{{ password }}' | sudo -S -p '' pgrep -fl mac-guest-agent &&\necho '--- serial ports the agent can use ---' &&\nls -l /dev/cu.serial* 2>/dev/null &&\necho '--- what it logged ---' &&\nprintf '%s\\n' '{{ password }}' | sudo -S -p '' tail -8 /var/log/mac-guest-agent.log 2>/dev/null || true\n"
+  timeout 120
+
+step "set the machine's name"
+  ssh "printf '%s\\n' '{{ password }}' | sudo -S -p '' sh -c 'scutil --set HostName {{ hostname }}; scutil --set LocalHostName {{ hostname }}; scutil --set ComputerName {{ hostname }}'"
+  timeout 180
+
+step "prove the name, all three of it"
+  ssh "sh -c 'for k in HostName LocalHostName ComputerName; do printf \"%s = %s\\n\" \"$k\" \"$(scutil --get $k)\"; done; test \"$(scutil --get HostName)\" = \"{{ hostname }}\" && echo HOSTNAME_OK'"
+  timeout 60
+
   # `systemsetup -settimezone` REFUSES IN A NON-GRAPHICAL SSH SESSION ON MACOS 15.
   #
   # MEASURED, and IDENTICALLY on the file BEFORE it was converted (upstream job 133765027531):
@@ -58,48 +79,66 @@ walkthrough "macos 15 - configure the vm (share, login hook, guest agent)"
   #
   # THE SYMLINK IS TRIED FIRST AND `systemsetup` SECOND, because the reverse order leaves a bad
   # `localtime` when -99 is reported and the status is still 0.
-  step "set the time zone, by the file systemsetup would write"
-    ssh == printf '%s\n' '{{ password }}' | sudo -S -p '' sh -c 'ln -sf /usr/share/zoneinfo/{{ timezone }} /etc/localtime && ls -l /etc/localtime && date'
-    timeout == 180
-  step "prove the time zone"
-    ssh == sh -c 'local=$(readlink -f /etc/localtime); echo "localtime = $local"; echo "date = $(date)"; printf "%s" "$local" | grep -q "{{ timezone }}" && echo TIMEZONE_OK'
-    timeout == 60
-  step "set the locale to American English with a UTF-8 terminal"
-    ssh == printf '%s\n' '{{ password }}' | sudo -S -p '' sh -c 'defaults write NSGlobalDomain AppleLocale -string "en_US"; defaults write NSGlobalDomain AppleLanguages -array "en-US" "en"; defaults write NSGlobalDomain AppleMeasurementUnits -string "Inches"; defaults write NSGlobalDomain AppleMetricUnits -bool false'
-    timeout == 120
-  step "prove the locale is the American one"
-    ssh == sh -c 'echo "AppleLocale = $(defaults read NSGlobalDomain AppleLocale)"; echo "AppleLanguages = $(defaults read NSGlobalDomain AppleLanguages | tr -d "\n")"; defaults read NSGlobalDomain AppleLocale | grep -q "en_US" && echo LOCALE_OK'
-    timeout == 60
-  step "prove the guest can fetch from the host share"
-    ssh == sh -c 'curl -fsS --max-time 20 http://172.30.0.1:8080/shared/ || wget -qO- --timeout=20 http://172.30.0.1:8080/shared/'
-    timeout == 180
-  step "show what the guest sees at the share"
-    ssh == sh -c 'curl -fsS --max-time 20 http://172.30.0.1:8080/shared/ 2>&1 | head -20; echo "fetch exit = $?"'
-    timeout == 120
-  step "copy the launcher in"
-    scp == {template: launcher, to: /tmp/bootstrap-launcher.sh}
-    timeout == 300
-  step "copy the login agent plist in"
-    scp == {template: macos_agent_plist, to: /tmp/bootstrap.plist}
-    timeout == 300
-  step "install the login agent"
-    ssh == "set -e\nlaunchd_home=$(eval echo \"~$(id -un)\")\nmkdir -p \"$launchd_home/Library/LaunchAgents\"\ncp /tmp/bootstrap-launcher.sh \"$launchd_home/bootstrap-launcher.sh\"\nchmod +x \"$launchd_home/bootstrap-launcher.sh\"\nsed 's|__LAUNCHER__|'\"$launchd_home\"'/bootstrap-launcher.sh|' /tmp/bootstrap.plist > \"$launchd_home/Library/LaunchAgents/org.vm.bootstrap.plist\"\necho INSTALLED_FOR_NEXT_LOGIN\n"
-    timeout == 300
-  step "prove the login agent is installed and loads"
-    ssh == "ls -l ~/Library/LaunchAgents/org.vm.bootstrap.plist ~/bootstrap-launcher.sh &&\nplutil -lint ~/Library/LaunchAgents/org.vm.bootstrap.plist &&\nlaunchctl print gui/$(id -u)/org.vm.bootstrap 2>&1 | head -6 || echo \"not loaded yet; it loads at next login\"\n"
-    timeout == 120
-  step "prove the launcher fetches, by running it now"
-    ssh == sh -c '/bin/sh ~/bootstrap-launcher.sh 2>&1 | head -5; echo "--- log ---"; tail -8 ~/bootstrap.log 2>/dev/null || echo "(no log)"'
-    timeout == 180
-  step "prove the login hook is installed"
-    ssh == "ls -l ~/Library/LaunchAgents/org.vm.bootstrap.plist ~/bootstrap-launcher.sh &&\nplutil -lint ~/Library/LaunchAgents/org.vm.bootstrap.plist &&\ngrep -c bootstrap-launcher.sh ~/Library/LaunchAgents/org.vm.bootstrap.plist\n"
-    timeout == 60
-  step "write the automatic login password, which is XOR'd against Apple's fixed key"
-    ssh == "printf '%s' '{{ password }}' | perl -e 'my $key = pack(\"C*\", 0x7d,0x89,0x52,0x23,0xd2,0xbc,0xdd,0xea,0xa3,0xb9,0x1f); my $pw = <STDIN>; chomp $pw; my @b = unpack(\"C*\", $pw); my $n = ((int(@b / 12) + 1) * 12); push @b, (0) x ($n - @b); my $k = 0; my $out = \"\"; for my $c (@b) { $out .= sprintf(\"%02x\", $c ^ ord(substr($key, $k % 12, 1))); $k++ } print $out' > /tmp/kcpassword.hex && printf '%s\\n' '{{ password }}' | sudo -S -p '' sh -c 'perl -e \"print pack(q{H*}, do { local $/; <STDIN> })\" < /tmp/kcpassword.hex > /etc/kcpassword && chown root:wheel /etc/kcpassword && chmod 600 /etc/kcpassword' && ls -l /etc/kcpassword && echo KCPASSWORD_WRITTEN\n"
-    timeout == 180
-  step "give loginwindow the other half, without which macOS shows the lock screen anyway"
-    ssh == "defaults write /Library/Preferences/com.apple.loginwindow autoLoginUser -string '{{ user }}' 2>&1 || printf '%s\\n' '{{ password }}' | sudo -S -p '' defaults write /Library/Preferences/com.apple.loginwindow autoLoginUser -string '{{ user }}'; printf '%s\\n' '{{ password }}' | sudo -S -p '' defaults write /Library/Preferences/com.apple.loginwindow autoLoginUserScreenLocked -bool false; echo AUTOLOGIN_CONFIGURED\n"
-    timeout == 120
+step "set the time zone, by the file systemsetup would write"
+  ssh "printf '%s\\n' '{{ password }}' | sudo -S -p '' sh -c 'ln -sf /usr/share/zoneinfo/{{ timezone }} /etc/localtime && ls -l /etc/localtime && date'"
+  timeout 180
+
+step "prove the time zone"
+  ssh "sh -c 'local=$(readlink -f /etc/localtime); echo \"localtime = $local\"; echo \"date = $(date)\"; printf \"%s\" \"$local\" | grep -q \"{{ timezone }}\" && echo TIMEZONE_OK'"
+  timeout 60
+
+step "set the locale to American English with a UTF-8 terminal"
+  ssh "printf '%s\\n' '{{ password }}' | sudo -S -p '' sh -c 'defaults write NSGlobalDomain AppleLocale -string \"en_US\"; defaults write NSGlobalDomain AppleLanguages -array \"en-US\" \"en\"; defaults write NSGlobalDomain AppleMeasurementUnits -string \"Inches\"; defaults write NSGlobalDomain AppleMetricUnits -bool false'"
+  timeout 120
+
+step "prove the locale is the American one"
+  ssh "sh -c 'echo \"AppleLocale = $(defaults read NSGlobalDomain AppleLocale)\"; echo \"AppleLanguages = $(defaults read NSGlobalDomain AppleLanguages | tr -d \"\\n\")\"; defaults read NSGlobalDomain AppleLocale | grep -q \"en_US\" && echo LOCALE_OK'"
+  timeout 60
+
+step "prove the guest can fetch from the host share"
+  ssh "sh -c 'curl -fsS --max-time 20 http://172.30.0.1:8080/shared/ || wget -qO- --timeout=20 http://172.30.0.1:8080/shared/'"
+  timeout 180
+
+step "show what the guest sees at the share"
+  ssh "sh -c 'curl -fsS --max-time 20 http://172.30.0.1:8080/shared/ 2>&1 | head -20; echo \"fetch exit = $?\"'"
+  timeout 120
+
+step "copy the launcher in"
+  copy
+    template launcher
+    to /tmp/bootstrap-launcher.sh
+  timeout 300
+
+step "copy the login agent plist in"
+  copy
+    template macos_agent_plist
+    to /tmp/bootstrap.plist
+  timeout 300
+
+step "install the login agent"
+  ssh "set -e\nlaunchd_home=$(eval echo \"~$(id -un)\")\nmkdir -p \"$launchd_home/Library/LaunchAgents\"\ncp /tmp/bootstrap-launcher.sh \"$launchd_home/bootstrap-launcher.sh\"\nchmod +x \"$launchd_home/bootstrap-launcher.sh\"\nsed 's|__LAUNCHER__|'\"$launchd_home\"'/bootstrap-launcher.sh|' /tmp/bootstrap.plist > \"$launchd_home/Library/LaunchAgents/org.vm.bootstrap.plist\"\necho INSTALLED_FOR_NEXT_LOGIN\n"
+  timeout 300
+
+step "prove the login agent is installed and loads"
+  ssh "ls -l ~/Library/LaunchAgents/org.vm.bootstrap.plist ~/bootstrap-launcher.sh &&\nplutil -lint ~/Library/LaunchAgents/org.vm.bootstrap.plist &&\nlaunchctl print gui/$(id -u)/org.vm.bootstrap 2>&1 | head -6 || echo \"not loaded yet; it loads at next login\"\n"
+  timeout 120
+
+step "prove the launcher fetches, by running it now"
+  ssh "sh -c '/bin/sh ~/bootstrap-launcher.sh 2>&1 | head -5; echo \"--- log ---\"; tail -8 ~/bootstrap.log 2>/dev/null || echo \"(no log)\"'"
+  timeout 180
+
+step "prove the login hook is installed"
+  ssh "ls -l ~/Library/LaunchAgents/org.vm.bootstrap.plist ~/bootstrap-launcher.sh &&\nplutil -lint ~/Library/LaunchAgents/org.vm.bootstrap.plist &&\ngrep -c bootstrap-launcher.sh ~/Library/LaunchAgents/org.vm.bootstrap.plist\n"
+  timeout 60
+
+step "write the automatic login password, which is XOR'd against Apple's fixed key"
+  ssh "printf '%s' '{{ password }}' | perl -e 'my $key = pack(\"C*\", 0x7d,0x89,0x52,0x23,0xd2,0xbc,0xdd,0xea,0xa3,0xb9,0x1f); my $pw = <STDIN>; chomp $pw; my @b = unpack(\"C*\", $pw); my $n = ((int(@b / 12) + 1) * 12); push @b, (0) x ($n - @b); my $k = 0; my $out = \"\"; for my $c (@b) { $out .= sprintf(\"%02x\", $c ^ ord(substr($key, $k % 12, 1))); $k++ } print $out' > /tmp/kcpassword.hex && printf '%s\\n' '{{ password }}' | sudo -S -p '' sh -c 'perl -e \"print pack(q{H*}, do { local $/; <STDIN> })\" < /tmp/kcpassword.hex > /etc/kcpassword && chown root:wheel /etc/kcpassword && chmod 600 /etc/kcpassword' && ls -l /etc/kcpassword && echo KCPASSWORD_WRITTEN\n"
+  timeout 180
+
+step "give loginwindow the other half, without which macOS shows the lock screen anyway"
+  ssh "defaults write /Library/Preferences/com.apple.loginwindow autoLoginUser -string '{{ user }}' 2>&1 || printf '%s\\n' '{{ password }}' | sudo -S -p '' defaults write /Library/Preferences/com.apple.loginwindow autoLoginUser -string '{{ user }}'; printf '%s\\n' '{{ password }}' | sudo -S -p '' defaults write /Library/Preferences/com.apple.loginwindow autoLoginUserScreenLocked -bool false; echo AUTOLOGIN_CONFIGURED\n"
+  timeout 120
+
   # `sudo -n` NEEDS A NOPASSWD RULE, AND THIS GUEST HAS NONE.
   #
   # MEASURED on run 44162678645, step 27/32 - the first run that got this far:
@@ -112,15 +151,18 @@ walkthrough "macos 15 - configure the vm (share, login hook, guest agent)"
   # THE HALVES THEMSELVES ARE RIGHT: `/etc/kcpassword` exists, is 12 bytes and is `-rw------- root`.
   # The failure is the READER, not the thing read - `-n` refuses to prompt, and every other step in
   # this file passes the password through `sudo -S -p ''` for exactly that reason.
-  step "prove both halves are in place"
-    ssh == "stat -f \"%z bytes\" /etc/kcpassword && stat -f \"%Sp %Su\" /etc/kcpassword && printf '%s\\n' '{{ password }}' | sudo -S -p '' defaults read /Library/Preferences/com.apple.loginwindow autoLoginUser && printf '%s\\n' '{{ password }}' | sudo -S -p '' defaults read /Library/Preferences/com.apple.loginwindow autoLoginUserScreenLocked && echo BOTH_HALVES_OK\n"
-    timeout == 120
-  step "turn off display sleep and the screen saver, which is what a viewer then sees"
-    ssh == "printf '%s\\n' '{{ password }}' | sudo -S -p '' pmset displaysleep 0 sleep 0; defaults -currentHost write com.apple.screensaver idleTime 0; echo SLEEP_DISABLED\n"
-    timeout == 180
-  step "prove the machine will not go to sleep"
-    ssh == "pmset -g custom | grep -iE \"displaysleep|sleep\" | head -4; defaults -currentHost read com.apple.screensaver idleTime\n"
-    timeout == 120
+step "prove both halves are in place"
+  ssh "stat -f \"%z bytes\" /etc/kcpassword && stat -f \"%Sp %Su\" /etc/kcpassword && printf '%s\\n' '{{ password }}' | sudo -S -p '' defaults read /Library/Preferences/com.apple.loginwindow autoLoginUser && printf '%s\\n' '{{ password }}' | sudo -S -p '' defaults read /Library/Preferences/com.apple.loginwindow autoLoginUserScreenLocked && echo BOTH_HALVES_OK\n"
+  timeout 120
+
+step "turn off display sleep and the screen saver, which is what a viewer then sees"
+  ssh "printf '%s\\n' '{{ password }}' | sudo -S -p '' pmset displaysleep 0 sleep 0; defaults -currentHost write com.apple.screensaver idleTime 0; echo SLEEP_DISABLED\n"
+  timeout 180
+
+step "prove the machine will not go to sleep"
+  ssh "pmset -g custom | grep -iE \"displaysleep|sleep\" | head -4; defaults -currentHost read com.apple.screensaver idleTime\n"
+  timeout 120
+
   # `shutdown: ssh`, FOR THE REASON macos/15/steps/ssh.walk ALREADY RECORDS.
   #
   # MEASURED AGAIN ON RUN 44474459141, this stage, step 22:
@@ -132,11 +174,13 @@ walkthrough "macos 15 - configure the vm (share, login hook, guest agent)"
   # from ssh.walk's EOF, and the same cure. `shutdown:` is the executor's own method: it sends the
   # command by a route that does not need the binary on PATH and tolerates the connection ending,
   # which a working shutdown always does. The `wait_until: stopped` after it is what confirms.
-  step "stop the machine"
-    shutdown == ssh
-    timeout == 300
-  step "wait for the machine to stop"
-    wait_until == stopped
-    timeout == 300
-  step "publish the disk"
-    compress == '{{ out }}'
+step "stop the machine"
+  stop ssh
+  timeout 300
+
+step "wait for the machine to stop"
+  wait_until stopped
+  timeout 300
+
+step "publish the disk"
+    save "{{ out }}"

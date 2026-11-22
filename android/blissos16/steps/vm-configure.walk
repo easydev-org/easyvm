@@ -1,60 +1,91 @@
 walkthrough "android 13 (blissos 16.9.7) - configure the vm"
-  resolution 1920x1080
-  var hostname == {default: easyvm-bliss, from: args.hostname}
-  var locale == {default: en_US.UTF-8, from: args.locale}
-  var out == {default: out/blissos16-vm-configure.qcow2, from: args.out}
-  var timezone == {default: America/Los_Angeles, from: args.timezone}
-  header recording_resolution == [1920, 1080]
+resolution 1920x1080
+recording_resolution 1920x1080
+var hostname
+  default easyvm-bliss
+  from args.hostname
+var locale
+  default en_US.UTF-8
+  from args.locale
+var out
+  default out/blissos16-vm-configure.qcow2
+  from args.out
+var timezone
+  default America/Los_Angeles
+  from args.timezone
 
-  step "boot the installed disk"
-    boot == true
-    memory_mb == 4096
-    os == android
-    timeout == 300
-  step "attach to the guest's adbd"
-    adb_connect == true
-    timeout == 300
-  step "the shell can change system state"
-    adb_privileged == true
-  step "grant Taskbar the permission it needs to draw"
-    adb == appops set com.farmerbb.taskbar SYSTEM_ALERT_WINDOW allow
-  step "read the permission back"
-    adb == appops get com.farmerbb.taskbar SYSTEM_ALERT_WINDOW
-  step "make Taskbar the home app"
-    adb == cmd package set-home-activity com.farmerbb.taskbar.support/.BlissHomeActivity
-  step "prove nothing will ask again"
-    adb == cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.HOME | tail -1
-  step "start it now"
-    adb == am start -n com.farmerbb.taskbar.support/.BlissHomeActivity
-    timeout == 120
-  step "never turn the screen off"
-    adb == settings put system screen_off_timeout 2147483647
-  step "read it back"
-    adb == settings get system screen_off_timeout
-  step "name the machine"
-    adb == setprop net.hostname {{ hostname }}
-  step "prove the name"
-    adb == getprop net.hostname
-  step "set the time zone"
-    adb == setprop persist.sys.timezone {{ timezone }}
-  step "prove the time zone"
-    adb == getprop persist.sys.timezone
-  step "set the locale"
-    adb == setprop persist.sys.locale en-US
-  step "prove the locale"
-    adb == getprop persist.sys.locale
-  settle 20s, named "give the launcher time to come to the front"
-  step "Taskbar is the window in front"
-    adb == dumpsys window | grep "mCurrentFocus" | grep com.farmerbb.taskbar
-    timeout == 60
-  step "and it is the resumed activity"
-    adb == dumpsys activity activities | grep "ResumedActivity" | grep com.farmerbb.taskbar
-    timeout == 60
-  step "and its windows are on screen"
-    adb == dumpsys window windows | grep -c com.farmerbb.taskbar
-    timeout == 60
-  step "stop the machine"
-    shutdown == kill
-    timeout == 120
-  step "publish the disk"
-    compress == '{{ out }}'
+
+step "boot the installed disk"
+  boot
+  memory_mb 4096
+  os android
+  timeout 300
+
+step "attach to the guest's adbd"
+  adb_connect
+  timeout 300
+
+step "the shell can change system state"
+  adb_privileged
+
+step "grant Taskbar the permission it needs to draw"
+  adb "appops set com.farmerbb.taskbar SYSTEM_ALERT_WINDOW allow"
+
+step "read the permission back"
+  adb "appops get com.farmerbb.taskbar SYSTEM_ALERT_WINDOW"
+
+step "make Taskbar the home app"
+  adb "cmd package set-home-activity com.farmerbb.taskbar.support/.BlissHomeActivity"
+
+step "prove nothing will ask again"
+  adb "cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.HOME | tail -1"
+
+step "start it now"
+  adb "am start -n com.farmerbb.taskbar.support/.BlissHomeActivity"
+  timeout 120
+
+step "never turn the screen off"
+  adb "settings put system screen_off_timeout 2147483647"
+
+step "read it back"
+  adb "settings get system screen_off_timeout"
+
+step "name the machine"
+  adb "setprop net.hostname {{ hostname }}"
+
+step "prove the name"
+  adb "getprop net.hostname"
+
+step "set the time zone"
+  adb "setprop persist.sys.timezone {{ timezone }}"
+
+step "prove the time zone"
+  adb "getprop persist.sys.timezone"
+
+step "set the locale"
+  adb "setprop persist.sys.locale en-US"
+
+step "prove the locale"
+  adb "getprop persist.sys.locale"
+
+step "give the launcher time to come to the front"
+  settle 20
+
+step "Taskbar is the window in front"
+  adb "dumpsys window | grep \"mCurrentFocus\" | grep com.farmerbb.taskbar"
+  timeout 60
+
+step "and it is the resumed activity"
+  adb "dumpsys activity activities | grep \"ResumedActivity\" | grep com.farmerbb.taskbar"
+  timeout 60
+
+step "and its windows are on screen"
+  adb "dumpsys window windows | grep -c com.farmerbb.taskbar"
+  timeout 60
+
+step "stop the machine"
+  stop kill
+  timeout 120
+
+step "publish the disk"
+    save "{{ out }}"

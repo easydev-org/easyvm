@@ -1,9 +1,13 @@
 walkthrough "macos 26 - build the firmware once and publish it"
-  var release == {default: "26", from: args.release}
-  header recording_resolution == [1920, 1080]
+recording_resolution 1920x1080
+var release
+  default "26"
+  from args.release
 
-  needs recovery.dmg, named "the recovery image this build reads is already on disk"
-  step "build the firmware the guest boots through"
-    fetch == opencore
-    recovery == recovery.dmg
-    release == "26"
+step "the recovery image this build reads is already on disk"
+  needs [recovery.dmg]
+
+step "build the firmware the guest boots through"
+  fetch opencore
+  recovery recovery.dmg
+  release "26"

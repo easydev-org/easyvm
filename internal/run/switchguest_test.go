@@ -24,7 +24,7 @@ func TestOneWalkCanStopAGuestAndStartAnother(t *testing.T) {
 	d := &fakeDriver{}
 	ex, steps := newExec(d,
 		map[string]any{"name": "boot windows", "boot": true, "os": "windows", "iso": "win.iso"},
-		map[string]any{"name": "stop it", "shutdown": "kill", "timeout": float64(60)},
+		map[string]any{"name": "stop it", "stop": "kill", "timeout": float64(60)},
 		map[string]any{"name": "boot linux", "boot": true, "os": "linux", "iso": "linux.iso"},
 	)
 	ex.Work = t.TempDir()
@@ -101,7 +101,7 @@ func TestAWalkCanWaitForTheMachineItJustStopped(t *testing.T) {
 	d := &fakeDriver{}
 	ex, steps := newExec(d,
 		map[string]any{"name": "boot", "boot": true, "os": "linux", "iso": "x.iso"},
-		map[string]any{"name": "stop it", "shutdown": "kill", "timeout": float64(60)},
+		map[string]any{"name": "stop it", "stop": "kill", "timeout": float64(60)},
 		map[string]any{"name": "wait for the machine to stop", "wait_until": "stopped",
 			"timeout": float64(5), "poll": float64(1)},
 	)

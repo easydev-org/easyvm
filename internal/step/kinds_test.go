@@ -63,6 +63,14 @@ var kindAnyReasons = map[string]string{
 	"esp_fallback": "a STRING naming the disk (`disk`), or a MAPPING {disk, from}. The flat form " +
 		"is what the only file uses and the mapping form is what a reader should write, so both are " +
 		"accepted; the two differ in structure rather than in value type.",
+	"stop": "the STEP-LEVEL MARKER for stopping the machine: `true` on the marker with `method` " +
+		"(and optionally `save`) beside it. The structural forms are the marker and its absence.",
+	"copy": "the STEP-LEVEL MARKER for a copy action: `true` on the marker, with `from`/`to` (or " +
+		"`template`) beside it. The distinct structural forms are the marker and its absence.",
+	"press": "the STEP-LEVEL MARKER for an input action, whose true value says \"this step is an " +
+		"input\" and whose siblings (`click`, `text`, `key`, `colour`) say WHICH. It is `true` on " +
+		"that marker and absent on a step that does not press anything, so the two structural " +
+		"forms are \"present as a marker\" and \"absent\", which no other Kind expresses.",
 	"scp": "a LIST [local-file, remote-path], or a MAPPING {template, to}. The two are not the same " +
 		"shape in the way a number and a template string are - one names two ends, the other names " +
 		"a file to RENDER and one end. Measured: 24 of the list form, 12 of the mapping form.",

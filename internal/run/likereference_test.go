@@ -39,7 +39,7 @@ func TestAReferenceComparisonEndToEnd(t *testing.T) {
 		shots: map[string]string{"shot": ref},
 	}
 	check := func() map[string]any {
-		return map[string]any{"check": map[string]any{
+		return map[string]any{"expect": map[string]any{
 			"name": "same", "from": "shot", "mode": "like",
 			"rect": []any{0, 0, 1920, 1080}, "rect_at": []any{1920, 1080},
 			"reference": "reference/desktop.png", "range": []any{0.97, 1.0}}}

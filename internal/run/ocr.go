@@ -232,7 +232,7 @@ func parseOCRStep(s walk.Step) (ocrSpec, error) {
 //	check: {name: done, from: page, says_any: [[software, updater], [activities]]}
 //	until: done
 func (e *Executor) doCheck(s walk.Step) error {
-	raw, ok := s.Spec["check"].(map[string]any)
+	raw, ok := s.Spec["expect"].(map[string]any)
 	if !ok {
 		return fail(s.Name, "`check:` must be a mapping: name, from, mode, and the mode's argument")
 	}

@@ -16,7 +16,7 @@ import (
 //	the Setup Assistant is up: assistant = false (mode says_any: none of "select your country
 //	or region" ... in "e")
 //
-// A `check:` only BINDS A BOOLEAN - it does not stop a walk - so a script could report success with a
+// A `expect:` only BINDS A BOOLEAN - it does not stop a walk - so a script could report success with a
 // half-installed disk behind the tag. `until:` reads the screen once and fails the walk when the
 // words are absent, which is the assertion this stage needs.
 func TestMacos26FailsWhenTheSetupAssistantIsAbsent(t *testing.T) {
@@ -27,25 +27,26 @@ func TestMacos26FailsWhenTheSetupAssistantIsAbsent(t *testing.T) {
 	src := string(raw)
 
 	// the final gate is the step whose name says so
-	re := regexp.MustCompile(`(?s)step "the Setup Assistant is up, OR THIS STAGE FAILS"\n(.*?)\n  step "`)
+	re := regexp.MustCompile(`(?s)step "the Setup Assistant is up, OR THIS STAGE FAILS"\n(.*?)\nstep "`)
 	m := re.FindStringSubmatch(src)
 	if m == nil {
 		t.Fatal("the final gate step is gone; a stage that cannot fail on a missing Setup " +
 			"Assistant is a stage that publishes whatever it has")
 	}
 	step := m[1]
-	if !strings.Contains(step, "until_any ==") {
-		t.Error("the final gate is not `until_any:`; a `check:` only binds a boolean and lets the " +
+	// BOTH SPELLINGS: `until_any ==` is the 1.0 form and `until_any` alone is the 2.0 one.
+	if !strings.Contains(step, "until_any ==") && !strings.Contains(step, "until_any ") {
+		t.Error("the final gate is not `until_any:`; a `expect:` only binds a boolean and lets the " +
 			"walk succeed on a black frame (measured: run 44248083728, assistant = false, published)")
 	}
-	// a REAL `check:` line, not the word inside the comment that explains why it was removed
+	// a REAL `expect:` line, not the word inside the comment that explains why it was removed
 	for _, line := range strings.Split(step, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "#") {
 			continue
 		}
-		if strings.HasPrefix(trimmed, "check ==") {
-			t.Errorf("the final gate still carries a `check:` line (%q); it must be an assertion",
+		if strings.HasPrefix(trimmed, "check ==") || trimmed == "expect" {
+			t.Errorf("the final gate still carries a `expect:` line (%q); it must be an assertion",
 				trimmed)
 		}
 	}
