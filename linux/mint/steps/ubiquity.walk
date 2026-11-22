@@ -24,7 +24,8 @@ step "disable the screen saver and the lock"
 
 
 step "open the installer"
-  input [114, 47]
+  input 114 47
+    double [114, 47]
   settle 25
 
 

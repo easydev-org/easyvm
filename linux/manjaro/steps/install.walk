@@ -45,7 +45,8 @@ step "let the desktop settle"
 
 
 step "open the installer"
-  input [960, 760]
+  input 960 760
+    double [960, 760]
   settle 35
 
 
@@ -65,7 +66,8 @@ step "open the installer - the screen says so"
 
 
 step "open the installer (once more, if it did not)"
-  input [960, 760]
+  input 960 760
+    double [960, 760]
   settle 40
   when_not [welcome]
 
