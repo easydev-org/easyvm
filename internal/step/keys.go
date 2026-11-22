@@ -49,6 +49,11 @@ const (
 	// `{button: [x, y]}`, `{button: [x, y], fallback: [x, y]}` and `{colour: [r, g, b]}` used to be
 	// `at_button:`, `at_fallback:` and `at_color:`. The value form is what makes ONE verb cover them.
 	KindPairOrMapping
+	// KindStringOrMapping is a name, OR a mapping that adds facts to it.
+	//
+	// IT EXISTS FOR `disk:`: a line either names a file or creates one, and the five keys that used
+	// to say "and 128 GiB, GPT, at least 4000 MiB, settled after 300 s" are fields of that mapping.
+	KindStringOrMapping
 	// KindRect is [x0, y0, x1, y1].
 	KindRect
 	// KindWords is a phrase, or a list of words that must all be present.
@@ -310,9 +315,10 @@ var Keys = map[string]Key{
 	// The old Summary described that form for as long as the code rejected it. What actually happens:
 	// `disk:` alone names the file `boot:` will start; `disk:` beside `disk_gb:` CREATES the file -
 	// two actions behind one key, decided by whether `disk_gb:` is present.
-	"disk": {Name: "disk", Kind: KindString,
-		Summary: "the disk file: alone, it names the one `boot:` starts; beside `disk_gb:` it " +
-			"creates it at that size"},
+	"disk": {Name: "disk", Kind: KindStringOrMapping,
+		Summary: "the disk file, or a mapping that creates it with its own size and layout. " +
+			"Alone it names the disk `boot:` starts; as a mapping it creates that disk, and the " +
+			"fields are listed in Subkeys"},
 	"disk_from": {Name: "disk_from", Kind: KindString,
 		Summary: "the source image a disk: step takes"},
 	"disk_copy": {Name: "disk_copy", Kind: KindString,

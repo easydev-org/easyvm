@@ -44,6 +44,30 @@ func checkKind(key Key, value any) error {
 		}
 	case KindPair:
 		return checkNumbers(key, value, 2, "[x, y]")
+	case KindStringOrMapping:
+		if m, ok := value.(map[string]any); ok {
+			// THE FIELDS ARE NAMED AND CHECKED, because a mapping that accepts anything is a second
+			// vocabulary: `disk: {size: 128}` without `file:` would be accepted here and then refused
+			// by the executor, which is the "loads and does nothing" shape this package exists to stop.
+			allowed := map[string]bool{
+				"file": true, "size": true, "gpt": true,
+				"esp_mib": true, "min_mb": true, "wait": true,
+			}
+			for k := range m {
+				if !allowed[k] {
+					return fmt.Errorf("`%s:` has no field `%s:`; the ones it has are "+
+						"file, size, gpt, esp_mib, min_mb, wait", key.Name, k)
+				}
+			}
+			if _, hasFile := m["file"]; !hasFile {
+				return fmt.Errorf("`%s:` as a mapping needs `file:`", key.Name)
+			}
+			return nil
+		}
+		if _, ok := value.(string); !ok {
+			return expect(key, "a file name or a mapping", value)
+		}
+		return nil
 	case KindPairOrMapping:
 		if _, ok := value.(map[string]any); ok {
 			return nil

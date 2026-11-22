@@ -9,8 +9,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"unicode/utf8"
 	"time"
+	"unicode/utf8"
 
 	"github.com/easydev-org/easyvm/internal/asset"
 	"github.com/easydev-org/easyvm/internal/bootstrap"
@@ -273,6 +273,38 @@ func (e *Executor) doShutdown(s walk.Step) error {
 	}
 	return nil
 }
+
+// translateDisk turns the mapping form of `disk:` into the step that carries the old keys.
+//
+// IT IS A PURE FUNCTION SO A TEST CAN ASSERT THE TRANSLATION without a guest. It returns nil when
+// the value is not a mapping, or when a mapping has no `file:`.
+func translateDisk(spec map[string]any) map[string]any {
+	m, ok := spec["disk"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	file, _ := m["file"].(string)
+	if file == "" {
+		return nil
+	}
+	out := make(map[string]any, len(spec)+6)
+	for k, v := range spec {
+		if k != "disk" {
+			out[k] = v
+		}
+	}
+	out["disk"] = file
+	for from, to := range map[string]string{
+		"size": "disk_gb", "gpt": "disk_gpt", "esp_mib": "disk_esp_mib",
+		"min_mb": "disk_min_mb", "wait": "disk_settle",
+	} {
+		if v, ok := m[from]; ok {
+			out[to] = v
+		}
+	}
+	return out
+}
+
 func (e *Executor) doDisk(s walk.Step) error {
 	// A STEP WITH `disk_gb:` CREATES A DISK; one with `disk:` NAMES AN EXISTING ONE.
 	//
@@ -286,13 +318,33 @@ func (e *Executor) doDisk(s walk.Step) error {
 	if !ok {
 		return fail(s.Name, "`disk:` must name a file")
 	}
+	// `disk:` AS A MAPPING IS THE FOLDED FORM OF FIVE KEYS: `disk_gb`, `disk_gpt`, `disk_esp_mib`,
+	// `disk_min_mb` and `disk_settle` all described the disk the line already named. Measured before
+	// folding: `disk:` 30 uses, `disk_gb:` 17, `disk_min_mb:` 7, `disk_settle:` 7, `disk_esp_mib:` 1,
+	// `disk_gpt:` 1 - six keys for one file's size and layout.
+	//
+	//	disk: disk.qcow2                                     an existing disk
+	//	disk: {file: disk.qcow2, size: 128}                  create it, 128 GiB
+	//	disk: {file: disk.qcow2, size: 128, gpt: true}       ...with a GPT table
+	//	disk: {file: disk.qcow2, min_mb: 4000, settle: 300}  wait for it to stop growing
+	//
+	// The mapping's fields are translated into the old keys, so `createDisk` - and every guard in
+	// it - is reused rather than duplicated.
+	if _, isMap := v.(map[string]any); isMap {
+		spec := translateDisk(s.Spec)
+		if spec == nil {
+			return fail(s.Name, "`disk:` as a mapping needs `file:` - "+
+				"`disk: {file: disk.qcow2}` or `disk: {file: disk.qcow2, size: 128}`")
+		}
+		sub := walk.Step{Index: s.Index, Name: s.Name, Spec: spec}
+		if _, creates := spec["disk_gb"]; creates {
+			return e.createDisk(sub)
+		}
+		return e.doDisk(sub)
+	}
 	path, isPath := v.(string)
 	if !isPath {
-		if _, isMap := v.(map[string]any); isMap {
-			return fail(s.Name, "`disk:` names a FILE, not a mapping: write `disk: disk.qcow2`. "+
-				"The {from, copy} form was never used by any file in this repository")
-		}
-		return fail(s.Name, "`disk:` must be a file name, got %T", v)
+		return fail(s.Name, "`disk:` must be a file name or a mapping, got %T", v)
 	}
 	if path == "" {
 		return fail(s.Name, "`disk:` is empty")

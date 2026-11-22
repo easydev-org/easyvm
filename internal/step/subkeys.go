@@ -24,6 +24,24 @@ package step
 // owner hands its value to the same `checkKind` - `check:` does exactly that with `mode:` and
 // `words:`.
 var Subkeys = map[string]Key{
+	// --- the fields of a folded `disk:` mapping ------------------------------------------------
+	//
+	// `disk: {file: disk.qcow2, size: 128}` is the folded form of six keys: the file, and the five
+	// that described it. These names are SUBKEYS - written inside `disk:`, never on a step - which is
+	// why they are here rather than in `Keys`.
+	"file": {Name: "file", Kind: KindString,
+		Summary: "with `disk:`: the disk file the step names or creates"},
+	"size": {Name: "size", Kind: KindInt,
+		Summary: "with `disk:`: the size in GiB to create it at (was `disk_gb:`)"},
+	"gpt": {Name: "gpt", Kind: KindBool,
+		Summary: "with `disk:`: write a GPT partition table (was `disk_gpt:`)"},
+	"esp_mib": {Name: "esp_mib", Kind: KindInt,
+		Summary: "with `disk:`: the size of the EFI system partition (was `disk_esp_mib:`)"},
+	"min_mb": {Name: "min_mb", Kind: KindInt,
+		Summary: "with `disk:`: the smallest a finished disk may be (was `disk_min_mb:`)"},
+	"wait": {Name: "wait", Kind: KindFloat,
+		Summary: "with `disk:`: wait this long for the file to stop growing (was `disk_settle:`)"},
+
 	// --- where a question is asked, and what it is compared with --------------------------------
 	"rect": {Name: "rect", Kind: KindRect,
 		Summary: "the region to measure: as a FRACTION of the frame (`middle`, `bottom 4.5%`), or " +

@@ -184,6 +184,7 @@ reads the region, the click does not).
 | `then`, `else` | `if` | the branches | 21 |
 | `of` | — | **DEAD**: the `see:` that measured numbers is gone; a question is a `check:` | 0 |
 | `to`, `path`, `body`, `argv` | `scp`, `qga` | the remote path, the guest file, the bytes, the command line | 0 |
+| `file`, `size`, `gpt`, `esp_mib`, `min_mb`, `wait` | `disk` | the folded form of `disk_gb:`, `disk_gpt:`, `disk_esp_mib:`, `disk_min_mb:` and `disk_settle:` — `disk: {file: disk.qcow2, size: 128}` | new |
 
 ## Step-level arguments that are NOT subkeys
 
