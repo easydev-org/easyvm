@@ -194,6 +194,10 @@ func (s *DNSServer) sweep() {
 			return
 		case <-t.C:
 			dnsNames.sweep()
+			// AND THE FAKE POOL, on the same tick: an allocation nobody has used for five minutes is a
+			// name from a machine that is gone, and leaving it would fill the range on a long-lived
+			// daemon.
+			fakeIPs.sweep()
 		}
 	}
 }
@@ -215,12 +219,38 @@ func (s *DNSServer) serve() {
 	}
 }
 
-// handle forwards one query and records what came back.
+// handle answers one query.
+//
+// TWO MODES, AND THEY ANSWER THE SAME QUESTION DIFFERENTLY:
+//
+//	real-ip   forward it, record what came back, return the upstream's answer. The name-to-address
+//	          table learns from the answer, so a rule matches for the addresses the guest resolved.
+//
+//	fake-ip   invent an address for the name and return that, without forwarding. The connection that
+//	          follows carries the name because the daemon put it there, so nothing can miss - see
+//	          fakeip.go. A name the daemon cannot invent an address for is forwarded instead.
+//
+// A MALFORMED QUERY IS STILL FORWARDED IN REAL-IP MODE. This is a resolver, not a validator: the
+// upstream's own answer (or refusal) is more informative than silence, and refusing here would make a
+// broken client look like a broken network.
 func (s *DNSServer) handle(query []byte, from *net.UDPAddr) {
 	name, qtype, ok := parseQuestion(query)
-	// A MALFORMED QUERY IS STILL FORWARDED. This is a resolver, not a validator: the upstream's own
-	// answer (or refusal) is more informative than silence, and refusing here would make a broken
-	// client look like a broken network.
+
+	if fakeIPEnabled && ok {
+		// AAAA IS ANSWERED EMPTY ON PURPOSE: the proxy and the relay carry IPv4 only, so a guest told
+		// an IPv6 address would connect where this daemon cannot follow. An empty NOERROR makes the
+		// client fall back to the A record, which is what it should have done anyway.
+		if qtype == 1 || qtype == 28 {
+			if reply := fakeAnswer(query, name, qtype); reply != nil {
+				_, _ = s.conn.WriteToUDP(reply, from)
+				return
+			}
+		}
+		// ANY OTHER TYPE IS FORWARDED, because it is not a connection destination: MX, TXT and SRV are
+		// read by mail clients and service discovery, and inventing an address for them would be a lie
+		// no rule needs.
+	}
+
 	reply := s.forward(query)
 	if reply == nil {
 		return

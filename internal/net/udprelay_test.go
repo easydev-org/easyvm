@@ -14,8 +14,7 @@ import (
 func TestRouteForMapsEachVerdict(t *testing.T) {
 	// THE UPSTREAM TABLE IS PROCESS-WIDE, so a test installs its own and the cleanup restores the
 	// one the daemon had. Reading the real table would make this depend on the environment.
-	old := UpstreamsCopy()
-	t.Cleanup(func() { _ = SetUpstreams(old) })
+	lockPolicy(t)
 	if err := SetUpstreams([]Upstream{
 		{Name: "default", SOCKS5: "proxy.example:1080"},
 		{Name: "fast", SOCKS5: "fast.example:1080"},

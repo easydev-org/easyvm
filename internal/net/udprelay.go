@@ -65,19 +65,24 @@ func StartUDPRelay(guestIP string) (*easytun.Relay, error) {
 // SOCKS5 address falls back to the default - so an upstream configured for CONNECT only still
 // carries TCP and leaves UDP on the default rather than dropping it.
 func routeFor(dst net.IP, port uint16) easytun.Route {
+	// THE NAME, WHEN THIS DAEMON INVENTED THE ADDRESS. In fake-ip mode the destination is a fake
+	// address, so `UDP ASSOCIATE 198.18.7.3` would ask the proxy for a host that exists nowhere - the
+	// name is the only thing that reaches the real server, and it is also what a name rule matched.
+	host, _ := NameForFakeIP(dst)
+
 	v := VerdictFor(dst, int(port))
 	switch v.Kind {
 	case KindBlock:
-		return easytun.Route{Drop: true}
+		return easytun.Route{Drop: true, Host: host}
 	case KindDirect:
-		return easytun.Route{Direct: true}
+		return easytun.Route{Direct: true, Host: host}
 	}
 	if v.Upstream != "" {
 		if addr, ok := socksFor(v.Upstream); ok {
-			return easytun.Route{Upstream: addr}
+			return easytun.Route{Upstream: addr, Host: host}
 		}
 	}
-	return easytun.Route{}
+	return easytun.Route{Host: host}
 }
 
 // UDPRelayConfigured reports the SOCKS5 address this build was told to use.

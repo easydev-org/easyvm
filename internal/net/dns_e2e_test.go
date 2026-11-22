@@ -18,16 +18,14 @@ import (
 // A regression in either half breaks this, and the failure it guards against is the one that shipped:
 // the resolver was complete and was never started, so the second step silently got the default.
 func TestTheDomainRuleMatchesThroughARealQuery(t *testing.T) {
-	oldU := UpstreamsCopy()
-	t.Cleanup(func() { _ = SetUpstreams(oldU) })
+	lockPolicy(t)
 	if err := SetUpstreams([]Upstream{
 		{Name: "default", HTTP: "d:1", SOCKS5: "d:2"},
 		{Name: "fast", HTTP: "fast:1", SOCKS5: "fast:2"},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	oldP, _, _ := Egress()
-	t.Cleanup(func() { _ = SetEgress(oldP) })
+
 	if err := SetEgress(Policy{
 		Default: Verdict{Kind: KindProxy},
 		Rules:   []Rule{{Match: ".youtube.com", Verdict: Verdict{Kind: KindProxy, Upstream: "fast"}}},

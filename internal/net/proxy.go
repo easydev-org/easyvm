@@ -203,13 +203,32 @@ func (p *TransparentProxy) tunnel(conn net.Conn, dst string) {
 	// one thing - which proxy is dialled - so the CONNECT framing, the refusal handling and the copy
 	// loop below are all shared by every upstream, and a new one cannot behave differently.
 	upstream := p.Upstream
+	// THE DESTINATION THE GUEST NAMED, WHEN THERE IS ONE. In fake-ip mode `dst` is an address this
+	// daemon invented, so `CONNECT 198.18.7.3:443` would ask the proxy for an address that exists
+	// nowhere. The name is what the guest asked for, so it is what the proxy is told - and it is also
+	// what a name rule matched, which is the reason the fake address was handed out at all.
+	connectTo := dst
+	if name, ok := NameForFakeIP(parseHost(dst)); ok {
+		connectTo = net.JoinHostPort(name, portOf(dst))
+	}
 	if ip, port, err := splitDst(dst); err == nil {
 		v := VerdictFor(ip, port)
 		switch v.Kind {
 		case KindBlock:
 			return
 		case KindDirect:
-			up, err := net.DialTimeout("tcp", dst, 15*time.Second)
+			// A DIRECT CONNECTION CANNOT DIAL THE FAKE ADDRESS, because it leads back here. The name
+			// is resolved against the upstreams directly - see resolveReal - and the connection is
+			// made to the real address, unproxied, which is what `direct` means.
+			target := dst
+			if name, ok := NameForFakeIP(ip); ok {
+				real, err := resolveReal(name)
+				if err != nil {
+					return
+				}
+				target = net.JoinHostPort(real.String(), portOf(dst))
+			}
+			up, err := net.DialTimeout("tcp", target, 15*time.Second)
 			if err != nil {
 				return
 			}
@@ -244,7 +263,7 @@ func (p *TransparentProxy) tunnel(conn net.Conn, dst string) {
 	// THE CONNECT GOES TO THE PROXY, AND THE 200 COMES BACK BEFORE ANY GUEST BYTE IS FORWARDED.
 	// A tunnel that starts copying first would send the guest's TLS ClientHello into a socket the
 	// proxy is still expecting a request line on.
-	if _, err := fmt.Fprintf(up, "CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", dst, dst); err != nil {
+	if _, err := fmt.Fprintf(up, "CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", connectTo, connectTo); err != nil {
 		return
 	}
 	br := bufio.NewReader(up)
@@ -552,4 +571,26 @@ func StopTransparentProxy() {
 		proxy.Close()
 		proxy = nil
 	}
+}
+
+// parseHost and portOf split a `host:port` without parsing the host as an address.
+//
+// `splitDst` requires an IP, which is right for a redirected connection - SO_ORIGINAL_DST is always
+// an address. These are for the fake-ip case, where the "host" is the fake address and the name is
+// looked up separately; a failure to split returns the input and an empty port, so a malformed
+// destination degrades to the address it already was rather than to a panic.
+func parseHost(dst string) net.IP {
+	host, _, err := net.SplitHostPort(dst)
+	if err != nil {
+		return nil
+	}
+	return net.ParseIP(host)
+}
+
+func portOf(dst string) string {
+	_, port, err := net.SplitHostPort(dst)
+	if err != nil {
+		return ""
+	}
+	return port
 }

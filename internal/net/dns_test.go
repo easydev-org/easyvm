@@ -173,16 +173,13 @@ func TestAnExpiredEntryDisappears(t *testing.T) {
 // THIS IS THE TEST THAT WOULD HAVE FOUND THE DEAD RESOLVER. Before `StartDNS` was called, the table
 // was always empty, so every `.domain` rule matched nothing - and nothing said so.
 func TestARecordedNameMakesADomainRuleMatch(t *testing.T) {
-	oldU := UpstreamsCopy()
-	t.Cleanup(func() { _ = SetUpstreams(oldU) })
+	lockPolicy(t)
 	if err := SetUpstreams([]Upstream{
 		{Name: "default", HTTP: "d:1", SOCKS5: "d:2"},
 		{Name: "fast", HTTP: "fast:1", SOCKS5: "fast:2"},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	oldP, _, _ := Egress()
-	t.Cleanup(func() { _ = SetEgress(oldP) })
 
 	if err := SetEgress(Policy{
 		Default: Verdict{Kind: KindProxy},
