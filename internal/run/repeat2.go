@@ -193,6 +193,21 @@ func (e *Executor) expectOnce(parent walk.Step, cond map[string]any) error {
 	if _, ok := spec["name"]; !ok {
 		spec["name"] = "__until__"
 	}
+	// `must: true` IS WHAT MAKES THE ANSWER A VERDICT RATHER THAN A BINDING, AND WITHOUT IT EVERY
+	// `until` WAS TRUE ON ITS FIRST ATTEMPT.
+	//
+	// A plain `check:` binds a boolean and does NOT fail when it is false - that is right for a step
+	// an `if:` reads. But this function exists to answer "has the loop's condition held", and a
+	// false answer that returns nil means "yes". MEASURED on freebsd install, run 45074859661:
+	//
+	//	wait for the partitioning menu [until]: __until__ = false
+	//	    (none of "guided" or "manual" in "FreeBSD Installer -ase-dbqigbase ...")
+	//	repeat: satisfied after 1 attempt(s)
+	//
+	// The loop stopped on the FIRST attempt with the condition visibly false, the walk then pressed
+	// keys into a menu that was not up, and bsdinstall ended on a ZFS pool dialog instead of the UFS
+	// path - a disk with 0 MiB written, refused by the publish floor.
+	spec["must"] = true
 	sub := walk.Step{
 		Index: parent.Index,
 		Name:  parent.Name + " [until]",
