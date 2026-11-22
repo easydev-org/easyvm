@@ -5,16 +5,17 @@ go 1.26.0
 require (
 	github.com/coder/websocket v1.8.15
 	github.com/digitalocean/go-qemu v0.0.0-20250212194115-ee9b0668d242
+	github.com/easydev-org/easytun v0.1.0
 	github.com/pkg/sftp v1.13.12
 	golang.org/x/crypto v0.58.0
 	gopkg.in/yaml.v3 v3.0.1
 	howett.net/plist v1.0.1
+	modernc.org/sqlite v1.58.0
 )
 
 require (
 	github.com/digitalocean/go-libvirt v0.0.0-20220804181439-8648fbde413e // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/easydev-org/easytun v0.1.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/kr/fs v0.1.0 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
@@ -25,5 +26,4 @@ require (
 	modernc.org/libc v1.75.6 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
-	modernc.org/sqlite v1.58.0 // indirect
 )
