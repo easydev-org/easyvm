@@ -153,6 +153,16 @@ func Load(path string, overrides map[string]string) (*File, error) {
 	// A `.walk` FILE IS CONVERTED TO THE SAME DOCUMENT THE YAML DECODER WOULD PRODUCE, so everything
 	// below this line - validation, the dispatcher, the measurements - is unaware of the format. The
 	// extension decides, and it is the only place the two differ.
+	//
+	// THE 2.0 FORM IS READ FIRST WHERE THE TEXT SAYS SO, because both versions are `.walk` files and a
+	// version is a fact about the TEXT rather than about the name: a 2.0 file has no `==` anywhere.
+	if isWalkFile(path) && IsV2(string(raw)) {
+		converted, err := WalkV2ToYAML(string(raw))
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
+		return loadDocument(path, converted, overrides)
+	}
 	if isWalkFile(path) {
 		converted, err := WalkToYAML(string(raw))
 		if err != nil {
@@ -166,6 +176,19 @@ func Load(path string, overrides map[string]string) (*File, error) {
 		// passed through rather than smoothed over.
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
+	if doc == nil {
+		return nil, fmt.Errorf("%s: empty document", path)
+	}
+	return loadDocument(path, doc, overrides)
+}
+
+// loadDocument is everything `Load` does once a document exists, whichever format produced it.
+//
+// IT IS SPLIT OUT SO THE 2.0 READER CAN USE IT: the two formats differ only in how a document is
+// obtained, and keeping one copy of the validation means a rule added for one is enforced for both.
+func loadDocument(path string, doc map[string]any, overrides map[string]string) (*File, error) {
+	// AN EMPTY DOCUMENT IS A LATER ERROR, and the check is here rather than before the format
+	// dispatch so both readers are held to it.
 	if doc == nil {
 		return nil, fmt.Errorf("%s: empty document", path)
 	}
@@ -240,10 +263,11 @@ func Load(path string, overrides map[string]string) (*File, error) {
 		}
 	}
 
-	f.Vars, err = resolveVars(doc["vars"], overrides)
+	vars, err := resolveVars(doc["vars"], overrides)
 	if err != nil {
 		return nil, fmt.Errorf("%s: vars: %w", path, err)
 	}
+	f.Vars = vars
 
 	stepsRaw, ok := doc["steps"].([]any)
 	if !ok {
