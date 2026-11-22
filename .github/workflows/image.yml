@@ -26,6 +26,14 @@ on:
         description: "Rebuild every layer (use when the image is stale but the push said success)"
         type: boolean
         default: false
+      tag:
+        description: >-
+          an EXTRA tag to publish beside `latest` and the sha. Empty is the normal case. A release
+          branch sets this to its own name (`v0.0.2`) so a real guest can be driven by that engine
+          WITHOUT replacing `:latest` for everyone else - `stage.yml` already takes an `image_tag`
+          input for exactly this, and its comment names the branch case.
+        type: string
+        default: ""
   push:
     branches: [main]
     paths:
@@ -193,8 +201,15 @@ jobs:
           images: ${{ env.IMAGE }}
           # TWO TAGS AND BOTH MATTER. `latest` is what a run pulls by default; the sha is what makes
           # a run reproducible and lets a reader say which image produced a log line.
+          #
+          # THE THIRD IS OPT-IN, AND WHEN IT IS GIVEN `latest` IS NOT PUSHED AT ALL. A dispatch from
+          # `v0.0.2` passes `tag: v0.0.2`, and the six walkthrough repositories call `stage.yml` with
+          # `image_tag: v0.0.2` - so the v0.0.2 engine drives real guests while `:latest` keeps
+          # serving whatever `main` is. Publishing `latest` from a release branch would silently
+          # move every other consumer onto an engine they did not ask for.
           tags: |
-            type=raw,value=latest
+            type=raw,value=latest,enable=${{ inputs.tag == '' }}
+            type=raw,value=${{ inputs.tag }},enable=${{ inputs.tag != '' }}
             type=sha,prefix=,format=short
 
       - name: build and push
