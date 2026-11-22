@@ -515,14 +515,59 @@ const DefaultVideoDevice = "VGA,xres=1920,yres=1080,vgamem_mb=32"
 // verify the result in the same run, and only the verification wants the small machine.
 func machineType(boot machine.Boot) string {
 	if boot.MicroVM {
-		// `graphics=on` IS WHAT MAKES `see:` POSSIBLE ON A MICROVM, and without it the machine is
-		// serial-only. A walkthrough that PROVES THE VOCABULARY has to read the screen, so a microvm
-		// with no display could only test the console half - and the measurement primitives are the
-		// half this branch exists to make testable.
+		// `acpi=on` IS NOT A DISPLAY OPTION AND IT IS NOT OPTIONAL FOR SOME DISTRIBUTIONS.
 		//
-		// IT IS STILL THE SMALL MACHINE: no PCIe, no IDE, no USB. The graphics option adds the VGA
-		// adapter back on the ISA bus, which is one device and about 16 MiB.
-		return "microvm,accel=kvm,pcie=off,graphics=on"
+		// A microvm with `pcie=off` has to deliver its disks as virtio-over-MMIO, and qemu can name
+		// those devices in ONE OF TWO WAYS: on the kernel command line (`virtio_mmio.device=...`,
+		// which qemu injects itself), or in an ACPI table.
+		//
+		// A KERNEL ONLY HONOURS THE FIRST FORM IF IT WAS BUILT WITH
+		// CONFIG_VIRTIO_MMIO_CMDLINE_DEVICES, and the distributions disagree about it. MEASURED, from
+		// each one's own `boot/config-*`:
+		//
+		//	Alpine 3.21   CONFIG_VIRTIO_MMIO=y   CMDLINE_DEVICES=y     boots, finds /dev/vda
+		//	NixOS 6.18    CONFIG_VIRTIO_MMIO=m   CMDLINE_DEVICES=y     boots, finds /dev/vda
+		//	Debian 6.12   CONFIG_VIRTIO_MMIO=m   # CMDLINE_DEVICES is not set   NO /dev/vda
+		//
+		// On Debian the failure is not silent, which is how it was pinned down:
+		//
+		//	virtio_mmio: unknown parameter 'device' ignored
+		//	ALERT!  /dev/vda does not exist.  Dropping to a shell!
+		//
+		// - the module IS loaded and simply refuses the argument. `acpi=on` makes qemu describe the
+		// same MMIO devices in a DSDT instead, which every one of those kernels can read, so one
+		// machine option covers all four without a per-distribution flag.
+		//
+		// IT COSTS NOTHING AND IT STILL IS NOT PCIe: `pcie=off` stays, no PCI bus is created, and
+		// the ACPI tables describe only the MMIO transports and the ISA VGA adapter that
+		// `graphics=on` adds.
+		//
+		// `pic=on` and `rtc=on` CAME WITH IT because a machine with no ACPI had none of its own
+		// timer: the earlier option string let qemu pick defaults, and a guest that reaches userspace
+		// with no working timer logs a clock that never advances.
+		//
+		// `graphics=on` IS ONLY FOR A TEXT CONSOLE NOW. A DESKTOP draws on a virtio-gpu device and
+		// wants `graphics=off`, because an ISA VGA beside it would be a second, unused display that
+		// `see:` might photograph instead.
+		graphics := "off"
+		if boot.MicroVMDisplay == "terminal" {
+			graphics = "on"
+		}
+		// PCIe IS ON FOR A DESKTOP, AND ONLY FOR A DESKTOP. MEASURED: `virtio-gpu-device` on the
+		// virtio-MMIO bus attaches but its driver never binds (status 0x83, NEEDS_RESET, no
+		// /dev/dri/card0), while `pcie=on` with `virtio-gpu-pci` produces
+		//
+		//	[drm] Initialized virtio_gpu 0.1.0 for 0000:00:01.0 on minor 0
+		//	/sys/class/drm: card0 card0-Virtual-1 renderD128
+		//
+		// - a KMS output and a render node on one device, which a compositor needs. A serial or
+		// terminal microvm keeps `pcie=off`: its disk and network are virtio-MMIO and it has no use
+		// for a PCI bus, which is the small machine this type exists to be.
+		pcie := "off"
+		if boot.MicroVMDisplay == "desktop" {
+			pcie = "on"
+		}
+		return "microvm,accel=kvm,acpi=on,pic=on,rtc=on,pcie=" + pcie + ",graphics=" + graphics
 	}
 	return "q35,accel=kvm,vmport=off"
 }
@@ -973,22 +1018,32 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 		// whose resolution is qemu's own default, and the walkthrough that reads it says what it
 		// expects rather than needing 1920x1080.
 		if boot.MicroVM {
-			// `desktop` ASKS FOR A GPU, NOT A TEXT CONSOLE.
+			// `desktop` ASKS FOR A GPU, AND ON A MICROVM IT IS A PCIe DEVICE.
 			//
-			// `isa-vga` IS A TEXT-MODE ADAPTER: it gives the guest 80x25 with no DRM node and no
-			// `/dev/fb0`, so an X server on it cannot find a screen. MEASURED, twice:
+			// MEASURED: `virtio-gpu-device` on the virtio-MMIO bus attaches but the driver NEVER
+			// BINDS - the device exists with a modalias `virtio_gpu` matches, the module loads, and
+			// then
 			//
-			//	openbox on isa-vga   (EE) no screens found - X exits before it draws
-			//	xfce on Xvfb         the desktop is in the guest's MEMORY, and a qemu screendump
-			//	                     reads the ADAPTER, so the recording shows the console instead
+			//	virtio1/status = 0x83   (DRIVER_OK|NEEDS_RESET)
+			//	virtio1/driver          does not exist
+			//	dmesg | grep virtio_gpu counts 0
+			//	/sys/class/drm holds only `version`
 			//
-			// `virtio-gpu-device` IS ON THE virtio BUS, NOT PCI, which is why a machine with no PCIe
-			// can still attach it: it is the same transport `virtio-blk-device` and
-			// `virtio-net-device` already use here. It provides DRM/KMS, so the guest gets
-			// `/dev/dri/card0`, X draws, and - the point of this whole exercise - the picture is in
-			// an adapter qemu owns, so `screendump` records it.
+			// - so no /dev/dri/card0. THE FAULT WAS THE MMIO TRANSPORT, NOT THE MACHINE, and that
+			// was measured too: the same image with `-M microvm,pcie=on` and `virtio-gpu-pci` says
+			//
+			//	virtio-gpu-pci detected at 0000:00:01.0
+			//	[drm] Initialized virtio_gpu 0.1.0 for 0000:00:01.0 on minor 0
+			//	virtio_gpudrmfb frame buffer device
+			//	/sys/class/drm: card0 card0-Virtual-1 renderD128
+			//
+			// One device with BOTH a KMS output and a render node, which is what Mutter, KWin and
+			// wlroots' EGL path need. So a desktop microvm turns PCIe on (see `machineType`) and gets
+			// this adapter. The disk and network stay on virtio-MMIO: measured, the mixed command
+			// line boots to `login:` with /dev/vda mounted.
 			if boot.MicroVMDisplay == "desktop" {
-				args = append(args, "-device", "virtio-gpu-device")
+				// The resolution is stated so the guest's single output has a mode `see:` can name.
+				args = append(args, "-device", "virtio-gpu-pci,xres=1024,yres=768")
 				break
 			}
 			// `isa-vga` IS THE ADAPTER A `microvm` CAN ACTUALLY CREATE, and `-vga std` is not:
@@ -1055,7 +1110,19 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 	if tmpl == "" {
 		tmpl = "/usr/share/OVMF/OVMF_VARS_4M.fd"
 	}
-	if !guestOS.IsMacOS() {
+	// A MICROVM HAS NO FIRMWARE, SO IT MUST NOT BE ASKED FOR ONE.
+	//
+	// `FirmwareArgs` returns nothing for a microvm - there is no pflash, no boot order and no UEFI to
+	// read - but this function used to call `TouchOvmfVars` UNCONDITIONALLY first, which copies the
+	// template into the work directory and fails when the template is absent. MEASURED on a GitHub
+	// runner, which has no `ovmf` package installed:
+	//
+	//	boot: firmware variables template /usr/share/OVMF/OVMF_VARS_4M.fd:
+	//	      open /usr/share/OVMF/OVMF_VARS_4M.fd: no such file or directory
+	//
+	// for a guest that boots a kernel handed to it by the host and could not use the file if it were
+	// there. The two decisions belong together, so the condition is the same one `FirmwareArgs` uses.
+	if !boot.MicroVM && !guestOS.IsMacOS() {
 		if err := machine.TouchOvmfVars(tmpl, ovmfVars); err != nil {
 			return err
 		}

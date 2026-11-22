@@ -14,11 +14,13 @@
 #	without a display   no adapter at all, serial only. `see:` reads nothing and a recording is blank.
 #	with a console     a text-mode ISA VGA adapter the guest draws its TTY on. A recording of a
 #	                   headless guest is a PICTURE of its console.
-#	with a desktop     the same adapter with a window manager on it.
+#	with a desktop     a virtio-gpu on a PCIe bus, which is the only adapter whose driver binds. This
+#	                   is the ONE shape that does not carry `pci=off` on the kernel line, because
+#	                   that would hide the bus the GPU is attached to.
 #
-# This file is the first. A walkthrough that wants a console says so on its `boot:` step, and the
-# daemon picks `isa-vga` or `virtio-gpu-device` from that - not from this file - because the choice is
-# about the guest's session, not about the machine.
+# This file is the first. A walkthrough that wants a console or a desktop says so on its `boot:` step,
+# and the daemon picks the adapter, the bus and the kernel flags from that - not from this file -
+# because the choice is about the guest's session, not about the machine.
 
 name: microvm
 description: "no firmware, no PCIe, no display - a kernel and an initramfs handed to qemu by the host"

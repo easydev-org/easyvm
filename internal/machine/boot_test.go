@@ -1038,3 +1038,50 @@ func TestAMicroVMBootAsksForTheSmallMachine(t *testing.T) {
 			"sector, and a host-supplied kernel would skip the boot chain the install is proving", got)
 	}
 }
+
+// A MICROVM WITH NO PCI BUS MUST TELL ITS KERNEL SO, AND A DESKTOP MICROVM MUST NOT.
+//
+// THIS IS ONE FACT WITH TWO OPPOSITE ANSWERS, which is why it is a test rather than a line.
+//
+// MEASURED, the first: a microvm now gets `acpi=on` (Debian needs the tables to see its MMIO disk),
+// and a kernel that finds an ACPI root assumes a PCI host bridge exists and stops at 0.05s with
+//
+//	PCI: Fatal: No config space access function found
+//
+// `pci=off` states the truth and the same kernel reaches `NIXOS-MICROVM-READY`.
+//
+// MEASURED, the second: a DESKTOP microvm has a PCIe bus ON PURPOSE - `virtio-gpu-pci` is the only
+// adapter whose driver binds - so `pci=off` there would hide the bus the GPU is attached to, and the
+// one device the shape exists for would vanish.
+func TestAMicrovmDeclaresTheAbsenceOfPCIeUnlessItHasADesktop(t *testing.T) {
+	serial := Boot{OS: "microvm", MicroVM: true, MicroVMDisplay: "serial",
+		Kernel: "/w/vmlinuz", Initrd: "/w/initramfs"}
+	if got := strings.Join(serial.KernelArgs(), " "); !strings.Contains(got, "pci=off") {
+		t.Errorf("a serial microvm's kernel line is %q, which does not say `pci=off`. With ACPI on "+
+			"and no PCI bus, the kernel stops at `PCI: Fatal: No config space access function found`", got)
+	}
+
+	terminal := Boot{OS: "microvm", MicroVM: true, MicroVMDisplay: "terminal",
+		Kernel: "/w/vmlinuz", Initrd: "/w/initramfs"}
+	if got := strings.Join(terminal.KernelArgs(), " "); !strings.Contains(got, "pci=off") {
+		t.Errorf("a terminal microvm's kernel line is %q, which does not say `pci=off` - a text "+
+			"console has no device on a PCI bus either", got)
+	}
+
+	desktop := Boot{OS: "microvm", MicroVM: true, MicroVMDisplay: "desktop",
+		Kernel: "/w/vmlinuz", Initrd: "/w/initramfs"}
+	if got := strings.Join(desktop.KernelArgs(), " "); strings.Contains(got, "pci=off") {
+		t.Errorf("a desktop microvm's kernel line is %q and says `pci=off`. That hides the PCIe bus "+
+			"the virtio-gpu is attached to, and the GPU - the whole reason this shape turns PCIe on - "+
+			"disappears", got)
+	}
+
+	// AND A FILE THAT WROTE ITS OWN LINE IS NOT DOUBLE-PREFIXED.
+	own := Boot{OS: "microvm", MicroVM: true, MicroVMDisplay: "serial",
+		Kernel: "/w/vmlinuz", KernelAppend: "console=ttyS0 pci=off root=/dev/vda"}
+	got := strings.Join(own.KernelArgs(), " ")
+	if strings.Count(got, "pci=off") != 1 {
+		t.Errorf("a microvm whose own line already says `pci=off` got %q - the flag is added rather "+
+			"than checked", got)
+	}
+}

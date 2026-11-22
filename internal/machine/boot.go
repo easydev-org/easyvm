@@ -186,11 +186,16 @@ type Boot struct {
 	// MicroVMDisplay is serial, terminal or desktop - whether the microvm has a VGA adapter.
 	//
 	//	serial     graphics=off: serial only. `see:` reads nothing and a recording is blank.
+	//	           pcie=off, and `pci=off` on the kernel line.
 	//	terminal   graphics=on:  a VGA adapter the guest draws its TTY on. A recording of a
-	//	                         headless guest is a PICTURE of its console.
-	//	desktop    graphics=on:  the same adapter with a window manager on it.
+	//	                         headless guest is a PICTURE of its console. pcie=off.
+	//	desktop    pcie=on and graphics=off: a `virtio-gpu-pci` device, which is the ONLY way a
+	//	           compositor gets a KMS output and a render node on one card. It is also the one
+	//	           shape that does NOT carry `pci=off`, because that would hide the bus the GPU is
+	//	           attached to.
 	//
-	// The last two are the SAME qemu machine; what separates them is what the guest runs.
+	// The three are the same qemu machine type; what separates them is the adapter and the PCI bus,
+	// and - for `desktop` - what the guest runs.
 	MicroVMDisplay string
 	// Kernel and Initrd are handed to qemu directly, which is how a microvm starts: there is no
 	// firmware to read a boot sector, so the host supplies the kernel the guest runs.
@@ -1096,6 +1101,30 @@ func (b Boot) KernelArgs() []string {
 	cmdline := b.KernelAppend
 	if cmdline == "" {
 		cmdline = "console=ttyS0 modules=loop,squashfs,sd-mod modloop=/dev/vda"
+	}
+	// `pci=off` IS ADDED TO A MICROVM'S LINE THAT HAS NO PCI BUS, INCLUDING ONE THAT WROTE ITS OWN.
+	//
+	// A microvm with `pcie=off` has no PCI bus, and a kernel that finds an ACPI root - which every
+	// microvm now gets, because Debian needs it to see its MMIO disk - assumes a PCI host bridge
+	// exists and stops:
+	//
+	//	PCI: Fatal: No config space access function found
+	//
+	// MEASURED on the NixOS guest, which died at 0.05s with that line and nothing else. With
+	// `pci=off` the same kernel prints the warning and continues to
+	//
+	//	EXT4-fs (vda): mounted filesystem ... r/w with ordered data mode
+	//	echo[464]: NIXOS-MICROVM-READY
+	//	nixos-microvm login: root (automatic login)
+	//
+	// The statement is TRUE of this machine in every case, so it is prepended rather than left to
+	// each walkthrough: a file that adds its own `console=` should not also have to know that the
+	// absence of a PCI bus has to be declared.
+	//
+	// A DESKTOP MICROVM HAS A PCIe BUS ON PURPOSE (see `machineType`), so it must NOT carry
+	// `pci=off`: that would hide the bus the virtio-gpu is attached to and the GPU would vanish.
+	if !(b.MicroVM && b.MicroVMDisplay == "desktop") && !strings.Contains(cmdline, "pci=off") {
+		cmdline = "pci=off " + cmdline
 	}
 	args = append(args, "-append", cmdline)
 	return args
