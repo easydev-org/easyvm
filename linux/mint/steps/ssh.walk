@@ -35,7 +35,7 @@ step "the greeter is drawn"
   repeat
     do
       item
-        press esc
+        input esc
         settle 3
     until
       bind up
@@ -48,15 +48,15 @@ step "the greeter is drawn"
     max 60
 
 step "greeter - the password box"
-  press 259 568
+  input 259 568
   settle 2
 
 step "greeter - log in"
   settle 3
-  press text "{{ password }}"
+  input text "{{ password }}"
 
 step "greeter - submit"
-  press ret
+  input ret
   settle 12
 
   # THE SESSION TAKES LONGER THAN THE TWELVE SECONDS AFTER `Return`, AND A CHORD PRESSED IN THAT
@@ -66,7 +66,7 @@ step "wait for the desktop"
   timeout 900
 
 step "open the terminal"
-  press ctrl+alt+t
+  input ctrl+alt+t
   settle 20
 
   # NO `terminal_wait:` HERE, AND THAT IS THE FIX RATHER THAN AN OMISSION.

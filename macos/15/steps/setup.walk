@@ -44,11 +44,11 @@ step "wait for the recovery menu"
     max 180
 
 step "select disk utility"
-  press 837 514
+  input 837 514
   settle 3
 
 step "open disk utility"
-  press 1142 586
+  input 1142 586
   settle 5
 
 step "make disk utility full screen"
@@ -58,7 +58,7 @@ step "make disk utility full screen"
   settle 6
 
 step "read the first disk"
-  press 200 112
+  input 200 112
   settle 2
 
 step "is the first disk the uninitialised one"
@@ -81,7 +81,7 @@ step "step down to the uninitialised disk"
         repeat
           do
             item
-              press down
+              input down
             item
               settle 1
           until
@@ -98,7 +98,7 @@ step "erase - open the sheet"
   repeat
     do
       item
-        press 1681 57
+        input 1681 57
       item
         settle 3
     until
@@ -112,16 +112,16 @@ step "erase - open the sheet"
   settle 4
 
 step "erase - clear the name field"
-  press backspace
+  input backspace
   settle 3
 
 step "erase - name the volume"
-  press text "{{ disk_name }}"
+  input text "{{ disk_name }}"
     at 960 415
   settle 4
 
 step "erase - confirm"
-  press 1150 647
+  input 1150 647
   settle 5
 
 step "erase - wait for the report"
@@ -137,11 +137,11 @@ step "erase - wait for the report"
     max 60
 
 step "erase - done"
-  press 1143 601
+  input 1143 601
   settle 5
 
 step "close disk utility"
-  press meta_l+q
+  input meta_l+q
   settle 12
 
 step "the recovery menu is back"
@@ -157,11 +157,11 @@ step "the recovery menu is back"
     max 60
 
 step "select reinstall macos"
-  press 837 333
+  input 837 333
   settle 3
 
 step "open the installer"
-  press 1142 586
+  input 1142 586
   settle 20
 
 step "wait for the installer to load"
@@ -177,7 +177,7 @@ step "wait for the installer to load"
     max 24
 
 step "welcome continue"
-  press 960 712
+  input 960 712
   settle 5
 
 step "wait for the licence pane"
@@ -193,7 +193,7 @@ step "wait for the licence pane"
     max 24
 
 step "agree to the licence"
-  press 1005 713
+  input 1005 713
   settle 5
 
 step "wait for the licence sheet"
@@ -209,15 +209,15 @@ step "wait for the licence sheet"
     max 12
 
 step "agree in the sheet"
-  press 1018 520
+  input 1018 520
   settle 10
 
 step "select the destination card"
-  press 850 550
+  input 850 550
   settle 5
 
 step "destination continue"
-  press 1005 712
+  input 1005 712
   settle 10
 
 step "the copy runs until the Setup Assistant appears"

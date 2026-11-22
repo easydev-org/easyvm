@@ -59,15 +59,15 @@ step "wait for the firmware to offer the DVD"
   timeout 180
 
 step "press a key so the loader takes it"
-  press esc
+  input esc
   settle 1
 
 step "press it again, because the prompt is emitted more than once"
-  press esc
+  input esc
   settle 1
 
 step "and once more, for a loader that was not listening yet"
-  press esc
+  input esc
   settle 2
 
 step "Setup is on screen"
@@ -153,7 +153,7 @@ step "Setup is on screen"
   # reads 28% at 200 s, 54% at 600 s, and 54% again at 1200, 1800, 2400 and 3000 - the install had
   # stopped, and the quit dialog is up from about 520 s. The dialog is what has to be answered.
 step "answer a quit dialog, if one is up"
-  press Escape
+  input Escape
   rect [820, 460, 1520, 660]
   rect_at [1920, 1080]
   # SCALE 2, BECAUSE SCALE 1 DOES NOT READ THE WORD THIS GATE NEEDS. Read back from the recording:
@@ -167,7 +167,7 @@ step "answer a quit dialog, if one is up"
   # THE SAME ANSWER ONCE MORE, because a dialog that has been dismissed can come back: the first
   # one appeared only because a stray Return had pressed Cancel, and no Return is sent any more.
 step "answer it again, if it came back"
-  press Escape
+  input Escape
   rect [820, 460, 1520, 660]
   rect_at [1920, 1080]
   scale 2
@@ -223,11 +223,11 @@ step "wait for the desktop"
   # in the corner is a separate window and the click is what dismisses it - measured on the frame
   # this comparison rejected, where both were up at once.
 step "click the empty desktop"
-  press 960 540
+  input 960 540
   settle 3
 
 step "and an Escape in case a panel was the thing that took it"
-  press esc
+  input esc
   settle 2
 
   # A NOTIFICATION IS NOT DISMISSED BY A CLICK ON THE WALLPAPER. MEASURED ON RUN 44377939172, after

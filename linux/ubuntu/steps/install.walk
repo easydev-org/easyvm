@@ -44,7 +44,7 @@ step "wait for the live desktop"
   # AND THE REFERENCE IS THE INSTALLER'S OWN WINDOW, which is what the next step waits for - so the
   # comparison is about "the live session got this far", not "the desktop is empty".
 step "close the right-click menu the live session leaves open"
-  press esc
+  input esc
   settle 2
 
 step "settle 2s"
@@ -65,7 +65,7 @@ step "wait for the installer window"
   repeat
     do
       item
-        press 420 300
+        input 420 300
       item
         settle 5
     until
@@ -95,7 +95,7 @@ step "the screen is the one this file was written against"
     reference reference/desktop.png
 
 step "welcome / language"
-  press 1355 848
+  input 1355 848
   settle 12
 
 step "wait for the accessibility page, because a click that assumes the page before it is a click that can miss"
@@ -111,7 +111,7 @@ step "wait for the accessibility page, because a click that assumes the page bef
     max 24
 
 step "accessibility"
-  press 1355 848
+  input 1355 848
   settle 12
 
 step "wait for the keyboard layout page, because a click that assumes the page before it is a click that can miss"
@@ -127,7 +127,7 @@ step "wait for the keyboard layout page, because a click that assumes the page b
     max 24
 
 step "keyboard layout"
-  press 1355 848
+  input 1355 848
   settle 12
 
 step "wait for the internet connection page, because a click that assumes the page before it is a click that can miss"
@@ -143,7 +143,7 @@ step "wait for the internet connection page, because a click that assumes the pa
     max 24
 
 step "internet connection"
-  press 1355 848
+  input 1355 848
   settle 12
 
 step "read whether the installer offered to update itself, which blocks every page behind it"
@@ -162,7 +162,7 @@ step "leave the update page by the same Next every other page uses"
   if update_offered
     then
       item "next, past the update offer"
-        press 1355 848
+        input 1355 848
         settle 8
 
 step "wait for the what do you want to do with ubuntu page, because a click that assumes the page before it is a click that can miss"
@@ -178,7 +178,7 @@ step "wait for the what do you want to do with ubuntu page, because a click that
     max 24
 
 step "what do you want to do with ubuntu"
-  press 1355 848
+  input 1355 848
   settle 12
 
 step "wait for the type of installation page, because a click that assumes the page before it is a click that can miss"
@@ -194,7 +194,7 @@ step "wait for the type of installation page, because a click that assumes the p
     max 24
 
 step "type of installation"
-  press 1355 848
+  input 1355 848
   settle 12
 
 step "wait for the applications page, because a click that assumes the page before it is a click that can miss"
@@ -210,7 +210,7 @@ step "wait for the applications page, because a click that assumes the page befo
     max 24
 
 step "applications"
-  press 1355 848
+  input 1355 848
   settle 12
 
 step "wait for the optimise your computer page, because a click that assumes the page before it is a click that can miss"
@@ -226,7 +226,7 @@ step "wait for the optimise your computer page, because a click that assumes the
     max 24
 
 step "optimise your computer"
-  press 1355 848
+  input 1355 848
   settle 12
 
 step "wait for the disk setup page, because a click that assumes the page before it is a click that can miss"
@@ -242,7 +242,7 @@ step "wait for the disk setup page, because a click that assumes the page before
     max 24
 
 step "disk setup"
-  press 1355 848
+  input 1355 848
   settle 12
 
 step "wait for the encryption page, because a click that assumes the page before it is a click that can miss"
@@ -258,7 +258,7 @@ step "wait for the encryption page, because a click that assumes the page before
     max 24
 
 step "encryption"
-  press 1355 848
+  input 1355 848
   settle 12
 
 step "wait for the account page before typing into it"
@@ -273,36 +273,68 @@ step "wait for the account page before typing into it"
       words [[create, account]]
     max 24
 
-step "create your account - full name"
-  clear
-  press text "{{ user }}"
-    at 1139 393
-  settle 2
+step "create your account - full name - click the field"
+  input 1139 393
 
-step "create your account - username"
-  clear
-  press text "{{ user }}"
-    at 1139 501
-  settle 2
+step "create your account - full name - select what is there"
+  input ctrl+a
+  settle 1
 
-step "create your account - password"
-  clear
-  press text "{{ password }}"
-    at 1050 563
-  settle 2
+step "create your account - full name - delete the selection"
+  input backspace
+  settle 1
 
-step "create your account - confirm password"
-  clear
-  press text "{{ password }}"
-    at 1139 616
+step "create your account - full name - type the value"
+  input text "{{ user }}"
+  settle 2
+step "create your account - username - click the field"
+  input 1139 501
+
+step "create your account - username - select what is there"
+  input ctrl+a
+  settle 1
+
+step "create your account - username - delete the selection"
+  input backspace
+  settle 1
+
+step "create your account - username - type the value"
+  input text "{{ user }}"
+  settle 2
+step "create your account - password - click the field"
+  input 1050 563
+
+step "create your account - password - select what is there"
+  input ctrl+a
+  settle 1
+
+step "create your account - password - delete the selection"
+  input backspace
+  settle 1
+
+step "create your account - password - type the value"
+  input text "{{ password }}"
+  settle 2
+step "create your account - confirm password - click the field"
+  input 1139 616
+
+step "create your account - confirm password - select what is there"
+  input ctrl+a
+  settle 1
+
+step "create your account - confirm password - delete the selection"
+  input backspace
+  settle 1
+
+step "create your account - confirm password - type the value"
+  input text "{{ password }}"
   settle 3
-
 step "clear 'require my password to log in'"
-  press 923 670
+  input 923 670
   settle 3
 
 step "create your account"
-  press 1355 848
+  input 1355 848
   settle 12
 
 step "wait for the time zone page"
@@ -318,22 +350,22 @@ step "wait for the time zone page"
     max 24
 
 step "time zone - new york on the map"
-  press 762 483
+  input 762 483
   settle 4
 
 step "time zone"
-  press 1355 848
+  input 1355 848
   settle 14
 
 step "ready to install - the green install button"
-  press 1355 848
+  input 1355 848
   settle 30
 
 step "the installer finishes"
   repeat
     do
       item
-        press 420 300
+        input 420 300
         settle 20
     until
       bind done

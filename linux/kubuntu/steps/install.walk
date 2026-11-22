@@ -29,7 +29,7 @@ step "wait for the installer's launcher"
   timeout 5400
 
 step "open the installer"
-  press 1332 844
+  input 1332 844
   settle 20
 
 step "calamares is open"
@@ -46,15 +46,15 @@ step "the installer's first page"
     words [welcome, partitions, next]
 
 step "next from welcome"
-  press 1777 1059
+  input 1777 1059
   settle 8
 
 step "next from location"
-  press 1777 1059
+  input 1777 1059
   settle 8
 
 step "next from keyboard"
-  press 1777 1059
+  input 1777 1059
   settle 8
 
 step "the installation mode page"
@@ -62,7 +62,7 @@ step "the installation mode page"
     name mode
 
 step "next from customize"
-  press 1777 1059
+  input 1777 1059
   settle 8
 
 step "the partitions page"
@@ -70,7 +70,7 @@ step "the partitions page"
     name parts
 
 step "select erase disk"
-  press 250 76
+  input 250 76
   settle 6
 
 step "the erase page shows ext4"
@@ -87,7 +87,7 @@ step "the default filesystem is ext4"
     words [ext4]
 
 step "next from partitions"
-  press 1777 1059
+  input 1777 1059
   settle 8
 
 step "the users page"
@@ -95,36 +95,68 @@ step "the users page"
     name users
 
 step "the full name"
-  press text "{{ user }}"
+  input text "{{ user }}"
     at 293 51
   settle 2
 
-step "the login name"
-  clear
-  press text "{{ user }}"
-    at 293 119
-  settle 2
+step "the login name - click the field"
+  input 293 119
 
-step "the computer name"
-  clear
-  press text kubuntu
-    at 293 187
-  settle 2
+step "the login name - select what is there"
+  input ctrl+a
+  settle 1
 
-step "the password"
-  clear
-  press text "{{ password }}"
-    at 293 255
-  settle 2
+step "the login name - delete the selection"
+  input backspace
+  settle 1
 
-step "the password again"
-  clear
-  press text "{{ password }}"
-    at 500 255
+step "the login name - type the value"
+  input text "{{ user }}"
   settle 2
+step "the computer name - click the field"
+  input 293 187
 
+step "the computer name - select what is there"
+  input ctrl+a
+  settle 1
+
+step "the computer name - delete the selection"
+  input backspace
+  settle 1
+
+step "the computer name - type the value"
+  input text kubuntu
+  settle 2
+step "the password - click the field"
+  input 293 255
+
+step "the password - select what is there"
+  input ctrl+a
+  settle 1
+
+step "the password - delete the selection"
+  input backspace
+  settle 1
+
+step "the password - type the value"
+  input text "{{ password }}"
+  settle 2
+step "the password again - click the field"
+  input 500 255
+
+step "the password again - select what is there"
+  input ctrl+a
+  settle 1
+
+step "the password again - delete the selection"
+  input backspace
+  settle 1
+
+step "the password again - type the value"
+  input text "{{ password }}"
+  settle 2
 step "log in automatically"
-  press 205 295
+  input 205 295
   settle 3
 
 step "the users page is filled in"
@@ -142,7 +174,7 @@ step "the password was accepted"
     words [vmuser]
 
 step "next from users"
-  press 1777 1059
+  input 1777 1059
   settle 8
 
 step "the summary page"
@@ -159,7 +191,7 @@ step "the summary names ext4"
     words [ext4]
 
 step "start the install"
-  press 1777 1059
+  input 1777 1059
   settle 8
 
 step "the confirmation dialog"
@@ -167,7 +199,7 @@ step "the confirmation dialog"
     name confirm
 
 step "install now"
-  press 1071 535
+  input 1071 535
   settle 15
 
 step "the install writes the disk"

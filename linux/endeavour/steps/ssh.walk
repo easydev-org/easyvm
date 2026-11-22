@@ -54,7 +54,7 @@ step "the disk's boot menu, when it has one"
   #
   # Sixty seconds, then the greeter wait gets a screen instead of a splash.
 step "boot the highlighted entry, which is the installed system"
-  press ret
+  input ret
   settle 60
 
   # THE GREETER IS ASKED FOR, AND THE DESKTOP IS WAITED FOR, AND NEITHER WAS HERE.
@@ -105,15 +105,15 @@ step "boot the highlighted entry, which is the installed system"
   # so the click, the password and Return are what this stage does, and the desktop gate confirms
   # the session started before anything is typed.
 step "greeter - the password box"
-  press 936 628
+  input 936 628
   settle 3
 
 step "greeter - log in"
   settle 3
-  press text "{{ password }}"
+  input text "{{ password }}"
 
 step "greeter - submit"
-  press ret
+  input ret
   settle 20
 
 step "the desktop is up after the login"
@@ -121,7 +121,7 @@ step "the desktop is up after the login"
   timeout 600
 
 step "open the terminal"
-  press ctrl+alt+t
+  input ctrl+alt+t
   settle 20
 
   # NO PROBE COMMAND FIRST. MEASURED ON RUN 44586147027, whose terminal reads

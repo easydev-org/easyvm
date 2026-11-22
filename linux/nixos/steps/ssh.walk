@@ -48,21 +48,20 @@ step "the greeter is drawn"
     max 60
 
 step "greeter - wake the screen"
-  press esc
+  input esc
   settle 5
 
 step "greeter - the user tile"
-  press 960 488
+  input 960 488
   settle 4
 
 step "greeter - the password box"
-  clear false
-  press text "{{ password }}"
+  input text "{{ password }}"
     at 936 628
   settle 4
 
 step "greeter - submit"
-  press ret
+  input ret
   settle 12
 
 step "let the session finish starting"
@@ -105,11 +104,11 @@ step "the welcome dialog is up, when this desktop shows one"
   # a GTK dialog with a close action), and the terminal comes from the overview, which is where this
   # stage opened one successfully before - meta_l, type "terminal", Return on the result.
 step "close the welcome dialog"
-  press esc
+  input esc
   settle 2
 
 step "and clear anything it left behind"
-  press esc
+  input esc
   settle 2
 
   # NO WORD AND NO PICTURE DECIDES THIS DESKTOP, SO THE SHELL DOES.
@@ -139,19 +138,19 @@ step "let the session finish starting, which no band can confirm"
   # stays below as a fallback for a GNOME that does not.
   # THE TERMINAL COMES FROM THE OVERVIEW, NOT A CHORD: `ctrl+alt+t` leaves no window on this GNOME.
 step "open the overview"
-  press meta_l
+  input meta_l
   settle 4
 
 step "search for the terminal"
   settle 3
-  press text terminal
+  input text terminal
   type_gap 0.08
 
 step "the result list has had time to draw"
   settle 4
 
 step "open the terminal on the first result"
-  press ret
+  input ret
   settle 25
 
   # NO `terminal_wait:` HERE, AND THAT IS THE FIX RATHER THAN AN OMISSION.

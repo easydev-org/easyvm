@@ -45,7 +45,7 @@ step "grub shell, when the disk drops into one"
   optional
 
 step "leave the shell for the menu"
-  press text normal
+  input text normal
   when [grub]
 
   # THE MAIN MENU COMES UP WITH THE LANGUAGE ROW HIGHLIGHTED, AND THREE `up` PRESSES DO NOT MOVE IT.
@@ -68,7 +68,7 @@ step "the boot menu, when it is not already booting"
   optional
 
 step "enter the normal module, which loads the menu"
-  press ret
+  input ret
   settle 5
 
   # THE HIGHLIGHT IS ON "Language - Keyboard - Timezone", AND `home` MOVES IT TO THE MENU TITLE.
@@ -88,19 +88,19 @@ step "enter the normal module, which loads the menu"
   # header. THREE `up` PRESSES from the Language row land on entry 1, which is the installed system
   # and the same row the install walk's own menu picks.
 step "up from the language row"
-  press up
+  input up
   settle 1
 
 step "up past the integrity check"
-  press up
+  input up
   settle 1
 
 step "up past the systemd entry, onto the installed system"
-  press up
+  input up
   settle 1
 
 step "boot the highlighted entry, which is the installed system"
-  press ret
+  input ret
   settle 60
 
   # THE GREETER IS ASKED FOR BEFORE IT IS CLICKED, AND THE BAND IS THIS MEDIUM'S OWN.
@@ -135,16 +135,16 @@ step "the greeter is drawn"
   optional
 
 step "greeter - the password box"
-  press 936 628
+  input 936 628
   when [password, vmuser]
 
 step "greeter - log in"
   settle 3
-  press text "{{ password }}"
+  input text "{{ password }}"
   when [password, vmuser]
 
 step "greeter - submit"
-  press ret
+  input ret
   settle 12
   when [password, vmuser]
 
@@ -162,15 +162,15 @@ step "wait for the desktop"
   #
   # The window's own X is at 1305,163. Escape after it covers a window that is already gone.
 step "close the welcome window, which holds focus"
-  press 1305 163
+  input 1305 163
   when [password, vmuser]
 
 step "clear anything it left behind"
-  press esc
+  input esc
   settle 2
 
 step "open the terminal"
-  press ctrl+alt+t
+  input ctrl+alt+t
   settle 20
 
   # NO `terminal_wait:` HERE, AND THAT IS THE FIX RATHER THAN AN OMISSION.

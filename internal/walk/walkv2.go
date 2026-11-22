@@ -515,9 +515,9 @@ func v2NormaliseList(steps *[]any) error {
 				step[k] = v
 			}
 		}
-		if m, ok := step["press"].(map[string]any); ok {
-			delete(step, "press")
-			step["press"] = true
+		if m, ok := step["input"].(map[string]any); ok {
+			delete(step, "input")
+			step["input"] = true
 			for k, v := range m {
 				step[k] = v
 			}
@@ -726,7 +726,7 @@ func v2Size(s string) (int, int, error) {
 // nothing on the line, so they follow the plain rule. These six take both halves.
 func v2IsVerbatim(key string) bool {
 	switch key {
-	case "press", "run", "copy", "stop", "control", "boot":
+	case "input", "run", "copy", "stop", "control", "boot":
 		return true
 	}
 	return false
@@ -742,7 +742,7 @@ func v2VerbArgument(verb, rest string) map[string]any {
 		return out
 	}
 	switch verb {
-	case "press":
+	case "input":
 		if first, after := v2Cut(rest); first == "text" {
 			out["text"] = v2ParseInline(after)
 			return out

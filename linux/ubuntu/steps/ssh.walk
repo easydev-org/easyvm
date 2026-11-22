@@ -30,15 +30,15 @@ step "wait for the greeter's X server to settle on the mode it was given"
     max 24
 
 step "greeter - the password box"
-  press 936 628
+  input 936 628
   settle 3
 
 step "greeter - log in"
   settle 3
-  press text "{{ password }}"
+  input text "{{ password }}"
 
 step "greeter - submit"
-  press ret
+  input ret
   settle 12
 
 step "the first-login wizard is up, when this build shows one"
@@ -57,7 +57,7 @@ step "walk the first-login pages to the end"
   repeat
     do
       item
-        press 1464 194
+        input 1464 194
       item
         settle 4
     until
@@ -71,7 +71,7 @@ step "walk the first-login pages to the end"
     max 12
 
 step "open the terminal"
-  press ctrl+alt+t
+  input ctrl+alt+t
   settle 20
 
 step "keep the screen on"

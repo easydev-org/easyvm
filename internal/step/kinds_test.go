@@ -33,7 +33,7 @@ func TestEveryKindAcceptsItsShapesAndRefusesTheOthers(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		key, known := Keys[c.key]
+		key, known := keyOf(c.key)
 		if !known {
 			t.Fatalf("%q is not a key", c.key)
 		}
@@ -67,18 +67,15 @@ var kindAnyReasons = map[string]string{
 		"(and optionally `save`) beside it. The structural forms are the marker and its absence.",
 	"copy": "the STEP-LEVEL MARKER for a copy action: `true` on the marker, with `from`/`to` (or " +
 		"`template`) beside it. The distinct structural forms are the marker and its absence.",
-	"press": "the STEP-LEVEL MARKER for an input action, whose true value says \"this step is an " +
+	"input": "the STEP-LEVEL MARKER for an input action, whose true value says \"this step is an " +
 		"input\" and whose siblings (`click`, `text`, `key`, `colour`) say WHICH. It is `true` on " +
 		"that marker and absent on a step that does not press anything, so the two structural " +
 		"forms are \"present as a marker\" and \"absent\", which no other Kind expresses.",
-	"scp": "a LIST [local-file, remote-path], or a MAPPING {template, to}. The two are not the same " +
-		"shape in the way a number and a template string are - one names two ends, the other names " +
-		"a file to RENDER and one end. Measured: 24 of the list form, 12 of the mapping form.",
 }
 
 func TestNoKeyIsUncheckedWithoutAReason(t *testing.T) {
 	var unjustified []string
-	for name, key := range Keys {
+	for name, key := range allDeclaredKeys() {
 		if key.Kind != KindAny {
 			continue
 		}
@@ -93,7 +90,11 @@ func TestNoKeyIsUncheckedWithoutAReason(t *testing.T) {
 	}
 	// AND THE OTHER DIRECTION: a reason for a key that is no longer KindAny is a stale argument.
 	for name := range kindAnyReasons {
-		key, ok := Keys[name]
+		// A VERB'S OWN KEY IS A MAPPING OR A FLAG, not a value with two structural forms.
+		if _, isVerb := Verbs[name]; isVerb {
+			continue
+		}
+		key, ok := keyOf(name)
 		if !ok {
 			t.Errorf("kindAnyReasons explains `%s:`, which is not a key", name)
 			continue

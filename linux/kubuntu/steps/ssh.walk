@@ -63,21 +63,21 @@ step "the session is up, which is what autologin is for"
 step "close the welcome centre, which takes the keyboard"
   do
     item
-      press 684 813
+      input 684 813
       settle 3
     item
-      press 684 813
+      input 684 813
       settle 3
     item
-      press 684 813
+      input 684 813
       settle 3
 
 step "clear anything the welcome centre left behind"
-  press esc
+  input esc
   settle 2
 
 step "open the terminal"
-  press ctrl+alt+t
+  input ctrl+alt+t
   settle 20
 
   # NO `terminal_wait:` HERE, AND THAT IS THE FIX RATHER THAN AN OMISSION.

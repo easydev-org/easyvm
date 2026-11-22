@@ -52,7 +52,7 @@ step "wait for the live desktop"
   timeout 5400
 
 step "a pointer nudge on the wallpaper, so the idle timer starts again"
-  press 960 300
+  input 960 300
   settle 20
 
 step "answer the live session's welcome dialog"
@@ -69,7 +69,7 @@ step "answer the live session's welcome dialog"
     max 30
 
 step "launch the installer"
-  press 830 698
+  input 830 698
   settle 25
 
 step "anaconda's web ui is up"
@@ -86,15 +86,15 @@ step "anaconda's web ui is up"
     max 60
 
 step "open the language search"
-  press 938 224
+  input 938 224
   settle 2
 
 step "search for the United States"
   settle 4
-  press text "united states"
+  input text "united states"
 
 step "choose English (United States)"
-  press 853 314
+  input 853 314
   settle 6
 
 step "the wizard is in English now"
@@ -112,7 +112,7 @@ step "it speaks English"
     words [[Welcome], [now]]
 
 step "welcome"
-  press 726 999
+  input 726 999
   settle 15
 
 step "the installation method page"
@@ -130,11 +130,11 @@ step "that page asks how to install"
     words [[Destination], [Encryption], [storage]]
 
 step "open the storage editor, which is the only place a filesystem can be chosen"
-  press 928 446
+  input 928 446
   settle 8
 
 step "launch it"
-  press 794 642
+  input 794 642
   settle 20
 
 step "the editor is up"
@@ -151,19 +151,19 @@ step "the editor is up"
     max 60
 
 step "the disk's menu"
-  press 1185 328
+  input 1185 328
   settle 4
 
 step "create the partition table"
-  press 1117 480
+  input 1117 480
   settle 6
 
 step "initialize it as GPT, which is the default"
-  press 474 381
+  input 474 381
   settle 8
 
 step "the free space's menu"
-  press 1185 363
+  input 1185 363
   settle 4
 
 step "the free space menu is open"
@@ -180,7 +180,7 @@ step "the free space menu is open"
     max 12
 
 step "create the root partition"
-  press 1132 405
+  input 1132 405
   settle 8
 
 step "the root dialog is up"
@@ -197,17 +197,17 @@ step "the root dialog is up"
     max 12
 
 step "name it root"
-  press text root
+  input text root
     at 882 271
   settle 2
 
 step "mount it at the root"
-  press text /
+  input text /
     at 882 333
   settle 2
 
 step "create it, taking the dialog's own ext4 default"
-  press 441 628
+  input 441 628
   settle 8
 
 step "the root partition exists"
@@ -224,7 +224,7 @@ step "the root partition exists"
     max 20
 
 step "open the root partition's detail page"
-  press 460 363
+  input 460 363
   settle 6
 
 step "the detail page is up"
@@ -241,7 +241,7 @@ step "the detail page is up"
     max 12
 
 step "shrink it from the detail page"
-  press 1008 267
+  input 1008 267
   settle 6
 
 step "the shrink dialog is up"
@@ -258,27 +258,27 @@ step "the shrink dialog is up"
     max 12
 
 step "shrink it"
-  press 1029 562
+  input 1029 562
   settle 6
 
 step "to 136 GB, leaving room for the ESP"
-  press 1041 275
+  input 1041 275
   settle 1
 
 step "replace the size"
-  press ctrl+a
+  input ctrl+a
   settle 1
 
 step "the size the shrink dialog is given"
   settle 2
-  press text "136"
+  input text "136"
 
 step "confirm the shrink"
-  press 456 337
+  input 456 337
   settle 8
 
 step "back to the partition list"
-  press 427 222
+  input 427 222
   settle 6
 
 step "the list is up, with free space on it"
@@ -301,7 +301,7 @@ step "the new free space's menu"
   repeat
     do
       item
-        press 1185 407
+        input 1185 407
         settle 3
     until
       bind open
@@ -314,7 +314,7 @@ step "the new free space's menu"
     max 6
 
 step "create the ESP"
-  press 1132 449
+  input 1132 449
   settle 8
 
 step "the ESP dialog is up"
@@ -334,10 +334,10 @@ step "set the type to the ESP"
   repeat
     do
       item
-        press 882 396
+        input 882 396
         settle 3
       item
-        press 648 576
+        input 648 576
         settle 3
     until
       bind esp
@@ -349,14 +349,22 @@ step "set the type to the ESP"
       words [[partition]]
     max 6
 
-step "name it boot"
-  clear
-  press text boot
-    at 882 271
-  settle 2
+step "name it boot - click the field"
+  input 882 271
 
+step "name it boot - select what is there"
+  input ctrl+a
+  settle 1
+
+step "name it boot - delete the selection"
+  input backspace
+  settle 1
+
+step "name it boot - type the value"
+  input text boot
+  settle 2
 step "create it, and the mount point is filled in for us"
-  press 456 566
+  input 456 566
   settle 10
 
 step "the ESP exists"
@@ -373,11 +381,11 @@ step "the ESP exists"
     max 20
 
 step "back to the installer"
-  press 450 975
+  input 450 975
   settle 12
 
 step "accept the layout it detected"
-  press 756 337
+  input 756 337
   settle 15
 
 step "the review page, which now names this storage"
@@ -398,7 +406,7 @@ step "next from the installation method"
   repeat
     do
       item
-        press 730 999
+        input 730 999
         settle 12
     until
       bind here
@@ -411,14 +419,14 @@ step "next from the installation method"
     max 4
 
 step "close any quit dialog"
-  press esc
+  input esc
   settle 3
 
 step "press install"
   repeat
     do
       item
-        press 730 999
+        input 730 999
         settle 15
     until
       bind begun

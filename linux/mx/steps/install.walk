@@ -84,23 +84,23 @@ step "that menu is this medium's own language panel"
     max 20
 
 step "down to Keyboard"
-  press down
+  input down
   settle 1
 
 step "down to Timezone"
-  press down
+  input down
   settle 1
 
 step "down to Reset"
-  press down
+  input down
   settle 1
 
 step "down to Back to main menu"
-  press down
+  input down
   settle 1
 
 step "enter the rescue menu, which is what that row opens"
-  press ret
+  input ret
   settle 20
 
   # A SINGLE `check:` ON A PANEL THAT IS STILL PAINTING READS NOTHING, AND THAT IS WHAT HAPPENED.
@@ -125,7 +125,7 @@ step "the rescue menu is up, and its footer says ESC leaves it"
     max 20
 
 step "ESC to the main menu, where the live session is"
-  press esc
+  input esc
   settle 20
 
   # THE HIGHLIGHT COMES BACK WHERE IT WAS - ON THE LANGUAGE ROW - NOT ON THE TOP ENTRY.
@@ -143,19 +143,19 @@ step "ESC to the main menu, where the live session is"
   # The live session is the FIRST row, and the highlight is on the fourth. `up` walks the list, so
   # three of them put it on the top row; `Return` boots it.
 step "up to Check integrity"
-  press up
+  input up
   settle 1
 
 step "up to the systemd entry"
-  press up
+  input up
   settle 1
 
 step "up to the top row, the live session"
-  press up
+  input up
   settle 1
 
 step "boot the live session"
-  press ret
+  input ret
   settle 30
 
 step "wait for the live desktop"
@@ -191,7 +191,7 @@ step "wait for the live desktop"
 step "desktop - installer"
   do
     item
-      press 81 259
+      input 81 259
       settle 6
   settle 28
 
@@ -208,7 +208,7 @@ step "wait for the terms page"
     max 30
 
 step "terms of use"
-  press 1482 889
+  input 1482 889
   settle 14
 
 step "wait for the installation type page"
@@ -224,7 +224,7 @@ step "wait for the installation type page"
     max 30
 
 step "installation type"
-  press 1482 889
+  input 1482 889
   settle 16
 
 step "wait for the confirmation page"
@@ -240,11 +240,11 @@ step "wait for the confirmation page"
     max 30
 
 step "installation confirmation - start"
-  press 1478 889
+  input 1478 889
   settle 25
 
 step "dismiss the invalid settings modal if it is up"
-  press 1069 583
+  input 1069 583
   settle 4
 
 step "wait for the swap file page"
@@ -260,7 +260,7 @@ step "wait for the swap file page"
     max 40
 
 step "swap file"
-  press 1482 889
+  input 1482 889
   settle 18
 
 step "wait for the computer identity page"
@@ -276,7 +276,7 @@ step "wait for the computer identity page"
     max 40
 
 step "computer identity"
-  press 1482 889
+  input 1482 889
   settle 18
 
 step "wait for the localization page"
@@ -292,7 +292,7 @@ step "wait for the localization page"
     max 40
 
 step "localization defaults"
-  press 1482 889
+  input 1482 889
   settle 18
 
 step "wait for the account page"
@@ -308,33 +308,33 @@ step "wait for the account page"
     max 30
 
 step "account - login name"
-  press text "{{ user }}"
+  input text "{{ user }}"
     at 1210 342
   settle 2
 
 step "account - password"
-  press text "{{ password }}"
+  input text "{{ password }}"
     at 1210 377
   settle 2
 
 step "account - confirm password"
-  press text "{{ password }}"
+  input text "{{ password }}"
     at 1210 412
   settle 3
 
 step "autologin"
-  press 700 561
+  input 700 561
   settle 4
 
 step "default user login"
-  press 1482 889
+  input 1482 889
   settle 25
 
 step "the installer finishes"
   repeat
     do
       item
-        press 420 300
+        input 420 300
         settle 20
     until
       bind done

@@ -44,14 +44,14 @@ step "wait for the live desktop"
   timeout 5400
 
 step "open the installer from the dock"
-  press 1211 1050
+  input 1211 1050
   settle 20
 
 step "the installer window is up"
   repeat
     do
       item
-        press 420 300
+        input 420 300
         settle 3
     until
       bind done
@@ -67,7 +67,7 @@ step "select the language, all the way to the keyboard page"
   repeat
     do
       item
-        press 1367 810
+        input 1367 810
         settle 6
     until
       bind there
@@ -93,17 +93,27 @@ step "the keyboard page is up"
     max 20
 
 step "the keyboard layout, which is US"
-  press 1190 696
+  input 1190 696
   settle 3
 
-step "the layout types latin letters"
+step "the layout types latin letters - click the field"
+  input 1190 757
+
+step "the layout types latin letters - select what is there"
+  input ctrl+a
+  settle 1
+
+step "the layout types latin letters - delete the selection"
+  input backspace
+  settle 1
+
+step "the layout types latin letters - type the value"
+  input text abc
+
+step "the layout types latin letters - the field took it"
   repeat
     do
       item
-        clear
-        press text abc
-          at 1190 757
-        settle 1
         type_gap 0.12
     until
       bind latin
@@ -114,9 +124,9 @@ step "the layout types latin letters"
       rect_at [1920, 1080]
       scale 6
     max 4
-
+  settle 1
 step "take the keyboard layout"
-  press 1367 810
+  input 1367 810
   settle 6
 
 step "the install page is up"
@@ -133,11 +143,11 @@ step "the install page is up"
     max 20
 
 step "clean install"
-  press 1000 433
+  input 1000 433
   settle 3
 
 step "install"
-  press 1367 810
+  input 1367 810
   settle 6
 
 step "the drive page is up"
@@ -154,11 +164,11 @@ step "the drive page is up"
     max 20
 
 step "select a drive"
-  press 1185 497
+  input 1185 497
   settle 4
 
 step "erase and install"
-  press 1367 810
+  input 1367 810
   settle 10
 
 step "wait for the account pane"
@@ -174,14 +184,24 @@ step "wait for the account pane"
       words [[Account], [User]]
     max 45
 
-step "type the display name"
+step "type the display name - click the field"
+  input 1190 530
+
+step "type the display name - select what is there"
+  input ctrl+a
+  settle 1
+
+step "type the display name - delete the selection"
+  input backspace
+  settle 1
+
+step "type the display name - type the value"
+  input text "VM User"
+
+step "type the display name - the field took it"
   repeat
     do
       item
-        clear
-        press text "VM User"
-          at 1190 530
-        settle 2
         type_gap 0.09
     until
       bind took
@@ -192,12 +212,12 @@ step "type the display name"
       scale 6
       words [[VM], [User]]
     max 4
-
+  settle 2
 step "create user account, and wait for the password pane"
   repeat
     do
       item
-        press 1367 816
+        input 1367 816
         settle 8
     until
       bind there
@@ -209,26 +229,42 @@ step "create user account, and wait for the password pane"
       words [[Confirm], [Password]]
     max 6
 
-step "type the password"
-  clear
-  press text "{{ password }}"
-    at 1200 448
-  settle 2
-  type_gap 0.09
+step "type the password - click the field"
+  input 1200 448
 
-step "confirm the password"
-  clear
-  press text "{{ password }}"
-    at 1200 544
-  settle 2
-  type_gap 0.09
+step "type the password - select what is there"
+  input ctrl+a
+  settle 1
 
+step "type the password - delete the selection"
+  input backspace
+  settle 1
+
+step "type the password - type the value"
+  input text "{{ password }}"
+  type_gap 0.09
+  settle 2
+step "confirm the password - click the field"
+  input 1200 544
+
+step "confirm the password - select what is there"
+  input ctrl+a
+  settle 1
+
+step "confirm the password - delete the selection"
+  input backspace
+  settle 1
+
+step "confirm the password - type the value"
+  input text "{{ password }}"
+  type_gap 0.09
+  settle 2
 step "account password next"
-  press 1367 810
+  input 1367 810
   settle 25
 
 step "drive encryption - don't encrypt"
-  press 1367 810
+  input 1367 810
   settle 15
 
 step "the install has started"

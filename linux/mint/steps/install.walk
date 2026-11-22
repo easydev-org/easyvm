@@ -51,15 +51,15 @@ step "that menu names mint"
   # than once - and a second Return on a menu that has already gone is harmless, because the live
   # session ignores it.
 step "answer the menu, which does not count down"
-  press ret
+  input ret
   settle 5
 
 step "answer it again, because a firmware menu can miss the first key"
-  press ret
+  input ret
   settle 5
 
 step "and once more, then let the kernel start"
-  press ret
+  input ret
   settle 20
 
 step "wait for the live desktop"
@@ -109,11 +109,11 @@ step "that icon names the installer"
     words [[Install]]
 
 step "select the installer's icon"
-  press 114 52
+  input 114 52
   settle 3
 
 step "open it with the keyboard, because a double-click does not"
-  press ret
+  input ret
   settle 25
 
 step "the installer window is up"
@@ -130,19 +130,19 @@ step "the installer window is up"
     max 30
 
 step "welcome"
-  press 1306 727
+  input 1306 727
   settle 12
 
 step "keyboard"
-  press 1306 727
+  input 1306 727
   settle 12
 
 step "multimedia codecs"
-  press 1306 727
+  input 1306 727
   settle 12
 
 step "installation type"
-  press 1306 727
+  input 1306 727
   settle 15
 
 step "the dialog names the filesystem it will create"
@@ -160,34 +160,34 @@ step "the root partition will be ext4"
     words [[ext4]]
 
 step "write the changes to disks"
-  press 1266 663
+  input 1266 663
   settle 25
 
 step "installation type - install now, after the modal"
-  press 1307 726
+  input 1307 726
   settle 30
 
 step "where are you"
-  press 1306 727
+  input 1306 727
   settle 15
 
 step "who are you - full name"
-  press text "{{ display_name }}"
+  input text "{{ display_name }}"
     at 965 347
   settle 2
 
 step "who are you - password"
-  press text "{{ password }}"
+  input text "{{ password }}"
     at 877 458
   settle 2
 
 step "who are you - confirm password"
-  press text "{{ password }}"
+  input text "{{ password }}"
     at 877 492
   settle 3
 
 step "who are you"
-  press 1306 727
+  input 1306 727
   settle 20
 
 step "the install finishes"

@@ -47,10 +47,22 @@ var retiredNames = map[string]bool{
 }
 
 // summaryNames returns the `name:` references in every Summary, by key.
+// summaryNames is every Summary the vocabulary has, and it walks the ONE table rather than the four
+// this test was written against.
 func summaryNames() map[string][]string {
 	out := map[string][]string{}
-	for name, key := range Keys {
-		out[name] = backtickedNames(key.Summary)
+	note := func(name string, k Key) { out[name] = backtickedNames(k.Summary) }
+	for name, k := range Shared {
+		note(name, k)
+	}
+	for name, k := range Aliases {
+		note(name, k)
+	}
+	for name, v := range Verbs {
+		note(name, Key{Name: v.Name, Summary: v.Summary})
+		for f, k := range v.Fields {
+			note(f, k)
+		}
 	}
 	return out
 }

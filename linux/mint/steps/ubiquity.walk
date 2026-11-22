@@ -21,7 +21,7 @@ step "disable the screen saver and the lock"
   type_gap 0.15
 
 step "open the installer"
-  press [114, 47]
+  input [114, 47]
   settle 25
 
 step "open the installer - what is on screen"
@@ -38,46 +38,46 @@ step "open the installer - the screen says so"
     words [welcome]
 
 step "welcome"
-  press 1306 727
+  input 1306 727
   settle 12
 
 step "keyboard layout"
-  press 1306 727
+  input 1306 727
   settle 12
 
 step "multimedia codecs"
-  press 1306 727
+  input 1306 727
   settle 12
 
 step "installation type"
-  press 1306 727
+  input 1306 727
   settle 15
 
 step "write the changes to disks"
-  press 1269 659
+  input 1269 659
   settle 20
 
 step "time zone"
-  press 1306 727
+  input 1306 727
   settle 15
 
 step "full name"
-  press text "{{ user }}"
+  input text "{{ user }}"
     at 965 347
 
 step "host name"
-  press text "{{ user }}"
+  input text "{{ user }}"
     at 877 375
 step "password"
-  press text "{{ password }}"
+  input text "{{ password }}"
     at 877 458
 
 step "confirm password"
-  press text "{{ password }}"
+  input text "{{ password }}"
     at 877 492
 
 step "create the account"
-  press 1306 727
+  input 1306 727
   settle 20
 
 step "install"

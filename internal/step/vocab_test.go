@@ -64,13 +64,13 @@ func TestEveryVerbSaysWhatItNeeds(t *testing.T) {
 // it rather than by a second table.
 func TestAFieldsKindIsChecked(t *testing.T) {
 	if err := Validate("probe", map[string]any{
-		"press": true,
+		"input": true,
 		"click": "not a pair",
 	}); err == nil {
 		t.Fatal("a click with a non-coordinate was accepted")
 	}
 	if err := Validate("probe", map[string]any{
-		"press": true,
+		"input": true,
 		"click": []any{1, 2},
 	}); err != nil {
 		t.Fatalf("a valid click was refused: %v", err)
@@ -87,7 +87,7 @@ func TestAFieldFromAnotherVerbIsNamed(t *testing.T) {
 	if err == nil {
 		t.Fatal("a `text:` on a `run:` step was accepted")
 	}
-	if !strings.Contains(err.Error(), "press") {
+	if !strings.Contains(err.Error(), "input") {
 		t.Errorf("the error does not say which verb owns `text:`: %v", err)
 	}
 }
@@ -97,7 +97,7 @@ func TestAFieldFromAnotherVerbIsNamed(t *testing.T) {
 func TestTwoVerbsInOneStepIsRefused(t *testing.T) {
 	err := Validate("probe", map[string]any{
 		"boot":  true,
-		"press": true,
+		"input": true,
 		"click": []any{1, 2},
 	})
 	if err == nil {
@@ -180,4 +180,23 @@ func TestEveryDeclaredKeyHasARole(t *testing.T) {
 			check(f)
 		}
 	}
+}
+
+// allDeclaredKeys is every key with its declaration, from whichever table holds it.
+func allDeclaredKeys() map[string]Key {
+	out := map[string]Key{}
+	for k, v := range Shared {
+		out[k] = v
+	}
+	for k, v := range Aliases {
+		out[k] = v
+	}
+	for _, v := range Verbs {
+		for f, k := range v.Fields {
+			if _, exists := out[f]; !exists {
+				out[f] = k
+			}
+		}
+	}
+	return out
 }

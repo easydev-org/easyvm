@@ -40,11 +40,11 @@ step "wait for the home-app chooser"
     max 20
 
 step "choose Taskbar for Bliss OS"
-  press 666 722
+  input 666 722
   settle 3
 
 step "always, so the next boot goes straight to the desktop"
-  press 1238 986
+  input 1238 986
   settle 6
 
 step "wait for Android's own UI"

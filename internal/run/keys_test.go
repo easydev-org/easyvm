@@ -289,13 +289,13 @@ func TestThePaneModelKeysAreDispatched(t *testing.T) {
 // that is broken.
 func TestTheDeadPaneStateMachineKeysAreGone(t *testing.T) {
 	for _, key := range []string{"once", "end", "stuck_after"} {
-		if _, ok := step.Keys[key]; ok {
+		if step.Declares(key) {
 			t.Errorf("`%s:` is declared again. It was part of the pane state machine, it had no "+
 				"dispatcher branch, and no file uses it", key)
 		}
 	}
 	// AND `until_any:` IS THE ONE THAT IS NOT DEAD: `doUntil` reads it beside `until:`.
-	if _, ok := step.Keys["until_any"]; !ok {
+	if !step.Declares("until_any") {
 		t.Error("`until_any:` is not declared, and `doUntil` reads it: a file that spells the " +
 			"alternatives form is refused while the executor implements it")
 	}

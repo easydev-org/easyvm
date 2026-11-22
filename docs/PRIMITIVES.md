@@ -1,14 +1,13 @@
 # easyvm walkthrough — every primitive, in one table
 
-A step is one of nine verbs and its fields. `internal/step/vocab.go` is the source; this document is
-checked against it row by row.
+A step is one of nine verbs and its fields. `internal/step/vocab.go` is the source.
 
 ## 1. The nine verbs
 
 | key | what it does |
 |---|---|
 | `boot` | start the machine this file owns |
-| `press` | send input to the guest - a click, a keystroke, or text |
+| `input` | send input to the guest - a click, a keystroke, or text |
 | `run` | run one command in the guest, over the console, ssh or adb |
 | `copy` | copy one file into the guest |
 | `read` | capture one frame and bind it to a name. It measures nothing and decides nothing; the region and the question belong to the `check:` that follows |
@@ -18,7 +17,7 @@ checked against it row by row.
 | `stop` | stop the machine, and publish the disk in the same step |
 | `repeat` | run `do:` and then ask `until:`, up to `max:` times |
 
-## 2. Shared — what every verb reads
+## 2. Shared
 
 | key | what it does |
 |---|---|
@@ -132,7 +131,7 @@ checked against it row by row.
 | `nudge` | actions that fire AT MOST ONCE, once the threshold has passed |
 | `nudge_after` | with `nudge:`: the number of seconds before it fires |
 
-## 4. Aliases — shapes the engine dispatches on
+## 4. Aliases
 
 | key | what it does |
 |---|---|
@@ -140,7 +139,8 @@ checked against it row by row.
 | `do` | the pane model's action list, run in order |
 | `then` | a branch |
 | `else` | a branch |
-| `until` | the 1.0 single-shot wait on a console line |
+| `until` | a single-shot wait on a console line |
+| `from` | with `copy:`: the local file; with `until:`: the channel (`console`) |
 | `until_any` | the 1.0 negative form of `until:` |
 | `wait` | the 1.0 name for `settle:` |
 | `needs` | the files a stage reads before it starts; a header declaration |
@@ -150,9 +150,21 @@ checked against it row by row.
 | `blind_after` | seconds of a blank screen before a wait starts looking |
 | `fetch` | obtain a prepared asset by name |
 | `release` | with `fetch:`: which release of it |
+| `recovery` | with `fetch:`/`boot:`: macOS's recovery image |
+| `os` | with `fetch:`: the guest family the asset is for |
 | `write` | write one of the built-in templates to disk |
+| `disk` | the disk a machine is made on, or the file it starts from |
+| `disk_gb` | how big to make it, in GiB |
+| `disk_gpt` | write a GPT partition table |
+| `disk_esp_mib` | the EFI system partition's size |
+| `disk_min_mb` | the smallest a finished disk may be |
+| `disk_settle` | wait for the disk file to stop growing |
 | `esp_fallback` | edit a FAT filesystem inside a stopped disk |
 | `screenshot` | save the screen to this path, for a post-mortem nobody had to ask for |
+| `ssh_after_reboot` | with `require_ssh:`: wait out the old daemon before the wait |
+| `ssh_probe` | with `require_ssh:`: the command the wait runs |
+| `terminal_wait` | seconds to wait for the console to answer a command |
+| `type_gap` | seconds between characters |
 | `ssh` | run a command over ssh; the exit status is the verdict |
 | `adb` | run a command over adb |
 | `adb_connect` | connect adb before the commands that need it |

@@ -48,7 +48,7 @@ step "the greeter is drawn"
   repeat
     do
       item
-        press esc
+        input esc
         settle 4
     until
       bind up
@@ -61,18 +61,17 @@ step "the greeter is drawn"
     max 60
 
 step "greeter - the user tile"
-  press 960 488
+  input 960 488
   when [password, vmuser]
 
 step "greeter - the password box"
-  clear false
-  press text "{{ password }}"
+  input text "{{ password }}"
     at 960 627
   settle 4
   when [password, vmuser]
 
 step "greeter - submit"
-  press ret
+  input ret
   settle 12
   when [password, vmuser]
 
@@ -90,15 +89,15 @@ step "greeter - submit"
   #
   # `No Thanks` is at 873,797. Escape follows for a panel that is already dismissed.
 step "dismiss the first-run tour panel, which takes the keyboard"
-  press 873 797
+  input 873 797
   when [password, vmuser]
 
 step "clear anything the panel left behind"
-  press esc
+  input esc
   settle 2
 
 step "open the terminal"
-  press ctrl+alt+t
+  input ctrl+alt+t
   settle 20
 
   # NO `terminal_wait:` HERE, AND THAT IS THE FIX RATHER THAN AN OMISSION.
@@ -181,16 +180,16 @@ step "open the terminal"
 step "dismiss the updater's authentication panel"
   do
     item
-      press esc
+      input esc
       settle 2
     item
-      press esc
+      input esc
       settle 2
     item
-      press 860 700
+      input 860 700
       settle 2
     item
-      press esc
+      input esc
       settle 2
 
 step "keep the screen on, with the tool this guest actually has"

@@ -40,11 +40,11 @@ step "let the desktop settle"
   settle 15
 
 step "open the installer"
-  press 960 743
+  input 960 743
   settle 1
 
 step "open the installer, second click"
-  press 960 743
+  input 960 743
   settle 25
 
 step "the installer is on screen"
@@ -64,19 +64,19 @@ step "choose English, retrying until the page says so"
   repeat
     do
       item
-        press 980 661
+        input 980 661
         settle 4
       item
-        press e
+        input e
         settle 2
       item
-        press up
+        input up
         settle 1
       item
-        press up
+        input up
         settle 1
       item
-        press ret
+        input ret
         settle 6
     until
       bind ok
@@ -89,7 +89,7 @@ step "choose English, retrying until the page says so"
     max 6
 
 step "next from welcome"
-  press 1356 751
+  input 1356 751
   settle 8
 
 step "the location page arrives after welcome"
@@ -106,7 +106,7 @@ step "the location page arrives after welcome"
     max 30
 
 step "next from location"
-  press 1356 791
+  input 1356 791
   settle 8
 
 step "the keyboard page arrives after location"
@@ -123,7 +123,7 @@ step "the keyboard page arrives after location"
     max 30
 
 step "next from keyboard"
-  press 1360 792
+  input 1360 792
   settle 8
 
 step "the bootloader page arrives after keyboard"
@@ -144,7 +144,7 @@ step "the bootloader page"
     name boot
 
 step "choose grub"
-  press 500 305
+  input 500 305
   settle 5
 
 step "grub is selected"
@@ -162,7 +162,7 @@ step "the bootloader is grub"
     words [[grub]]
 
 step "next from bootloader"
-  press 1356 791
+  input 1356 791
   settle 10
 
 step "the partitions page arrives after the bootloader"
@@ -179,7 +179,7 @@ step "the partitions page arrives after the bootloader"
     max 30
 
 step "select erase disk"
-  press 427 366
+  input 427 366
   settle 8
 
 step "the partitions page with erase selected"
@@ -187,11 +187,11 @@ step "the partitions page with erase selected"
     name parts
 
 step "open the filesystem list"
-  press 543 425
+  input 543 425
   settle 5
 
 step "choose ext4"
-  press 527 517
+  input 527 517
   settle 6
 
 step "the partitions page settles after the filesystem list closes"
@@ -222,7 +222,7 @@ step "the root partition is ext4"
     words [[ext4]]
 
 step "next from partitions"
-  press 1356 793
+  input 1356 793
   settle 10
 
 step "the desktop page"
@@ -230,7 +230,7 @@ step "the desktop page"
     name desk
 
 step "next from desktop"
-  press 1356 793
+  input 1356 793
   settle 12
 
 step "the packages page"
@@ -238,7 +238,7 @@ step "the packages page"
     name pkgs
 
 step "next from packages"
-  press 1356 793
+  input 1356 793
   settle 12
 
 step "the users page arrives before anything is typed into it"
@@ -259,23 +259,31 @@ step "the users page"
     name users
 
 step "the full name"
-  press text "{{ user }}"
+  input text "{{ user }}"
     at 515 341
   settle 3
 
-step "the login name"
-  clear
-  press text "{{ user }}"
-    at 515 412
-  settle 3
+step "the login name - click the field"
+  input 515 412
 
+step "the login name - select what is there"
+  input ctrl+a
+  settle 1
+
+step "the login name - delete the selection"
+  input backspace
+  settle 1
+
+step "the login name - type the value"
+  input text "{{ user }}"
+  settle 3
 step "the password"
-  press text "{{ password }}"
+  input text "{{ password }}"
     at 515 550
   settle 2
 
 step "the password again"
-  press text "{{ password }}"
+  input text "{{ password }}"
     at 720 552
   settle 3
 
@@ -295,7 +303,7 @@ step "the password was accepted"
     words [vmuser]
 
 step "next from users"
-  press 1356 793
+  input 1356 793
   settle 10
 
 step "the summary page arrives before install is clicked"
@@ -326,7 +334,7 @@ step "the summary names ext4"
     words [[ext4]]
 
 step "start the install"
-  press 1362 872
+  input 1362 872
   settle 10
 
 step "the confirmation dialog"
@@ -334,7 +342,7 @@ step "the confirmation dialog"
     name confirm
 
 step "install now"
-  press 1055 617
+  input 1055 617
   settle 25
 
 step "the install writes the disk"

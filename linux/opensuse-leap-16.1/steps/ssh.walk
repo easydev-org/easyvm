@@ -80,7 +80,7 @@ step "the disk's boot menu, when it has one"
   optional
 
 step "boot the highlighted entry, which is the installed system"
-  press ret
+  input ret
   settle 60
 
   # THE GREETER AND THE DESKTOP ARE GONE FROM THIS FILE, AND THAT IS THE POINT OF THE STAGE.
@@ -144,21 +144,21 @@ step "log in on the console, retrying until the shell answers"
   repeat
     do
       item
-        press ret
+        input ret
         settle 3
       item
         settle 5
-        press text "{{ user }}"
+        input text "{{ user }}"
         type_gap 0.25
       item
-        press ret
+        input ret
         settle 8
       item
         settle 5
-        press text "{{ password }}"
+        input text "{{ password }}"
         type_gap 0.25
       item
-        press ret
+        input ret
         settle 14
     until
       bind logged_in

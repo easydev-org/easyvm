@@ -59,11 +59,11 @@ step "the disk asks for its passphrase, when it is encrypted"
 
 step "answer the passphrase prompt"
   settle 2
-  press text "{{ password }}"
+  input text "{{ password }}"
   when [unlock]
 
 step "submit the passphrase"
-  press ret
+  input ret
   settle 25
 
 step "wait for sshd"

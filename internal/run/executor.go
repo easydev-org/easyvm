@@ -376,10 +376,10 @@ func (e *Executor) runOne(s walk.Step) error {
 	// `text:` is typing, `colour:` is a blob to find, and `double:`/`anchor:` are modifiers on a
 	// click. The discriminator is the field, which is the same rule `expect` and `control` follow.
 	// `press` IS THE MARKER AND THE SHAPES ARE THE ACTION, so the shapes come first: a step with
-	// `click:` runs `doClick`, and `doPress` is only reached for a step whose argument had no shape
+	// `click:` runs `doClick`, and `doInput` is only reached for a step whose argument had no shape
 	// the other branches recognise.
-	case s.Has("press"):
-		return e.doPress(s)
+	case s.Has("input"):
+		return e.doInput(s)
 
 	// ---- 3. `run` ----------------------------------------------------------------------
 	//
@@ -673,18 +673,7 @@ func (e *Executor) doType(s walk.Step) error {
 		if err := e.Driver.Click(x, y); err != nil {
 			return fail(s.Name, "click before typing: %v", err)
 		}
-		if s.Has("clear") {
-			modifier := s.Get("modifier")
-			if modifier == "" {
-				modifier = "ctrl"
-			}
-			if err := e.Driver.Stroke([]string{modifier}, "a"); err != nil {
-				return fail(s.Name, "select-all: %v", err)
-			}
-			if err := e.Driver.Key("backspace"); err != nil {
-				return fail(s.Name, "clear: %v", err)
-			}
-		}
+
 	}
 
 	perChar := 150 * time.Millisecond

@@ -44,87 +44,87 @@ step "the menu offers Installation"
     words [installation]
 
 step "down to the second row"
-  press down
+  input down
   settle 1
 
 step "down to the third row"
-  press down
+  input down
   settle 1
 
 step "down to the fourth row"
-  press down
+  input down
   settle 1
 
 step "down to Installation"
-  press down
+  input down
   settle 1
 
 step "start the installer"
-  press ret
+  input ret
   settle 45
 
 step "open the ESP's filesystem question"
-  press ret
+  input ret
   settle 15
 
 step "choose FAT32"
-  press f
+  input f
   settle 3
 
 step "confirm the filesystem"
-  press ret
+  input ret
   settle 10
 
 step "keep the ESP label"
-  press ret
+  input ret
   settle 12
 
 step "select Yes for the ESP format"
-  press left
+  input left
   settle 2
 
 step "format the ESP"
-  press ret
+  input ret
   settle 30
 
 step "move to the system partition"
-  press down
+  input down
   settle 3
 
 step "open vda2"
-  press ret
+  input ret
   settle 15
 
 step "choose ext4"
-  press e
+  input e
   settle 3
 
 step "confirm the filesystem for vda2"
-  press ret
+  input ret
   settle 10
 
 step "keep the system volume label"
-  press ret
+  input ret
   settle 12
 
 step "select Yes for the system format"
-  press left
+  input left
   settle 2
 
 step "format vda2 and copy the system"
-  press ret
+  input ret
   settle 300
 
 step "decline the OTA preparation"
-  press right
+  input right
   settle 3
 
 step "confirm the OTA answer"
-  press ret
+  input ret
   settle 40
 
 step "write Grub2 into the ESP"
-  press ret
+  input ret
   settle 200
 
 step "read the result"

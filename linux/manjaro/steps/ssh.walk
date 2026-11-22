@@ -65,7 +65,7 @@ step "the disk's boot menu, when it has one"
   optional
 
 step "boot the highlighted entry, which is the installed system"
-  press ret
+  input ret
   settle 25
 
   # THE GREETER IS ASKED FOR BEFORE IT IS CLICKED, AND THE WAIT WAKES THE SCREEN.
@@ -80,7 +80,7 @@ step "the greeter is drawn"
   repeat
     do
       item
-        press esc
+        input esc
         settle 3
     until
       bind up
@@ -102,12 +102,12 @@ step "the greeter is drawn"
   # at 936,628, and an arrow button beside it. Click the field, type, Return - which is what every
   # other KDE stage here does.
 step "greeter - the password box"
-  press 936 628
+  input 936 628
   settle 3
 
 step "greeter - log in"
   settle 3
-  press text "{{ password }}"
+  input text "{{ password }}"
 
   # THE PASSWORD IS IN THE FIELD AND RETURN MUST BE PRESSED MORE THAN ONCE.
   #
@@ -115,11 +115,11 @@ step "greeter - log in"
   # FIELD - the characters arrived - and no session. One Return a second after the last character
   # is not enough for SDDM to accept it.
 step "greeter - submit"
-  press ret
+  input ret
   settle 8
 
 step "greeter - submit again, because SDDM can miss the first"
-  press ret
+  input ret
   settle 20
 
 step "the desktop is up after the login"
@@ -127,7 +127,7 @@ step "the desktop is up after the login"
   timeout 600
 
 step "open the terminal"
-  press ctrl+alt+t
+  input ctrl+alt+t
   settle 20
 
   # NO PROBE COMMAND. MEASURED ON endeavour AND mx: a lone 'echo XXX' right after the chord loses

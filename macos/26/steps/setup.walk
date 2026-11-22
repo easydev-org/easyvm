@@ -44,11 +44,11 @@ step "wait for the recovery menu"
     max 180
 
 step "select disk utility"
-  press 800 523
+  input 800 523
   settle 3
 
 step "open disk utility"
-  press 1148 595
+  input 1148 595
   settle 8
 
 step "make disk utility full screen"
@@ -58,7 +58,7 @@ step "make disk utility full screen"
   settle 6
 
 step "select the first disk"
-  press 200 132
+  input 200 132
   settle 2
 
 step "is the selected disk the uninitialised one"
@@ -79,7 +79,7 @@ step "select the second disk, when row 1 was the boot image"
   if uninitialised
     else
       item "click row 2"
-        press 200 164
+        input 200 164
         settle 2
       item "is the second disk the uninitialised one"
         read
@@ -98,7 +98,7 @@ step "erase - open the sheet"
   repeat
     do
       item
-        press 1711 56
+        input 1711 56
       item
         settle 3
     until
@@ -113,16 +113,16 @@ step "erase - open the sheet"
   settle 4
 
 step "erase - clear the name field"
-  press meta_l+a
+  input meta_l+a
   settle 1
 
 step "erase - name the volume"
-  press text "{{ disk_name }}"
+  input text "{{ disk_name }}"
     at 988 542
   settle 4
 
 step "erase - confirm"
-  press 1154 650
+  input 1154 650
   settle 5
 
 step "erase - wait for the report"
@@ -139,11 +139,11 @@ step "erase - wait for the report"
     max 60
 
 step "erase - done"
-  press 1147 614
+  input 1147 614
   settle 5
 
 step "close disk utility"
-  press meta_l+q
+  input meta_l+q
   settle 12
 
 step "the recovery menu is back"
@@ -160,11 +160,11 @@ step "the recovery menu is back"
     max 60
 
 step "select reinstall macos"
-  press 837 333
+  input 837 333
   settle 3
 
 step "open the installer"
-  press 1142 586
+  input 1142 586
   settle 20
 
 step "wait for the installer to load"
@@ -181,7 +181,7 @@ step "wait for the installer to load"
     max 24
 
 step "welcome continue"
-  press 960 712
+  input 960 712
   settle 5
 
 step "wait for the licence pane"
@@ -198,7 +198,7 @@ step "wait for the licence pane"
     max 24
 
 step "agree to the licence"
-  press 1005 713
+  input 1005 713
   settle 5
 
 step "wait for the licence sheet"
@@ -215,15 +215,15 @@ step "wait for the licence sheet"
     max 12
 
 step "agree in the sheet"
-  press 1018 520
+  input 1018 520
   settle 10
 
 step "select the destination card"
-  press 850 550
+  input 850 550
   settle 5
 
 step "destination continue"
-  press 1005 712
+  input 1005 712
   settle 10
 
 step "the copy runs, look 1 of at most 8"
@@ -247,7 +247,7 @@ step "the copy runs, look 1 of at most 8"
         if cancel_sheet
           then
             item "continue installing"
-              press 960 508
+              input 960 508
               settle 10
     until
       bind done
@@ -260,7 +260,7 @@ step "the copy runs, look 1 of at most 8"
     max 270
     nudge 5400
       item "pick macOS Installer in OpenCore's picker, if that is what is up"
-        press 731 547
+        input 731 547
         settle 15
       item "reset the guest"
         acpi reset
@@ -299,7 +299,7 @@ step "the copy runs, look 2 of at most 8"
     max 30
     nudge 600
       item "pick macOS Installer in OpenCore's picker, if that is what is up"
-        press 731 547
+        input 731 547
         settle 15
       item "reset the guest"
         acpi reset
@@ -338,7 +338,7 @@ step "the copy runs, look 3 of at most 8"
     max 30
     nudge 600
       item "pick macOS Installer in OpenCore's picker, if that is what is up"
-        press 731 547
+        input 731 547
         settle 15
       item "reset the guest"
         acpi reset
@@ -377,7 +377,7 @@ step "the copy runs, look 4 of at most 8"
     max 30
     nudge 600
       item "pick macOS Installer in OpenCore's picker, if that is what is up"
-        press 731 547
+        input 731 547
         settle 15
       item "reset the guest"
         acpi reset
@@ -416,7 +416,7 @@ step "the copy runs, look 5 of at most 8"
     max 30
     nudge 600
       item "pick macOS Installer in OpenCore's picker, if that is what is up"
-        press 731 547
+        input 731 547
         settle 15
       item "reset the guest"
         acpi reset
@@ -455,7 +455,7 @@ step "the copy runs, look 6 of at most 8"
     max 30
     nudge 600
       item "pick macOS Installer in OpenCore's picker, if that is what is up"
-        press 731 547
+        input 731 547
         settle 15
       item "reset the guest"
         acpi reset
@@ -494,7 +494,7 @@ step "the copy runs, look 7 of at most 8"
     max 30
     nudge 600
       item "pick macOS Installer in OpenCore's picker, if that is what is up"
-        press 731 547
+        input 731 547
         settle 15
       item "reset the guest"
         acpi reset
@@ -533,7 +533,7 @@ step "the copy runs, look 8 of at most 8"
     max 30
     nudge 600
       item "pick macOS Installer in OpenCore's picker, if that is what is up"
-        press 731 547
+        input 731 547
         settle 15
       item "reset the guest"
         acpi reset

@@ -127,11 +127,11 @@ step "the setup wizard is up"
   # it. A click that lands a few pixels off is a click that does nothing; a keyboard focus ring is
   # not ambiguous.
 step "focus the wizard's only button"
-  press tab
+  input tab
   settle 2
 
 step "start the setup wizard, by keyboard"
-  press ret
+  input ret
   settle 15
 
   # THE WIZARD HAS MANY PAGES AND ONE BUTTON THAT MOVES FORWARD.
@@ -290,7 +290,7 @@ step "start the setup wizard, by keyboard"
   # wizard draws it at on every page. Its location switch is left alone: this stage is not about
   # location services, and clicking the page's centre would toggle it.
 step "leave the privacy page"
-  press 1413 193
+  input 1413 193
   settle 5
 
   #
@@ -299,15 +299,15 @@ step "leave the privacy page"
   # "PST (UTC-08) Los Angeles, United States". It is NOT what makes the page pass: measured, Next on
   # an unanswered Time Zone page is the same blue button and moves the wizard on to Third-Party.
 step "point the map at Los Angeles, when the wizard is showing one"
-  press 640 690
+  input 640 690
   settle 3
 
 step "leave the time zone page"
-  press 1413 193
+  input 1413 193
   settle 5
 
 step "leave the third-party repositories page"
-  press 1413 193
+  input 1413 193
   settle 5
 
   # THE ACCOUNT FORM IS RECOGNISED BY A PICTURE, NOT BY WORDS OR A GUESS ABOUT FOCUS.
@@ -354,24 +354,24 @@ step "the create-account form is up, with the cursor in Full Name"
   # complains about. A non-optional check has none of that ambiguity: it fails, or it proves.
 step "the full name"
   settle 3
-  press text "{{ user }}"
+  input text "{{ user }}"
   type_gap 0.09
 
 step "on to the user name"
-  press tab
+  input tab
   settle 2
 
 step "clear the auto-filled user name"
-  press ctrl+a
+  input ctrl+a
   settle 1
 
 step "the user name"
   settle 3
-  press text "{{ user }}"
+  input text "{{ user }}"
   type_gap 0.09
 
 step "submit the account page"
-  press ret
+  input ret
   settle 10
 
   # THE PASSWORD PAGE HAS TWO FIELDS AND TAB DOES NOT REACH THE SECOND ONE.
@@ -382,24 +382,24 @@ step "submit the account page"
   # the wizard finishes on "All done!".
 step "the password"
   settle 2
-  press text "{{ password }}"
+  input text "{{ password }}"
   type_gap 0.09
 
 step "put the cursor in the confirmation field, which Tab does not reach"
-  press 960 627
+  input 960 627
   settle 1
 
 step "the password, again"
   settle 2
-  press text "{{ password }}"
+  input text "{{ password }}"
   type_gap 0.09
 
 step "leave the password page"
-  press 1413 193
+  input 1413 193
   settle 4
 
 step "finish the wizard"
-  press ret
+  input ret
   settle 20
 
   # THE TERMINAL IS OPENED BY SEARCHING IN THE OVERVIEW, AND THE WAY IN IS THE ESCAPE KEY, NOT meta_l.
@@ -425,11 +425,11 @@ step "finish the wizard"
   # keystrokes were still in it, so Return ran a search for a command line instead of starting a
   # program.
 step "start from a clean desktop"
-  press esc
+  input esc
   settle 2
 
 step "open the overview"
-  press meta_l
+  input meta_l
   settle 3
 
   # THE SEARCH BOX IS CLICKED BEFORE ANYTHING IS TYPED INTO IT, AND `meta_l` ALONE IS NOT ENOUGH.
@@ -447,11 +447,11 @@ step "open the overview"
   # characters then produced the Terminal tile immediately. The coordinate is the field's, measured
   # from a frame of this screen, not a guess about where a search box usually sits.
 step "put the cursor in the overview's search field"
-  press 960 59
+  input 960 59
   settle 2
 
 step "search for the terminal"
-  press text terminal
+  input text terminal
   type_gap 0.08
 
   # THE RESULT IS WAITED FOR, THEN CLICKED, AND THE DIFFERENCE IS MEASURED.
@@ -486,7 +486,7 @@ step "the Terminal result has been drawn"
     max 10
 
 step "open the terminal on the first result"
-  press 960 178
+  input 960 178
   settle 20
 
   # THE TERMINAL HAS TO BE PROVEN OPEN BEFORE ANY COMMAND IS TYPED INTO IT.

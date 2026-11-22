@@ -67,8 +67,8 @@ func TestASizeBranchTakesTheRightSide(t *testing.T) {
 		}
 		if err := ex.doIf(walk.Step{Name: "take?", Spec: map[string]any{
 			"if":   "ok",
-			"then": []any{map[string]any{"press": true, "key": "ret"}},
-			"else": []any{map[string]any{"press": true, "key": "down"}},
+			"then": []any{map[string]any{"input": true, "key": "ret"}},
+			"else": []any{map[string]any{"input": true, "key": "down"}},
 		}}); err != nil {
 			t.Fatal(err)
 		}

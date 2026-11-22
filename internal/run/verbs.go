@@ -12,7 +12,7 @@ import (
 // file writes one verb where the executor has several branches, and the branches are the measured
 // part.
 
-// doPress dispatches the one input verb to the shape it describes.
+// doInput dispatches the one input verb to the shape it describes.
 //
 // THE FIELD IS THE DISCRIMINATOR, and there is exactly one of them per step:
 //
@@ -23,7 +23,7 @@ import (
 //	press {text: ...}          typing, optionally with `at:` to click first
 //	press {button: ...}        click the button found by its label
 //	press {colour: ...}        click the largest blob of that colour
-func (e *Executor) doPress(s walk.Step) error {
+func (e *Executor) doInput(s walk.Step) error {
 	// A COORDINATE IS THE COMMONEST SHAPE, and it is a bare pair: `press 960 628`.
 	if s.Has("click") {
 		return e.doClick(s)

@@ -12,7 +12,7 @@ package run
 func ExecutableKeys() []string {
 	return []string{
 		// THE VERBS.
-		"boot", "press", "run", "copy", "read", "check", "control", "if", "stop", "repeat",
+		"boot", "input", "run", "copy", "read", "check", "control", "if", "stop", "repeat",
 		// THE TRANSPORTS AND THE PREPARATION A VERB MAY NAME.
 		"ssh", "adb", "adb_connect", "adb_privileged",
 		"fetch", "asset", "build", "generate", "write",

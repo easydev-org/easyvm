@@ -180,12 +180,12 @@ func newExec(d Driver, steps ...map[string]any) (*Executor, []walk.Step) {
 func TestActionsReachTheRightChannel(t *testing.T) {
 	d := &fakeDriver{}
 	ex, steps := newExec(d,
-		map[string]any{"name": "click", "press": true, "click": []any{100, 200}},
-		map[string]any{"name": "double", "press": true, "double": []any{10, 20}, "click": []any{10, 20}},
-		map[string]any{"name": "key", "press": true, "key": "ret"},
-		map[string]any{"name": "combo", "press": true, "key": "ctrl+alt+t"},
-		map[string]any{"name": "type", "press": true, "text": "hello"},
-		map[string]any{"name": "type in field", "press": true, "at": []any{5, 6}, "text": "world"},
+		map[string]any{"name": "click", "input": true, "click": []any{100, 200}},
+		map[string]any{"name": "double", "input": true, "double": []any{10, 20}, "click": []any{10, 20}},
+		map[string]any{"name": "key", "input": true, "key": "ret"},
+		map[string]any{"name": "combo", "input": true, "key": "ctrl+alt+t"},
+		map[string]any{"name": "type", "input": true, "text": "hello"},
+		map[string]any{"name": "type in field", "input": true, "at": []any{5, 6}, "text": "world"},
 	)
 	res, err := ex.Run(steps)
 	if err != nil {
@@ -220,9 +220,9 @@ func TestActionsReachTheRightChannel(t *testing.T) {
 func TestFailureStopsTheWalk(t *testing.T) {
 	d := &fakeDriver{}
 	ex, steps := newExec(d,
-		map[string]any{"name": "one", "press": true, "click": []any{1, 1}},
+		map[string]any{"name": "one", "input": true, "click": []any{1, 1}},
 		map[string]any{"name": "broken", "click": "not a pair"},
-		map[string]any{"name": "three", "press": true, "click": []any{3, 3}},
+		map[string]any{"name": "three", "input": true, "click": []any{3, 3}},
 	)
 	res, err := ex.Run(steps)
 	if err == nil {
@@ -242,7 +242,7 @@ func TestOptionalFailureIsLoggedAndPassed(t *testing.T) {
 	d := &fakeDriver{}
 	ex, steps := newExec(d,
 		map[string]any{"name": "flaky", "click": "not a pair", "optional": true},
-		map[string]any{"name": "after", "press": true, "click": []any{9, 9}},
+		map[string]any{"name": "after", "input": true, "click": []any{9, 9}},
 	)
 	res, err := ex.Run(steps)
 	if err != nil {
@@ -263,8 +263,8 @@ func TestOptionalFailureIsLoggedAndPassed(t *testing.T) {
 func TestAFailedStepIsNotCounted(t *testing.T) {
 	d := &fakeDriver{}
 	ex, steps := newExec(d,
-		map[string]any{"name": "click", "press": true, "click": []any{1, 1}},
-		map[string]any{"name": "bad pair", "press": true, "click": []any{1}},
+		map[string]any{"name": "click", "input": true, "click": []any{1, 1}},
+		map[string]any{"name": "bad pair", "input": true, "click": []any{1}},
 	)
 	res, _ := ex.Run(steps)
 	for _, name := range res.Answered {
@@ -805,9 +805,9 @@ func TestAStepThatNeedsNoGuestSurvivesAShutdown(t *testing.T) {
 		{"stop and publish", map[string]any{"name": "x", "stop": "kill", "save": "out.qcow2"}, false},
 		{"stop recording", map[string]any{"name": "x", "record": false}, false},
 		{"start recording", map[string]any{"name": "x", "record": "v.mp4"}, true},
-		{"a click", map[string]any{"name": "x", "press": true, "click": []any{1, 2}}, true},
+		{"a click", map[string]any{"name": "x", "input": true, "click": []any{1, 2}}, true},
 		{"a reading", map[string]any{"name": "x", "read": map[string]any{"name": "s"}}, true},
-		{"a key", map[string]any{"name": "x", "press": true, "key": "ret"}, true},
+		{"a key", map[string]any{"name": "x", "input": true, "key": "ret"}, true},
 		{"a wait", map[string]any{"name": "x", "settle": 5}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

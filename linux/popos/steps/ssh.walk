@@ -52,29 +52,29 @@ step "the disk asks for its passphrase, when it is encrypted"
 
 step "answer the passphrase prompt"
   settle 2
-  press text "{{ password }}"
+  input text "{{ password }}"
   when [unlock]
 
 step "submit the passphrase"
-  press ret
+  input ret
   settle 20
 
 step "greeter - the password box"
-  press 1120 283
+  input 1120 283
   when [password, vmuser]
 
 step "greeter - log in"
   settle 3
-  press text "{{ password }}"
+  input text "{{ password }}"
   when [password, vmuser]
 
 step "greeter - submit"
-  press ret
+  input ret
   settle 12
   when [password, vmuser]
 
 step "open the terminal"
-  press 1092 1048
+  input 1092 1048
   settle 20
 
   # NO `terminal_wait:` HERE, AND THAT IS THE FIX RATHER THAN AN OMISSION.

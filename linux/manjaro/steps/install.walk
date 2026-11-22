@@ -39,7 +39,7 @@ step "let the desktop settle"
   settle 15
 
 step "open the installer"
-  press [960, 760]
+  input [960, 760]
   settle 35
 
 step "open the installer - what is on screen"
@@ -56,32 +56,32 @@ step "open the installer - the screen says so"
     words [[welcome], [location]]
 
 step "open the installer (once more, if it did not)"
-  press [960, 760]
+  input [960, 760]
   settle 40
   when_not [welcome]
 
 step "welcome"
-  press 1325 801
+  input 1325 801
   settle 18
 
 step "location"
-  press 1325 801
+  input 1325 801
   settle 18
 
 step "keyboard"
-  press 1325 801
+  input 1325 801
   settle 18
 
 step "partitions - erase the disk"
-  press 653 340
+  input 653 340
   settle 6
 
 step "open the filesystem list"
-  press 955 396
+  input 955 396
   settle 5
 
 step "choose ext4"
-  press 933 459
+  input 933 459
   settle 6
 
 step "the partitions page after choosing ext4"
@@ -98,64 +98,64 @@ step "the root partition is ext4"
     words [ext4]
 
 step "partitions"
-  press 1325 801
+  input 1325 801
   settle 20
 
 step "users - full name"
-  press text "{{ user }}"
+  input text "{{ user }}"
     at 741 320
   settle 2
 
 step "users - login name"
-  press text "{{ user }}"
+  input text "{{ user }}"
     at 741 385
   settle 2
 
 step "users - password"
-  press text "{{ password }}"
+  input text "{{ password }}"
     at 724 523
   settle 2
 
 step "users - confirm password"
-  press text "{{ password }}"
+  input text "{{ password }}"
     at 944 523
   settle 2
 
 step "users - root password"
-  press text "{{ password }}"
+  input text "{{ password }}"
     at 741 650
   settle 2
 
 step "users - confirm root password"
-  press text "{{ password }}"
+  input text "{{ password }}"
     at 944 650
   settle 3
 
 step "users"
-  press 1325 801
+  input 1325 801
   settle 20
 
 step "office suite - no office suite"
-  press 700 288
+  input 700 288
   settle 6
 
 step "office suite"
-  press 1334 794
+  input 1334 794
   settle 20
 
 step "summary - install"
-  press 1318 799
+  input 1318 799
   settle 18
 
 step "the install confirmation's install now"
-  press 1055 537
+  input 1055 537
   settle 30
 
 step "the installer finishes"
   repeat
     do
       item
-        press 420 300
+        input 420 300
         settle 20
     until
       bind done

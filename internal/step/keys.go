@@ -147,319 +147,6 @@ func (k Kind) String() string {
 	return "?"
 }
 
-// Keys is every accepted step key. Grouped by what the step does to the machine, because that is
-// the order a reader needs them in: a step opens a screen, acts on it, waits, and then says
-// whether it worked. The groups are documentation; the map below is enforcement.
-var Keys = map[string]Key{
-	"name": {Name: "name", Kind: KindString,
-		Summary: "what the log calls this step; required"},
-
-	"optional": {Name: "optional", Kind: KindBool,
-		Summary: "a step that may fail without failing the stage - only for a check whose " +
-			"NEGATIVE result is information, never for a verdict"},
-
-	"needs": {Name: "needs", Kind: KindList,
-		Summary: "files that must be on disk before this stage runs; the first step of every stage " +
-			"names its medium here so a missing input fails in the first second rather than forty " +
-			"minutes in"},
-
-	"when_not": {Name: "when_not", Kind: KindWords,
-		Summary: "the negative gate: run this step only if the screen does NOT show these words"},
-
-	"when_not_any": {Name: "when_not_any", Kind: KindWordSets,
-		Summary: "the alternatives form of `when_not:`: the step runs only if the screen shows " +
-			"NONE of these word-sets"},
-
-	"boot": {Name: "boot", Kind: KindBool,
-		Summary: "start the machine this file owns. Its arguments are SIBLING keys - os, iso, " +
-			"kernel, initrd, memory_mb, cpus, cpu, recovery, answer_cd, driver_cd - and the disk is " +
-			"the one an earlier `disk:` step named"},
-
-	"os": {Name: "os", Kind: KindString,
-		Summary: "which family the machine is: windows, macos, linux, android"},
-
-	"iso": {Name: "iso", Kind: KindString,
-		Summary: "an installer ISO. Windows and Linux boot it directly; macOS has none and is " +
-			"refused by name if given one"},
-
-	"recovery": {Name: "recovery", Kind: KindString,
-		Summary: "macOS's recovery image, attached as removable media. It is the install medium " +
-			"AND the source of the APFS driver OpenCore needs, so it is attached on every macOS " +
-			"boot"},
-
-	"answer_cd": {Name: "answer_cd", Kind: KindString,
-		Summary: "a second CD-ROM carrying Windows' answer file. Setup finds it nowhere on the " +
-			"install ISO"},
-
-	"driver_cd": {Name: "driver_cd", Kind: KindString,
-		Summary: "a third CD-ROM carrying the virtio drivers, for the installed system to pick up " +
-			"network and ballooning"},
-
-	"memory_mb": {Name: "memory_mb", Kind: KindInt,
-		Summary: "the guest's RAM in MiB; 4096 when not said. A guest that installs from a " +
-			"memdisk needs more than the default"},
-
-	"cpus": {Name: "cpus", Kind: KindInt,
-		Summary: "how many vCPUs the guest gets; 4 when not said"},
-
-	"kernel": {Name: "kernel", Kind: KindString,
-		Summary: "with `microvm:`: the kernel qemu hands the guest, because a microvm has no " +
-			"firmware to read a boot sector"},
-
-	"initrd": {Name: "initrd", Kind: KindString,
-		Summary: "with `microvm:`: the initramfs beside the kernel"},
-
-	"kernel_append": {Name: "kernel_append", Kind: KindString,
-		Summary: "with `microvm:`: the guest's OWN kernel command line. Required for any microvm " +
-			"whose root is a real filesystem - the default is Alpine's diskless `modloop=/dev/vda`, " +
-			"which mounts OVER the root disk and drops the guest to an emergency shell"},
-
-	"microvm": {Name: "microvm", Kind: KindBool,
-		Summary: "with `boot:`: the smallest machine that can boot a modern Linux kernel - no " +
-			"firmware, no devices the guest does not need, a direct kernel hand-off. For a " +
-			"walkthrough whose job is to prove the vocabulary drives a guest, not to install a " +
-			"distribution through its GUI"},
-
-	"shutdown": {Name: "shutdown", Kind: KindString,
-		Summary: "a NAMED method: guest_agent, ssh, acpi, or kill. EVERY ONE OF THEM STOPS THE " +
-			"MACHINE AND WAITS FOR IT TO GO - a method that only waited was here for one commit and " +
-			"did not belong: `shutdown:` names how to stop it, so a verb that stopped nothing was a " +
-			"word that lied. Waiting for qemu to release the disk is a precondition of `compress:` " +
-			"and lives there"},
-
-	"acpi": {Name: "acpi", Kind: KindString,
-		Summary: "send one ACPI message: `power` (the power button) or `reset`. It SENDS ONLY - " +
-			"whether the guest goes is `wait_until: stopped`, a step of its own"},
-
-	"qga": {Name: "qga", Kind: KindString,
-		Summary: "run one qemu-guest-agent command: ping, info, shutdown, exec, file-read, " +
-			"file-write, set-time, interfaces. The only channel into a guest with no sshd and no " +
-			"ACPI handler"},
-
-	"compress": {Name: "compress", Kind: KindString,
-		Summary: "flatten the overlay into this artifact; the path is relative to the repository " +
-			"root, not to the work directory"},
-
-	"disk": {Name: "disk", Kind: KindStringOrMapping,
-		Summary: "the disk file, or a mapping that creates it with its own size and layout. " +
-			"Alone it names the disk `boot:` starts; as a mapping it creates that disk, and the " +
-			"fields are listed in Subkeys"},
-
-	"disk_gb": {Name: "disk_gb", Kind: KindTemplated,
-		Summary: "size of a disk this step creates"},
-
-	"disk_gpt": {Name: "disk_gpt", Kind: KindBool,
-		Summary: "partition the created disk: a 260 MiB ESP typed EF00 at LBA 2048, Linux on the rest"},
-
-	"disk_esp_mib": {Name: "disk_esp_mib", Kind: KindTemplated,
-		Summary: "size of that ESP; 260 is what the installer draws as 0.25GB"},
-
-	"disk_settle": {Name: "disk_settle", Kind: KindFloat,
-		Summary: "wait until the target qcow2 stops growing for this many quiet seconds"},
-
-	"disk_min_mb": {Name: "disk_min_mb", Kind: KindInt,
-		Summary: "with disk_settle: only start waiting once it holds this many allocated MiB"},
-
-	// `press` IS THE SHAPE OF A CLICK, WHICH IS THE POSITION PART OF `press`. It is a step-level key
-	// because the executor reads it there: the coordinate pair is the argument, and `press` says the
-	// step is an input action at all.
-	"click": {Name: "click", Kind: KindPairOrMapping,
-		Summary: "with `press:`: where the pointer goes, as [x, y]"},
-	// `press` ARGUMENTS THAT SIT AT STEP LEVEL, because that is where the executor reads them.
-	"text": {Name: "text", Kind: KindString,
-		Summary: "with `press:`: the string to type"},
-	"colour": {Name: "colour", Kind: KindList,
-		Summary: "with `press:`: click the largest blob of this [r, g, b]"},
-	"button": {Name: "button", Kind: KindRect,
-		Summary: "with `press:`: click the control found by this label"},
-	"at": {Name: "at", Kind: KindPair,
-		Summary: "with `press text:`: the point to click before typing"},
-	"anchor": {Name: "anchor", Kind: KindString,
-		Summary: "with `press:`: measure the point from `bottom` instead of the top-left"},
-	"fallback": {Name: "fallback", Kind: KindPair,
-		Summary: "with `press button:`: the point to use when no control carries that label"},
-	"gap": {Name: "gap", Kind: KindFloat,
-		Summary: "with `press text:`: seconds between keystrokes"},
-	"copy": {Name: "copy", Kind: KindAny,
-		Summary: "copy one file into the guest: the local path, and the remote path as a child"},
-	"stop": {Name: "stop", Kind: KindAny,
-		Summary: "stop the machine: kill, ssh, acpi or guest_agent"},
-	"method": {Name: "method", Kind: KindString,
-		Summary: "with `stop:`: how to stop the machine - kill, ssh, acpi or guest_agent"},
-	"save": {Name: "save", Kind: KindString,
-		Summary: "with `stop:`: publish the disk to this path after the machine is gone"},
-	"via": {Name: "via", Kind: KindString,
-		Summary: "with `run:`: where it runs - console, ssh or adb"},
-	"press": {Name: "press", Kind: KindAny,
-		Summary: "click at a point. `[x, y]` is a coordinate; `{button: [x, y]}` is a point " +
-			"inside a window; `{button: [x, y], fallback: [x, y]}` adds a second place to try; " +
-			"`{colour: [r, g, b]}` is the largest blob of one colour. Fixed positions, never OCR " +
-			"- a button's position is a measured fact about a screen, and a search for it is a " +
-			"guess that moves"},
-
-	"double": {Name: "double", Kind: KindPair,
-		Summary: "double-click [x, y]; separate from `press` because the gap between the two " +
-			"clicks is what makes it a double-click"},
-
-	"at_button": {Name: "at_button", Kind: KindRect,
-		Summary: "[x0, y0, x1, y1] - click the centre of the coloured fill inside this region. " +
-			"The ONE lookup this repository allows, for a control whose position moves per pane " +
-			"and whose fill is the only one of its kind in that strip"},
-
-	"at_color": {Name: "at_color", Kind: KindColor,
-		Summary: "[r, g, b] - click the centre of the largest blob of this colour. For a control " +
-			"the window draws in a fixed colour, which is how a macOS window button is found without " +
-			"knowing where the window is"},
-
-	"color_tolerance": {Name: "color_tolerance", Kind: KindInt,
-		Summary: "with `at_color`: how far a pixel may be from the target colour and still count, " +
-			"for antialiasing. 45 matches macOS's window buttons"},
-
-	"color_region": {Name: "color_region", Kind: KindRect,
-		Summary: "with `at_color`: [x0, y0, x1, y1] to search inside, when the colour could appear " +
-			"somewhere else on the screen too"},
-
-	"at_bottom": {Name: "at_bottom", Kind: KindPair,
-		Summary: "[x, dy] - click x at dy pixels above the window's bottom edge"},
-
-	"key": {Name: "key", Kind: KindString,
-		Summary: "a qemu qcode, or a + combo such as ctrl+alt+t"},
-
-	"type": {Name: "type", Kind: KindString,
-		Summary: "text to type; combined with `at` it clicks the field first and clears it"},
-
-	"clear": {Name: "clear", Kind: KindBool,
-		Summary: "clear the field before typing (select-all, then backspace)"},
-
-	"modifier": {Name: "modifier", Kind: KindString,
-		Summary: "the select-all modifier for this family: ctrl on Linux, meta_l on macOS"},
-
-	"type_gap": {Name: "type_gap", Kind: KindFloat,
-		Summary: "seconds between keystrokes; 0.02 suits a POSIX shell, 0.15 a Windows one"},
-
-	"run": {Name: "run", Kind: KindScript,
-		Summary: "a shell line typed into the guest's own terminal, one line at a time"},
-
-	"terminal_wait": {Name: "terminal_wait", Kind: KindFloat,
-		Summary: "seconds to wait for the terminal after `run` opens it"},
-
-	"blind_after": {Name: "blind_after", Kind: KindInt,
-		Summary: "with until_console: go on after this many seconds whether or not the text " +
-			"appeared, for media that boot with no prompt at all"},
-
-	"until": {Name: "until", Kind: KindWords,
-		Summary: "words that end a wait loop"},
-
-	"until_any": {Name: "until_any", Kind: KindWordSets,
-		Summary: "the alternatives form of `until:`: ONE of these word-sets must be on screen. " +
-			"`doUntil` reads it beside `until:` and joins the two into one list of alternatives"},
-
-	"poll": {Name: "poll", Kind: KindFloat,
-		Summary: "seconds between looks in an until: loop"},
-
-	"timeout": {Name: "timeout", Kind: KindTemplated,
-		Summary: "seconds THIS step may wait. THE DEFAULT DEPENDS ON THE VERB, because the waits " +
-			"are not one thing: ssh and require_ssh 900, until from: console 180, disk_settle 3600, " +
-			"adb_connect 300, adb 60, a desktop 900, a shutdown grace 0. AND ON A `boot:` IT IS THE " +
-			"BUDGET THE FOLLOWING WAIT INHERITS, because a boot returns before the guest is up - " +
-			"previously the number was written 53 times and read by nothing"},
-
-	"scale": {Name: "scale", Kind: KindInt,
-		Summary: "enlargement for a cropped read; small text needs it"},
-
-	"screenshot": {Name: "screenshot", Kind: KindString,
-		Summary: "save the screen to this path, for a post-mortem nobody had to ask for"},
-
-	"desktop": {Name: "desktop", Kind: KindString,
-		Summary: "wait until a desktop is on screen; options include family and timeout"},
-
-	"ssh": {Name: "ssh", Kind: KindScript,
-		Summary: "a command run over ssh IN the guest; the exit status is the verdict"},
-
-	"require_ssh": {Name: "require_ssh", Kind: KindBool,
-		Summary: "wait for sshd before the steps that use it"},
-
-	"ssh_probe": {Name: "ssh_probe", Kind: KindString,
-		Summary: "the command that wait runs; `true` is not a Windows command"},
-
-	"ssh_after_reboot": {Name: "ssh_after_reboot", Kind: KindBool,
-		Summary: "on a require_ssh: wait out the old daemon first, or the wait passes on the " +
-			"process that is about to die"},
-
-	"scp": {Name: "scp", Kind: KindAny,
-		Summary: "copy a file in. [local-file, remote-path], or {template: KIND, to: REMOTE} to " +
-			"render a bootstrap file (launcher, macos_agent_plist, windows_task) and copy it"},
-
-	"adb": {Name: "adb", Kind: KindScript,
-		Summary: "a command run over adb IN the guest; Android's remote access is adbd and " +
-			"there is no sshd until a stage installs one"},
-
-	"adb_privileged": {Name: "adb_privileged", Kind: KindBool,
-		Summary: "prove the adb shell can change system state - a write that reads back. NOT " +
-			"`adb root`: this guest is a `user` build with ro.debuggable=0 and no `su`, and the " +
-			"shell it already has owns appops, settings, cmd and setprop"},
-
-	"adb_connect": {Name: "adb_connect", Kind: KindBool,
-		Summary: "attach to the guest's adbd on its forwarded port and prove it answers"},
-
-	"when": {Name: "when", Kind: KindWordsOrNone,
-		Summary: "run this step only if the screen shows these words. `when: {none: [[a], [b, c]]}` " +
-			"is the NEGATIVE form: run only if NONE of those word-sets is present (it replaces " +
-			"`when_not_any:`)"},
-
-	"do": {Name: "do", Kind: KindList,
-		Summary: "a pane's actions, in order, run in one pass"},
-
-	"release": {Name: "release", Kind: KindString,
-		Summary: "which OS release is being driven; the Apple Account pane differs by release"},
-
-	"write": {Name: "write", Kind: KindString,
-		Summary: "write one of the login/bootstrap files on the HOST, for the scp: after it. " +
-			"Kinds: launcher, macos_agent_plist, macos_mount_script, macos_mount_plist, " +
-			"windows_task"},
-
-	"esp_fallback": {Name: "esp_fallback", Kind: KindAny,
-		Summary: "copy a disk's EFI loader tree to \\EFI\\BOOT and repair its config search. " +
-			"The value is the disk (`disk` for the one this stage built) or {disk, from}, where " +
-			"`from` is the loader directory inside the ESP"},
-
-	"read": {Name: "read", Kind: KindShot,
-		Summary: "capture one frame and bind it under `name:`. Every `check:` that follows asks its " +
-			"own question about THAT frame, with its own `rect:`"},
-
-	"settle": {Name: "settle", Kind: KindFloat,
-		Summary: "seconds to wait where there is NO fact to wait on; the older `wait:` and " +
-			"`wait_after:` both become this"},
-
-	"wait_until": {Name: "wait_until", Kind: KindString,
-		Summary: "wait for a CONDITION about the machine: `stopped` - its process has gone. " +
-			"A file that sent `acpi: power` or `ssh: poweroff` says this next, and a file that " +
-			"did not gets a clear message instead of a disk qemu still holds open"},
-
-	"check": {Name: "check", Kind: KindMapping,
-		Summary: "compare a named reading and bind a BOOLEAN: {name, from, mode, ...}. `mode:` says " +
-			"HOW to compare. `must: true` makes a FALSE answer fail the step, which is what a file " +
-			"means when it says the screen IS the reference"},
-
-	"if": {Name: "if", Kind: KindString,
-		Summary: "run `then:` when this named boolean is true and `else:` when it is false. The " +
-			"boolean comes from a `check:` step; a branch is a plain step list"},
-
-	"repeat": {Name: "repeat", Kind: KindMapping,
-		Summary: "the parts written down: `max:`, `do:` (the action), `ocr:` (the reading -> text), " +
-			"`check:` (the comparison -> boolean), `until: {fact: ...}` (tests the boolean). " +
-			"Optionally `every: <seconds>` with `clock: [...]` - an action that runs ONCE when that " +
-			"long has passed, whatever the screen says"},
-
-	"fetch": {Name: "fetch", Kind: KindString,
-		Summary: "produce one host-side input: an installer image, a guest agent, a firmware, an " +
-			"answer CD. The value names WHAT, not how it is obtained"},
-
-	"template": {Name: "template", Kind: KindString,
-		Summary: "with `generate: answer_iso`: the answer file to substitute into. It is a path in " +
-			"the repository because the placeholders are the file's vocabulary, not a download"},
-}
-
 // Validate checks a step mapping against the vocabulary.
 //
 // A KEY THAT IS UNKNOWN FAILS THE FILE, and that is the whole point of this list: the Python
@@ -674,13 +361,13 @@ func verbOf(stepName string, mapping map[string]any) (string, error) {
 		// A COLOUR-ADDRESSED CLICK IS `press` WITHOUT THE MARKER: `at_color` + `color_region` is how
 		// a file clicks a blob when the coordinate is not stable.
 		if _, ok := mapping["at_color"]; ok {
-			return "press", nil
+			return "input", nil
 		}
 		if _, ok := mapping["at_button"]; ok {
-			return "press", nil
+			return "input", nil
 		}
 		if _, ok := mapping["at_bottom"]; ok {
-			return "press", nil
+			return "input", nil
 		}
 		// `write:` RENDERS A TEMPLATE TO DISK, which is a copy with no source file.
 		if _, ok := mapping["write"]; ok {
@@ -734,6 +421,9 @@ func isActionAlias(name string) bool {
 
 // anyVerbField finds a key in any verb's field list, for an alias step that reads another verb's shape.
 func anyVerbField(name string) (Key, bool) {
+	if v, ok := Verbs[name]; ok {
+		return Key{Name: v.Name, Kind: KindMapping, Summary: v.Summary}, true
+	}
 	for _, v := range Verbs {
 		if k, ok := v.Fields[name]; ok {
 			return k, true
@@ -780,4 +470,31 @@ func quoted(owners []string) string {
 		return parts[0] + " or " + parts[1]
 	}
 	return strings.Join(parts[:len(parts)-1], ", ") + " or " + parts[len(parts)-1]
+}
+
+// Declares reports whether the vocabulary has this key, in any of its tables. It is the question a
+// caller outside this package asks when it wants to know whether a name is supported.
+func Declares(name string) bool {
+	_, ok := keyOf(name)
+	return ok
+}
+
+// keyOf finds a declared key wherever it lives. It is the one lookup the tests and the validator
+// share, so a key cannot be "in the vocabulary" for one and not the other.
+func keyOf(name string) (Key, bool) {
+	if k, ok := Shared[name]; ok {
+		return k, true
+	}
+	if k, ok := Aliases[name]; ok {
+		return k, true
+	}
+	if v, ok := Verbs[name]; ok {
+		return Key{Name: v.Name, Kind: KindMapping, Summary: v.Summary}, true
+	}
+	for _, v := range Verbs {
+		if k, ok := v.Fields[name]; ok {
+			return k, true
+		}
+	}
+	return Key{}, false
 }

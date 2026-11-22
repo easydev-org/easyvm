@@ -39,10 +39,10 @@ step "wait for the live desktop"
 step "open the installer"
   do
     item
-      press 960 640
+      input 960 640
       settle 3
     item
-      press 960 640
+      input 960 640
       settle 3
   settle 8
 
@@ -50,7 +50,7 @@ step "calamares is up"
   repeat
     do
       item
-        press 420 300
+        input 420 300
         settle 10
     until
       bind done
@@ -63,18 +63,18 @@ step "calamares is up"
     max 30
 
 step "the language combo, opened and taken"
-  press 1050 736
+  input 1050 736
   settle 3
 
 step "take the current entry"
-  press ret
+  input ret
   settle 3
 
 step "next through the pages, until the users page is up"
   repeat
     do
       item
-        press 1330 828
+        input 1330 828
         settle 8
     until
       bind here
@@ -86,14 +86,24 @@ step "next through the pages, until the users page is up"
       words [[name], [Password]]
     max 8
 
-step "the full name field"
+step "the full name field - click the field"
+  input 727 375
+
+step "the full name field - select what is there"
+  input ctrl+a
+  settle 1
+
+step "the full name field - delete the selection"
+  input backspace
+  settle 1
+
+step "the full name field - type the value"
+  input text "{{ user }}"
+
+step "the full name field - the field took it"
   repeat
     do
       item
-        clear
-        press text "{{ user }}"
-          at 727 375
-        settle 2
     until
       bind took
       source name_field
@@ -103,28 +113,28 @@ step "the full name field"
       scale 8
       words [["{{ user }}"]]
     max 4
-
+  settle 2
 step "users - allow a short password"
-  press 645 537
+  input 645 537
   settle 3
 
 step "users - password"
-  press text "{{ password }}"
+  input text "{{ password }}"
     at 741 495
   settle 2
 
 step "users - repeat password"
-  press text "{{ password }}"
+  input text "{{ password }}"
     at 959 495
   settle 2
 
 step "users - administrator password"
-  press text "{{ password }}"
+  input text "{{ password }}"
     at 741 609
   settle 2
 
 step "users - administrator repeat password"
-  press text "{{ password }}"
+  input text "{{ password }}"
     at 959 609
   settle 3
 
@@ -132,7 +142,7 @@ step "next to the partitions page"
   repeat
     do
       item
-        press 1330 828
+        input 1330 828
         settle 6
     until
       bind here
@@ -145,14 +155,14 @@ step "next to the partitions page"
     max 8
 
 step "partitions - erase the disk"
-  press 633 390
+  input 633 390
   settle 6
 
 step "partitions -> summary"
   repeat
     do
       item
-        press 1330 828
+        input 1330 828
         settle 6
     until
       bind here
@@ -168,7 +178,7 @@ step "summary - install"
   repeat
     do
       item
-        press 1328 857
+        input 1328 857
         settle 12
     until
       bind begun

@@ -32,7 +32,7 @@ step "the greeter is drawn"
   repeat
     do
       item
-        press esc
+        input esc
         settle 4
     until
       bind up
@@ -45,18 +45,17 @@ step "the greeter is drawn"
     max 60
 
 step "greeter - the user tile"
-  press 960 488
+  input 960 488
   when [password, vmuser]
 
 step "greeter - the password box"
-  clear false
-  press text "{{ password }}"
+  input text "{{ password }}"
     at 936 628
   settle 4
   when [password, vmuser]
 
 step "greeter - submit"
-  press ret
+  input ret
   settle 12
   when [password, vmuser]
 
@@ -115,7 +114,7 @@ step "wait for the desktop"
   # IT IS RUN FIRST, BEFORE THE TERMINAL IS NEEDED FOR ANYTHING, so the commands below have a live
   # screen to be typed into.
 step "open the terminal"
-  press ctrl+alt+t
+  input ctrl+alt+t
   settle 20
 
   # NO `terminal_wait:` HERE, AND THAT IS THE FIX RATHER THAN AN OMISSION.

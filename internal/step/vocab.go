@@ -135,8 +135,8 @@ var Verbs = map[string]Verb{
 				Summary: "wait this long for the disk file to stop growing"},
 		}},
 
-	// ---- 2. `press` ------------------------------------------------------------------------
-	"press": {Name: "press",
+	// ---- 2. `input` ------------------------------------------------------------------------
+	"input": {Name: "input",
 		Summary: "send input to the guest - a click, a keystroke, or text",
 		Fields: map[string]Key{
 			"click": {Name: "click", Kind: KindPairOrMapping,
@@ -404,7 +404,7 @@ func buildRoles() map[string]Role {
 		}
 	}
 	// A NAME THAT IS BOTH IS DECIDED BY THE ACTION, which is the stricter of the two: `click` is a
-	// field of `press` and a dispatch branch, and a step that writes it has an action.
+	// field of `input` and a dispatch branch, and a step that writes it has an action.
 	for name := range Verbs {
 		m[name] = RoleAction
 	}
@@ -415,7 +415,7 @@ func buildRoles() map[string]Role {
 // branch wins: a step that carries two of them runs the earlier one and drops the later.
 var dispatchOrder = []string{
 	"boot",
-	"press",
+	"input",
 	"run", "ssh", "adb", "adb_connect", "adb_privileged",
 	"copy",
 	"read", "screenshot",

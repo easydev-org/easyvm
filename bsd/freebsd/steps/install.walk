@@ -39,31 +39,31 @@ step "wait for the installer menu"
     max 60
 
 step "welcome - Install is preselected"
-  press ret
+  input ret
   settle 10
 
 step "keymap - continue with the default"
-  press ret
+  input ret
   settle 8
 step "hostname"
   settle 2
-  press text freebsd
+  input text freebsd
 
 step "accept the hostname"
-  press ret
+  input ret
   settle 8
 
 step "installation type - packages, which is pkgbase"
-  press ret
+  input ret
   settle 10
 
 step "offline, so pkgbase does not reboot before the chroot runs"
   do
     item
-      press right
+      input right
       settle 1
     item
-      press ret
+      input ret
       settle 10
 
 step "partitioning - automatic ufs"
@@ -84,18 +84,18 @@ step "wait for the partitioning menu before choosing on it"
 step "choose auto ufs"
   do
     item
-      press down
+      input down
       settle 1
     item
-      press ret
+      input ret
       settle 10
 
 step "entire disk, not a shared partition"
-  press ret
+  input ret
   settle 10
 
 step "partition scheme - GPT, which is what makes this disk UEFI bootable"
-  press ret
+  input ret
   settle 10
 
 step "wait for the partition editor"
@@ -113,33 +113,33 @@ step "wait for the partition editor"
 step "accept the partitioning"
   do
     item
-      press tab
+      input tab
       settle 1
     item
-      press tab
+      input tab
       settle 1
     item
-      press tab
+      input tab
       settle 1
     item
-      press tab
+      input tab
       settle 1
     item
-      press tab
+      input tab
       settle 1
     item
-      press tab
+      input tab
       settle 1
     item
-      press ret
+      input ret
       settle 10
 
 step "commit the layout"
-  press ret
+  input ret
   settle 15
 
 step "distribution select - accept the default set"
-  press ret
+  input ret
   settle 15
 
   # THE INSTALL ENDS BY ASKING FOR THE ROOT PASSWORD, AND THAT IS THE SIGNAL THE SCREEN GIVES.
@@ -190,79 +190,79 @@ step "wait for the install to finish"
 
 step "the root password - first field"
   settle 2
-  press text "{{ password }}"
+  input text "{{ password }}"
 
 step "the root password - tab to the second field"
-  press tab
+  input tab
   settle 1
 
 step "the root password - second field"
   settle 2
-  press text "{{ password }}"
+  input text "{{ password }}"
 
 step "skip the root password pane"
   do
     item
-      press tab
+      input tab
       settle 1
     item
-      press tab
+      input tab
       settle 1
     item
-      press right
+      input right
       settle 1
     item
-      press ret
+      input ret
       settle 8
 
 step "network - auto, which is the interface menu's default button"
-  press ret
+  input ret
   settle 15
 
 step "time zone - the region list opens on UTC, which is the first entry"
-  press ret
+  input ret
   settle 6
 
 step "time zone - the date box, skipped"
-  press ret
+  input ret
   settle 4
 
 step "time zone - the time box, skipped"
-  press ret
+  input ret
   settle 4
 
 step "services - sshd is already ticked, so accept the list"
-  press ret
+  input ret
   settle 6
 
 step "hardening - nothing to hide on a throwaway guest, so accept"
-  press ret
+  input ret
   settle 6
 
 step "firmware - skip it"
-  press ret
+  input ret
   settle 10
 
 step "do not add a user here - the chroot shell does it"
   do
     item
-      press left
+      input left
       settle 1
     item
-      press ret
+      input ret
       settle 8
 
 step "final configuration - Finish is the first entry"
-  press ret
+  input ret
   settle 10
 
 step "open a shell in the new system"
   do
     item
-      press left
+      input left
       settle 1
     item
-      press ret
+      input ret
       settle 12
 
 step "prove the chroot shell is actually up before typing into it"
@@ -281,313 +281,313 @@ step "set the root password"
   do
     item
       settle 10
-      press text "printf '%s' '{{ password }}' | pw usermod root -h0 && echo ROOT_PW_SET"
+      input text "printf '%s' '{{ password }}' | pw usermod root -h0 && echo ROOT_PW_SET"
     item
-      press ret
+      input ret
 
 step "create the account"
   do
     item
       settle 10
-      press text "pw useradd -n {{ user }} -m -s /bin/csh -G wheel"
+      input text "pw useradd -n {{ user }} -m -s /bin/csh -G wheel"
     item
-      press ret
+      input ret
     item
       settle 10
-      press text "printf '%s' '{{ password }}' | pw usermod {{ user }} -h0 && echo PASSWORD_SET"
+      input text "printf '%s' '{{ password }}' | pw usermod {{ user }} -h0 && echo PASSWORD_SET"
     item
-      press ret
+      input ret
 
 step "prove the account exists"
   do
     item
       settle 2
-      press text "pw usershow {{ user }}"
+      input text "pw usershow {{ user }}"
     item
-      press ret
+      input ret
       settle 4
 
 step "allow password authentication over ssh"
   do
     item
       settle 3
-      press text "sed -i '' 's/^#*PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config"
+      input text "sed -i '' 's/^#*PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config"
     item
-      press ret
+      input ret
       settle 4
 
 step "prove the setting took"
   do
     item
       settle 2
-      press text "grep -c '^PasswordAuthentication yes' /etc/ssh/sshd_config"
+      input text "grep -c '^PasswordAuthentication yes' /etc/ssh/sshd_config"
     item
-      press ret
+      input ret
       settle 4
 
 step "make sure sshd starts at every boot"
   do
     item
       settle 2
-      press text "sysrc sshd_enable=YES"
+      input text "sysrc sshd_enable=YES"
     item
-      press ret
+      input ret
       settle 4
 
 step "give the chroot a resolver, without which pkg cannot reach a mirror"
   do
     item
       settle 2
-      press text "echo cHJpbnRmICclc1xuJyAnbmFtZXNlcnZlciAxNzIuMzAuMC4xJyA+IC9ldGMvcmVzb2x2LmNvbmY= | base64 -d | sh"
+      input text "echo cHJpbnRmICclc1xuJyAnbmFtZXNlcnZlciAxNzIuMzAuMC4xJyA+IC9ldGMvcmVzb2x2LmNvbmY= | base64 -d | sh"
     item
-      press ret
+      input ret
       settle 3
     item
       settle 3
-      press text "cat /etc/resolv.conf"
+      input text "cat /etc/resolv.conf"
     item
-      press ret
+      input ret
       settle 5
 
 step "point pkg at the network repository, because the disc has no ports packages"
   do
     item
       settle 5
-      press text "echo cHJpbnRmICclc1xuJyAnRnJlZUJTRDogeycgJyAgdXJsOiAicGtnK2h0dHBzOi8vcGtnLkZyZWVCU0Qub3JnLyR7QUJJfS9xdWFydGVybHkiLCcgJyAgbWlycm9yX3R5cGU6ICJzcnYiLCcgJyAgZW5hYmxlZDogeWVzJyAnfScgPiAvdXNyL2xvY2FsL2V0Yy9wa2cvcmVwb3MvRnJlZUJTRC5jb25m | base64 -d | sh"
+      input text "echo cHJpbnRmICclc1xuJyAnRnJlZUJTRDogeycgJyAgdXJsOiAicGtnK2h0dHBzOi8vcGtnLkZyZWVCU0Qub3JnLyR7QUJJfS9xdWFydGVybHkiLCcgJyAgbWlycm9yX3R5cGU6ICJzcnYiLCcgJyAgZW5hYmxlZDogeWVzJyAnfScgPiAvdXNyL2xvY2FsL2V0Yy9wa2cvcmVwb3MvRnJlZUJTRC5jb25m | base64 -d | sh"
     item
-      press ret
+      input ret
     item
       settle 3
-      press text "cat /usr/local/etc/pkg/repos/FreeBSD.conf"
+      input text "cat /usr/local/etc/pkg/repos/FreeBSD.conf"
     item
-      press ret
+      input ret
 
 step "bootstrap pkg, which is a stub until it downloads itself once"
   do
     item
       settle 4
-      press text "env ASSUME_ALWAYS_YES=yes pkg bootstrap -f"
+      input text "env ASSUME_ALWAYS_YES=yes pkg bootstrap -f"
     item
-      press ret
+      input ret
       settle 60
     item
       settle 3
-      press text "pkg -vv"
+      input text "pkg -vv"
     item
-      press ret
+      input ret
       settle 6
 
 step "install the desktop, sudo and their packages while this shell is root"
   do
     item
       settle 4
-      press text "env ASSUME_ALWAYS_YES=yes pkg install -y sudo xorg xf86-video-scfb xf86-input-libinput xfce lightdm lightdm-gtk-greeter"
+      input text "env ASSUME_ALWAYS_YES=yes pkg install -y sudo xorg xf86-video-scfb xf86-input-libinput xfce lightdm lightdm-gtk-greeter"
     item
-      press ret
+      input ret
       settle 60
     item
       settle 3
-      press text "sh -c 'i=0; while [ $i -lt 60 ]; do pkg info xfce >/dev/null 2>&1 && pkg info sudo >/dev/null 2>&1 && break; sleep 10; i=$((i+1)); done; pkg info sudo xfce xorg lightdm 2>&1 | grep -E \"^(Name|Version)\" | head -8'"
+      input text "sh -c 'i=0; while [ $i -lt 60 ]; do pkg info xfce >/dev/null 2>&1 && pkg info sudo >/dev/null 2>&1 && break; sleep 10; i=$((i+1)); done; pkg info sudo xfce xorg lightdm 2>&1 | grep -E \"^(Name|Version)\" | head -8'"
     item
-      press ret
+      input ret
       settle 40
 
 step "prove the desktop actually landed"
   do
     item
       settle 3
-      press text "ls -l /usr/local/share/xsessions/xfce.desktop /usr/local/bin/Xorg /usr/local/sbin/lightdm"
+      input text "ls -l /usr/local/share/xsessions/xfce.desktop /usr/local/bin/Xorg /usr/local/sbin/lightdm"
     item
-      press ret
+      input ret
       settle 5
     item
       settle 2
-      press text "ls -l /usr/local/bin/sudo"
+      input text "ls -l /usr/local/bin/sudo"
     item
-      press ret
+      input ret
       settle 4
 
 step "let the account escalate without a password"
   do
     item
       settle 2
-      press text "printf '%s\\n' '{{ user }} ALL=(ALL) NOPASSWD:ALL' > /usr/local/etc/sudoers.d/90-{{ user }}"
+      input text "printf '%s\\n' '{{ user }} ALL=(ALL) NOPASSWD:ALL' > /usr/local/etc/sudoers.d/90-{{ user }}"
     item
-      press ret
+      input ret
       settle 3
     item
       settle 2
-      press text "chmod 0440 /usr/local/etc/sudoers.d/90-{{ user }}"
+      input text "chmod 0440 /usr/local/etc/sudoers.d/90-{{ user }}"
     item
-      press ret
+      input ret
       settle 3
 
 step "prove sudo works, as the account will use it"
   do
     item
       settle 3
-      press text "su -m {{ user }} -c 'sudo -n id -un'"
+      input text "su -m {{ user }} -c 'sudo -n id -un'"
     item
-      press ret
+      input ret
       settle 6
 
 step "install the guest agent, which is what lets the host shut this machine down"
   do
     item
       settle 4
-      press text "env ASSUME_ALWAYS_YES=yes pkg install -y qemu-guest-agent"
+      input text "env ASSUME_ALWAYS_YES=yes pkg install -y qemu-guest-agent"
     item
-      press ret
+      input ret
       settle 45
     item
       settle 3
-      press text "sh -c 'i=0; while [ $i -lt 40 ]; do pkg info qemu-guest-agent >/dev/null 2>&1 && break; sleep 5; i=$((i+1)); done; pkg info qemu-guest-agent 2>&1 | grep -E \"^(Name|Version)\"'"
+      input text "sh -c 'i=0; while [ $i -lt 40 ]; do pkg info qemu-guest-agent >/dev/null 2>&1 && break; sleep 5; i=$((i+1)); done; pkg info qemu-guest-agent 2>&1 | grep -E \"^(Name|Version)\"'"
     item
-      press ret
+      input ret
       settle 20
 
 step "prove the guest agent's device and enable it at every boot"
   do
     item
       settle 2
-      press text "sysrc qemu_guest_agent_enable=YES"
+      input text "sysrc qemu_guest_agent_enable=YES"
     item
-      press ret
+      input ret
       settle 4
     item
       settle 2
-      press text "ls /usr/local/bin/qemu-ga /usr/local/etc/rc.d/qemu-guest-agent"
+      input text "ls /usr/local/bin/qemu-ga /usr/local/etc/rc.d/qemu-guest-agent"
     item
-      press ret
+      input ret
       settle 4
     item
       settle 2
-      press text "grep qemu_guest_agent /etc/rc.conf"
+      input text "grep qemu_guest_agent /etc/rc.conf"
     item
-      press ret
+      input ret
       settle 4
 
 step "tell Xorg to draw through the kernel framebuffer"
   do
     item
       settle 1
-      press text "mkdir -p /usr/local/etc/X11/xorg.conf.d"
+      input text "mkdir -p /usr/local/etc/X11/xorg.conf.d"
     item
-      press ret
+      input ret
       settle 2
     item
       settle 2
-      press text "sh -c 'printf \"%s\\n\" \"Section \\\"Device\\\"\" \"    Identifier \\\"Card0\\\"\" \"    Driver \\\"scfb\\\"\" \"EndSection\" > /usr/local/etc/X11/xorg.conf.d/10-scfb.conf'"
+      input text "sh -c 'printf \"%s\\n\" \"Section \\\"Device\\\"\" \"    Identifier \\\"Card0\\\"\" \"    Driver \\\"scfb\\\"\" \"EndSection\" > /usr/local/etc/X11/xorg.conf.d/10-scfb.conf'"
     item
-      press ret
+      input ret
       settle 3
     item
       settle 2
-      press text "cat /usr/local/etc/X11/xorg.conf.d/10-scfb.conf"
+      input text "cat /usr/local/etc/X11/xorg.conf.d/10-scfb.conf"
     item
-      press ret
+      input ret
       settle 4
 
 step "enable the desktop at boot"
   do
     item
       settle 2
-      press text "sysrc dbus_enable=YES"
+      input text "sysrc dbus_enable=YES"
     item
-      press ret
+      input ret
       settle 3
     item
       settle 2
-      press text "sysrc lightdm_enable=YES"
+      input text "sysrc lightdm_enable=YES"
     item
-      press ret
+      input ret
       settle 3
     item
       settle 2
-      press text "sysrc devfs_system_ruleset=desktop"
+      input text "sysrc devfs_system_ruleset=desktop"
     item
-      press ret
+      input ret
       settle 3
 
 step "log in to the desktop automatically"
   do
     item
       settle 3
-      press text "sh -c 'printf \"%s\\n\" \"[Seat:*]\" \"greeter-session=lightdm-gtk-greeter\" \"autologin-user={{ user }}\" \"session-wrapper=/usr/local/etc/lightdm/Xsession\" \"autologin-user-timeout=0\" \"user-session=xfce\" > /usr/local/etc/lightdm/lightdm.conf'"
+      input text "sh -c 'printf \"%s\\n\" \"[Seat:*]\" \"greeter-session=lightdm-gtk-greeter\" \"autologin-user={{ user }}\" \"session-wrapper=/usr/local/etc/lightdm/Xsession\" \"autologin-user-timeout=0\" \"user-session=xfce\" > /usr/local/etc/lightdm/lightdm.conf'"
     item
-      press ret
+      input ret
       settle 4
     item
       settle 2
-      press text "cat /usr/local/etc/lightdm/lightdm.conf"
+      input text "cat /usr/local/etc/lightdm/lightdm.conf"
     item
-      press ret
+      input ret
       settle 4
 
 step "let the account reach the display and the video devices"
   do
     item
       settle 2
-      press text "pw groupmod video -m {{ user }}"
+      input text "pw groupmod video -m {{ user }}"
     item
-      press ret
+      input ret
       settle 4
 
 step "flush the writes before anything else"
   do
     item
       settle 3
-      press text sync
+      input text sync
     item
-      press ret
+      input ret
       settle 20
     item
       settle 3
-      press text sync
+      input text sync
     item
-      press ret
+      input ret
       settle 20
 
 step "prove the disk is the filesystem this file asked for"
   do
     item
       settle 3
-      press text "sh -c 'df -h / | tail -1; zpool list 2>&1 | head -2'"
+      input text "sh -c 'df -h / | tail -1; zpool list 2>&1 | head -2'"
     item
-      press ret
+      input ret
       settle 6
 
 step "make the installed system talk on the serial console"
   do
     item
       settle 3
-      press text "printf '%s\\n' 'console=\"comconsole,vidconsole\"' 'boot_multicons=\"YES\"' 'boot_serial=\"YES\"' 'comconsole_speed=\"115200\"' > /boot/loader.conf"
+      input text "printf '%s\\n' 'console=\"comconsole,vidconsole\"' 'boot_multicons=\"YES\"' 'boot_serial=\"YES\"' 'comconsole_speed=\"115200\"' > /boot/loader.conf"
     item
-      press ret
+      input ret
       settle 4
     item
       settle 2
-      press text "cat /boot/loader.conf"
+      input text "cat /boot/loader.conf"
     item
-      press ret
+      input ret
       settle 4
 
 step "give ttyu0 a login prompt, or the console is readable but not usable"
   do
     item
       settle 3
-      press text "awk 'BEGIN{OFS=\"\\t\"} /^ttyu0/{print \"ttyu0\",\"\\\"/usr/libexec/getty std.115200\\\"\",\"vt100\",\"on\",\"secure\"; next} {print}' /etc/ttys > /tmp/ttys.new && cp /tmp/ttys.new /etc/ttys"
+      input text "awk 'BEGIN{OFS=\"\\t\"} /^ttyu0/{print \"ttyu0\",\"\\\"/usr/libexec/getty std.115200\\\"\",\"vt100\",\"on\",\"secure\"; next} {print}' /etc/ttys > /tmp/ttys.new && cp /tmp/ttys.new /etc/ttys"
     item
-      press ret
+      input ret
       settle 4
 
 step "leave the shell, which finishes the install"
   do
     item
       settle 5
-      press text exit
+      input text exit
     item
-      press ret
+      input ret
       settle 60
 
 step "wait for the installer to unmount the disk"

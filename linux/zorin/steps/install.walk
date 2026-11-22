@@ -45,15 +45,15 @@ step "wait for the live desktop"
   # SO THE FIRST STRETCH OF THE WAIT PRESSES RETURN, because the welcome dialog is modal and takes
   # the key: that is how the same live session is driven by hand. Then the text check decides.
 step "wake the live session, whose welcome dialog takes a key"
-  press ret
+  input ret
   settle 20
 
 step "wake it again"
-  press ret
+  input ret
   settle 20
 
 step "wake it again"
-  press ret
+  input ret
   settle 20
 
 step "wait for the installer to put itself up"
@@ -62,7 +62,7 @@ step "wait for the installer to put itself up"
       item
         settle 5
       item
-        press ret
+        input ret
       item
         settle 5
     until
@@ -78,20 +78,20 @@ step "wait for the installer to put itself up"
 step "install zorin os"
   do
     item
-      press 1223 586
+      input 1223 586
       settle 3
     item
-      press 1223 586
+      input 1223 586
       settle 3
   settle 40
 
 step "install zorin os (once more, if the wizard is not up)"
   do
     item
-      press 1223 586
+      input 1223 586
       settle 3
     item
-      press 1223 586
+      input 1223 586
       settle 3
   settle 40
   when_not [keyboard]
@@ -103,19 +103,19 @@ step "disable the screen saver and the lock"
   type_gap 0.15
 
 step "welcome"
-  press 1361 764
+  input 1361 764
   settle 15
 
 step "keyboard - english (us)"
-  press 1106 402
+  input 1106 402
   settle 4
 
 step "keyboard"
-  press 1361 764
+  input 1361 764
   settle 18
 
 step "updates and other software, when this build shows it"
-  press 1361 764
+  input 1361 764
   settle 18
   when_not_any [[installation, type]]
 
@@ -144,7 +144,7 @@ step "the keyboard pane is done"
     max 80
 
 step "installation type - install now"
-  press 1361 764
+  input 1361 764
   settle 18
 
 step "the disk warning is up"
@@ -173,7 +173,7 @@ step "the root partition will be ext4"
     words [ext4]
 
 step "write the changes to disks"
-  press 1293 673
+  input 1293 673
   settle 20
 
 step "the disk warning is answered"
@@ -189,7 +189,7 @@ step "the disk warning is answered"
     max 60
 
 step "where are you"
-  press 1361 764
+  input 1361 764
   settle 18
 
 step "the time zone pane is done"
@@ -205,27 +205,27 @@ step "the time zone pane is done"
     max 60
 
 step "who are you - your name"
-  press text "{{ user }}"
+  input text "{{ user }}"
     at 975 386
   settle 2
 
 step "who are you - username"
-  press text "{{ user }}"
+  input text "{{ user }}"
     at 859 477
   settle 2
 
 step "who are you - password"
-  press text "{{ password }}"
+  input text "{{ password }}"
     at 873 514
   settle 2
 
 step "who are you - confirm password"
-  press text "{{ password }}"
+  input text "{{ password }}"
     at 883 550
   settle 3
 
 step "who are you"
-  press 1361 764
+  input 1361 764
   settle 20
 
 step "the install runs, as measured"

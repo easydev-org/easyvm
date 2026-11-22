@@ -42,19 +42,19 @@ step "wait for the installer's product chooser to draw"
     max 40
 
 step "choose the product"
-  press 66 199
+  input 66 199
   settle 5
 
 step "choose the Standard system"
-  press 94 324
+  input 94 324
   settle 3
 
 step "accept the licence"
-  press 47 420
+  input 47 420
   settle 3
 
 step "select it"
-  press 160 470
+  input 160 470
   settle 20
 
 step "wait for the installer's summary to draw"
@@ -71,107 +71,107 @@ step "wait for the installer's summary to draw"
     max 40
 
 step "open the storage section"
-  press 120 387
+  input 120 387
   settle 10
 
 step "open the mount list"
-  press 455 330
+  input 455 330
   settle 6
 
 step "the root row's menu"
-  press 850 420
+  input 850 420
   settle 5
 
 step "edit it"
-  press 792 458
+  input 792 458
   settle 8
 
 step "open the filesystem list"
-  press 87 502
+  input 87 502
   settle 6
 
 step "choose ext4"
-  press 79 744
+  input 79 744
   settle 6
 
 step "accept the partition"
-  press 61 632
+  input 61 632
   settle 8
 
 step "back to the summary"
-  press 72 29
+  input 72 29
   settle 10
 
 step "open the authentication section"
-  press 758 390
+  input 758 390
   settle 3
 
 step "define an administrator user"
-  press 73 275
+  input 73 275
   settle 6
 
 step "the full name"
-  press text "{{ user }}"
+  input text "{{ user }}"
     at 207 366
   settle 2
 
 step "the user name"
-  press text "{{ user }}"
+  input text "{{ user }}"
     at 207 460
   settle 2
 
 step "the password"
-  press text "{{ password }}"
+  input text "{{ password }}"
     at 207 553
   settle 2
 
 step "the password again"
-  press text "{{ password }}"
+  input text "{{ password }}"
     at 207 673
   settle 3
 
 step "scroll the form to its buttons, by tabbing focus down it"
-  press tab
+  input tab
   settle 1
 
 step "tab 1 of the scroll"
-  press tab
+  input tab
   settle 1
 
 step "tab 2 of the scroll"
-  press tab
+  input tab
   settle 1
 
 step "tab 3 of the scroll"
-  press tab
+  input tab
   settle 1
 
 step "tab 4 of the scroll"
-  press tab
+  input tab
   settle 1
 
 step "tab 5 of the scroll"
-  press tab
+  input tab
   settle 1
 
 step "tab 6 of the scroll"
-  press tab
+  input tab
   settle 1
 
 step "tab 7 of the scroll"
-  press tab
+  input tab
   settle 1
 
 step "tab 8 of the scroll"
-  press tab
+  input tab
   settle 1
 
 step "tab to Accept, which scrolls it into view"
-  press tab
+  input tab
   settle 2
 
 step "accept the account"
-  press 92 1016
+  input 92 1016
   settle 10
 
 step "the changes are applied"
@@ -189,15 +189,15 @@ step "changes were applied"
     words [[applied], [successfully]]
 
 step "back to the summary, where install is now enabled"
-  press 177 129
+  input 177 129
   settle 10
 
 step "start the install"
-  press 110 515
+  input 110 515
   settle 20
 
 step "confirm, because this medium asks"
-  press 756 669
+  input 756 669
   settle 30
 
 step "the install is written"

@@ -127,7 +127,7 @@ func TestAVerbAndItsFieldsAreOneAction(t *testing.T) {
 	}{
 		{
 			name: "press reads text and at",
-			spec: map[string]any{"press": true, "text": "hello", "at": []any{1, 2}},
+			spec: map[string]any{"input": true, "text": "hello", "at": []any{1, 2}},
 			ok:   true,
 			why:  "typing into a field clicks it first - this is ONE action",
 		},
@@ -151,7 +151,7 @@ func TestAVerbAndItsFieldsAreOneAction(t *testing.T) {
 		},
 		{
 			name: "a shared modifier beside an action is fine",
-			spec: map[string]any{"when_not": []any{"done"}, "press": true, "click": []any{1, 2}},
+			spec: map[string]any{"when_not": []any{"done"}, "input": true, "click": []any{1, 2}},
 			ok:   true,
 			why:  "`when_not` gates; the click is still the one action",
 		},

@@ -40,11 +40,11 @@ step "let the desktop settle"
   settle 15
 
 step "start the installer"
-  press 748 431
+  input 748 431
   settle 25
 
 step "choose the offline method"
-  press 1084 591
+  input 1084 591
   settle 30
 
 step "calamares is up"
@@ -62,23 +62,23 @@ step "the welcome page is in English or needs changing"
     words [[welcome], [歡迎]]
 
 step "open the language list"
-  press 980 661
+  input 980 661
   settle 4
 
 step "jump to the English group"
-  press e
+  input e
   settle 2
 
 step "step up to British English"
-  press up
+  input up
   settle 1
 
 step "step up to American English"
-  press up
+  input up
   settle 1
 
 step "choose it"
-  press ret
+  input ret
   settle 6
 
 step "the installer speaks English"
@@ -96,15 +96,15 @@ step "the page is in English"
     words [[welcome]]
 
 step "next from welcome"
-  press 1410 878
+  input 1410 878
   settle 9
 
 step "next from location"
-  press 1410 878
+  input 1410 878
   settle 9
 
 step "next from keyboard"
-  press 1410 878
+  input 1410 878
   settle 9
 
 step "the bootloader page"
@@ -112,7 +112,7 @@ step "the bootloader page"
     name boot
 
 step "next from bootloader"
-  press 1410 878
+  input 1410 878
   settle 9
 
 step "the partitions page"
@@ -120,7 +120,7 @@ step "the partitions page"
     name parts
 
 step "select erase disk"
-  press 679 252
+  input 679 252
   settle 8
 
 step "the partitions page with erase selected"
@@ -138,7 +138,7 @@ step "the default filesystem is ext4"
     words [[ext4]]
 
 step "next from partitions"
-  press 1410 878
+  input 1410 878
   settle 10
 
 step "the users page settles before anything is typed into it"
@@ -159,31 +159,41 @@ step "the users page"
     name users
 
 step "the full name"
-  press text "{{ user }}"
+  input text "{{ user }}"
     at 850 299
   settle 2
 
-step "the login name"
-  clear
-  press text "{{ user }}"
-    at 850 354
-  settle 2
+step "the login name - click the field"
+  input 850 354
 
-step "the computer name"
-  clear
-  press text endeavouros
-    at 850 434
-  settle 2
+step "the login name - select what is there"
+  input ctrl+a
+  settle 1
 
+step "the login name - delete the selection"
+  input backspace
+  settle 1
+
+step "the login name - type the value"
+  input text "{{ user }}"
+  settle 2
+step "the computer name - click the field"
+  input 850 434
+
+step "the computer name - select what is there"
+  input ctrl+a
+  settle 1
+
+step "the computer name - delete the selection"
+  input backspace
+  settle 1
+
+step "the computer name - type the value"
+  input text endeavouros
+  settle 2
 step "the password"
-  press text "{{ password }}"
+  input text "{{ password }}"
     at 700 515
-  settle 2
-
-step "the password again"
-  clear
-  press text "{{ password }}"
-    at 900 515
   settle 2
 
   # THE ROOT PASSWORD IS TYPED INTO ITS FIELDS RATHER THAN TICKED BY A CHECKBOX.
@@ -199,20 +209,50 @@ step "the password again"
   #
   # `clear: true` first, because a half-filled field from a click that landed in it is worse than an
   # empty one - Calamares shows the mismatch and keeps Next disabled either way.
-step "the root password - first field"
-  clear
-  press text "{{ password }}"
-    at 700 703
-  settle 2
+step "the password again - click the field"
+  input 900 515
 
-step "the root password - second field"
-  clear
-  press text "{{ password }}"
-    at 993 703
-  settle 2
+step "the password again - select what is there"
+  input ctrl+a
+  settle 1
 
+step "the password again - delete the selection"
+  input backspace
+  settle 1
+
+step "the password again - type the value"
+  input text "{{ password }}"
+  settle 2
+step "the root password - first field - click the field"
+  input 700 703
+
+step "the root password - first field - select what is there"
+  input ctrl+a
+  settle 1
+
+step "the root password - first field - delete the selection"
+  input backspace
+  settle 1
+
+step "the root password - first field - type the value"
+  input text "{{ password }}"
+  settle 2
+step "the root password - second field - click the field"
+  input 993 703
+
+step "the root password - second field - select what is there"
+  input ctrl+a
+  settle 1
+
+step "the root password - second field - delete the selection"
+  input backspace
+  settle 1
+
+step "the root password - second field - type the value"
+  input text "{{ password }}"
+  settle 2
 step "log in automatically"
-  press 587 755
+  input 587 755
   settle 3
 
 step "the users page is filled in"
@@ -231,7 +271,7 @@ step "the password was accepted"
     words [ok]
 
 step "next from users"
-  press 1410 878
+  input 1410 878
   settle 10
 
 step "the summary page arrives before install is clicked"
@@ -262,7 +302,7 @@ step "the summary names ext4"
     words [[ext4]]
 
 step "start the install"
-  press 1412 868
+  input 1412 868
   settle 10
 
 step "the confirmation dialog"
@@ -270,7 +310,7 @@ step "the confirmation dialog"
     name confirm
 
 step "install now"
-  press 1064 540
+  input 1064 540
   settle 25
 
 step "the install writes the disk"
