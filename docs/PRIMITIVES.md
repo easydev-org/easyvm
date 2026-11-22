@@ -158,8 +158,6 @@ A step is one of nine verbs, or one of the actions the engine dispatches on, plu
 
 ## 4. Actions the engine dispatches on
 
-Each is a step of its own with its own fields.
-
 | key | what it does |
 |---|---|
 | `acpi` | send one ACPI message: power, reset, sleep |
@@ -256,22 +254,15 @@ Each is a step of its own with its own fields.
 
 ## 5. The machine's own facts
 
-A `check:` binds a boolean; these are LIVE, asked of the daemon when read, and may be used
-anywhere a boolean is: `if`, `repeat until`, `wait_until`.
+A `check:` binds a boolean. These are LIVE: asked of the daemon when read, and usable anywhere
+a boolean is - `if`, `repeat until`, `wait_until`.
 
-| name | what it asks |
+| name | |
 |---|---|
-| `machine_running` | — |
-| `machine_stopped` | — |
-| `machine_ssh` | — |
-| `machine_ssh_gone` | — |
-| `machine_qga` | — |
-| `machine_booted` | — |
-| `machine_console_idle` | — |
-| `machine_disk_idle` | — |
-| `machine_recording` | — |
-| `machine_share` | — |
-| `machine_frame_still` | — |
+| `machine_running` | |
+| `machine_stopped` | |
+| `machine_ssh` | |
+| `machine_qga` | |
 
 ## 6. File header
 

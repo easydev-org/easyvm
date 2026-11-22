@@ -508,10 +508,7 @@ func DispatchOrder(key string) int {
 // THEY ARE DECLARED HERE because `Validate` has to know the prefix is reserved, and a second copy in
 // `internal/run` would be the drift this vocabulary keeps removing.
 var MachineFacts = []string{
-	"machine_running", "machine_stopped", "machine_ssh", "machine_ssh_gone",
-	"machine_qga", "machine_booted",
-	"machine_console_idle", "machine_disk_idle", "machine_recording", "machine_share",
-	"machine_frame_still",
+	"machine_running", "machine_stopped", "machine_ssh", "machine_qga",
 }
 
 // MachineFactNames lists them for a failure message.

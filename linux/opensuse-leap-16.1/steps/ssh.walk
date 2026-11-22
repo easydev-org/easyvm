@@ -599,17 +599,30 @@ step "prove sshd will start at boot"
   # is the assertion. `optional` would have swallowed a reboot that never started too.
 
 step "restart the machine"
-  ssh "printf '%s\\n' '{{ password }}' | sudo -S -p '' systemctl reboot || true\n"
-  timeout 60
+  # A CLEAN STOP AND A CLEAN START, RATHER THAN `systemctl reboot`.
+  #
+  # THE IN-GUEST REBOOT WAS THE WRONG PRIMITIVE HERE, and it took a while to see why: qemu never
+  # stops, so `machine_stopped` can never be observed, and the only way to tell "the old daemon" from
+  # "the new one" was a probe that relied on the old one briefly not answering. MEASURED on
+  # opensuse-tumbleweed: a wait placed straight after `systemctl reboot` passed on the process that
+  # was about to die, and every step after it failed.
+  #
+  # `acpi` ASKS THE GUEST TO POWER OFF and qemu exits with it, so the stop is a fact the daemon
+  # reports rather than an inference, and the boot that follows is the machine coming back.
+  stop acpi
+  timeout 120
 
-
-step "come back up with sshd answering - wait for the old daemon to stop"
+step "after the restart - wait for qemu to exit"
   repeat
     until machine_stopped
-    max 30
+    max 60
     pause 2
 
-step "come back up with sshd answering"
+step "after the restart - boot the machine again"
+  boot
+    os linux
+
+step "after the restart - wait for sshd"
   repeat
     until machine_ssh
     max 90

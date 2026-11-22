@@ -42,17 +42,10 @@ const errNoSuchFact = "no `check:` step has made it"
 // on purpose: a file that could write `machine_running and not machine_ssh` could also write
 // something whose failure does not say which half never happened.
 var machineFacts = map[string]string{
-	"machine_running":      "the qemu process is up",
-	"machine_stopped":      "the qemu process has gone",
-	"machine_ssh":          "sshd accepts a connection",
-	"machine_ssh_gone":     "sshd has stopped answering",
-	"machine_qga":          "the guest agent answers",
-	"machine_booted":       "the guest finished starting",
-	"machine_console_idle": "the serial console has stopped being written",
-	"machine_disk_idle":    "the disk has stopped growing",
-	"machine_recording":    "something is recording",
-	"machine_share":        "the host share has a directory",
-	"machine_frame_still":  "the frame has stopped changing",
+	"machine_running": "the qemu process is up",
+	"machine_stopped": "the qemu process has gone",
+	"machine_ssh":     "sshd accepts a connection and can run a command",
+	"machine_qga":     "the guest agent answers",
 }
 
 // isMachineFact reports whether a name is a live machine fact rather than a bound boolean.
@@ -91,29 +84,10 @@ func (e *Executor) machineFact(s walk.Step, name string) (bool, string, error) {
 		// reports too.
 		//
 		// THE ANSWER HAS AN AGE. `runProbes` ticks every ten seconds, so a `repeat` that waits on
-		// this must poll at least that slowly - which is why the file says `pause 10` rather than
-		// trusting a default.
+		// this must poll at least that slowly - which is why the files say `pause 10`.
 		return f["ssh_ready"] == "true", "sshd does not accept a connection", nil
-	case "machine_ssh_gone":
-		// THE NEGATIVE FORM, and it has a caller: a `require_ssh:` after `systemctl reboot` used to
-		// wait for the OLD daemon to stop answering first, so the success it reported was the new
-		// one's. MEASURED: without this the wait passed on the process that was about to die.
-		return f["ssh_ready"] != "true", "sshd is still answering", nil
 	case "machine_qga":
 		return f["qga_ready"] == "true", "the guest agent does not answer", nil
-	case "machine_booted":
-		return f["guest_phase"] == "up", "the guest has not finished starting", nil
-	case "machine_console_idle":
-		return f["console_idle"] != "" && atLeast(f["console_idle"], s),
-			"the console is still being written", nil
-	case "machine_disk_idle":
-		return atLeast(f["disk_grow_rate"], s), "the disk is still growing", nil
-	case "machine_recording":
-		return f["recording"] == "true", "nothing is recording", nil
-	case "machine_share":
-		return f["share_ready"] == "true", "the share has no directory", nil
-	case "machine_frame_still":
-		return atLeast(f["frame_age"], s), "the frame is still being captured", nil
 	}
 	return false, "", fmt.Errorf("`%s` is not a machine fact this build knows. The ones it knows "+
 		"are %s", name, machineFactNames())
