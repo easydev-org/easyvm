@@ -31,7 +31,7 @@ step "wait for the installer menu"
     pause 10
     until
       bind menu_up
-      from pane
+      source pane
       mode text
       rect [0, 0, 1920, 1080]
       rect_at [1920, 1080]
@@ -74,7 +74,7 @@ step "wait for the partitioning menu before choosing on it"
     pause 6
     until
       bind part_showing
-      from partmenu
+      source partmenu
       mode text
       rect [0, 0, 1920, 1080]
       rect_at [1920, 1080]
@@ -103,7 +103,7 @@ step "wait for the partition editor"
     pause 6
     until
       bind parted_showing
-      from parted
+      source parted
       mode text
       rect [0, 0, 1920, 1080]
       rect_at [1920, 1080]
@@ -180,7 +180,7 @@ step "wait for the install to finish"
     pause 15
     until
       bind finished
-      from done
+      source done
       mode text
       rect [700, 420, 1200, 640]
       rect_at [1920, 1080]
@@ -270,7 +270,7 @@ step "prove the chroot shell is actually up before typing into it"
     pause 5
     until
       bind shell_up
-      from chroot
+      source chroot
       mode text
       rect [0, 0, 1920, 1080]
       rect_at [1920, 1080]

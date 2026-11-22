@@ -70,7 +70,7 @@ step "wait for the installer window"
         settle 5
     until
       bind done
-      from screen
+      source screen
       mode text
       rect [873, 208, 1133, 395]
       rect_at [1920, 1080]
@@ -84,8 +84,8 @@ step "the desktop is the one this file was written against"
   read shot
 
 step "the screen is the one this file was written against"
-  expect
-    from shot
+  check
+    source shot
     mode like
     must
     name matched
@@ -103,7 +103,7 @@ step "wait for the accessibility page, because a click that assumes the page bef
     pause 5
     until
       bind there
-      from page
+      source page
       mode text
       rect [0, 0, 1920, 1080]
       rect_at [1920, 1080]
@@ -119,7 +119,7 @@ step "wait for the keyboard layout page, because a click that assumes the page b
     pause 5
     until
       bind there
-      from page
+      source page
       mode text
       rect [885, 208, 1036, 271]
       rect_at [1920, 1080]
@@ -135,7 +135,7 @@ step "wait for the internet connection page, because a click that assumes the pa
     pause 5
     until
       bind there
-      from page
+      source page
       mode text
       rect [873, 210, 1046, 268]
       rect_at [1920, 1080]
@@ -150,8 +150,8 @@ step "read whether the installer offered to update itself, which blocks every pa
   read page
 
 step "is the update dialog up"
-  expect
-    from page
+  check
+    source page
     mode text
     name update_offered
     rect [883, 208, 1036, 271]
@@ -170,7 +170,7 @@ step "wait for the what do you want to do with ubuntu page, because a click that
     pause 5
     until
       bind there
-      from page
+      source page
       mode text
       rect [944, 477, 1085, 554]
       rect_at [1920, 1080]
@@ -186,7 +186,7 @@ step "wait for the type of installation page, because a click that assumes the p
     pause 5
     until
       bind there
-      from page
+      source page
       mode text
       rect [944, 209, 1045, 501]
       rect_at [1920, 1080]
@@ -202,7 +202,7 @@ step "wait for the applications page, because a click that assumes the page befo
     pause 5
     until
       bind there
-      from page
+      source page
       mode text
       rect [937, 433, 1027, 496]
       rect_at [1920, 1080]
@@ -218,7 +218,7 @@ step "wait for the optimise your computer page, because a click that assumes the
     pause 5
     until
       bind there
-      from page
+      source page
       mode text
       rect [1082, 397, 1232, 465]
       rect_at [1920, 1080]
@@ -234,7 +234,7 @@ step "wait for the disk setup page, because a click that assumes the page before
     pause 5
     until
       bind there
-      from page
+      source page
       mode text
       rect [944, 473, 1054, 545]
       rect_at [1920, 1080]
@@ -250,7 +250,7 @@ step "wait for the encryption page, because a click that assumes the page before
     pause 5
     until
       bind there
-      from page
+      source page
       mode text
       rect [852, 210, 967, 271]
       rect_at [1920, 1080]
@@ -266,7 +266,7 @@ step "wait for the account page before typing into it"
     pause 5
     until
       bind there
-      from page
+      source page
       mode text
       rect [0, 0, 1920, 1080]
       rect_at [1920, 1080]
@@ -310,7 +310,7 @@ step "wait for the time zone page"
     pause 5
     until
       bind there
-      from page
+      source page
       mode text
       rect [944, 210, 1050, 268]
       rect_at [1920, 1080]
@@ -337,7 +337,7 @@ step "the installer finishes"
         settle 20
     until
       bind done
-      from screen
+      source screen
       mode text
       rect [690, 630, 1270, 730]
       rect_at [1920, 1080]

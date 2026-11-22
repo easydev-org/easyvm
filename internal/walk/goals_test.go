@@ -1812,7 +1812,7 @@ func TestTheMacOSRecoveryGateAcceptsReadableRows(t *testing.T) {
 		t.Errorf("the condition crops at scale %.0f. Measured on the real 640x480 frame: at scale 6 "+
 			"four rows read, at scale 2 only two", scale)
 	}
-	if _, has := until["from"]; !has {
+	if _, has := until["source"]; !has {
 		t.Fatal("the loop's condition names no picture - it would read the screen itself")
 	}
 	if _, ok := loop["until"].(map[string]any); !ok {
@@ -2538,20 +2538,20 @@ func TestNoCheckNamesAPhrase(t *testing.T) {
 			continue // TestEveryWalkthroughLoads reports the reason
 		}
 		for _, s := range f.Steps {
-			if c, ok := s.Spec["expect"].(map[string]any); ok {
+			if c, ok := s.Spec["check"].(map[string]any); ok {
 				visit(rel, s.Name, c)
 			}
 			if lp, ok := s.Spec["repeat"].(map[string]any); ok {
-				if c, ok := lp["expect"].(map[string]any); ok {
+				if c, ok := lp["until"].(map[string]any); ok {
 					visit(rel, s.Name, c)
 				}
 			}
 		}
 	}
 	if checks == 0 {
-		t.Fatal("no `expect:` found anywhere, so this test checked nothing")
+		t.Fatal("no `check:` found anywhere, so this test checked nothing")
 	}
-	t.Logf("checked %d `expect:` block(s)", checks)
+	t.Logf("checked %d `check:` block(s)", checks)
 }
 
 // stepsOf turns the raw list inside a `loop: do:` or an `if: then:` into Steps, so a scan can descend

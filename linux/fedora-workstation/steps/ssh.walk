@@ -108,7 +108,7 @@ step "the setup wizard is up"
     pause 10
     until
       bind up
-      from wizard
+      source wizard
       mode text
       rect [0, 150, 1920, 1080]
       rect_at [1920, 1080]
@@ -336,8 +336,8 @@ step "look at the page the route ended on"
   settle 2
 
 step "the create-account form is up, with the cursor in Full Name"
-  expect
-    from account_form
+  check
+    source account_form
     mode like
     must
     name ready
@@ -477,7 +477,7 @@ step "the Terminal result has been drawn"
     pause 2
     until
       bind drawn
-      from results
+      source results
       mode text
       rect [860, 150, 1060, 250]
       rect_at [1920, 1080]
@@ -511,7 +511,7 @@ step "the terminal is open, with a prompt"
     pause 4
     until
       bind ready
-      from shell
+      source shell
       mode text
       rect [300, 280, 1330, 810]
       rect_at [1920, 1080]

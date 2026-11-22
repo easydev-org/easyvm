@@ -112,13 +112,10 @@ func TestEveryKeyInTheTableExists(t *testing.T) {
 	// in `Subkeys`. Keeping them apart is the point of the split - a step may not say `mean:` - but
 	// the document is one table, so a row in either section must exist somewhere.
 	for _, k := range append(append([]string{}, tb.main...), tb.subkey...) {
-		if _, ok := Keys[k]; ok {
+		if declared(k) {
 			continue
 		}
-		if _, ok := Subkeys[k]; ok {
-			continue
-		}
-		t.Errorf("docs/PRIMITIVES.md lists `%s:` and neither table declares it - a reader would "+
+		t.Errorf("docs/PRIMITIVES.md lists `%s:` and nothing declares it - a reader would "+
 			"write a file that cannot load", k)
 	}
 }
@@ -132,12 +129,7 @@ func TestNoKeyIsMissingFromTheTable(t *testing.T) {
 		documented[k] = true
 	}
 	var undeclared []string
-	for k := range Keys {
-		if !documented[k] {
-			undeclared = append(undeclared, k)
-		}
-	}
-	for k := range Subkeys {
+	for k := range allDeclared() {
 		if !documented[k] {
 			undeclared = append(undeclared, k)
 		}
@@ -353,4 +345,41 @@ func countKeyInDir(t *testing.T, dir, key string) int {
 		return nil
 	})
 	return n
+}
+
+// declared reports whether any table knows this key.
+func declared(k string) bool {
+	if _, ok := Shared[k]; ok {
+		return true
+	}
+	if _, ok := Aliases[k]; ok {
+		return true
+	}
+	if _, ok := Verbs[k]; ok {
+		return true
+	}
+	for _, v := range Verbs {
+		if _, ok := v.Fields[k]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// allDeclared is every key the vocabulary knows, from whichever table holds it.
+func allDeclared() map[string]bool {
+	out := map[string]bool{}
+	for k := range Shared {
+		out[k] = true
+	}
+	for k := range Aliases {
+		out[k] = true
+	}
+	for name, v := range Verbs {
+		out[name] = true
+		for f := range v.Fields {
+			out[f] = true
+		}
+	}
+	return out
 }

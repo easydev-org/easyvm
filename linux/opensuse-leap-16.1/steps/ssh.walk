@@ -70,7 +70,7 @@ step "the disk's boot menu, when it has one"
     pause 5
     until
       bind at_menu
-      from grubmenu
+      source grubmenu
       mode text
       rect [150, 330, 1720, 460]
       rect_at [1920, 1080]
@@ -162,7 +162,7 @@ step "log in on the console, retrying until the shell answers"
         settle 14
     until
       bind logged_in
-      from console
+      source console
       mode text
       rect [0, 100, 1920, 1000]
       rect_at [1920, 1080]

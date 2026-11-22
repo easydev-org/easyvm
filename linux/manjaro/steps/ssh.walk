@@ -55,7 +55,7 @@ step "the disk's boot menu, when it has one"
     pause 5
     until
       bind at_menu
-      from grubmenu
+      source grubmenu
       mode text
       rect [300, 300, 1640, 480]
       rect_at [1920, 1080]
@@ -84,7 +84,7 @@ step "the greeter is drawn"
         settle 3
     until
       bind up
-      from greeter
+      source greeter
       mode text
       rect [740, 470, 1340, 770]
       rect_at [1920, 1080]

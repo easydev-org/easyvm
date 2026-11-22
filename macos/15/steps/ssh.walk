@@ -29,136 +29,136 @@ step "answer the wizard until the desktop appears"
         read
           name pane
       item "classify - analytics"
-        expect
-          from pane
+        check
+          source pane
           mode text
           name analytics
           rect [0, 0, 1920, 1080]
           rect_at [1920, 1080]
           words [analytics, improve]
       item "classify - data and privacy"
-        expect
-          from pane
+        check
+          source pane
           mode text
           name privacy_pane
           rect [0, 0, 1920, 1080]
           rect_at [1920, 1080]
           words [privacy, fundamental]
       item "classify - spoken languages"
-        expect
-          from pane
+        check
+          source pane
           mode text
           name languages
           rect [0, 0, 1920, 1080]
           rect_at [1920, 1080]
           words [spoken, languages]
       item "classify - accessibility"
-        expect
-          from pane
+        check
+          source pane
           mode text
           name accessibility
           rect [0, 0, 1920, 1080]
           rect_at [1920, 1080]
           words [accessibility, individual]
       item "classify - transfer"
-        expect
-          from pane
+        check
+          source pane
           mode text
           name transfer
           rect [0, 0, 1920, 1080]
           rect_at [1920, 1080]
           words [transfer, data]
       item "classify - country"
-        expect
-          from pane
+        check
+          source pane
           mode text
           name country
           rect [0, 0, 1920, 1080]
           rect_at [1920, 1080]
           words [country, region]
       item "classify - account"
-        expect
-          from pane
+        check
+          source pane
           mode text
           name account
           rect [0, 0, 1920, 1080]
           rect_at [1920, 1080]
           words [create, mac, account]
       item "classify - location"
-        expect
-          from pane
+        check
+          source pane
           mode text
           name location
           rect [0, 0, 1920, 1080]
           rect_at [1920, 1080]
           words [approximate, location]
       item "classify - screen time"
-        expect
-          from pane
+        check
+          source pane
           mode text
           name screen_time
           rect [0, 0, 1920, 1080]
           rect_at [1920, 1080]
           words [screen, report]
       item "classify - time zone"
-        expect
-          from pane
+        check
+          source pane
           mode text
           name time_zone
           rect [0, 0, 1920, 1080]
           rect_at [1920, 1080]
           words [time, zone]
       item "classify - look"
-        expect
-          from pane
+        check
+          source pane
           mode text
           name look
           rect [0, 0, 1920, 1080]
           rect_at [1920, 1080]
           words [look, appearance]
       item "classify - terms"
-        expect
-          from pane
+        check
+          source pane
           mode text
           name terms
           rect [0, 0, 1920, 1080]
           rect_at [1920, 1080]
           words [terms, conditions]
       item "classify - welcome"
-        expect
-          from pane
+        check
+          source pane
           mode text
           name welcome
           rect [0, 0, 1920, 1080]
           rect_at [1920, 1080]
           words [welcome, mac]
       item "classify - keyboard"
-        expect
-          from pane
+        check
+          source pane
           mode text
           name keyboard
           rect [0, 0, 1920, 1080]
           rect_at [1920, 1080]
           words [keyboard, assistant]
       item "classify - apple account"
-        expect
-          from pane
+        check
+          source pane
           mode text
           name apple_account
           rect [0, 0, 1920, 1080]
           rect_at [1920, 1080]
           words [sign, in, to, your, apple, account]
       item "classify - the apple account sheet"
-        expect
-          from pane
+        check
+          source pane
           mode text
           name apple_sheet
           rect [0, 0, 1920, 1080]
           rect_at [1920, 1080]
           words [are, you, sure]
       item "classify - update"
-        expect
-          from pane
+        check
+          source pane
           mode text
           name update
           rect [0, 0, 1920, 1080]
@@ -310,7 +310,7 @@ step "answer the wizard until the desktop appears"
               settle 15
     until
       bind finished
-      from wizard
+      source wizard
       mode text
       rect [31, 0, 119, 40]
       rect_at [1920, 1080]
@@ -364,7 +364,7 @@ step "wait for the desktop"
         press esc
     until
       bind ready
-      from desk
+      source desk
       mode text
       rect [31, 0, 119, 40]
       rect_at [1920, 1080]
@@ -393,7 +393,7 @@ step "the settings window is up"
     pause 3
     until
       bind done
-      from screen
+      source screen
       mode text
       rect [590, 290, 1350, 690]
       rect_at [1920, 1080]
@@ -425,7 +425,7 @@ step "the remote login result is on screen"
     pause 2
     until
       bind done
-      from screen
+      source screen
       mode text
       rect [622, 304, 748, 365]
       rect_at [1920, 1080]
@@ -450,7 +450,7 @@ step "the remote login pane is up"
     pause 3
     until
       bind done
-      from screen
+      source screen
       mode text
       rect [731, 395, 907, 453]
       rect_at [1920, 1080]
@@ -470,7 +470,7 @@ step "the switch reads on"
     pause 3
     until
       bind done
-      from screen
+      source screen
       mode text
       rect [787, 336, 953, 395]
       rect_at [1920, 1080]

@@ -29,8 +29,8 @@ step "open the installer - what is on screen"
     name open_the_installer
 
 step "open the installer - the screen says so"
-  expect
-    from open_the_installer
+  check
+    source open_the_installer
     mode text
     name asserted
     rect [0, 0, 1920, 1080]

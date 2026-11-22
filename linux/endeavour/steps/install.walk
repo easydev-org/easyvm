@@ -52,8 +52,8 @@ step "calamares is up"
     name cal
 
 step "the welcome page is in English or needs changing"
-  expect
-    from cal
+  check
+    source cal
     mode text
     name seen
     rect [570, 225, 1340, 745]
@@ -86,8 +86,8 @@ step "the installer speaks English"
     name english
 
 step "the page is in English"
-  expect
-    from english
+  check
+    source english
     mode text
     name ok
     rect [570, 225, 1340, 745]
@@ -128,8 +128,8 @@ step "the partitions page with erase selected"
     name erase
 
 step "the default filesystem is ext4"
-  expect
-    from erase
+  check
+    source erase
     mode text
     name ext4
     rect [570, 225, 1340, 745]
@@ -146,7 +146,7 @@ step "the users page settles before anything is typed into it"
     pause 8
     until
       bind here
-      from at_users
+      source at_users
       mode text
       rect [570, 225, 1340, 745]
       rect_at [1920, 1080]
@@ -220,8 +220,8 @@ step "the users page is filled in"
     name filled
 
 step "the password was accepted"
-  expect
-    from filled
+  check
+    source filled
     mode text
     name ok
     rect [570, 225, 1340, 745]
@@ -239,7 +239,7 @@ step "the summary page arrives before install is clicked"
     pause 10
     until
       bind here
-      from settle
+      source settle
       mode text
       rect [570, 225, 1340, 745]
       rect_at [1920, 1080]
@@ -252,8 +252,8 @@ step "the summary page"
     name summary
 
 step "the summary names ext4"
-  expect
-    from summary
+  check
+    source summary
     mode text
     name ext4
     rect [570, 225, 1340, 745]
@@ -284,7 +284,7 @@ step "the install is done"
     pause 15
     until
       bind finished
-      from done
+      source done
       mode text
       rect [570, 225, 1340, 745]
       rect_at [1920, 1080]

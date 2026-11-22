@@ -33,7 +33,7 @@ step "wait for the installer's product chooser to draw"
     pause 6
     until
       bind up
-      from chooser
+      source chooser
       mode text
       rect [45, 125, 242, 561]
       rect_at [1920, 1080]
@@ -62,7 +62,7 @@ step "wait for the installer's summary to draw"
     pause 6
     until
       bind up
-      from summary
+      source summary
       mode text
       rect [43, 71, 434, 593]
       rect_at [1920, 1080]
@@ -179,8 +179,8 @@ step "the changes are applied"
     name auth_applied
 
 step "changes were applied"
-  expect
-    from auth_applied
+  check
+    source auth_applied
     mode text
     name applied
     rect [132, 73, 338, 138]
@@ -211,7 +211,7 @@ step "the install finishes"
     pause 15
     until
       bind finished
-      from done
+      source done
       mode text
       rect [600, 500, 1300, 620]
       rect_at [1920, 1080]

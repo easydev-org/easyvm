@@ -72,16 +72,13 @@ func backtickedNames(s string) []string {
 // TestEveryNamedArgumentExists is the cheap half: a Summary cannot name a key the vocabulary does
 // not have.
 //
-// A SUBCKEY IS A REAL NAME. `see:`'s Summary explains `rect:`, and `rect:` is written INSIDE the
-// `check:` that asks the question, so it lives in `Subkeys` rather than `Keys`. The Summary is still
-// telling the truth about a key a reader will type - just not at step level.
+// A FIELD OF ANY VERB IS A REAL NAME. `check:`'s Summary explains `rect:`, and `rect:` is a field of
+// `check:` rather than a verb, so `declared` looks at every table - the point is that the Summary is
+// telling the truth about a key a reader will type.
 func TestEveryNamedArgumentExists(t *testing.T) {
 	for key, names := range summaryNames() {
 		for _, n := range names {
-			if _, ok := Keys[n]; ok {
-				continue
-			}
-			if _, ok := Subkeys[n]; ok {
+			if declared(n) {
 				continue
 			}
 			if retiredNames[n] {

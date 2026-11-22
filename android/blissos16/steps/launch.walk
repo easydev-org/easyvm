@@ -20,7 +20,7 @@ step "the firmware found the ESP and GRUB is running"
     pause 5
     until
       bind reached
-      from boot
+      source boot
       mode text
       rect [548, 689, 1184, 868]
       rect_at [1920, 1080]
@@ -32,7 +32,7 @@ step "wait for the home-app chooser"
     pause 5
     until
       bind asked
-      from chooser
+      source chooser
       mode text
       rect [0, 0, 1920, 1080]
       rect_at [1920, 1080]

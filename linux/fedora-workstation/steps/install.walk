@@ -60,7 +60,7 @@ step "answer the live session's welcome dialog"
     pause 5
     until
       bind offered
-      from welcome_dialog
+      source welcome_dialog
       mode text
       rect [773, 536, 1001, 639]
       rect_at [1920, 1080]
@@ -77,7 +77,7 @@ step "anaconda's web ui is up"
     pause 10
     until
       bind ready
-      from anaconda
+      source anaconda
       mode text
       rect [538, 72, 725, 143]
       rect_at [1920, 1080]
@@ -102,8 +102,8 @@ step "the wizard is in English now"
     name english
 
 step "it speaks English"
-  expect
-    from english
+  check
+    source english
     mode text
     name ok
     rect [353, 146, 978, 214]
@@ -120,8 +120,8 @@ step "the installation method page"
     name method
 
 step "that page asks how to install"
-  expect
-    from method
+  check
+    source method
     mode text
     name asking
     rect [623, 226, 931, 477]
@@ -142,7 +142,7 @@ step "the editor is up"
     pause 10
     until
       bind up
-      from blivet
+      source blivet
       mode text
       rect [610, 186, 1431, 344]
       rect_at [1920, 1080]
@@ -171,7 +171,7 @@ step "the free space menu is open"
     pause 2
     until
       bind up
-      from the_free_space_menu_is_open
+      source the_free_space_menu_is_open
       mode text
       rect [1000, 380, 1360, 460]
       rect_at [1920, 1080]
@@ -188,7 +188,7 @@ step "the root dialog is up"
     pause 2
     until
       bind up
-      from the_root_dialog_is_up
+      source the_root_dialog_is_up
       mode text
       rect [380, 320, 1100, 650]
       rect_at [1920, 1080]
@@ -215,7 +215,7 @@ step "the root partition exists"
     pause 4
     until
       bind there
-      from part1
+      source part1
       mode text
       rect [618, 331, 693, 389]
       rect_at [1920, 1080]
@@ -232,7 +232,7 @@ step "the detail page is up"
     pause 2
     until
       bind up
-      from detail
+      source detail
       mode text
       rect [390, 330, 1040, 410]
       rect_at [1920, 1080]
@@ -249,7 +249,7 @@ step "the shrink dialog is up"
     pause 2
     until
       bind up
-      from shrink_dialog
+      source shrink_dialog
       mode text
       rect [400, 200, 950, 350]
       rect_at [1920, 1080]
@@ -286,7 +286,7 @@ step "the list is up, with free space on it"
     pause 2
     until
       bind up
-      from back_at_list
+      source back_at_list
       mode text
       rect [618, 277, 694, 354]
       rect_at [1920, 1080]
@@ -305,7 +305,7 @@ step "the new free space's menu"
         settle 3
     until
       bind open
-      from fs_menu
+      source fs_menu
       mode text
       rect [1030, 380, 1350, 460]
       rect_at [1920, 1080]
@@ -322,7 +322,7 @@ step "the ESP dialog is up"
     pause 2
     until
       bind up
-      from esp_dialog
+      source esp_dialog
       mode text
       rect [571, 485, 700, 599]
       rect_at [1920, 1080]
@@ -341,7 +341,7 @@ step "set the type to the ESP"
         settle 3
     until
       bind esp
-      from type_now
+      source type_now
       mode text
       rect [560, 380, 1400, 420]
       rect_at [1920, 1080]
@@ -364,7 +364,7 @@ step "the ESP exists"
     pause 4
     until
       bind there
-      from part2
+      source part2
       mode text
       rect [1343, 466, 1403, 523]
       rect_at [1920, 1080]
@@ -385,8 +385,8 @@ step "the review page, which now names this storage"
     name review
 
 step "the review names a configured layout"
-  expect
-    from review
+  check
+    source review
     mode text
     name configured
     rect [621, 600, 735, 661]
@@ -402,7 +402,7 @@ step "next from the installation method"
         settle 12
     until
       bind here
-      from review_page
+      source review_page
       mode text
       rect [353, 266, 443, 324]
       rect_at [1920, 1080]
@@ -422,7 +422,7 @@ step "press install"
         settle 15
     until
       bind begun
-      from install_started
+      source install_started
       mode text
       rect [0, 0, 1920, 1080]
       rect_at [1920, 1080]

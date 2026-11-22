@@ -75,7 +75,7 @@ step "that menu is this medium's own language panel"
     pause 3
     until
       bind is_mx_menu
-      from mxmenu
+      source mxmenu
       mode text
       rect [560, 180, 1460, 580]
       rect_at [1920, 1080]
@@ -116,7 +116,7 @@ step "the rescue menu is up, and its footer says ESC leaves it"
     pause 3
     until
       bind is_rescue
-      from mxrescue
+      source mxrescue
       mode text
       rect [560, 180, 1460, 640]
       rect_at [1920, 1080]
@@ -200,7 +200,7 @@ step "wait for the terms page"
     pause 6
     until
       bind done
-      from screen
+      source screen
       mode text
       rect [690, 195, 1040, 255]
       rect_at [1920, 1080]
@@ -216,7 +216,7 @@ step "wait for the installation type page"
     pause 6
     until
       bind done
-      from screen
+      source screen
       mode text
       rect [660, 210, 1360, 270]
       rect_at [1920, 1080]
@@ -232,7 +232,7 @@ step "wait for the confirmation page"
     pause 6
     until
       bind done
-      from screen
+      source screen
       mode text
       rect [457, 284, 547, 340]
       rect_at [1920, 1080]
@@ -252,7 +252,7 @@ step "wait for the swap file page"
     pause 6
     until
       bind done
-      from screen
+      source screen
       mode text
       rect [0, 0, 1920, 1080]
       rect_at [1920, 1080]
@@ -268,7 +268,7 @@ step "wait for the computer identity page"
     pause 6
     until
       bind done
-      from screen
+      source screen
       mode text
       rect [387, 241, 579, 548]
       rect_at [1920, 1080]
@@ -284,7 +284,7 @@ step "wait for the localization page"
     pause 6
     until
       bind done
-      from screen
+      source screen
       mode text
       rect [314, 241, 644, 616]
       rect_at [1920, 1080]
@@ -300,7 +300,7 @@ step "wait for the account page"
     pause 6
     until
       bind done
-      from screen
+      source screen
       mode text
       rect [314, 284, 569, 412]
       rect_at [1920, 1080]
@@ -338,7 +338,7 @@ step "the installer finishes"
         settle 20
     until
       bind done
-      from screen
+      source screen
       mode text
       rect [314, 241, 594, 331]
       rect_at [1920, 1080]

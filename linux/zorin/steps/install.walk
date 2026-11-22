@@ -67,7 +67,7 @@ step "wait for the installer to put itself up"
         settle 5
     until
       bind done
-      from screen
+      source screen
       mode text
       rect [0, 0, 1920, 1080]
       rect_at [1920, 1080]
@@ -124,7 +124,7 @@ step "the updates pane is done"
     pause 3
     until
       bind done
-      from screen
+      source screen
       mode text
       rect [488, 285, 707, 355]
       rect_at [1920, 1080]
@@ -136,7 +136,7 @@ step "the keyboard pane is done"
     pause 3
     until
       bind done
-      from screen
+      source screen
       mode text
       rect [488, 285, 707, 355]
       rect_at [1920, 1080]
@@ -152,7 +152,7 @@ step "the disk warning is up"
     pause 2
     until
       bind done
-      from screen
+      source screen
       mode text
       rect [585, 421, 1073, 580]
       rect_at [1920, 1080]
@@ -164,8 +164,8 @@ step "the dialog names the filesystem it will create"
     name format
 
 step "the root partition will be ext4"
-  expect
-    from format
+  check
+    source format
     mode text
     name ext4
     rect [0, 0, 1920, 1080]
@@ -181,7 +181,7 @@ step "the disk warning is answered"
     pause 3
     until
       bind done
-      from screen
+      source screen
       mode text
       rect [487, 285, 702, 355]
       rect_at [1920, 1080]
@@ -197,7 +197,7 @@ step "the time zone pane is done"
     pause 3
     until
       bind done
-      from screen
+      source screen
       mode text
       rect [487, 285, 803, 416]
       rect_at [1920, 1080]

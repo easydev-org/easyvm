@@ -39,7 +39,7 @@ step "the greeter is drawn"
     pause 5
     until
       bind up
-      from greeter
+      source greeter
       mode text
       rect [740, 470, 1340, 770]
       rect_at [1920, 1080]
@@ -82,7 +82,7 @@ step "the welcome dialog is up, when this desktop shows one"
     pause 5
     until
       bind showing
-      from welcome
+      source welcome
       mode text
       rect [740, 600, 1180, 700]
       rect_at [1920, 1080]

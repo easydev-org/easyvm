@@ -41,7 +41,7 @@ step "the disk asks for its passphrase, when it is encrypted"
     pause 5
     until
       bind locked
-      from unlock
+      source unlock
       mode text
       rect [600, 480, 1320, 600]
       rect_at [1920, 1080]

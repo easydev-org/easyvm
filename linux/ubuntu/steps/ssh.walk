@@ -22,7 +22,7 @@ step "wait for the greeter's X server to settle on the mode it was given"
     pause 5
     until
       bind settled
-      from greeter
+      source greeter
       mode text
       rect [768, 641, 1062, 755]
       rect_at [1920, 1080]
@@ -46,7 +46,7 @@ step "the first-login wizard is up, when this build shows one"
     pause 3
     until
       bind done
-      from screen
+      source screen
       mode text
       rect [768, 641, 1062, 755]
       rect_at [1920, 1080]
@@ -62,7 +62,7 @@ step "walk the first-login pages to the end"
         settle 4
     until
       bind done
-      from page
+      source page
       mode matches
       pattern .
       rect [0, 0, 1920, 1080]

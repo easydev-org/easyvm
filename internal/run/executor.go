@@ -415,7 +415,7 @@ func (e *Executor) runOne(s walk.Step) error {
 	//
 	// ASSERT ONCE. The condition is the whole argument, and its shape is the same one a `repeat`'s
 	// `until` takes, so there is one way to ask a question.
-	case s.Has("expect"):
+	case s.Has("check"):
 		return e.doCheck(s)
 
 	// ---- 7. `control` ------------------------------------------------------------------

@@ -424,7 +424,7 @@ var Keys = map[string]Key{
 			"`from` is the loader directory inside the ESP"},
 
 	"read": {Name: "read", Kind: KindShot,
-		Summary: "capture one frame and bind it under `name:`. Every `expect:` that follows asks its " +
+		Summary: "capture one frame and bind it under `name:`. Every `check:` that follows asks its " +
 			"own question about THAT frame, with its own `rect:`"},
 
 	"settle": {Name: "settle", Kind: KindFloat,
@@ -436,18 +436,18 @@ var Keys = map[string]Key{
 			"A file that sent `acpi: power` or `ssh: poweroff` says this next, and a file that " +
 			"did not gets a clear message instead of a disk qemu still holds open"},
 
-	"expect": {Name: "expect", Kind: KindMapping,
+	"check": {Name: "check", Kind: KindMapping,
 		Summary: "compare a named reading and bind a BOOLEAN: {name, from, mode, ...}. `mode:` says " +
 			"HOW to compare. `must: true` makes a FALSE answer fail the step, which is what a file " +
 			"means when it says the screen IS the reference"},
 
 	"if": {Name: "if", Kind: KindString,
 		Summary: "run `then:` when this named boolean is true and `else:` when it is false. The " +
-			"boolean comes from a `expect:` step; a branch is a plain step list"},
+			"boolean comes from a `check:` step; a branch is a plain step list"},
 
 	"repeat": {Name: "repeat", Kind: KindMapping,
 		Summary: "the parts written down: `max:`, `do:` (the action), `ocr:` (the reading -> text), " +
-			"`expect:` (the comparison -> boolean), `until: {fact: ...}` (tests the boolean). " +
+			"`check:` (the comparison -> boolean), `until: {fact: ...}` (tests the boolean). " +
 			"Optionally `every: <seconds>` with `clock: [...]` - an action that runs ONCE when that " +
 			"long has passed, whatever the screen says"},
 
@@ -492,100 +492,279 @@ var Keys = map[string]Key{
 
 // Validate refuses a key the vocabulary does not have, and a blind pause long enough that stopping
 // the machine would not work.
+//
+// IT IS THREE QUESTIONS, because there is one table now:
+//
+//  1. which verb is this step? exactly one of `Verbs`.
+//  2. is every key either that verb's field or one of `Shared`?
+//  3. does each value have the shape its Key declares?
 func Validate(stepName string, mapping map[string]any) error {
-	// ONE ACTION PER STEP, CHECKED BEFORE THE KEYS THEMSELVES.
-	//
-	// THE FAILURE THIS PREVENTS IS SILENT: a step that writes `double:` beside `expect:` loads today,
-	// and the dispatcher takes the `expect` branch and returns, so the double-click never happens and
-	// the step reports a verdict it was supposed to reach by clicking. Measured 63 such steps in the
-	// tree this was written against. See roles.go.
-	if err := CheckOneAction(stepName, mapping); err != nil {
+	verb, err := verbOf(stepName, mapping)
+	if err != nil {
 		return err
 	}
-	// AND A STEP THAT ACTS MAY NOT BE `optional`. See the measurement in CheckOptionalDoesNotAct:
-	// four optional greeter steps pressed Escape, clicked, typed and returned into a wizard.
 	if err := CheckOptionalDoesNotAct(stepName, mapping); err != nil {
 		return err
 	}
-	for name, value := range mapping {
-		if key, ok := Keys[name]; ok {
-			// THE NAME IS WHAT THE LOG SAYS, SO IT IS A STRING AND NOTHING ELSE.
+	// A WAIT-ONLY STEP IS ITS OWN SHAPE: every other key is the wait's own or a modifier.
+	if verb == "settle" {
+		for name, value := range mapping {
 			if name == "name" {
 				continue
 			}
+			key, ok := Shared[name]
+			if !ok {
+				key, ok = Aliases[name]
+			}
+			if !ok {
+				return fmt.Errorf("step %q is a wait and writes `%s:`, which is not a modifier",
+					stepName, name)
+			}
+			if err := checkKind(key, value); err != nil {
+				return fmt.Errorf("step %q: %w", stepName, err)
+			}
+		}
+		return nil
+	}
+	// THE ALIAS AND THE WAIT-ONLY SHAPES are checked leniently: their fields are the engine's,
+	// not a verb's.
+	if verb == "action" || verb == "settle" {
+		return checkLooseAlias(stepName, mapping)
+	}
+	// AN ALIAS STEP (`require_ssh`, `desktop`, `disk_settle`, ...) is the engine's shape, and its
+	// fields are declared in `Aliases` rather than on a verb.
+	if _, isAlias := Aliases[verb]; isAlias {
+		return checkLooseAlias(stepName, mapping)
+	}
+	v := Verbs[verb]
+	for name, value := range mapping {
+		if name == "name" {
+			continue
+		}
+		// THE VERB ITSELF: its value is a flag or an argument, and the verb already accepted it.
+		if name == verb {
+			continue
+		}
+		if key, ok := v.Fields[name]; ok {
 			if err := checkKind(key, value); err != nil {
 				return fmt.Errorf("step %q: %w", stepName, err)
 			}
 			continue
 		}
-		key, ok := Subkeys[name]
-		if !ok {
-			return fmt.Errorf("step %q has unknown key %q; an unknown key used to mean a step that did nothing",
-				stepName, name)
-		}
-		// A SUB-KEY IS ALLOWED HERE ONLY WHEN THE STEP ALSO NAMES WHAT READS IT.
-		//
-		// `rect:` beside `press:` is real: the CLICK does not take a rectangle, the `when_not:` GATE
-		// that qualified it does, and the dispatcher strips the region before the click runs. What is
-		// not real is `{mean: 40}` - a step whose only key is an argument to a question nobody asked.
-		//
-		// BEFORE THE SPLIT BOTH LOADED, and the second one reached the dispatcher, which answered
-		// "no implementation for this step's keys" - a true sentence about a mistake made earlier.
-		owners := OwnersOf(name)
-		if len(owners) == 0 {
-			return fmt.Errorf("step %q writes `%s:`, which is only meaningful INSIDE another key's "+
-				"value (%s). A step cannot say it at its own level", stepName, name, Subkeys[name].Summary)
-		}
-		consumed := false
-		for _, owner := range owners {
-			if _, present := mapping[owner]; present {
-				consumed = true
+		if key, ok := Shared[name]; ok {
+			if err := checkKind(key, value); err != nil {
+				return fmt.Errorf("step %q: %w", stepName, err)
 			}
+			continue
 		}
-		if !consumed {
-			return fmt.Errorf("step %q writes `%s:`, which belongs to %s - and this step does not "+
-				"name any of them. A sub-key without its owner reads as a step with no action",
-				stepName, name, quoted(owners))
+		// AN ALIAS IS A SHAPE THE ENGINE STILL DISPATCHES ON. It is not part of what a person writes,
+		// but a compiled document carries it and it must load.
+		if key, ok := Aliases[name]; ok {
+			if err := checkKind(key, value); err != nil {
+				return fmt.Errorf("step %q: %w", stepName, err)
+			}
+			continue
 		}
-		if err := checkKind(key, value); err != nil {
-			return fmt.Errorf("step %q: %w", stepName, err)
+		// A KEY THAT BELONGS TO A DIFFERENT VERB IS A MISTAKE WORTH NAMING, because the sentence a
+		// person needs is "`text:` belongs to `press:`", not "unknown key".
+		if owner := ownerOf(name); owner != "" {
+			return fmt.Errorf("step %q is a `%s:` step and writes `%s:`, which belongs to `%s:` - "+
+				"and a step does one thing", stepName, verb, name, owner)
 		}
+		return fmt.Errorf("step %q has unknown key %q; an unknown key used to mean a step that did "+
+			"nothing", stepName, name)
 	}
 	return nil
 }
 
-// OwnersOf names the keys whose value may legitimately carry this sub-key at step level.
-//
-// IT IS THE INVERSE OF `Consumes`, plus the five keys whose arguments live in the key's own mapping
-// rather than beside it: `repeat:` owns `max`/`every`/`clock`/`fact`, `if:` owns `then`/`else`, and
-// `expect:` owns `must`. Those are still sub-keys - they are written inside a mapping in every file -
-// but the action that owns them is the one in the step, so a step that names it may carry them.
-func OwnersOf(subkey string) []string {
-	var out []string
-	for action, args := range Consumes {
-		for _, a := range args {
-			if a == subkey {
-				out = append(out, action)
-				break
-			}
+// checkLooseAlias validates a step whose action is one of the engine's shapes rather than a verb a
+// person writes: `do:`, `acpi:`, `save:` and their kin. Every key must be one the vocabulary knows.
+func checkLooseAlias(stepName string, mapping map[string]any) error {
+	for name, value := range mapping {
+		if name == "name" {
+			continue
 		}
+		if key, ok := Shared[name]; ok {
+			if err := checkKind(key, value); err != nil {
+				return fmt.Errorf("step %q: %w", stepName, err)
+			}
+			continue
+		}
+		if key, ok := Aliases[name]; ok {
+			if err := checkKind(key, value); err != nil {
+				return fmt.Errorf("step %q: %w", stepName, err)
+			}
+			continue
+		}
+		// A FIELD OF ANY VERB IS ACCEPTED ON AN ALIAS STEP, because an alias IS that verb's engine
+		// shape: `write:` renders a template and reads `template:`; `require_ssh:` reads the probe.
+		if fieldKey, ok := anyVerbField(name); ok {
+			if err := checkKind(fieldKey, value); err != nil {
+				return fmt.Errorf("step %q: %w", stepName, err)
+			}
+			continue
+		}
+		if owner := ownerOf(name); owner != "" {
+			return fmt.Errorf("step %q writes `%s:`, which belongs to `%s:`, and this step's action "+
+				"does not read it", stepName, name, owner)
+		}
+		return fmt.Errorf("step %q has unknown key %q", stepName, name)
 	}
-	if owners, ok := nestedOwners[subkey]; ok {
-		out = append(out, owners...)
-	}
-	sort.Strings(out)
-	return out
+	return nil
 }
 
-// nestedOwners is the part `Consumes` cannot express: keys written inside another key's MAPPING.
-var nestedOwners = map[string][]string{
-	"max":   {"loop"},
-	"every": {"loop"},
-	"clock": {"loop"},
-	"fact":  {"loop"},
-	"then":  {"if"},
-	"else":  {"if"},
-	"must":  {"check"},
+// verbOf finds the one verb a step names.
+//
+// AN ALIAS COUNTS AS THE VERB, because a compiled document carries the shape the engine dispatches on
+// (`disk:`, `fetch:`, `desktop:`) and it must load. The alias's own fields are not declared - it is
+// the engine's shape, not the file's vocabulary - so its arguments are checked leniently.
+func verbOf(stepName string, mapping map[string]any) (string, error) {
+	var found []string
+	for name := range mapping {
+		if _, ok := Verbs[name]; ok {
+			found = append(found, name)
+			continue
+		}
+		if _, ok := Aliases[name]; ok && isActionAlias(name) {
+			found = append(found, name)
+		}
+	}
+	if len(found) == 0 {
+		// AND A STEP THAT ONLY PUBLISHES IS THE SECOND HALF OF `stop:`. `save:` on its own is how the
+		// 62 files write "publish the disk" as a step of its own, after the machine is gone.
+		if _, ok := mapping["save"]; ok {
+			return "stop", nil
+		}
+		if _, ok := mapping["compress"]; ok {
+			return "stop", nil
+		}
+		// THE MACHINE MESSAGES ARE `control:`'S. `acpi power` and `qga shutdown` are how 20 files ask
+		// the machine itself to do something.
+		for _, name := range []string{"acpi", "qga", "wait_until"} {
+			if _, ok := mapping[name]; ok {
+				return "control", nil
+			}
+		}
+		// `do:` IS A STEP: a list run in order under one name, which is what the pane model writes.
+		if _, ok := mapping["do"]; ok {
+			return "action", nil
+		}
+		// `until:` ON ITS OWN IS A WAIT ON THE SERIAL LINE, which is how a microvm asks whether the
+		// guest got to a prompt.
+		if _, ok := mapping["until"]; ok {
+			return "action", nil
+		}
+		if _, ok := mapping["until_any"]; ok {
+			return "action", nil
+		}
+		if _, ok := mapping["desktop"]; ok {
+			return "action", nil
+		}
+		// A STEP THAT ONLY WATCHES THE DISK is the second half of making one: `disk_min_mb` and
+		// `disk_settle` say "wait until the file stops growing, and check it is big enough".
+		for _, name := range []string{"disk_min_mb", "disk_settle"} {
+			if _, ok := mapping[name]; ok {
+				return "action", nil
+			}
+		}
+		// `require_ssh:` AND ITS RETRY WORD ARE ONE STEP in 39 files.
+		if _, ok := mapping["require_ssh"]; ok {
+			return "action", nil
+		}
+		// A COLOUR-ADDRESSED CLICK IS `press` WITHOUT THE MARKER: `at_color` + `color_region` is how
+		// a file clicks a blob when the coordinate is not stable.
+		if _, ok := mapping["at_color"]; ok {
+			return "press", nil
+		}
+		if _, ok := mapping["at_button"]; ok {
+			return "press", nil
+		}
+		if _, ok := mapping["at_bottom"]; ok {
+			return "press", nil
+		}
+		// `write:` RENDERS A TEMPLATE TO DISK, which is a copy with no source file.
+		if _, ok := mapping["write"]; ok {
+			return "action", nil
+		}
+		if _, ok := mapping["screenshot"]; ok {
+			return "action", nil
+		}
+		// A STEP THAT ONLY WAITS IS A STEP. `settle: 5` says "let the screen draw" and nothing else.
+		// It is checked LAST, because a step that also clicks is a click.
+		for name := range mapping {
+			if name == "settle" || name == "wait" {
+				return "settle", nil
+			}
+		}
+		// NAME THE KEY THAT MADE IT UNKNOWN, because "names no verb" alone sends a reader looking for
+		// the missing word rather than at the misspelled one they wrote.
+		var unknown []string
+		for name := range mapping {
+			if name == "name" {
+				continue
+			}
+			unknown = append(unknown, name)
+		}
+		sort.Strings(unknown)
+		return "", fmt.Errorf("step %q names no verb, and no key it writes is one; it says %s, "+
+			"and a step is one of %s", stepName, quoted(unknown), quotedVerbNames())
+	}
+	if len(found) > 1 {
+		sort.Slice(found, func(i, j int) bool { return DispatchOrder(found[i]) < DispatchOrder(found[j]) })
+		return "", fmt.Errorf("step %q names %d actions (%s); a step does one thing, and the "+
+			"dispatcher would run `%s:` and drop the rest", stepName, len(found),
+			quoted(found), found[0])
+	}
+	return found[0], nil
+}
+
+// isActionAlias reports whether an alias is a step's action rather than a pole of one.
+//
+// `do`/`then`/`else`/`until` are parts of another step, not actions of their own.
+func isActionAlias(name string) bool {
+	switch name {
+	case "do", "then", "else", "until", "until_any", "poll", "blind_after",
+		"release", "path", "to", "template", "save", "method", "via", "text", "scale",
+		"from", "disk_gb", "disk_gpt", "disk_esp_mib", "disk_min_mb", "disk_settle",
+		"ssh_after_reboot", "ssh_probe", "terminal_wait", "type_gap", "recovery", "os":
+		return false
+	}
+	return true
+}
+
+// anyVerbField finds a key in any verb's field list, for an alias step that reads another verb's shape.
+func anyVerbField(name string) (Key, bool) {
+	for _, v := range Verbs {
+		if k, ok := v.Fields[name]; ok {
+			return k, true
+		}
+	}
+	return Key{}, false
+}
+
+// ownerOf names the verb a field belongs to, for the failure message.
+func ownerOf(field string) string {
+	var owners []string
+	for name, v := range Verbs {
+		if _, ok := v.Fields[field]; ok {
+			owners = append(owners, name)
+		}
+	}
+	sort.Strings(owners)
+	if len(owners) == 0 {
+		return ""
+	}
+	return strings.Join(owners, " or ")
+}
+
+// quotedVerbNames lists the nine verbs for a failure message.
+func quotedVerbNames() string {
+	names := make([]string, 0, len(Verbs))
+	for n := range Verbs {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return strings.Join(names, ", ")
 }
 
 // quoted renders owners as `a:`, `b:` and `c:` for a failure message.

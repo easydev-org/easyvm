@@ -55,7 +55,7 @@ step "the installer window is up"
         settle 3
     until
       bind done
-      from screen
+      source screen
       mode text
       rect [698, 153, 945, 755]
       rect_at [1920, 1080]
@@ -71,7 +71,7 @@ step "select the language, all the way to the keyboard page"
         settle 6
     until
       bind there
-      from kb
+      source kb
       mode text
       rect [728, 680, 857, 755]
       rect_at [1920, 1080]
@@ -84,7 +84,7 @@ step "the keyboard page is up"
     pause 3
     until
       bind there
-      from kb
+      source kb
       mode text
       rect [728, 680, 857, 755]
       rect_at [1920, 1080]
@@ -107,7 +107,7 @@ step "the layout types latin letters"
         type_gap 0.12
     until
       bind latin
-      from layout_test
+      source layout_test
       mode matches
       pattern "^[a-z]{2,5}$"
       rect [968, 743, 1351, 770]
@@ -124,7 +124,7 @@ step "the install page is up"
     pause 3
     until
       bind there
-      from inst
+      source inst
       mode text
       rect [1012, 391, 1105, 548]
       rect_at [1920, 1080]
@@ -145,7 +145,7 @@ step "the drive page is up"
     pause 3
     until
       bind there
-      from drv
+      source drv
       mode text
       rect [726, 458, 1217, 748]
       rect_at [1920, 1080]
@@ -166,7 +166,7 @@ step "wait for the account pane"
     pause 2
     until
       bind done
-      from screen
+      source screen
       mode text
       rect [731, 533, 1021, 790]
       rect_at [1920, 1080]
@@ -185,7 +185,7 @@ step "type the display name"
         type_gap 0.09
     until
       bind took
-      from name_box
+      source name_box
       mode text
       rect [968, 518, 1411, 541]
       rect_at [1920, 1080]
@@ -201,7 +201,7 @@ step "create user account, and wait for the password pane"
         settle 8
     until
       bind there
-      from pw_pane
+      source pw_pane
       mode text
       rect [943, 383, 1161, 544]
       rect_at [1920, 1080]
@@ -236,7 +236,7 @@ step "the install has started"
     pause 6
     until
       bind begun
-      from started
+      source started
       mode text
       rect [491, 722, 598, 784]
       rect_at [1920, 1080]

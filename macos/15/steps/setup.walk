@@ -35,7 +35,7 @@ step "wait for the recovery menu"
     pause 10
     until
       bind done
-      from recovery
+      source recovery
       mode text
       rect [760, 200, 1400, 560]
       rect_at [1920, 1080]
@@ -65,8 +65,8 @@ step "is the first disk the uninitialised one"
   read details
 
 step "the first disk is the uninitialised one"
-  expect
-    from details
+  check
+    source details
     mode contains
     name uninitialised
     rect [360, 100, 1000, 160]
@@ -86,7 +86,7 @@ step "step down to the uninitialised disk"
               settle 1
           until
             bind uninitialised
-            from details
+            source details
             mode contains
             rect [360, 100, 1000, 160]
             rect_at [1920, 1080]
@@ -103,7 +103,7 @@ step "erase - open the sheet"
         settle 3
     until
       bind sheet_up
-      from sheet
+      source sheet
       mode text
       rect [0, 0, 1920, 1080]
       rect_at [1920, 1080]
@@ -129,7 +129,7 @@ step "erase - wait for the report"
     pause 5
     until
       bind done
-      from screen
+      source screen
       mode text
       rect [0, 0, 1920, 1080]
       rect_at [1920, 1080]
@@ -149,7 +149,7 @@ step "the recovery menu is back"
     pause 5
     until
       bind done
-      from screen
+      source screen
       mode text
       rect [813, 300, 1007, 374]
       rect_at [1920, 1080]
@@ -169,7 +169,7 @@ step "wait for the installer to load"
     pause 10
     until
       bind loaded
-      from instaload
+      source instaload
       mode text
       rect [600, 520, 1300, 640]
       rect_at [1920, 1080]
@@ -185,7 +185,7 @@ step "wait for the licence pane"
     pause 10
     until
       bind licence_up
-      from licence
+      source licence
       mode text
       rect [0, 0, 1920, 1080]
       rect_at [1920, 1080]
@@ -201,7 +201,7 @@ step "wait for the licence sheet"
     pause 5
     until
       bind sheet_up
-      from sheet
+      source sheet
       mode text
       rect [0, 0, 1920, 1080]
       rect_at [1920, 1080]
@@ -225,7 +225,7 @@ step "the copy runs until the Setup Assistant appears"
     pause 20
     until
       bind done
-      from screen
+      source screen
       mode text
       rect [0, 0, 1920, 1080]
       rect_at [1920, 1080]

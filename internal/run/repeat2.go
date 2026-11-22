@@ -182,7 +182,7 @@ func (e *Executor) expectOnce(parent walk.Step, cond map[string]any) error {
 	sub := walk.Step{
 		Index: parent.Index,
 		Name:  parent.Name + " [until]",
-		Spec:  map[string]any{"expect": spec},
+		Spec:  map[string]any{"check": spec},
 	}
 	return e.doCheck(sub)
 }

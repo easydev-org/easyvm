@@ -28,14 +28,14 @@ func TestMustMakesAFalseReferenceComparisonFailTheStep(t *testing.T) {
 
 	base := func(must bool) map[string]any {
 		ck := map[string]any{
-			"name": "matched", "from": "shot", "mode": "like",
+			"name": "matched", "source": "shot", "mode": "like",
 			"rect": []any{0, 0, 1920, 1080}, "rect_at": []any{1920, 1080},
 			"reference": "reference/desktop.png", "range": []any{0.97, 1.0},
 		}
 		if must {
 			ck["must"] = true
 		}
-		return map[string]any{"expect": ck}
+		return map[string]any{"check": ck}
 	}
 	newEx := func(frame string) *Executor {
 		return &Executor{

@@ -35,8 +35,8 @@ step "read the menu"
     name menu
 
 step "the menu offers Installation"
-  expect
-    from menu
+  check
+    source menu
     mode text
     name has_install
     rect [816, 507, 965, 571]
@@ -132,8 +132,8 @@ step "read the result"
     name done
 
 step "it says the install succeeded"
-  expect
-    from done
+  check
+    source done
     mode text
     name installed
     rect [818, 392, 1033, 453]

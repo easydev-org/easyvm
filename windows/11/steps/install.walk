@@ -75,7 +75,7 @@ step "Setup is on screen"
     pause 5
     until
       bind done
-      from screen
+      source screen
       mode text
       rect [0, 0, 1920, 1080]
       rect_at [1920, 1080]
@@ -259,8 +259,8 @@ step "the screen is the one this file was written against"
   # `rect` as a PIXEL pair with `rect_at`, rather than a fraction, because 1000/1080 is the edge of
   # a taskbar that is 40 px tall at this resolution - a fraction would move with the guest's size
   # and the taskbar's edge is what has to be excluded.
-  expect
-    from shot
+  check
+    source shot
     mode like
     must
     name matched

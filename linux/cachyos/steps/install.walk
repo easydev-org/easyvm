@@ -52,7 +52,7 @@ step "the installer is on screen"
     pause 5
     until
       bind up
-      from cal
+      source cal
       mode text
       rect [792, 301, 1032, 774]
       rect_at [1920, 1080]
@@ -80,7 +80,7 @@ step "choose English, retrying until the page says so"
         settle 6
     until
       bind ok
-      from english
+      source english
       mode text
       rect [718, 369, 991, 428]
       rect_at [1920, 1080]
@@ -97,7 +97,7 @@ step "the location page arrives after welcome"
     pause 10
     until
       bind here
-      from at_location
+      source at_location
       mode text
       rect [399, 639, 1036, 699]
       rect_at [1920, 1080]
@@ -114,7 +114,7 @@ step "the keyboard page arrives after location"
     pause 10
     until
       bind here
-      from at_keyboard
+      source at_keyboard
       mode text
       rect [393, 511, 497, 572]
       rect_at [1920, 1080]
@@ -131,7 +131,7 @@ step "the bootloader page arrives after keyboard"
     pause 10
     until
       bind here
-      from at_bootloader
+      source at_bootloader
       mode text
       rect [797, 713, 1456, 774]
       rect_at [1920, 1080]
@@ -152,8 +152,8 @@ step "grub is selected"
     name grub
 
 step "the bootloader is grub"
-  expect
-    from grub
+  check
+    source grub
     mode text
     name ok
     rect [401, 285, 483, 342]
@@ -170,7 +170,7 @@ step "the partitions page arrives after the bootloader"
     pause 10
     until
       bind here
-      from at_partitions
+      source at_partitions
       mode text
       rect [483, 288, 606, 450]
       rect_at [1920, 1080]
@@ -199,7 +199,7 @@ step "the partitions page settles after the filesystem list closes"
     pause 10
     until
       bind here
-      from at_partitions_again
+      source at_partitions_again
       mode text
       rect [483, 288, 606, 450]
       rect_at [1920, 1080]
@@ -212,8 +212,8 @@ step "the page after choosing ext4"
     name fs
 
 step "the root partition is ext4"
-  expect
-    from fs
+  check
+    source fs
     mode text
     name ext4
     rect [0, 0, 1920, 1080]
@@ -246,7 +246,7 @@ step "the users page arrives before anything is typed into it"
     pause 10
     until
       bind here
-      from at_users
+      source at_users
       mode text
       rect [401, 453, 696, 579]
       rect_at [1920, 1080]
@@ -284,8 +284,8 @@ step "the users page is filled in"
     name filled
 
 step "the password was accepted"
-  expect
-    from filled
+  check
+    source filled
     mode text
     name ok
     rect [396, 306, 494, 452]
@@ -303,7 +303,7 @@ step "the summary page arrives before install is clicked"
     pause 10
     until
       bind here
-      from at_summary
+      source at_summary
       mode text
       rect [452, 279, 676, 340]
       rect_at [1920, 1080]
@@ -316,8 +316,8 @@ step "the summary page"
     name summary
 
 step "the summary names ext4"
-  expect
-    from summary
+  check
+    source summary
     mode text
     name ext4
     rect [0, 0, 1920, 1080]
@@ -348,7 +348,7 @@ step "the install is done"
     pause 15
     until
       bind finished
-      from done
+      source done
       mode text
       rect [912, 549, 1009, 607]
       rect_at [1920, 1080]

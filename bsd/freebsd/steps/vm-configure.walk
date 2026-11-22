@@ -40,7 +40,7 @@ step "wait for the desktop"
     pause 10
     until
       bind ready
-      from desk
+      source desk
       mode text
       rect [0, 0, 117, 44]
       rect_at [1920, 1080]
@@ -51,8 +51,8 @@ step "the desktop is not a login prompt"
   read greeter
 
 step "check there is no login prompt"
-  expect
-    from greeter
+  check
+    source greeter
     mode text
     name no_prompt
     rect [0, 0, 117, 44]

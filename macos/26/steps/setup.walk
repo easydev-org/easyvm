@@ -35,7 +35,7 @@ step "wait for the recovery menu"
     pause 10
     until
       bind done
-      from recovery
+      source recovery
       mode text
       rect [760, 200, 1400, 560]
       rect_at [1920, 1080]
@@ -66,8 +66,8 @@ step "is the selected disk the uninitialised one"
     name details
 
 step "the first disk is the uninitialised one"
-  expect
-    from details
+  check
+    source details
     mode contains
     name uninitialised
     rect [360, 105, 1100, 200]
@@ -85,8 +85,8 @@ step "select the second disk, when row 1 was the boot image"
         read
           name details
       item "the second disk is the uninitialised one"
-        expect
-          from details
+        check
+          source details
           mode contains
           name uninitialised
           rect [360, 105, 1100, 200]
@@ -103,7 +103,7 @@ step "erase - open the sheet"
         settle 3
     until
       bind sheet_up
-      from sheet
+      source sheet
       mode text
       rect [720, 425, 1200, 680]
       rect_at [1920, 1080]
@@ -130,7 +130,7 @@ step "erase - wait for the report"
     pause 5
     until
       bind done
-      from screen
+      source screen
       mode text
       rect [0, 0, 1920, 1080]
       rect_at [1920, 1080]
@@ -151,7 +151,7 @@ step "the recovery menu is back"
     pause 5
     until
       bind done
-      from screen
+      source screen
       mode text
       rect [760, 200, 1400, 560]
       rect_at [1920, 1080]
@@ -172,7 +172,7 @@ step "wait for the installer to load"
     pause 10
     until
       bind loaded
-      from instaload
+      source instaload
       mode text
       rect [400, 560, 1520, 700]
       rect_at [1920, 1080]
@@ -189,7 +189,7 @@ step "wait for the licence pane"
     pause 10
     until
       bind licence_up
-      from licence
+      source licence
       mode text
       rect [660, 430, 1260, 700]
       rect_at [1920, 1080]
@@ -206,7 +206,7 @@ step "wait for the licence sheet"
     pause 5
     until
       bind sheet_up
-      from sheet
+      source sheet
       mode text
       rect [780, 330, 1140, 560]
       rect_at [1920, 1080]
@@ -235,8 +235,8 @@ step "the copy runs, look 1 of at most 8"
         read
           name cancelshot
       item "classify - the cancel confirmation"
-        expect
-          from cancelshot
+        check
+          source cancelshot
           mode text
           name cancel_sheet
           rect [820, 300, 1100, 600]
@@ -251,7 +251,7 @@ step "the copy runs, look 1 of at most 8"
               settle 10
     until
       bind done
-      from screen
+      source screen
       mode matches
       pattern "select your country or region|transfer your information to this mac|choose a wireless network|sign in with your apple id|update mac automatically|choose your look"
       rect [0, 0, 1920, 1080]
@@ -277,7 +277,7 @@ step "wait for the guest to be drawing again after reset 1"
     pause 10
     until
       bind anything1
-      from back1
+      source back1
       mode matches
       pattern .
       rect [0, 0, 1920, 1080]
@@ -290,7 +290,7 @@ step "the copy runs, look 2 of at most 8"
     pause 20
     until
       bind done
-      from screen
+      source screen
       mode matches
       pattern "select your country or region|transfer your information to this mac|choose a wireless network|sign in with your apple id|update mac automatically|choose your look"
       rect [0, 0, 1920, 1080]
@@ -316,7 +316,7 @@ step "wait for the guest to be drawing again after reset 2"
     pause 10
     until
       bind anything2
-      from back2
+      source back2
       mode matches
       pattern .
       rect [0, 0, 1920, 1080]
@@ -329,7 +329,7 @@ step "the copy runs, look 3 of at most 8"
     pause 20
     until
       bind done
-      from screen
+      source screen
       mode matches
       pattern "select your country or region|transfer your information to this mac|choose a wireless network|sign in with your apple id|update mac automatically|choose your look"
       rect [0, 0, 1920, 1080]
@@ -355,7 +355,7 @@ step "wait for the guest to be drawing again after reset 3"
     pause 10
     until
       bind anything3
-      from back3
+      source back3
       mode matches
       pattern .
       rect [0, 0, 1920, 1080]
@@ -368,7 +368,7 @@ step "the copy runs, look 4 of at most 8"
     pause 20
     until
       bind done
-      from screen
+      source screen
       mode matches
       pattern "select your country or region|transfer your information to this mac|choose a wireless network|sign in with your apple id|update mac automatically|choose your look"
       rect [0, 0, 1920, 1080]
@@ -394,7 +394,7 @@ step "wait for the guest to be drawing again after reset 4"
     pause 10
     until
       bind anything4
-      from back4
+      source back4
       mode matches
       pattern .
       rect [0, 0, 1920, 1080]
@@ -407,7 +407,7 @@ step "the copy runs, look 5 of at most 8"
     pause 20
     until
       bind done
-      from screen
+      source screen
       mode matches
       pattern "select your country or region|transfer your information to this mac|choose a wireless network|sign in with your apple id|update mac automatically|choose your look"
       rect [0, 0, 1920, 1080]
@@ -433,7 +433,7 @@ step "wait for the guest to be drawing again after reset 5"
     pause 10
     until
       bind anything5
-      from back5
+      source back5
       mode matches
       pattern .
       rect [0, 0, 1920, 1080]
@@ -446,7 +446,7 @@ step "the copy runs, look 6 of at most 8"
     pause 20
     until
       bind done
-      from screen
+      source screen
       mode matches
       pattern "select your country or region|transfer your information to this mac|choose a wireless network|sign in with your apple id|update mac automatically|choose your look"
       rect [0, 0, 1920, 1080]
@@ -472,7 +472,7 @@ step "wait for the guest to be drawing again after reset 6"
     pause 10
     until
       bind anything6
-      from back6
+      source back6
       mode matches
       pattern .
       rect [0, 0, 1920, 1080]
@@ -485,7 +485,7 @@ step "the copy runs, look 7 of at most 8"
     pause 20
     until
       bind done
-      from screen
+      source screen
       mode matches
       pattern "select your country or region|transfer your information to this mac|choose a wireless network|sign in with your apple id|update mac automatically|choose your look"
       rect [0, 0, 1920, 1080]
@@ -511,7 +511,7 @@ step "wait for the guest to be drawing again after reset 7"
     pause 10
     until
       bind anything7
-      from back7
+      source back7
       mode matches
       pattern .
       rect [0, 0, 1920, 1080]
@@ -524,7 +524,7 @@ step "the copy runs, look 8 of at most 8"
     pause 20
     until
       bind done
-      from screen
+      source screen
       mode matches
       pattern "select your country or region|transfer your information to this mac|choose a wireless network|sign in with your apple id|update mac automatically|choose your look"
       rect [0, 0, 1920, 1080]

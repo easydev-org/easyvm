@@ -30,8 +30,8 @@ step "the medium's GRUB menu is up"
     name grub
 
 step "that menu names mint"
-  expect
-    from grub
+  check
+    source grub
     mode text
     name is_mint
     rect [0, 0, 1920, 1080]
@@ -99,8 +99,8 @@ step "the desktop's install icon is on screen"
     name desktop
 
 step "that icon names the installer"
-  expect
-    from desktop
+  check
+    source desktop
     mode text
     name launcher
     rect [0, 0, 1920, 1080]
@@ -121,7 +121,7 @@ step "the installer window is up"
     pause 6
     until
       bind up
-      from installer
+      source installer
       mode text
       rect [0, 0, 1920, 1080]
       rect_at [1920, 1080]
@@ -150,8 +150,8 @@ step "the dialog names the filesystem it will create"
     name format
 
 step "the root partition will be ext4"
-  expect
-    from format
+  check
+    source format
     mode text
     name ext4
     rect [0, 0, 1920, 1080]
@@ -195,7 +195,7 @@ step "the install finishes"
     pause 15
     until
       bind done
-      from finished
+      source finished
       mode text
       rect [0, 0, 1920, 1080]
       rect_at [1920, 1080]

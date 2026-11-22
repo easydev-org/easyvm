@@ -36,7 +36,7 @@ step "the greeter is drawn"
         settle 4
     until
       bind up
-      from greeter
+      source greeter
       mode text
       rect [740, 470, 1340, 770]
       rect_at [1920, 1080]

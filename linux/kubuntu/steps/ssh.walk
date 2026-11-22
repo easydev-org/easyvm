@@ -22,7 +22,7 @@ step "the session is up, which is what autologin is for"
     pause 10
     until
       bind up
-      from desk
+      source desk
       mode text
       rect [0, 0, 1920, 1080]
       rect_at [1920, 1080]

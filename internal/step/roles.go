@@ -2,7 +2,6 @@ package step
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 )
 
@@ -88,188 +87,6 @@ func (r Role) String() string {
 	return "unknown"
 }
 
-// Roles is every key in Keys, plus the sub-keys that only appear inside a mapping, classified.
-//
-// A KEY HERE THAT IS ALSO A STEP KEY MUST HAVE A ROLE OTHER THAN RoleUnknown; the test walks the
-// real files, asks which keys appear at step level, and fails on any it finds without one. That is
-// how `os:` became an argument rather than an accident.
-var Roles = map[string]Role{
-	// --- identity and gating -----------------------------------------------------------
-	"name":         RoleModifier, // the log line, not a decision
-	"optional":     RoleModifier,
-	"needs":        RoleGate,
-	"when_not":     RoleGate,
-	"when_not_any": RoleGate,
-
-	// --- the machine's own lifecycle ----------------------------------------------------
-	"boot":      RoleAction,
-	"os":        RoleArgument, // the guest family; `boot:` and `write:` both read it
-	"iso":       RoleArgument,
-	"recovery":  RoleArgument,
-	"answer_cd": RoleArgument,
-	"driver_cd": RoleArgument,
-
-	// --- how big the guest is ------------------------------------------------------------
-	"memory_mb":       RoleArgument,
-	"cpus":            RoleArgument,
-	"kernel":          RoleArgument,
-	"initrd":          RoleArgument,
-	"microvm":         RoleArgument,
-	"kernel_append":   RoleArgument,
-	"shutdown":        RoleAction,
-	"acpi":            RoleAction,
-	"qga":             RoleAction,
-	"wait_until":      RoleAction,
-	"compress":        RoleAction,
-
-	// --- the disk ------------------------------------------------------------------------
-	"disk":         RoleAction, // names a file; with `disk_gb:` it creates one
-	"disk_gb":      RoleArgument,
-	"disk_gpt":     RoleArgument,
-	"disk_esp_mib": RoleArgument,
-	"disk_settle":  RoleAction, // waits for the disk to stop growing
-	"disk_min_mb":  RoleArgument,
-
-	// --- the screen: act ----------------------------------------------------------------
-	"click":           RoleAction,
-	"double":          RoleAction,
-	"at_button":       RoleAction,
-	"at_color":        RoleAction,
-	"color_tolerance": RoleArgument,
-	"color_region":    RoleArgument,
-	"at_bottom":       RoleAction,
-	"key":             RoleAction,
-	"type":            RoleAction,
-	"clear":           RoleArgument,
-	"modifier":        RoleArgument,
-	"type_gap":        RoleArgument,
-	"run":             RoleAction,
-	"terminal_wait":   RoleArgument,
-
-	// --- the screen: read ---------------------------------------------------------------
-	"blind_after":      RoleArgument,
-	"until":            RoleAction,
-	"until_any":        RoleAction,
-	"poll":             RoleArgument,
-	"timeout":          RoleModifier,
-	"scale":            RoleArgument,
-	"screenshot":       RoleAction,
-	"desktop":          RoleAction,
-	"ssh":              RoleAction,
-	"require_ssh":      RoleAction,
-	"ssh_probe":        RoleArgument,
-	"ssh_after_reboot": RoleArgument,
-	"scp":              RoleAction,
-	"adb":              RoleAction,
-	"adb_privileged":   RoleAction,
-	"adb_connect":      RoleAction,
-
-	// --- panes: the macOS shape ---------------------------------------------------------
-	"when":         RoleGate,
-	"do":           RoleAction, // a list of steps run in order under one name
-	"release":      RoleArgument,
-	"write":        RoleAction,
-	"esp_fallback": RoleAction,
-
-	// --- the three-step model -----------------------------------------------------------
-	"text": RoleArgument,
-	"colour": RoleArgument,
-	"button": RoleArgument,
-	"at": RoleArgument,
-	"anchor": RoleArgument,
-	"fallback": RoleArgument,
-	"gap": RoleArgument,
-	"method": RoleArgument,
-	"save": RoleArgument,
-	"via": RoleArgument,
-	"copy":  RoleAction,
-	"stop":  RoleAction,
-	"read":  RoleAction,
-	"press": RoleAction,
-
-	// --- `check:` and the relations inside it --------------------------------------------
-	"expect":        RoleAction,
-	"mode":         RoleSubkey,
-	"must":         RoleSubkey, // `check: {must: true}` - a false answer fails the step
-	"words":        RoleSubkey,
-	"without":      RoleSubkey,
-	"range":        RoleSubkey,
-	"pattern":      RoleSubkey,
-	"if":           RoleAction, // the conditional step, an action with `then:`/`else:`
-	"then":         RoleSubkey,
-	"else":         RoleSubkey,
-	"fact":         RoleSubkey,
-	"repeat":         RoleAction,
-	"max":          RoleSubkey,
-	"every":        RoleSubkey,
-	"clock":        RoleSubkey,
-	"fetch":        RoleAction,
-	"template":     RoleArgument,
-	"contains_any": RoleSubkey,
-	"not_contains": RoleSubkey,
-	"greater_than": RoleSubkey,
-	"rect":         RoleSubkey, // inside `see:`/`loop:`, not a step of its own
-	"rect_at":      RoleSubkey,
-	"of":           RoleSubkey,
-	"to":           RoleSubkey,
-	"reference":    RoleSubkey,
-	"path":         RoleSubkey, // `qga: {path: ...}` at step level
-	"settle":       RoleModifier,
-}
-
-// Consumes names, for each action, the OTHER step-level keys it reads as its own arguments.
-//
-// THIS IS THE PART THAT MAKES "ONE ACTION" TRUE RATHER THAN MERELY DECLARED. `type:` reads `click:`
-// as the field to click before typing, so `{type: "...", click: [x, y]}` is ONE action and must not
-// be refused - while `{check: {...}, click: [x, y]}` is TWO, because nothing in `doCheck` reads a
-// click, and the second one would be silently dropped.
-//
-// A KEY IN BOTH Roles AS RoleAction AND HERE AS A CONSUMED ARGUMENT is the interesting case: `click`
-// is an action on its own and an argument of `type`. That is deliberate and it is the general
-// problem this whole design is about - an argument may belong to more than one action.
-var Consumes = map[string][]string{
-	"press": {"click", "key", "clear", "modifier", "type_gap", "double"},
-	"type": {"click", "clear", "modifier", "type_gap"},
-	"boot": {"os", "iso", "recovery", "answer_cd", "driver_cd", "kernel", "initrd", "memory_mb", "cpus", "microvm", "kernel_append"},
-	"disk": {"disk_gb", "disk_gpt", "disk_esp_mib", "disk_min_mb"},
-	"write": {"os", "release"},
-	"fetch": {"os", "release", "recovery", "template"},
-	"run": {"terminal_wait", "type_gap"},
-	"shutdown": {},
-	"stop": {"method", "save", "disk_min_mb", "timeout"},
-	"copy": {"from", "to", "template"},
-	"compress": {"disk_min_mb"},
-	"read": {"rect", "rect_at", "of", "scale", "reference", "name"},
-	"expect": {"mode", "words", "without", "range", "pattern", "name", "must", "reference", "file", "desktop"},
-	"repeat": {"do", "until", "max"},
-	"desktop": {"os", "timeout", "reference", "range", "rect", "rect_at"},
-	"adb": {},
-	"until": {"from", "blind_after", "poll", "rect", "rect_at", "scale"},
-	"until_any": {"from", "blind_after", "poll", "rect", "rect_at", "scale"},
-	"expect_any": {"rect", "rect_at", "scale"},
-	"qga": {"path", "mode", "timeout"},
-	"scp": {"template", "to"},
-	"when": {"rect", "rect_at", "scale"},
-	"when_not": {"rect", "rect_at", "scale"},
-	"when_not_any": {"rect", "rect_at", "scale"},
-}
-
-// ActionsIn says which step-level keys would start work in this step, IN DISPATCH ORDER.
-//
-// THE ORDER MATTERS AND IT IS NOT COSMETIC: the executor is a `switch` whose first matching case
-// wins, so when two actions are present the EARLIER one runs and the later one is dropped. Returning
-// them in that order is what lets the error message name the key that will never run.
-func ActionsIn(mapping map[string]any) []string {
-	var found []string
-	for key := range mapping {
-		if Roles[key] == RoleAction {
-			found = append(found, key)
-		}
-	}
-	sort.Slice(found, func(i, j int) bool { return DispatchOrder(found[i]) < DispatchOrder(found[j]) })
-	return found
-}
-
 // CheckOneAction refuses a step that names two actions, unless the earlier one consumes the later.
 //
 // THE MESSAGE NAMES THE LOST KEY, because that is the whole point: a file that wrote
@@ -343,7 +160,7 @@ func CheckOptionalDoesNotAct(stepName string, mapping map[string]any) error {
 		"click": true, "double": true, "key": true, "press": true, "type": true,
 		"run": true, "ssh": true, "scp": true, "script": true, "qga": true, "adb": true,
 	}
-	for _, key := range ActionsIn(mapping) {
+	for key := range mapping {
 		if !presses[key] {
 			continue
 		}
@@ -356,33 +173,6 @@ func CheckOptionalDoesNotAct(stepName string, mapping map[string]any) error {
 			stepName, key, key)
 	}
 	return nil
-}
-
-func CheckOneAction(stepName string, mapping map[string]any) error {
-	actions := ActionsIn(mapping)
-	if len(actions) < 2 {
-		return nil
-	}
-	first := actions[0]
-	consumed := map[string]bool{first: true}
-	for _, k := range Consumes[first] {
-		consumed[k] = true
-	}
-	var dropped []string
-	for _, a := range actions[1:] {
-		if !consumed[a] {
-			dropped = append(dropped, a)
-		}
-	}
-	if len(dropped) == 0 {
-		// Every later action is an argument of the first. `type:`'s `click:` is this case, and it
-		// is one action rather than two.
-		return nil
-	}
-	return fmt.Errorf("step %q names %d actions: `%s:` runs, and %s never %s - the dispatcher "+
-		"takes the first branch and returns. A step is ONE action and its arguments; split this "+
-		"into %d steps, or make the dropped key an argument the action reads",
-		stepName, len(actions), first, quoteAll(dropped), plural(len(dropped)), len(actions))
 }
 
 func quoteAll(names []string) string {
@@ -400,28 +190,3 @@ func plural(n int) string {
 	return "run"
 }
 
-// DispatchOrder is the executor's own `switch` order, transcribed.
-//
-// IT IS A COPY AND A COPY CAN DRIFT, so `TestDispatchOrderMatchesTheExecutor` reads `executor.go`
-// and fails if this list and the source disagree. Without that check this table would be a second
-// place to be wrong.
-var dispatchOrder = []string{
-	"boot", "press", "run", "copy", "read", "expect", "control", "if", "stop", "repeat", "when", "when_not", "when_not_any", "do", "until", "until_any", "needs", "require", "require_ssh", "disk", "disk_settle", "fetch", "asset", "build", "generate", "write", "esp_fallback", "desktop", "at_color", "at_bottom", "at_button", "wait", "settle",
-}
-
-var dispatchRank = func() map[string]int {
-	m := make(map[string]int, len(dispatchOrder))
-	for i, k := range dispatchOrder {
-		m[k] = i
-	}
-	return m
-}()
-
-// DispatchOrder returns a key's position in the executor's switch, or a large number for a key
-// that is not a dispatch case (an argument, a sub-key).
-func DispatchOrder(key string) int {
-	if r, ok := dispatchRank[key]; ok {
-		return r
-	}
-	return len(dispatchOrder) + 1
-}

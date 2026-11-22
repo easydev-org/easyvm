@@ -37,8 +37,8 @@ step "calamares is open"
     name cal
 
 step "the installer's first page"
-  expect
-    from cal
+  check
+    source cal
     mode text
     name opened
     rect [0, 0, 1920, 1080]
@@ -78,8 +78,8 @@ step "the erase page shows ext4"
     name fs
 
 step "the default filesystem is ext4"
-  expect
-    from fs
+  check
+    source fs
     mode text
     name ext4
     rect [0, 0, 1920, 1080]
@@ -132,8 +132,8 @@ step "the users page is filled in"
     name filled
 
 step "the password was accepted"
-  expect
-    from filled
+  check
+    source filled
     mode text
     name ok
     rect [0, 0, 1920, 1080]
@@ -150,8 +150,8 @@ step "the summary page"
     name summary
 
 step "the summary names ext4"
-  expect
-    from summary
+  check
+    source summary
     mode text
     name ext4
     rect [0, 0, 1920, 1080]
@@ -180,7 +180,7 @@ step "the install is done"
     pause 15
     until
       bind finished
-      from done
+      source done
       mode text
       rect [0, 0, 1920, 1080]
       rect_at [1920, 1080]

@@ -54,7 +54,7 @@ step "calamares is up"
         settle 10
     until
       bind done
-      from screen
+      source screen
       mode text
       rect [810, 361, 978, 495]
       rect_at [1920, 1080]
@@ -78,7 +78,7 @@ step "next through the pages, until the users page is up"
         settle 8
     until
       bind here
-      from at_users
+      source at_users
       mode text
       rect [637, 384, 1146, 526]
       rect_at [1920, 1080]
@@ -96,7 +96,7 @@ step "the full name field"
         settle 2
     until
       bind took
-      from name_field
+      source name_field
       mode text
       rect [626, 362, 829, 389]
       rect_at [1920, 1080]
@@ -136,7 +136,7 @@ step "next to the partitions page"
         settle 6
     until
       bind here
-      from at_partitions
+      source at_partitions
       mode text
       rect [680, 360, 860, 469]
       rect_at [1920, 1080]
@@ -156,7 +156,7 @@ step "partitions -> summary"
         settle 6
     until
       bind here
-      from at_summary
+      source at_summary
       mode text
       rect [662, 322, 763, 377]
       rect_at [1920, 1080]
@@ -172,7 +172,7 @@ step "summary - install"
         settle 12
     until
       bind begun
-      from summary_after
+      source summary_after
       mode text
       rect [602, 809, 703, 870]
       rect_at [1920, 1080]

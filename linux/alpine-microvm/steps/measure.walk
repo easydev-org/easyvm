@@ -45,8 +45,8 @@ step "see the whole screen as \"page\""
   # `want:` COMBINED THREE COMPARISONS INTO ONE BOOLEAN AND WAS USED NOWHERE. A `check:` binds one
   # boolean from one reading, so this is three steps - each one says which measurement it is about.
 step "the screen says Alpine"
-  expect
-    from page
+  check
+    source page
     mode text
     name page_says_alpine
     rect [0, 0, 720, 400]

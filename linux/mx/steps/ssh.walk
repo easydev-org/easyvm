@@ -35,7 +35,7 @@ step "grub shell, when the disk drops into one"
     pause 4
     until
       bind at_shell
-      from shell
+      source shell
       mode text
       rect [450, 170, 1470, 900]
       rect_at [1920, 1080]
@@ -58,7 +58,7 @@ step "the boot menu, when it is not already booting"
     pause 4
     until
       bind at_menu
-      from bootmenu
+      source bootmenu
       mode text
       rect [660, 200, 1620, 520]
       rect_at [1920, 1080]
@@ -125,7 +125,7 @@ step "the greeter is drawn"
     pause 5
     until
       bind up
-      from greeter
+      source greeter
       mode text
       rect [740, 470, 1340, 770]
       rect_at [1920, 1080]

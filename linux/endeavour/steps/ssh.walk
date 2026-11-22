@@ -36,7 +36,7 @@ step "the disk's boot menu, when it has one"
     pause 5
     until
       bind at_menu
-      from grubmenu
+      source grubmenu
       mode text
       rect [400, 300, 1520, 780]
       rect_at [1920, 1080]

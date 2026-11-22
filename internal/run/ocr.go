@@ -232,7 +232,7 @@ func parseOCRStep(s walk.Step) (ocrSpec, error) {
 //	check: {name: done, from: page, says_any: [[software, updater], [activities]]}
 //	until: done
 func (e *Executor) doCheck(s walk.Step) error {
-	raw, ok := s.Spec["expect"].(map[string]any)
+	raw, ok := s.Spec["check"].(map[string]any)
 	if !ok {
 		return fail(s.Name, "`check:` must be a mapping: name, from, mode, and the mode's argument")
 	}
@@ -241,7 +241,10 @@ func (e *Executor) doCheck(s walk.Step) error {
 		return fail(s.Name, "`check:` must name the boolean it produces: "+
 			"`check: {name: done, from: page, mode: says_any, words: [[welcome]]}`")
 	}
-	from, _ := raw["from"].(string)
+	from, _ := raw["source"].(string)
+	if from == "" {
+		from, _ = raw["from"].(string)
+	}
 	if strings.TrimSpace(from) == "" {
 		return fail(s.Name, "`check:` must say `from:` - the reading an `ocr:` step produced")
 	}

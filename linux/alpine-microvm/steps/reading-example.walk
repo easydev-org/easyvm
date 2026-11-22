@@ -12,8 +12,8 @@ step "see the screen as \"page\""
   # `check:` binds ONE boolean from ONE reading, so a combined verdict is several steps and one `if:` -
   # which is what a reader can follow, and what 29 walkthroughs actually do.
 step "the middle says install"
-  expect
-    from page
+  check
+    source page
     mode text
     name label_ok
     rect middle
@@ -21,8 +21,8 @@ step "the middle says install"
     words [[Install]]
 
 step "the bottom band is a toolbar"
-  expect
-    from page
+  check
+    source page
     mode mean_between
     name panel_ok
     range [0, 255]

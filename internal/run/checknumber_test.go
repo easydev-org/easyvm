@@ -17,11 +17,11 @@ import "testing"
 // The reading existed. It was a number, and `check:` looked only in `e.seen`.
 func TestCheckCanDecideOnASeeNumber(t *testing.T) {
 	check := func(name, from, mode string, rng []any) map[string]any {
-		m := map[string]any{"name": name, "from": from, "mode": mode}
+		m := map[string]any{"name": name, "source": from, "mode": mode}
 		if rng != nil {
 			m["range"] = rng
 		}
-		return map[string]any{"expect": m}
+		return map[string]any{"check": m}
 	}
 
 	t.Run("a bare name finds the one number it bound", func(t *testing.T) {
@@ -77,8 +77,8 @@ func TestCheckCanDecideOnASeeNumber(t *testing.T) {
 
 	t.Run("a word mode on a number is refused with the modes that work", func(t *testing.T) {
 		d := &fakeDriver{}
-		ex, steps := newExec(d, map[string]any{"expect": map[string]any{
-			"name": "bad", "from": "shot", "mode": "says_any", "words": []any{"x"}}})
+		ex, steps := newExec(d, map[string]any{"check": map[string]any{
+			"name": "bad", "source": "shot", "mode": "says_any", "words": []any{"x"}}})
 		ex.numbers = map[string]float64{"shot.similarity": 0.9}
 		ex.facts = map[string]bool{}
 		if err := ex.doCheck(steps[0]); err == nil {
