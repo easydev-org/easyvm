@@ -141,6 +141,14 @@ func (d *Daemon) ServeHTTP(opts HTTPServeOptions) error {
 	mux.HandleFunc("/api/journal/library", d.handleJournalLibrary)
 	mux.HandleFunc("/api/journal/runs", d.handleJournalRuns)
 	mux.HandleFunc("/api/artifact", d.handleArtifact)
+	// THE EGRESS RULES, WHICH ARE HOW A PERSON SAYS "THIS DOMAIN GOES THAT WAY".
+	//
+	// They are OFF WITHOUT EASYVM_EGRESS_RULES=1 - see internal/daemon/egress.go - so a deployment that
+	// has not asked for them answers 403 with the variable's name rather than a 404 that would read as
+	// "this daemon cannot do that".
+	mux.HandleFunc("/api/egress", d.handleEgress)
+	mux.HandleFunc("/api/egress/rules", d.handleEgressRules)
+	mux.HandleFunc("/api/egress/rules/", d.handleEgressRule)
 	// THE REPORT, AS A PAGE. The same HTML `easyvm report` writes, rendered on request.
 	mux.HandleFunc("/report", d.handleReport)
 	// THE LIVE PAGE: every call as it happens, the screen, and a click that reaches the guest.

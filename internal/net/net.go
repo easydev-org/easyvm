@@ -255,7 +255,39 @@ func Up(sshPort int, forwards []int) error {
 	if err := startDHCP(); err != nil {
 		return err
 	}
+	// THE GUEST'S RESOLVER, WHICH IS ALSO THE NAME TABLE THE EGRESS RULES READ.
+	//
+	// DNS IS NOT JUST DNS HERE. The proxy and the udp relay see addresses (`142.250.1.1:443`), and a
+	// rule for `.youtube.com` can only match if somebody watched the query that produced that address
+	// and remembered it. This resolver is that somebody: it forwards the query upstream, records the
+	// A/AAAA answers with the query's own TTL, and answers the guest. Until it ran, `block: .ads.com`
+	// was a rule that could never match anything - a fact found by trying it (see dns.go).
+	//
+	// IT GOES AFTER startDHCP BECAUSE dnsmasq MUST HAVE RELEASED PORT 53 FIRST. Both bind the bridge
+	// address, and two sockets cannot hold one address. dnsmasq now runs with `port=0` (DHCP only),
+	// so this bind succeeds; before that change it would have failed with EADDRINUSE.
+	StopDNS()
+	if server, err := StartDNS(ResolverUpstreams()); err != nil {
+		// BEST EFFORT, LIKE THE UDP RELAY, AND FOR THE SAME REASON: a guest that can reach the
+		// internet by address is more useful than no network at all. But it is LOGGED, because the
+		// consequence - every egress rule that names a domain silently matching nothing - is exactly
+		// the kind of failure that otherwise shows up as "the rule did not work".
+		logf("dns: %v (name rules will not match; a guest can still resolve through dnsmasq)", err)
+	} else {
+		dnsServer = server
+	}
 	if err := applyNAT(); err != nil {
+		return err
+	}
+	// THE GUEST'S DNS GOES TO THE RESOLVER ABOVE, WHETHER OR NOT THE GUEST CO-OPERATES.
+	//
+	// The DHCP lease asks the guest to use the bridge, and a guest that does needs nothing more. This
+	// catches the one that does not: an installer with 8.8.8.8 compiled in, a restored resolver
+	// config, a `dig @1.1.1.1`. Those queries would otherwise leave through MASQUERADE and be
+	// answered without this daemon seeing the name - so a rule for that domain would silently match
+	// nothing. `dnsServer != nil` is the degraded case: no resolver means no redirect, because
+	// sending queries to a closed port is worse than letting them out un-recorded.
+	if err := applyDNSRedirect(fmt.Sprintf("%s/%d", BridgeIP, Prefix), dnsServer != nil); err != nil {
 		return err
 	}
 	if err := applyForwards(sshPort, forwards); err != nil {
@@ -322,6 +354,12 @@ func ensureIPForward() error {
 
 // Down removes what Up created, and is safe on a partially-created network.
 func Down() {
+	// THE RESOLVER BEFORE THE DHCP SERVER. dnsmasq runs with `port=0` now, so the order does not
+	// matter for the port - but the reverse order would be wrong the moment that changed back, and
+	// a stale listener on the bridge's 53 would make the next `Up` fail with EADDRINUSE.
+	StopDNS()
+	dnsServer = nil
+
 	// THE RELAY OWNS A TUN DEVICE AND A ROUTE, so it is torn down before the rules that point into
 	// it - a route whose device is gone is a route `ip route flush` has to be told about separately.
 	StopUDPRelay()
@@ -376,6 +414,11 @@ func Down() {
 	}
 	_, _ = run("iptables", "-t", "nat", "-F", proxyChain)
 	_, _ = run("iptables", "-t", "nat", "-X", proxyChain)
+
+	// AND THE DNS REDIRECT, whose chain lives in PREROUTING as its own jump. It goes here rather than
+	// beside StopDNS at the top because it is an iptables rule like the two above, and Down() removes
+	// the rules in one block so a reader can see every one that Up added.
+	removeDNSRedirect(spec)
 
 	_, _ = run("iptables", "-F", "FORWARD")
 	_, _ = run("iptables", "-t", "nat", "-D", "POSTROUTING", "-s", spec, "-j", "MASQUERADE")

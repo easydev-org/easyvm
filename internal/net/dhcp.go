@@ -169,13 +169,6 @@ func startDHCP() error {
 // THE LEASE IS BY MAC, NOT BY NAME. A guest may present any hostname or none, and a lease matched
 // by name would be a lease that depends on what an installer typed.
 func writeDHCPConfig() error {
-	// THE UPSTREAMS COME FROM THIS CONTAINER'S OWN resolv.conf, and one `server=` line is emitted
-	// per entry because dnsmasq does not accept a comma-separated list there.
-	resolvers := ResolverUpstreams()
-	var serverLines strings.Builder
-	for _, r := range resolvers {
-		serverLines.WriteString("server=" + r + "\n")
-	}
 	conf := fmt.Sprintf(`# written by easyvm; one guest per container on %s/%d
 interface=%s
 bind-interfaces
@@ -202,23 +195,24 @@ dhcp-leasefile=%s
 # 7890 port speaks HTTP CONNECT, which is a TCP protocol. An iptables -t nat -S listing filtered for
 # udp is empty on purpose, so a UDP query cannot be tunnelled the way the guest's TCP is.
 #
-# SO dnsmasq ANSWERS FOR THE GUEST and forwards to an upstream that DOES work. This is the same
+# SO THIS DAEMON ANSWERS FOR THE GUEST, and forwards to an upstream that DOES work. This is the same
 # resolver the container itself uses, so it inherits whatever the cluster does for the container.
 #
-# server= IS THE UPLINK AND no-resolv STOPS dnsmasq ALSO READING /etc/resolv.conf, which would put
-# the same servers first and make the explicit line meaningless.
-port=53
+# DNS IS NO LONGER dnsmasq's JOB. internal/net/dns.go runs its own resolver on the bridge's port 53,
+# for one reason nothing else can provide: A RULE ABOUT A NAME CAN ONLY BE ENFORCED WHERE THE NAME IS
+# STILL A NAME. The proxy sees 142.250.1.1:443, so a rule for .youtube.com needs somebody who watched
+# the query and remembered the answer. dnsmasq answered and forgot. Port 0 turns its DNS half off
+# entirely; DHCP is untouched, and DHCP is why dnsmasq is still here at all.
+#
+# port=0 IS THE WHOLE CHANGE. Without it dnsmasq binds 0.0.0.0:53 and this daemon's resolver cannot
+# bind the bridge's 53 - two sockets cannot hold one address, and the failure is an address-in-use
+# error that says nothing about DNS being split between two processes.
+#
+# no-resolv AND THE server= LINES GO WITH IT: dnsmasq no longer answers queries, so a forwarder here
+# would be configuration that is read and never used. The upstream list moved to the caller of
+# StartDNS, which reads the same /etc/resolv.conf through ResolverUpstreams().
+port=0
 no-resolv
-# ONE server= LINE PER UPSTREAM. A comma-separated server=a,b IS NOT two servers - dnsmasq reads it as
-# one address and refuses it:
-#
-#	dnsmasq: Name or service not known at line 34
-#
-# which is how this was found: dnsmasq --test -C on the generated file.
-#
-# %s IS BUILT FROM THE CONTAINER'S OWN resolv.conf at the top of this function, not written here: the
-# address differs between the lab and a CI runner, and a constant was right for one of them.
-%s
 # THE UPLINK'S MTU, TOLD TO THE CLIENT.
 #
 # The guest's default is 1500 and a guest larger than its tap drops every full segment - measured
@@ -232,7 +226,7 @@ dhcp-option=option:router,%s
 dhcp-option=option:dns-server,%s
 log-dhcp
 `, BridgeName, Prefix, BridgeName, GuestIP, GuestIP, TapMAC, GuestIP, dhcpLeasePath,
-		resolvers, serverLines.String(), UplinkMTU(), BridgeIP, BridgeIP)
+		UplinkMTU(), BridgeIP, BridgeIP)
 
 	if err := os.WriteFile(dhcpConfPath, []byte(conf), 0o644); err != nil {
 		return fmt.Errorf("writing %s: %w", dhcpConfPath, err)

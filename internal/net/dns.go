@@ -56,6 +56,12 @@ type dnsEntry struct {
 
 var dnsNames = &dnstable{byIP: map[string]*dnsEntry{}}
 
+// dnsPort is the port the resolver binds and the redirect targets. It is a constant rather than two
+// 53s so the two cannot drift, and it is a named 53 rather than something configurable because the
+// guest's stack assumes 53 and a configurable one would be a knob whose wrong value breaks DNS in a
+// way nothing reports.
+const dnsPort = 53
+
 // remember records that ip answered for name until the given expiry.
 func (t *dnstable) remember(ip, name string, ttl time.Duration) {
 	if ttl <= 0 {
@@ -150,14 +156,14 @@ type DNSServer struct {
 // IT BINDS 172.30.0.1 AND NOT 0.0.0.0. The guest is told to ask the bridge (the DHCP lease says so),
 // and a resolver reachable from the pod's own eth0 would be a second way in for no benefit.
 //
-// dnsmasq MUST HAVE GIVEN UP 53 FIRST, which is why `port=53` is no longer in its configuration -
-// two sockets cannot bind the same address, and the failure would be this daemon refusing to start
-// with an address-in-use error that says nothing about DNS being split.
+// dnsmasq MUST HAVE GIVEN UP 53 FIRST, which is why `port=0` is in its configuration now - two
+// sockets cannot bind the same address, and the failure would be this daemon refusing to start with
+// an address-in-use error that says nothing about DNS being split between two processes.
 func StartDNS(upstreams []string) (*DNSServer, error) {
 	if len(upstreams) == 0 {
 		return nil, fmt.Errorf("no upstream resolvers: the guest would have DNS that answers nothing")
 	}
-	addr := &net.UDPAddr{IP: net.ParseIP(BridgeIP), Port: 53}
+	addr := &net.UDPAddr{IP: net.ParseIP(BridgeIP), Port: dnsPort}
 	conn, err := net.ListenUDP("udp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("binding %s:53: %w", BridgeIP, err)
@@ -230,9 +236,18 @@ func (s *DNSServer) handle(query []byte, from *net.UDPAddr) {
 }
 
 // forward asks each upstream in turn and returns the first answer.
+//
+// AN UPSTREAM MAY CARRY A PORT - "127.0.0.1:5353" - AND A BARE ADDRESS MEANS 53. The port exists for
+// a test that runs a fake resolver on whatever port is free, which is the only way the forwarding path
+// can be exercised without a real upstream; a production caller passes bare addresses from
+// /etc/resolv.conf, where the port is 53 by definition.
 func (s *DNSServer) forward(query []byte) []byte {
 	for _, up := range s.upstreams {
-		addr, err := net.ResolveUDPAddr("udp", net.JoinHostPort(up, "53"))
+		host, port, err := net.SplitHostPort(up)
+		if err != nil {
+			host, port = up, "53"
+		}
+		addr, err := net.ResolveUDPAddr("udp", net.JoinHostPort(host, port))
 		if err != nil {
 			continue
 		}
