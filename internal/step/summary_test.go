@@ -55,8 +55,8 @@ func summaryNames() map[string][]string {
 	for name, k := range Shared {
 		note(name, k)
 	}
-	for name, k := range Aliases {
-		note(name, k)
+	for name, a := range Actions {
+		note(name, Key{Name: a.Name, Summary: a.Summary})
 	}
 	for name, v := range Verbs {
 		note(name, Key{Name: v.Name, Summary: v.Summary})

@@ -140,7 +140,7 @@ func TestEveryDeclaredKeyIsReachable(t *testing.T) {
 		if _, ok := Shared[k]; ok {
 			return true
 		}
-		if _, ok := Aliases[k]; ok {
+		if _, ok := Actions[k]; ok {
 			return true
 		}
 		if _, ok := Verbs[k]; ok {
@@ -148,6 +148,11 @@ func TestEveryDeclaredKeyIsReachable(t *testing.T) {
 		}
 		for _, v := range Verbs {
 			if _, ok := v.Fields[k]; ok {
+				return true
+			}
+		}
+		for _, a := range Actions {
+			if _, ok := a.Fields[k]; ok {
 				return true
 			}
 		}
@@ -171,7 +176,7 @@ func TestEveryDeclaredKeyHasARole(t *testing.T) {
 	for k := range Shared {
 		check(k)
 	}
-	for k := range Aliases {
+	for k := range Actions {
 		check(k)
 	}
 	for name, v := range Verbs {
@@ -188,8 +193,13 @@ func allDeclaredKeys() map[string]Key {
 	for k, v := range Shared {
 		out[k] = v
 	}
-	for k, v := range Aliases {
-		out[k] = v
+	for k, a := range Actions {
+		out[k] = Key{Name: a.Name, Kind: KindMapping, Summary: a.Summary}
+		for f, kk := range a.Fields {
+			if _, exists := out[f]; !exists {
+				out[f] = kk
+			}
+		}
 	}
 	for _, v := range Verbs {
 		for f, k := range v.Fields {

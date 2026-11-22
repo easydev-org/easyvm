@@ -29,6 +29,9 @@ type Verb struct {
 	// Required is the field the verb cannot work without, or "" when any of its fields will do. It
 	// exists so the error a person reads can say which key is missing rather than "nothing happened".
 	Required string
+	// Kind says what the action's OWN value looks like: a mapping for `check:`, a string for
+	// `desktop:`, a list for `needs:`. It is the shape of the key itself, not of its fields.
+	Kind Kind
 }
 
 // Shared is what every verb reads, and means the same thing on all of them.
@@ -43,6 +46,8 @@ var Shared = map[string]Key{
 	"optional": {Name: "optional", Kind: KindBool,
 		Summary: "a step that may fail without failing the stage - only for a check whose NEGATIVE " +
 			"result is information, never for a verdict"},
+	"type_gap": {Name: "type_gap", Kind: KindFloat,
+		Summary: "seconds between characters when text or a command is typed"},
 	"settle": {Name: "settle", Kind: KindFloat,
 		Summary: "seconds to wait where there is NO fact to wait on; the older `wait:` and " +
 			"`wait_after:` both become this"},
@@ -161,8 +166,6 @@ var Verbs = map[string]Verb{
 				Summary: "select-all and delete before typing"},
 			"modifier": {Name: "modifier", Kind: KindString,
 				Summary: "the modifier `clear:` uses; ctrl by default"},
-			"type_gap": {Name: "type_gap", Kind: KindFloat,
-				Summary: "seconds between characters"},
 			"double": {Name: "double", Kind: KindPair,
 				Summary: "double-click at this point"},
 			"at_color": {Name: "at_color", Kind: KindColor,
@@ -265,7 +268,7 @@ var Verbs = map[string]Verb{
 			"save": {Name: "save", Kind: KindString,
 				Summary: "publish the disk to this path after the machine is gone"},
 			"compress": {Name: "compress", Kind: KindString,
-				Summary: "the 1.0 spelling of `save:`"},
+				Summary: "the 1.0 spelling of publishing the disk"},
 			"shutdown": {Name: "shutdown", Kind: KindString,
 				Summary: "the 1.0 spelling of `method:`"},
 			"min_mb": {Name: "min_mb", Kind: KindInt,
@@ -294,82 +297,127 @@ var Verbs = map[string]Verb{
 		Required: "max"},
 }
 
-// Aliases are the step-level keys the engine still dispatches on because a verb compiles to them.
-//
-// THEY ARE NOT PART OF THE VOCABULARY A PERSON WRITES. `press text "x"` compiles to `{press, text}`,
-// and `run` over ssh compiles to `{ssh: cmd}` - the executor branches on those shapes because they
-// are what it knows how to run. A file may write them and they are checked, but the design does not
-// ask a person to.
-var Aliases = map[string]Key{
-	"action": {Name: "action", Kind: KindMapping,
-		Summary: "a step whose action is a list of steps run in order under one name"},
-	"do": {Name: "do", Kind: KindList,
-		Summary: "the pane model's action list, run in order"},
-	"then": {Name: "then", Kind: KindList,
-		Summary: "a branch"}, // also an `if` field; kept here for the flat form
-	"else": {Name: "else", Kind: KindList,
-		Summary: "a branch"},
-	"until": {Name: "until", Kind: KindWords,
-		Summary: "a single-shot wait on a console line"},
-	"from": {Name: "from", Kind: KindString,
-		Summary: "with `copy:`: the local file; with `until:`: the channel (`console`)"},
-	"until_any": {Name: "until_any", Kind: KindWordSets,
-		Summary: "the 1.0 negative form of `until:`"},
-	"wait": {Name: "wait", Kind: KindFloat,
-		Summary: "the 1.0 name for `settle:`"},
+var Actions = map[string]Verb{
 	"needs": {Name: "needs", Kind: KindList,
-		Summary: "the files a stage reads before it starts; a header declaration"},
+		Summary: "the files this stage reads must be on disk before it starts",
+		Fields:  map[string]Key{}},
 	"require_ssh": {Name: "require_ssh", Kind: KindBool,
-		Summary: "wait for sshd before the steps that use it"},
+		Summary: "wait for sshd before the steps that use it",
+		Fields: map[string]Key{
+			"ssh_probe": {Name: "ssh_probe", Kind: KindString,
+				Summary: "the command the wait runs"},
+			"ssh_after_reboot": {Name: "ssh_after_reboot", Kind: KindBool,
+				Summary: "wait out the old daemon before the wait"},
+		}},
 	"desktop": {Name: "desktop", Kind: KindString,
-		Summary: "wait until a desktop of this family is on screen"},
-	"poll": {Name: "poll", Kind: KindFloat,
-		Summary: "seconds between looks while waiting for a desktop"},
-	"blind_after": {Name: "blind_after", Kind: KindInt,
-		Summary: "seconds of a blank screen before a wait starts looking"},
-	"fetch": {Name: "fetch", Kind: KindString,
-		Summary: "obtain a prepared asset by name"},
-	"release": {Name: "release", Kind: KindString,
-		Summary: "with `fetch:`: which release of it"},
-	"recovery": {Name: "recovery", Kind: KindString,
-		Summary: "with `fetch:`/`boot:`: macOS's recovery image"},
-	"os": {Name: "os", Kind: KindString,
-		Summary: "with `fetch:`: the guest family the asset is for"},
-	"write": {Name: "write", Kind: KindString,
-		Summary: "write one of the built-in templates to disk"},
+		Summary: "wait until a desktop of this family is on screen",
+		Fields: map[string]Key{
+			"poll": {Name: "poll", Kind: KindFloat,
+				Summary: "seconds between looks"},
+			"blind_after": {Name: "blind_after", Kind: KindInt,
+				Summary: "seconds of a blank screen before the wait starts looking"},
+		}},
+	"until": {Name: "until", Kind: KindWords,
+		Summary: "wait for a console line, once",
+		Fields: map[string]Key{
+			"from": {Name: "from", Kind: KindString,
+				Summary: "the channel: `console`"},
+			"blind_after": {Name: "blind_after", Kind: KindInt,
+				Summary: "seconds of silence before the wait starts looking"},
+			"poll": {Name: "poll", Kind: KindFloat,
+				Summary: "seconds between looks"},
+		}},
+	"until_any": {Name: "until_any", Kind: KindWordSets,
+		Summary: "wait for any one of several console lines",
+		Fields: map[string]Key{
+			"from": {Name: "from", Kind: KindString, Summary: "the channel: `console`"},
+		}},
+	"acpi": {Name: "acpi", Kind: KindString,
+		Summary: "send one ACPI message: power, reset, sleep",
+		Fields:  map[string]Key{}},
+	"qga": {Name: "qga", Kind: KindString,
+		Summary: "one guest-agent command: ping, info, shutdown, file-read, file-write",
+		Fields: map[string]Key{
+			"path": {Name: "path", Kind: KindString,
+				Summary: "the file in the GUEST"},
+		}},
+	"wait_until": {Name: "wait_until", Kind: KindString,
+		Summary: "wait for a condition about the machine: `stopped`",
+		Fields:     map[string]Key{}},
 	"disk": {Name: "disk", Kind: KindStringOrMapping,
-		Summary: "the disk a machine is made on, or the file it starts from"},
-	"disk_gb": {Name: "disk_gb", Kind: KindTemplated,
-		Summary: "how big to make it, in GiB"},
-	"disk_gpt": {Name: "disk_gpt", Kind: KindBool,
-		Summary: "write a GPT partition table"},
-	"disk_esp_mib": {Name: "disk_esp_mib", Kind: KindTemplated,
-		Summary: "the EFI system partition's size"},
-	"disk_min_mb": {Name: "disk_min_mb", Kind: KindInt,
-		Summary: "the smallest a finished disk may be"},
+		Summary: "make one disk, or name the one a machine starts from",
+		Fields: map[string]Key{
+			"disk_gb": {Name: "disk_gb", Kind: KindTemplated,
+				Summary: "how big to make it, in GiB"},
+			"disk_gpt": {Name: "disk_gpt", Kind: KindBool,
+				Summary: "write a GPT partition table"},
+			"disk_esp_mib": {Name: "disk_esp_mib", Kind: KindTemplated,
+				Summary: "the EFI system partition's size, in MiB"},
+		}},
 	"disk_settle": {Name: "disk_settle", Kind: KindFloat,
-		Summary: "wait for the disk file to stop growing"},
+		Summary: "wait until the disk file stops growing, and check it is big enough",
+		Fields: map[string]Key{
+			"disk_min_mb": {Name: "disk_min_mb", Kind: KindInt,
+				Summary: "the smallest a finished disk may be, in MiB"},
+			"poll": {Name: "poll", Kind: KindFloat,
+				Summary: "seconds between looks"},
+		}},
 	"esp_fallback": {Name: "esp_fallback", Kind: KindAny,
-		Summary: "edit a FAT filesystem inside a stopped disk"},
+		Summary: "edit a FAT filesystem inside a stopped disk, at byte offsets",
+		Fields: map[string]Key{
+			"disk": {Name: "disk", Kind: KindString,
+				Summary: "the disk file to edit"},
+			"from": {Name: "from", Kind: KindString,
+				Summary: "the directory inside it"},
+		}},
+	"fetch": {Name: "fetch", Kind: KindString,
+		Summary: "obtain a prepared asset by name",
+		Fields: map[string]Key{
+			"release": {Name: "release", Kind: KindString,
+				Summary: "which release of it"},
+			"template": {Name: "template", Kind: KindString,
+				Summary: "the built-in template to render"},
+			"os": {Name: "os", Kind: KindString,
+				Summary: "the guest family the asset is for"},
+			"recovery": {Name: "recovery", Kind: KindString,
+				Summary: "macOS's recovery image"},
+		}},
+	"write": {Name: "write", Kind: KindString,
+		Summary: "write one of the built-in templates to disk",
+		Fields: map[string]Key{
+			"template": {Name: "template", Kind: KindString,
+				Summary: "which template"},
+			"os": {Name: "os", Kind: KindString,
+				Summary: "the guest family the template is for"},
+			"release": {Name: "release", Kind: KindString,
+				Summary: "the release the template names"},
+		}},
 	"screenshot": {Name: "screenshot", Kind: KindString,
-		Summary: "save the screen to this path, for a post-mortem nobody had to ask for"},
-	"ssh_after_reboot": {Name: "ssh_after_reboot", Kind: KindBool,
-		Summary: "with `require_ssh:`: wait out the old daemon before the wait"},
-	"ssh_probe": {Name: "ssh_probe", Kind: KindString,
-		Summary: "with `require_ssh:`: the command the wait runs"},
-	"terminal_wait": {Name: "terminal_wait", Kind: KindFloat,
-		Summary: "seconds to wait for the console to answer a command"},
-	"type_gap": {Name: "type_gap", Kind: KindFloat,
-		Summary: "seconds between characters"},
+		Summary: "save the screen to this path, for a post-mortem nobody had to ask for",
+		Fields:  map[string]Key{}},
 	"ssh": {Name: "ssh", Kind: KindScript,
-		Summary: "run a command over ssh; the exit status is the verdict"},
+		Summary: "run a command over ssh; the exit status is the verdict",
+		Fields: map[string]Key{
+			"terminal_wait": {Name: "terminal_wait", Kind: KindFloat,
+				Summary: "seconds to wait for the console to answer"},
+		}},
 	"adb": {Name: "adb", Kind: KindScript,
-		Summary: "run a command over adb"},
+		Summary: "run a command over adb",
+		Fields:  map[string]Key{}},
 	"adb_connect": {Name: "adb_connect", Kind: KindBool,
-		Summary: "connect adb before the commands that need it"},
+		Summary: "connect adb before the commands that need it",
+		Fields:  map[string]Key{}},
 	"adb_privileged": {Name: "adb_privileged", Kind: KindBool,
-		Summary: "ask adbd for root before the commands that need it"},
+		Summary: "ask adbd for root before the commands that need it",
+		Fields:  map[string]Key{}},
+	"do": {Name: "do", Kind: KindList,
+		Summary: "run a list of steps in order under one name",
+		Fields:  map[string]Key{}},
+	"save": {Name: "save", Kind: KindString,
+		Summary: "publish the disk to this path: the second half of `stop:`",
+		Fields:  map[string]Key{}},
 }
+
 
 // Roles classifies every key, and it is DERIVED rather than written: a key is an action if a verb
 // declares it, an argument if a verb declares it as a field, and a modifier if it is shared.
@@ -393,14 +441,24 @@ func buildRoles() map[string]Role {
 			m[f] = RoleArgument
 		}
 	}
-	for k := range Shared {
-		m[k] = RoleModifier
+	// AN ACTION IS AN ACTION, AND ITS FIELDS ARE ARGUMENTS - the same rule as a verb's.
+	for name, a := range Actions {
+		m[name] = RoleAction
+		for f := range a.Fields {
+			if _, isVerb := Verbs[f]; isVerb {
+				continue
+			}
+			if _, isAction := Actions[f]; isAction {
+				continue
+			}
+			if _, taken := m[f]; !taken {
+				m[f] = RoleArgument
+			}
+		}
 	}
-	// AN ALIAS IS AN ACTION ONLY WHEN NO VERB ALREADY CLAIMS IT AS A FIELD. `then`/`else` are `if`'s
-	// fields, and calling them actions would say a step could be "a then" - which is not a thing.
-	for k := range Aliases {
-		if _, isField := m[k]; !isField {
-			m[k] = RoleAction
+	for k := range Shared {
+		if _, taken := m[k]; !taken {
+			m[k] = RoleModifier
 		}
 	}
 	// A NAME THAT IS BOTH IS DECIDED BY THE ACTION, which is the stricter of the two: `click` is a

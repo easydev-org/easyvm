@@ -352,7 +352,7 @@ func declared(k string) bool {
 	if _, ok := Shared[k]; ok {
 		return true
 	}
-	if _, ok := Aliases[k]; ok {
+	if _, ok := Actions[k]; ok {
 		return true
 	}
 	if _, ok := Verbs[k]; ok {
@@ -360,6 +360,11 @@ func declared(k string) bool {
 	}
 	for _, v := range Verbs {
 		if _, ok := v.Fields[k]; ok {
+			return true
+		}
+	}
+	for _, a := range Actions {
+		if _, ok := a.Fields[k]; ok {
 			return true
 		}
 	}
@@ -372,8 +377,11 @@ func allDeclared() map[string]bool {
 	for k := range Shared {
 		out[k] = true
 	}
-	for k := range Aliases {
+	for k, a := range Actions {
 		out[k] = true
+		for f := range a.Fields {
+			out[f] = true
+		}
 	}
 	for name, v := range Verbs {
 		out[name] = true

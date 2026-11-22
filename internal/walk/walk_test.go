@@ -148,7 +148,7 @@ steps:
 	}
 	// THE SENTENCE CHANGED WITH THE VOCABULARY: a step whose keys are all unknown names no verb, and
 	// the refusal says so while naming the key that made it unreadable.
-	if !strings.Contains(err.Error(), "names no verb") && !strings.Contains(err.Error(), "unknown key") {
+	if !strings.Contains(err.Error(), "names no action") && !strings.Contains(err.Error(), "unknown key") {
 		t.Fatalf("the refusal must say the step has no readable action; got %v", err)
 	}
 }
