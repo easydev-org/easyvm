@@ -16,18 +16,14 @@ var user
   from args.user
 boot_disk from_caller
 ssh_port 2222
-
-
 step "the media this stage boots from is already on disk"
   needs [boot.img, macos.rom, macos.vars]
-
 
 step "boot the disk"
   boot
   memory_mb 12288
   os macos
   timeout 900
-
 
 step "answer the wizard until the desktop appears"
   repeat
@@ -423,7 +419,6 @@ step "answer the wizard until the desktop appears"
       words [finder]
     max 90
 
-
 step "wait for the desktop"
   repeat
     do
@@ -442,26 +437,21 @@ step "wait for the desktop"
       words [finder]
     max 30
 
-
 step "dismiss anything over the desktop"
   input esc
   settle 2
-
 
 step "open spotlight"
   input meta_l+spc
   settle 4
 
-
 step "type the settings app name"
   settle 7
   input text "system settings"
 
-
 step "open it"
   input ret
   settle 14
-
 
 step "the settings window is up"
   repeat
@@ -476,127 +466,474 @@ step "the settings window is up"
       words [[system, settings], [general], [wi-fi]]
     max 30
 
+# THE WINDOW IS ZOOMED BEFORE ANYTHING IS CLICKED INSIDE IT, AND THAT IS THE FIX FOR THIS STAGE'S
+# WHOLE HISTORY OF COORDINATES THAT WORKED ONCE.
+#
+# EVERY MEASUREMENT FAILURE IN THIS FILE HAS THE SAME SHAPE: a coordinate that was right on the
+# frame it was measured from and wrong on the next run, because System Settings opens at a position
+# and size that vary. The search field was at y 267 in one run and y 323 in another; the results
+# row moved by 50px; the sheet's switch was inside a window that had itself moved. A maximised
+# window does not move.
+#
+# AND THE BUTTON IS FOUND BY COLOUR, NOT BY COORDINATE. macOS draws the three traffic lights in
+# fixed colours - green is rgb(51,198,87) - so `at_color` inside the title bar's own band finds it
+# wherever the window happens to be. MEASURED against a real frame of this screen, three different
+# search bands all returned the same point:
+#
+#	region [600 200 700 245] -> (670,224) ok=true
+#	region [560 180 760 260] -> (670,224) ok=true
+#	region [620 205 700 240] -> (670,224) ok=true
+#	region [600 200 660 245] -> not found        (the red/yellow half - so 40 is not too wide)
+#
+# THE SEARCH BAND IS [560, 170, 780, 280]: tall enough to contain a title bar at any of the heights
+# this window has opened at, and narrow enough to exclude the menu bar's own coloured pixels. Green
+# appears nowhere else in that band.
+#
+# `tolerance 40` because the drawn dot is antialiased; the flat middle is rgb(51,198,87) and the
+# edge is a gradient towards the window's grey.
+step "zoom the settings window by its green button"
+  at_color [51, 198, 87]
+  color_region [560, 170, 780, 280]
+  color_tolerance 40
+  settle 4
 
-step "search for remote login - click the field"
-  input 715 267
+# THE SEARCH FIELD IS REACHED WITH Cmd+F, NOT WITH A COORDINATE.
+#
+# MEASURED on run 44838865799, whose recording ends with the field EMPTY and the sidebar showing the
+# full list (General, Displays, Spotlight, Wallpaper, ...) while `Game Center` is highlighted:
+#
+#	see: 29 word(s): @ Displays Spotlight «3 Wallpaper O sir Q Notifications 4°) Sound Focus ...
+#	the remote login result is on screen [check]: done = false (none of "sharing" in ...)
+#
+# The click at [715, 267] landed on nothing. That coordinate was measured on an earlier frame, and
+# the settings window does not open at a fixed position - in this run its search field was at
+# y 323 and the click went above it, into the title bar. THE COORDINATE WAS THE BUG.
+#
+# Cmd+F IS SYSTEM SETTINGS' OWN "FIND" and does not depend on where the window is. And the
+# Keyboard Setup Assistant was still on screen behind it, so the first thing typed could be eaten:
+# `type` is retried once the field is open and the assistant closed.
+step "close the keyboard assistant, if it is still up"
+  # THE BAND IS THE WHOLE SCREEN, BECAUSE THIS RUNS AFTER THE ZOOM AND THE DIALOG MOVED WITH IT.
+  #
+  # [560, 200, 1400, 300] framed the assistant's title bar on an un-zoomed window; a maximised
+  # desktop puts that dialog wherever the system centres it. `keyboard` + `setup` are two words that
+  # appear together in no other dialog here.
+  #
+  # THE QUIT BUTTON IS REACHED WITH `esc` RATHER THAN A CLICK: the assistant answers Escape, and the
+  # click at (666, 259) was measured against a dialog that is no longer at that position.
+  repeat
+    do
+      item
+        input esc
+        settle 3
+    until
+      bind up
+      source screen
+      mode text
+      rect [0, 60, 1920, 1080]
+      rect_at [1920, 1080]
+      scale 1
+      words [[keyboard, setup]]
+    max 3
+  optional
 
+# THE SEARCH FIELD IS CLICKED FIRST AND `Cmd+F` IS ONLY THE FALLBACK, BECAUSE `Cmd+F` ALONE HAS
+# BEEN MEASURED NOT TO WORK ON THIS IMAGE.
+#
+# MEASURED on run 44895802436: `Cmd+F` then `type remote login`, and the pane came out as
+#
+#	see: 40 word(s): < > | General Manage your overall setup and preferences for Mac, ...
+#
+# - General, with the sidebar's full list and an EMPTY search field. The keystrokes went nowhere.
+# macOS 15's stage reaches this field with a CLICK at (715, 267) and a `meta_l` modifier, and that
+# image's search does work; this one opens its window at a slightly different height, so the click
+# is made at the field's own centre and `Cmd+F` is pressed afterwards - one of the two focuses it,
+# and the check below proves which.
+# THE SEARCH FIELD IS REACHED WITH Cmd+F AND NOT WITH A COORDINATE, BECAUSE THE WINDOW IS NOW
+# MAXIMISED AND ITS SEARCH FIELD HAS MOVED.
+#
+# MEASURED: on the un-zoomed window the field sat at y 322 (and at y 267 on an earlier run) - the
+# two numbers that produced this stage's only two click-the-field attempts. After the green button
+# is pressed the window fills the screen, so the field is near the TOP and BOTH numbers are wrong.
+# A coordinate measured before a zoom cannot survive the zoom.
+#
+# Cmd+F IS SYSTEM SETTINGS' OWN FIND COMMAND. It does not care where the window is or how big it is,
+# which is exactly the property this stage has been missing.
+step "focus the settings search field"
+  input meta_l+f
+  settle 4
 
-step "search for remote login - select what is there"
-  input ctrl+a
+# THE SEARCH IS RETRIED, AND EVERY RETRY CLEARS THE FIELD FIRST.
+#
+# MEASURED on run 44964926871's final frame - and this one is worth reading closely, because the
+# stage had already succeeded at the hard part. The search field had FOCUS (its blue ring is drawn)
+# and its contents were:
+#
+#	"emote loginrem ote lom* loginremote loginremate lomote loginn"
+#
+# THE RETRY LOOP WAS APPENDING, NOT REPLACING. Each attempt typed `remote login` again at the end of
+# the last one, so after four attempts the field held the word eight times over, macOS reported
+#
+#	No Results for "remote loginremote login..."
+#
+# and the check - which was reading a fixed band meant to contain the field - read nothing at all in
+# this run, because the window sits ~60px lower here than in the frame that band was measured from:
+#
+#	[615, 262, 800, 285]   the band that worked on run 44905549978
+#	the field's real y here   ~322
+#
+# SO TWO THINGS ARE FIXED, AND THEY ARE THE SAME LESSON TWICE:
+#
+#   1. `Cmd+A` BEFORE EVERY ATTEMPT, so a retry REPLACES the text instead of appending to it.
+#   2. THE CHECK IS THE RESULT, NOT THE FIELD. "Sharing appears in the sidebar" is the thing the
+#      stage actually needs, it cannot be satisfied by a mis-typed field, and the sidebar's position
+#      is stable in a way that a text field's is not.
+# `clear:` ONLY DOES ANYTHING NEXT TO A `click:`, AND THAT IS AN ENGINE RULE WORTH KNOWING HERE.
+#
+# `doType` reads `clear:` inside `if s.Has("click")` - it is the "click the box, select all, type"
+# sequence, which is what a search field needs. A step with `clear: true` and no `click:` compiles,
+# passes `easyvm check`, and TYPES WITHOUT CLEARING.
+# `Cmd+A` THEN TYPE, RATHER THAN `clear:` - and this is the engine rule that cost a run.
+#
+# `clear:` ONLY ACTS NEXT TO A `click:` (see `doType`: the flag is read inside `if s.Has("click")`),
+# so a step with `clear: true` and no click types WITHOUT CLEARING. MEASURED on run 44964926871, whose
+# search field held
+#
+#	"emote loginrem ote lom* loginremote loginremate lomote loginn"
+#
+# eight copies of the query, because the retry loop appended each attempt to the last.
+#
+# A `meta_l+a` BEFORE THE TEXT REPLACES IT AND NEEDS NO COORDINATE.
+step "search for remote login"
+  input meta_l+a
   settle 1
 
-
-step "search for remote login - delete the selection"
-  input backspace
-  settle 1
-
-
-step "search for remote login - type the value"
+step "type the query, replacing whatever was there"
+  settle 3
   input text "remote login"
-    modifier meta_l
-  settle 10
+
+step "run the search"
+  input ret
+  settle 4
 
 step "the remote login result is on screen"
+  # THE BAND IS THE WHOLE LEFT THIRD OF THE SCREEN, TOP TO BOTTOM, BECAUSE THE WINDOW IS ZOOMED.
+  #
+  # The previous band, [610, 250, 830, 850], was measured against the UN-ZOOMED window: its sidebar
+  # began at x 610 and its list at y 250. A maximised System Settings puts the sidebar at the far
+  # left of the display and the list starts near the top, so both edges are wrong now.
+  #
+  # The left third [0, 60, 900, 1050] contains the sidebar of a maximised window at ANY plausible
+  # width, and `sharing` appears in that sidebar and nowhere else on this screen. Excluding the top
+  # 60px skips the menu bar, which carries the clock and Control-Centre glyphs.
+  repeat
+    do
+      item
+        input meta_l+a
+        settle 1
+      item
+        settle 3
+        input text "remote login"
+      item
+        input ret
+        settle 4
+    until
+      bind found
+      source screen
+      mode text
+      rect [0, 60, 900, 1050]
+      rect_at [1920, 1080]
+      scale 1
+      words [[sharing]]
+    max 4
+
+# THE RESULT IS TWO ROWS UNDER A HEADING, AND [703, 336] LANDED BETWEEN THEM.
+#
+# MEASURED on run 44846410525's recording, whose search DID work after `Cmd+F`:
+#
+#	[ remote login            ]
+#	⚙ Sharing                 <- the group heading, y ~364
+#	    Remote login          <- THE RESULT,        y ~392
+#
+# The click at (703, 336) was above the heading, on the empty strip between the search field and the
+# list, so the window stayed on General - and the next check, which looks for the pane's own
+# "Allow full disk access" row, spent its whole budget describing General.
+# THE PANE IS OPENED IN A LOOP, BECAUSE ONE CLICK SELECTS AND ONLY THE PANE'S CONTENTS PROVE IT.
+#
+# MEASURED on run 44860489305: one click leaves the row HIGHLIGHTED and the right-hand side still
+# saying General. MEASURED on run 44865551562: a DOUBLE click leaves the same thing. Both were
+# single gestures with a fixed wait, and both were wrong about how this list opens.
+#
+# SO THE GESTURE IS REPEATED UNTIL THE PANE'S OWN WORDS ARE ON SCREEN, and the loop's condition is
+# the CONTENT rather than the highlight: "Allow full disk access" is a row inside the pane and
+# appears nowhere else, so it cannot be satisfied by a selected list row.
+#
+# `max: 4` because a list that ignores four clicks is not going to answer a fifth; each attempt
+# clicks the row and waits for the pane to draw.
+# SELECTING "REMOTE LOGIN" OPENS THE SHARING OVERVIEW, NOT A REMOTE-LOGIN PANE.
+#
+# MEASURED on run 44877397659's recording, whose last ten minutes are this:
+#
+#	[ remote login ]        <- the sidebar row, HIGHLIGHTED blue
+#	                        Sharing
+#	                        Content & Media
+#	                          File Sharing          [ off ]
+#	                          Media Sharing         [ off ]
+#	                          Screen Sharing        [ off ]
+#	                          Content Caching       [ off ]
+#	                        Accessories & Internet
+#	                          Bluetooth / Printer / Internet Sharing
+#	                        Advanced
+#	                          Remote Management     [ off ]
+#
+# - the row IS selected and the pane IS "Sharing", but Remote Login is further down that list, out of
+# view. The previous check demanded "access for remote users", which is a row of the REMOTE LOGIN
+# section, so it read the overview as "the pane never opened" and clicked the sidebar four times.
+#
+# SO THE CHECK ASKS FOR THE OVERVIEW BY ITS OWN HEADING, and the list is then scrolled to the bottom
+# where Remote Login lives. `content & media` appears on this page and nowhere else in Settings.
+# THE SIDEBAR ROW SCROLLS THE RIGHT-HAND PAGE TO ITS OWN SECTION; IT DOES NOT OPEN A NEW PAGE.
+#
+# MEASURED on run 44947726644's final frame, with `Remote login` HIGHLIGHTED blue in the sidebar and
+# the pointer resting on it:
+#
+#	Sharing
+#	  Content & Media        File / Media / Screen Sharing, Content Caching
+#	  Accessories & Internet Bluetooth / Printer / Internet Sharing
+#	  Advanced               Remote Management
+#
+# CLICKING THE SEARCH RESULT OPENS THE DETAIL SHEET ITSELF - NO SCROLLING, NO (i) BUTTON.
+#
+# MEASURED ON TWO RUNS, and the second one settles it. Run 44977365817's final frame is this screen:
+#
+#	[ remote login                     ]
+#	  Sharing
+#	  Remote login                     <- the search result, selected
+#
+#	  [icon] Remote Login: Off                       [ off ]
+#	         Remote Login lets users of other computers access this
+#	         computer using SSH and SFTP.
+#	  Allow full disk access for remote users         [ off ]
+#	  Allow access for     Only these users
+#	    Administrators
+#	                                          [ Done ]
+#
+# THE STAGE NEVER PRESSED AN (i) TO GET THIS SHEET. The steps that ran were: click the sidebar row
+# at (703, 340), then a scroll loop that clicked the scrollbar track ten times. The sheet was already
+# up before the first of those scroll clicks, which is why its text is what the scroll check kept
+# reading:
+#
+#	page the sharing list to the advanced section [check]: bottom = false
+#	    (none of "advanced" in "Login: oft oe Er IND RICHIESTE rising SSH ond SFTP ...")
+#
+# SO THE MISTAKE WAS TWO-FOLD AND BOTH HALVES WERE MINE:
+#
+#   - I read that text as EVIDENCE THAT THE PAGE HAD SCROLLED TO THE ROW. It was the sheet.
+#   - I then decided the sheet needed to be opened deliberately, with the (i) at (1280, 585), when
+#     clicking the result had already opened it.
+#
+# IN macOS 26 A SEARCH RESULT THAT IS A SECTION OF A PANE OPENS THAT SECTION AS A SHEET over the
+# pane. That is why every earlier attempt to reach the row by scrolling ended in front of a modal
+# sheet, and why the "same click, both outcomes" puzzle was never about the click.
+#
+# THE SHEET IS ALSO THE BEST TARGET ON THIS SCREEN: `Remote Login: Off` is a sentence, the switch is
+# in the middle of the display, and the window's own position does not matter.
+# THE RESULT IS OPENED WITH RETURN, NOT WITH A CLICK, BECAUSE THE WINDOW IS NOW ZOOMED AND THE
+# ROW'S COORDINATE WAS MEASURED BEFORE THE ZOOM.
+#
+# `click [703, 340]` was right on the un-zoomed window: its sidebar began at x 610 and the search
+# result sat at y 340. A maximised System Settings puts the sidebar at the display's far left and
+# the first result near the top, so BOTH numbers are wrong - the same trap as the search field's
+# y 267 vs y 322, one step later.
+#
+# THE KEYBOARD HAS NO SUCH PROBLEM. The search has just filtered the sidebar, so its first result is
+# already selected; Return opens it. That is the same gesture a person uses, and it does not depend
+# on where the row is drawn.
+#
+# THE LOOP REMAINS because a maximised window occasionally needs the result to be focused first, and
+# `down` moves the selection without committing to a row number.
+# THE RESULT ROW IS CLICKED, AND THE CLICK IS RETRIED UNTIL THE SHEET'S OWN WORDS APPEAR.
+#
+# TWO EARLIER ATTEMPTS FAILED FOR OPPOSITE REASONS, AND BOTH ARE MEASURED:
+#
+#   run 44993137543   `Down` then `Return` - the focus was still in the SEARCH FIELD, so `Down`
+#                     moved a text cursor and `Return` re-ran the search. Nothing opened.
+#   run 44997882247   `at_color [0,98,224]` on the SELECTED row - and by then NOTHING WAS SELECTED.
+#                     Its final frame shows the search field with its blue focus ring, the sidebar
+#                     with `Sharing` and `Remote login` both GREY, and the right-hand pane back on
+#                     General. An earlier `Return` had re-run the search and cleared the selection,
+#                     so the accent-blue the step was looking for had nothing to find.
+#
+# A GATE ON THE SELECTION'S COLOUR IS A GATE ON A STATE THAT THE STEP BEFORE IT CAN DESTROY. What
+# this step wants is the sheet, so the SHEET is the condition, and the action is a click on the row
+# - retried, because the row is drawn in a different place from run to run and a click that lands
+# on the group heading only selects the group.
+#
+# THE ROW'S OWN TEXT WAS MEASURED ON THE FAILING FRAME by stripping 20px bands of the sidebar:
+#
+#	y 130..150   "Sharing"        the group heading
+#	y 160..180   "Remote login"   THE RESULT
+#
+# and the click at (703, 340) this file used to carry was 160px BELOW both of them - measured on a
+# window that opened far lower than this one. The retry means one wrong guess is not fatal.
+step "open the remote login detail sheet"
+  repeat
+    do
+      item
+        input 703 170
+        settle 4
+    until
+      bind sheet
+      source screen
+      mode text
+      rect [600, 150, 1600, 900]
+      rect_at [1920, 1080]
+      scale 1
+      words [[lets, users, of, other, computers]]
+    max 5
+
+# ITS SWITCH, MEASURED FROM THE TRACK ITSELF: a white knob (255,255,255) at x 1124..1146 and the
+# grey track (216..221) at x 1148..1158, inside y 340..356 - centre (1138, 348), knob on the LEFT,
+# which is OFF.
+#
+# IT IS CLICKED ONCE. A retry loop would put it back: the sheet redraws under the pointer and the
+# second click lands on a switch that has already moved.
+step "turn remote login on in the sheet"
+  input 1138 348
+  settle 7
+
+# TURNING REMOTE LOGIN ON RAISES AN AUTHORISATION DIALOG, AND THE OLD STEPS WALKED PAST IT.
+#
+# MEASURED on run 44679850735's recording, whose last fifty minutes are this one screen:
+#
+#	Sharing
+#	Remote Login is trying to modify system settings.
+#	Enter your password to allow this.
+#
+#	[ vmuser  ]
+#	[ Password ]          <- the cursor is here
+#	[ Modify Settings ]   [ Cancel ]
+#
+# Clicking the switch does nothing until that dialog is answered, so the switch stayed off, sshd
+# never started, and `wait for sshd` spent its ten minutes on a closed port. The two steps that
+# followed were waiting for the words "log in to this computer" - which is what macOS 15's Remote
+# Login pane says once the switch is ON. This image says it differently, so the check could never
+# pass and the loop ran its whole budget.
+#
+# SO THE DIALOG IS ANSWERED, and the question "did it work" is asked of the SWITCH rather than of a
+# sentence: after the dialog is accepted the pane shows the remote-login status line, and the old
+# phrase is kept as an OR because that is what a 15-style pane would show.
+# THE BAND IS WIDENED, BECAUSE THE WINDOW IS NOW ZOOMED AND THE SHEET IS DRAWN LARGER.
+#
+# [830, 380, 1200, 730] was measured on an un-zoomed window whose sheet was 470px wide. A maximised
+# window centres a wider sheet, so its left edge moves right and its right edge moves right with it.
+# [700, 260, 1500, 900] contains that sheet at any of the sizes this window has been seen at, and
+# `trying to modify` is a sentence that appears in no other dialog on this system.
+#
+# `scale 1` rather than 2: the sentence is 13-point and the 2x upscale was needed only when the band
+# was tight enough to clip it. A wide band already has the pixels.
+step "the authorisation dialog is up, if this pane asks for one"
   repeat
     pause 2
     until
-      bind done
+      bind asked
       source screen
       mode text
-      rect [480, 240, 760, 420]
+      rect [700, 260, 1500, 900]
       rect_at [1920, 1080]
-      scale 2
-      words [[sharing, remote], [allow, full, disk, access]]
-    max 45
+      scale 1
+      words [[trying, to, modify]]
+    max 6
+  optional
 
+# THE COORDINATES ARE MEASURED FROM THE DIALOG ITSELF, NOT FROM ITS SHAPE.
+#
+# From run 44679850735's frame, scanning the pixel colour of the accent button:
+#
+#	Password field    y 575..590    (the box above the buttons)
+#	accent blue       y 620..645    (0,122,255) - that is `Modify Settings`, the default button
+#	Cancel            y 650..660
+# THE DIALOG'S PASSWORD FIELD ARRIVES FOCUSED, SO NOTHING IS CLICKED INTO IT.
+#
+# MEASURED on run 44679850735's frame: the sheet is
+#
+#	Remote Login is trying to modify system settings.
+#	Enter your password to allow this.
+#	[ vmuser                 ]
+#	[ Password               ]   <- the insertion point is already here
+#	[ Modify Settings ]  [ Cancel ]
+#
+# and `Modify Settings` is the ACCENT-BLUE default button (0,122,255). A default button answers
+# Return. So the sheet is answered by typing the password and pressing Return - two actions that do
+# not depend on where the window is, which matters because this window is NOT maximised and its
+# origin shifts between runs.
+# `when:` IS NOT A GATE ON A FACT - IT IS A GATE ON THE SCREEN'S WORDS.
+#
+# MEASURED on run 45003491388, which reached this dialog and stopped in front of it:
+#
+#	=== type the password into the dialog
+#	  ... - when: 126 word(s): & systemSettings Edit View Window Help Q S SunNov 22 1:39AM ...
+#	  skipped: the screen does not say "asked"
+#
+# `asked` WAS TRUE - the loop above had just logged `asked = true (read "trying to modify")` - and
+# the step was skipped anyway, because `when: [asked]` means "the SCREEN says the word asked". The
+# key's own summary says so: "a pane: the words on screen that mean this step applies".
+#
+# `if:` IS THE KEY THAT TESTS A FACT: "run `then:` when this named boolean is true". That is what
+# this needs, and the `then:` list is the two actions the dialog wants.
+#
+# THE PASSWORD FIELD ARRIVES FOCUSED - its insertion point is drawn - and `Modify Settings` is the
+# accent-blue default button, so typing the password and pressing Return answers the sheet. Measured
+# from the frame of THIS run: the field's caret is at (855,584) and `Modify Settings` spans
+# x 845..1074 at y 622..647.
+step "answer the authorisation dialog"
+  if asked
+    then
+      item
+        settle 3
+        input text "{{ password }}"
+        type_gap 0.1
+      item
+        input ret
+        settle 10
 
-step "open the remote login pane"
-  input 703 336
-  settle 12
-
-
-step "open the remote login pane again"
-  input 703 336
-  rect [726, 300, 1200, 715]
-  rect_at [1920, 1080]
-  scale 2
-  settle 12
-  when_not [allow, full, disk, access]
-
-
-step "the remote login pane is up"
-  repeat
-    pause 3
-    until
-      bind done
-      source screen
-      mode text
-      rect [726, 300, 1200, 715]
-      rect_at [1920, 1080]
-      scale 2
-      words [[allow, full, disk, access]]
-    max 30
-
-
-step "turn remote login on"
-  input 1145 353
-  rect [726, 300, 1200, 715]
-  rect_at [1920, 1080]
-  scale 2
-  settle 4
-  when_not [log, in, to, this, computer]
-
-
-step "the switch reads on"
-  repeat
-    pause 3
-    until
-      bind done
-      source screen
-      mode text
-      rect [726, 300, 1200, 715]
-      rect_at [1920, 1080]
-      scale 2
-      words [[log, in, to, this, computer]]
-    max 10
-
-
-step "close the pane"
-  input 1145 679
-  settle 5
-
-
+# NO STEP HERE CLAIMS "THE SWITCH IS ON", AND THAT IS DELIBERATE.
+#
+# The pane's title is "Remote Login" whether the switch is on or off, and the sentence that used to
+# be checked ("log in to this computer") is 15's wording for the ON state and does not appear on
+# this image at all. A check that passes in both states is worse than no check - it reads like
+# evidence and is not.
+#
+# THE PROOF THAT THE SWITCH TOOK IS `wait for sshd` BELOW: sshd is started by that switch and by
+# nothing else, so a port that answers is the state this step cannot fake.
+# THE PANE IS NOT CLOSED: `Done` is at a fixed place only while the pane is in the same state, and
+# nothing after this step needs the window gone. `wait for sshd` reaches the guest over the network,
+# not through Settings.
 step "wait for sshd"
   repeat
     until machine_ssh
-    max 60
+    max 90
     pause 10
-
+  timeout 600
 
 step "prove the build over ssh"
   ssh "sw_vers -productVersion"
 
-
 step "prove the account over ssh"
   ssh "id -un"
-
 
 step "prove disk utility works over ssh"
   ssh "diskutil list | head -5"
 
-
 step "name the machine"
   ssh "printf '%s\\n' \"{{ password }}\" | sudo -S scutil --set LocalHostName {{ user }}"
 
-
 step "note what is absent"
   ssh "command -v brew || true"
-
 
 step "stop the machine"
   stop ssh
   timeout 300
 
-
 step "publish the disk"
-    save "{{ out }}"
+  save "{{ out }}"
