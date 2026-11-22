@@ -171,8 +171,6 @@ var Keys = map[string]Key{
 	"when_not_any": {Name: "when_not_any", Kind: KindWordSets,
 		Summary: "the alternatives form of `when_not:`: the step runs only if the screen shows " +
 			"NONE of these word-sets"},
-	"skip_when_unfinished": {Name: "skip_when_unfinished", Kind: KindBool,
-		Summary: "in a panes epilogue: run only if the walk finished"},
 
 	// --- the machine's own lifecycle ----------------------------------------------------
 	// `boot: true` IS A FLAG AND `boot: {os: linux}` IS THE SAME KEY WITH OPTIONS - both are in the
@@ -271,8 +269,6 @@ var Keys = map[string]Key{
 		Summary: "with `qga: exec`: the program and its arguments, as a list"},
 	"body": {Name: "body", Kind: KindString,
 		Summary: "with `qga: file-write`: the bytes to put in the guest's file"},
-	"graceful": {Name: "graceful", Kind: KindBool,
-		Summary: "ask the guest to shut down rather than killing it"},
 	// `record:` WAS HERE. The recording is now a property of the RUN: it starts when the walk does
 	// and `finishRecording` encodes it whichever way the walk ended. MEASURED: 74 uses, of which 36
 	// were the `record: false` half - a step whose only job was to stop a recorder that the run's own
@@ -409,14 +405,6 @@ var Keys = map[string]Key{
 	// claimed as executable, only declared.
 	//
 	// A LOOP IS `loop:`, and a fixed number of presses is a `do:` list. Both are visible in the file.
-	"sweep": {Name: "sweep", Kind: KindMapping,
-		Summary: "a band of clicks at one x, stopping when the sheet opens"},
-	"press": {Name: "press", Kind: KindString,
-		Summary: "press a named control rather than coordinates"},
-	"change_settle": {Name: "change_settle", Kind: KindFloat,
-		Summary: "with wait_for_change: how long the screen must stay unchanged"},
-	"change_timeout": {Name: "change_timeout", Kind: KindFloat,
-		Summary: "with wait_for_change: how long to wait for a change at all"},
 
 	// --- the screen: read --------------------------------------------------------------
 	// `until_console:` WAS HERE AND IS `until: {from: console}` NOW.
@@ -436,10 +424,6 @@ var Keys = map[string]Key{
 	"until_any": {Name: "until_any", Kind: KindWordSets,
 		Summary: "the alternatives form of `until:`: ONE of these word-sets must be on screen. " +
 			"`doUntil` reads it beside `until:` and joins the two into one list of alternatives"},
-	"until_dark": {Name: "until_dark", Kind: KindBool,
-		Summary: "wait until the screen goes black - an installer's own start signal"},
-	"wait_for_change": {Name: "wait_for_change", Kind: KindBool,
-		Summary: "wait until the screen changes rather than for particular words"},
 	"poll": {Name: "poll", Kind: KindFloat,
 		Summary: "seconds between looks in an until: loop"},
 	"timeout": {Name: "timeout", Kind: KindTemplated,

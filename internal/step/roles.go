@@ -95,12 +95,11 @@ func (r Role) String() string {
 // how `os:` became an argument rather than an accident.
 var Roles = map[string]Role{
 	// --- identity and gating -----------------------------------------------------------
-	"name":                 RoleModifier, // the log line, not a decision
-	"optional":             RoleModifier,
-	"needs":                RoleGate,
-	"when_not":             RoleGate,
-	"when_not_any":         RoleGate,
-	"skip_when_unfinished": RoleModifier,
+	"name":         RoleModifier, // the log line, not a decision
+	"optional":     RoleModifier,
+	"needs":        RoleGate,
+	"when_not":     RoleGate,
+	"when_not_any": RoleGate,
 
 	// --- the machine's own lifecycle ----------------------------------------------------
 	"boot":      RoleAction,
@@ -126,7 +125,6 @@ var Roles = map[string]Role{
 	"minimum":         RoleArgument,
 	"argv":            RoleArgument,
 	"body":            RoleArgument,
-	"graceful":        RoleModifier, // how the shutdown asks
 	"compress":        RoleAction,
 	"boot_from":       RoleAction,
 
@@ -158,17 +156,11 @@ var Roles = map[string]Role{
 	"run":             RoleAction,
 	"terminal_wait":   RoleArgument,
 	"line_gap":        RoleArgument,
-	"sweep":           RoleArgument,
-	"press":           RoleAction,
-	"change_settle":   RoleArgument,
-	"change_timeout":  RoleArgument,
 
 	// --- the screen: read ---------------------------------------------------------------
 	"blind_after":      RoleArgument,
 	"until":            RoleAction,
 	"until_any":        RoleAction,
-	"until_dark":       RoleAction,
-	"wait_for_change":  RoleAction,
 	"poll":             RoleArgument,
 	"timeout":          RoleModifier,
 	"scale":            RoleArgument,
@@ -264,7 +256,7 @@ var Consumes = map[string][]string{
 	"write":      {"os", "release"},
 	"fetch":      {"os", "release", "recovery", "template"},
 	"run":        {"terminal_wait", "type_gap", "line_gap"},
-	"shutdown":   {"graceful"},
+	"shutdown":   {},
 	"compress":   {"disk_min_mb"},
 	"see":        {"rect", "rect_at", "of", "scale", "reference"},
 	"check":      {"mode", "words", "without", "range", "text", "pattern", "as", "from"},
