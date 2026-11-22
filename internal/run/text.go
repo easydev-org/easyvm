@@ -396,6 +396,16 @@ func (e *Executor) doActionList(s walk.Step) error {
 // THE READING IS ONE CAPTURE, like `unless:`, so the gate and the action that follows it cannot see
 // two different screens.
 func (e *Executor) doWhen(s walk.Step) error {
+	// `when: {none: [[a], [b, c]]}` IS THE NEGATIVE FORM, folded in from `when_not_any:`.
+	//
+	// One key carries both polarities of one question, so a reader does not have to know that a
+	// negative gate has its own name - and the alternatives form (a pane can announce itself two
+	// ways) lives in the same place as the positive one.
+	if m, ok := s.Spec["when"].(map[string]any); ok {
+		if _, has := m["none"]; has {
+			return e.doUnless(s)
+		}
+	}
 	want := wordsOf(s, "when")
 	if len(want) == 0 {
 		return fail(s.Name, "`when:` must name the words that mean this step applies")
@@ -425,7 +435,17 @@ func (e *Executor) doUnless(s walk.Step) error {
 	// `unless:` REMAINS ONE WORD-SET WITH AND MEANING, because a gate that required ANY of two words
 	// and a gate that required BOTH were spelled the same way and that is a trap. Two keys, two
 	// meanings, no guessing.
-	alternatives := wordSetsOf(s, "when_not_any")
+	// `when: {none: ...}` IS THE FOLDED NAME AND `when_not_any:` / `when_not:` ARE WHAT FILES WRITE
+	// TODAY. All three arrive here, so the negative question has one implementation.
+	var alternatives [][]string
+	if m, ok := s.Spec["when"].(map[string]any); ok {
+		if none, has := m["none"]; has {
+			alternatives = setsOfAny(none)
+		}
+	}
+	if len(alternatives) == 0 {
+		alternatives = wordSetsOf(s, "when_not_any")
+	}
 	if len(alternatives) == 0 {
 		if want := wordsOf(s, "when_not"); len(want) > 0 {
 			alternatives = [][]string{want}
@@ -1074,4 +1094,25 @@ func describeLastError(err error) string {
 		return ""
 	}
 	return ": " + firstLineOf(err.Error())
+}
+
+// setsOfAny reads the value of `when: {none: ...}` into word-sets.
+//
+// A flat list is ONE set (all of its words), and a list of lists is one set per inner list - the
+// same reading `wordSetsOf` gives `when_not_any:`, so the two spellings cannot disagree.
+func setsOfAny(v any) [][]string {
+	list, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([][]string, 0, len(list))
+	for _, item := range list {
+		switch t := item.(type) {
+		case string:
+			out = append(out, []string{t})
+		case []any:
+			out = append(out, stringsToSlice(t))
+		}
+	}
+	return out
 }

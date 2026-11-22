@@ -54,6 +54,12 @@ const (
 	// IT EXISTS FOR `disk:`: a line either names a file or creates one, and the five keys that used
 	// to say "and 128 GiB, GPT, at least 4000 MiB, settled after 300 s" are fields of that mapping.
 	KindStringOrMapping
+	// KindWordsOrNone is a word list, or `{none: <word-sets>}` for the negative form.
+	//
+	// IT EXISTS SO ONE KEY CARRIES BOTH POLARITIES OF THE SAME QUESTION, and so `when_not_any:` (0
+	// uses in the tree, and the alternatives form of a negative gate) has a home that does not need
+	// its own name.
+	KindWordsOrNone
 	// KindRect is [x0, y0, x1, y1].
 	KindRect
 	// KindWords is a phrase, or a list of words that must all be present.
@@ -519,8 +525,10 @@ var Keys = map[string]Key{
 	// read from it writes the URL.
 
 	// --- panes: the macOS shape ---------------------------------------------------------
-	"when": {Name: "when", Kind: KindWords,
-		Summary: "a pane: the words on screen that mean this step applies"},
+	"when": {Name: "when", Kind: KindWordsOrNone,
+		Summary: "run this step only if the screen shows these words. `when: {none: [[a], [b, c]]}` " +
+			"is the NEGATIVE form: run only if NONE of those word-sets is present (it replaces " +
+			"`when_not_any:`)"},
 	"do": {Name: "do", Kind: KindList,
 		Summary: "a pane's actions, in order, run in one pass"},
 	"release": {Name: "release", Kind: KindString,

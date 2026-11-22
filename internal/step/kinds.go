@@ -44,6 +44,20 @@ func checkKind(key Key, value any) error {
 		}
 	case KindPair:
 		return checkNumbers(key, value, 2, "[x, y]")
+	case KindWordsOrNone:
+		if m, ok := value.(map[string]any); ok {
+			none, has := m["none"]
+			if !has {
+				return fmt.Errorf("`%s:` as a mapping needs `none:` - `when: {none: [[a], [b, c]]}`", key.Name)
+			}
+			for k := range m {
+				if k != "none" {
+					return fmt.Errorf("`%s:` has no field `%s:`; the mapping form is `{none: <word-sets>}`", key.Name, k)
+				}
+			}
+			return checkKind(Key{Name: key.Name, Kind: KindWordSets}, none)
+		}
+		return checkKind(Key{Name: key.Name, Kind: KindWords}, value)
 	case KindStringOrMapping:
 		if m, ok := value.(map[string]any); ok {
 			// THE FIELDS ARE NAMED AND CHECKED, because a mapping that accepts anything is a second
