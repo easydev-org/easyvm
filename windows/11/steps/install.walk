@@ -20,16 +20,20 @@ var windows_image_index
   from args.windows_image_index
 ssh_port 2222
 
+
 step "the media this stage boots from is already on disk"
   needs [windows.iso, virtio-win.iso]
+
 
 step "create the empty disk"
   disk disk.qcow2
   disk_gb 128
 
+
 step "build the answer CD"
   fetch answer_iso
   template windows/11/answer/Autounattend.xml
+
 
 step "boot the installer"
   boot
@@ -52,23 +56,28 @@ step "boot the installer"
   os windows
   timeout 1800
 
+
 step "wait for the firmware to offer the DVD"
   until DVD-ROM
   blind_after 60
   from console
   timeout 180
 
+
 step "press a key so the loader takes it"
   input esc
   settle 1
+
 
 step "press it again, because the prompt is emitted more than once"
   input esc
   settle 1
 
+
 step "and once more, for a loader that was not listening yet"
   input esc
   settle 2
+
 
 step "Setup is on screen"
   repeat
@@ -152,6 +161,7 @@ step "Setup is on screen"
   # WHY THE DIALOG AND NOT "press any key": MEASURED on the 2h07m recording, where the progress line
   # reads 28% at 200 s, 54% at 600 s, and 54% again at 1200, 1800, 2400 and 3000 - the install had
   # stopped, and the quit dialog is up from about 520 s. The dialog is what has to be answered.
+
 step "answer a quit dialog, if one is up"
   input Escape
   rect [820, 460, 1520, 660]
@@ -166,6 +176,7 @@ step "answer a quit dialog, if one is up"
 
   # THE SAME ANSWER ONCE MORE, because a dialog that has been dismissed can come back: the first
   # one appeared only because a stray Return had pressed Cancel, and no Return is sent any more.
+
 step "answer it again, if it came back"
   input Escape
   rect [820, 460, 1520, 660]
@@ -194,6 +205,7 @@ step "answer it again, if it came back"
   #
   # THE REFERENCE IS THE ONE THE `check:` BELOW ALREADY USES, so there is one picture of this desktop
   # in the repository rather than two that could drift apart.
+
 step "wait for the desktop"
   desktop windows
   range [0.9, 1]
@@ -222,9 +234,11 @@ step "wait for the desktop"
   # A CLICK ON THE WALLPAPER, NOT ONLY AN ESCAPE. Escape closes the START PANEL; the notification
   # in the corner is a separate window and the click is what dismisses it - measured on the frame
   # this comparison rejected, where both were up at once.
+
 step "click the empty desktop"
   input 960 540
   settle 3
+
 
 step "and an Escape in case a panel was the thing that took it"
   input esc
@@ -238,11 +252,14 @@ step "and an Escape in case a panel was the thing that took it"
   # IT EXPIRES ON ITS OWN in about thirty seconds, which is what this settles for. Waiting is the
   # honest fix: the alternative is a reference that contains a transient toast, and then the compare
   # is measuring how fast the runner is rather than whether the desktop came up.
+
 step "settle 45s"
   settle 45
 
+
 step "the desktop is the one this file was written against"
   read shot
+
 
 step "the screen is the one this file was written against"
   # THE TASKBAR IS EXCLUDED, BECAUSE EVERY RUN PUTS DIFFERENT ICONS IN IT.
@@ -269,22 +286,27 @@ step "the screen is the one this file was written against"
     rect_at [1920, 1080]
     reference reference/desktop.png
 
+
 step "reboot into the installed system"
   boot
   os windows
   timeout 900
 
+
 step "the installed system reaches a desktop"
   desktop windows
   timeout 1800
+
 
 step "shut the installed system down"
   acpi power
   timeout 300
 
+
 step "wait for the machine to stop"
   wait_until stopped
   timeout 300
+
 
 step "publish the disk"
     save "{{ out }}"

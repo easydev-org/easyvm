@@ -37,6 +37,7 @@ A step is one of nine verbs, or one of the actions the engine dispatches on, plu
 | `settle_before` | seconds to wait before the step acts |
 | `source` | WHERE the question is asked - the name of a frame a `read:` captured, or `console` for the serial line |
 | `timeout` | how long this step may take, in seconds |
+| `type_gap` | seconds between characters when text or a command is typed |
 | `when` | run this step only when the screen says these words (`{none: ...}` for the negative form) |
 | `when_not` | run this step only when the screen does NOT say these words |
 | `when_not_any` | run this step only when NONE of these word-sets is on screen |
@@ -124,7 +125,6 @@ A step is one of nine verbs, or one of the actions the engine dispatches on, plu
 | `key` | a qemu qcode: ret, esc, tab, meta_l+q |
 | `modifier` | the modifier `clear:` uses; ctrl by default |
 | `text` | the string to type |
-| `type_gap` | seconds between characters |
 
 ### `repeat`
 
@@ -135,14 +135,14 @@ A step is one of nine verbs, or one of the actions the engine dispatches on, plu
 | `nudge` | actions that fire AT MOST ONCE, once the threshold has passed |
 | `nudge_after` | with `nudge:`: the number of seconds before it fires |
 | `pause` | seconds between attempts |
-| `until` | the condition that ends it, written the way a `check:` is |
+| `until` | the condition that ends it: a `check:`-shaped block, or the name of one of the machine's own facts such as `machine_stopped` |
 
 ### `run`
 
 | key | what it does |
 |---|---|
 | `ssh_after_reboot` | wait out the old daemon first, or the wait passes on the process that is about to die |
-| `ssh_probe` | with `require_ssh:`: the command the wait runs |
+| `ssh_probe` | with `run:`: the command the wait runs |
 | `terminal_wait` | seconds to wait for the console to answer |
 | `via` | where it runs: console (default), ssh, adb |
 
@@ -150,7 +150,7 @@ A step is one of nine verbs, or one of the actions the engine dispatches on, plu
 
 | key | what it does |
 |---|---|
-| `compress` | the 1.0 spelling of `save:` |
+| `compress` | the 1.0 spelling of publishing the disk |
 | `method` | how to stop it: kill, ssh, acpi, guest_agent |
 | `min_mb` | the smallest the published disk may be, in MiB - a check that the guest really wrote what it claimed |
 | `save` | publish the disk to this path after the machine is gone |
@@ -158,10 +158,11 @@ A step is one of nine verbs, or one of the actions the engine dispatches on, plu
 
 ## 4. Actions the engine dispatches on
 
-Each is a step of its own with its own fields. They are not verbs because each is a single
-thing rather than one of nine categories.
+Each is a step of its own with its own fields.
+
 | key | what it does |
 |---|---|
+| `acpi` | send one ACPI message: power, reset, sleep |
 | `adb` | run a command over adb |
 | `adb_connect` | connect adb before the commands that need it |
 | `adb_privileged` | ask adbd for root before the commands that need it |
@@ -172,7 +173,7 @@ thing rather than one of nine categories.
 | `esp_fallback` | edit a FAT filesystem inside a stopped disk, at byte offsets |
 | `fetch` | obtain a prepared asset by name |
 | `needs` | the files this stage reads must be on disk before it starts |
-| `require_ssh` | wait for sshd before the steps that use it |
+| `qga` | one guest-agent command: ping, info, shutdown, file-read, file-write |
 | `save` | publish the disk to this path: the second half of `stop:` |
 | `screenshot` | save the screen to this path, for a post-mortem nobody had to ask for |
 | `ssh` | run a command over ssh; the exit status is the verdict |
@@ -181,27 +182,7 @@ thing rather than one of nine categories.
 | `wait_until` | wait for a condition about the machine: `stopped` |
 | `write` | write one of the built-in templates to disk |
 
-### `adb`
-
-run a command over adb
-
-Takes no fields.
-
-### `adb_connect`
-
-connect adb before the commands that need it
-
-Takes no fields.
-
-### `adb_privileged`
-
-ask adbd for root before the commands that need it
-
-Takes no fields.
-
 ### `desktop`
-
-wait until a desktop of this family is on screen
 
 | key | what it does |
 |---|---|
@@ -209,8 +190,6 @@ wait until a desktop of this family is on screen
 | `poll` | seconds between looks |
 
 ### `disk`
-
-make one disk, or name the one a machine starts from
 
 | key | what it does |
 |---|---|
@@ -220,22 +199,12 @@ make one disk, or name the one a machine starts from
 
 ### `disk_settle`
 
-wait until the disk file stops growing, and check it is big enough
-
 | key | what it does |
 |---|---|
 | `disk_min_mb` | the smallest a finished disk may be, in MiB |
 | `poll` | seconds between looks |
 
-### `do`
-
-run a list of steps in order under one name
-
-Takes no fields.
-
 ### `esp_fallback`
-
-edit a FAT filesystem inside a stopped disk, at byte offsets
 
 | key | what it does |
 |---|---|
@@ -244,8 +213,6 @@ edit a FAT filesystem inside a stopped disk, at byte offsets
 
 ### `fetch`
 
-obtain a prepared asset by name
-
 | key | what it does |
 |---|---|
 | `os` | the guest family the asset is for |
@@ -253,44 +220,19 @@ obtain a prepared asset by name
 | `release` | which release of it |
 | `template` | the built-in template to render |
 
-### `needs`
-
-the files this stage reads must be on disk before it starts
-
-Takes no fields.
-
-### `require_ssh`
-
-wait for sshd before the steps that use it
+### `qga`
 
 | key | what it does |
 |---|---|
-| `ssh_after_reboot` | wait out the old daemon before the wait |
-| `ssh_probe` | the command the wait runs |
-
-### `save`
-
-publish the disk to this path: the second half of `stop:`
-
-Takes no fields.
-
-### `screenshot`
-
-save the screen to this path, for a post-mortem nobody had to ask for
-
-Takes no fields.
+| `path` | the file in the GUEST |
 
 ### `ssh`
-
-run a command over ssh; the exit status is the verdict
 
 | key | what it does |
 |---|---|
 | `terminal_wait` | seconds to wait for the console to answer |
 
 ### `until`
-
-wait for a console line, once
 
 | key | what it does |
 |---|---|
@@ -300,21 +242,11 @@ wait for a console line, once
 
 ### `until_any`
 
-wait for any one of several console lines
-
 | key | what it does |
 |---|---|
 | `from` | the channel: `console` |
 
-### `wait_until`
-
-wait for a condition about the machine: `stopped`
-
-Takes no fields.
-
 ### `write`
-
-write one of the built-in templates to disk
 
 | key | what it does |
 |---|---|
@@ -322,7 +254,26 @@ write one of the built-in templates to disk
 | `release` | the release the template names |
 | `template` | which template |
 
-## 5. File header
+## 5. The machine's own facts
+
+A `check:` binds a boolean; these are LIVE, asked of the daemon when read, and may be used
+anywhere a boolean is: `if`, `repeat until`, `wait_until`.
+
+| name | what it asks |
+|---|---|
+| `machine_running` | — |
+| `machine_stopped` | — |
+| `machine_ssh` | — |
+| `machine_ssh_gone` | — |
+| `machine_qga` | — |
+| `machine_booted` | — |
+| `machine_console_idle` | — |
+| `machine_disk_idle` | — |
+| `machine_recording` | — |
+| `machine_share` | — |
+| `machine_frame_still` | — |
+
+## 6. File header
 
 | key | |
 |---|---|

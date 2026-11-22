@@ -466,8 +466,6 @@ func (e *Executor) runOne(s walk.Step) error {
 	// ---- the preparation and the disk, which are steps of their own ---------------------
 	case s.Has("needs"), s.Has("require"):
 		return e.doRequire(s)
-	case s.Has("require_ssh"):
-		return e.doRequireSSH(s)
 	case s.Has("disk"):
 		return e.doDisk(s)
 	case s.Has("disk_settle"):
@@ -737,81 +735,6 @@ func (e *Executor) doWait(s walk.Step) error {
 }
 
 // --- ssh ------------------------------------------------------------------------------
-
-func (e *Executor) doRequireSSH(s walk.Step) error {
-	timeout := e.budget(s, "timeout", 900)
-	probe := s.Get("ssh_probe")
-	if probe == "" {
-		probe = "echo ok"
-	}
-	target := e.target()
-
-	// `ssh_after_reboot:` EXISTS BECAUSE A WAIT PLACED AFTER `systemctl reboot` PASSES ON THE
-	// PROCESS THAT IS ABOUT TO DIE. It waits for the old daemon to stop answering first, so the
-	// success it reports is the new one's.
-	if s.Has("ssh_after_reboot") {
-		e.Driver.Log("  waiting for the old sshd to stop answering first")
-		gone := time.Now().Add(timeout)
-		for time.Now().Before(gone) {
-			if err := guest.Probe(target, 1, 2*time.Second); err != nil {
-				break
-			}
-			time.Sleep(2 * time.Second)
-		}
-	}
-
-	e.Driver.Log(fmt.Sprintf("  waiting up to %s for sshd on port %d", timeout, target.Port))
-	start := time.Now()
-	err := guest.WaitForPort(target, timeout, 2*time.Second,
-		func(elapsed time.Duration, last error) {
-			e.Driver.Log(fmt.Sprintf("  still waiting after %s (%v)",
-				elapsed.Round(time.Second), last))
-		})
-	if err != nil {
-		return fail(s.Name, "%v", err)
-	}
-	// TEN ATTEMPTS, NOT THREE, AND THE REASON IS MEASURED TWICE.
-	//
-	// FIRST: on macOS 26 the first handshake against a starting sshd ends in `handshake failed: EOF`
-	// because the daemon accepts TCP before it can serve a session. SECOND, and this is the one that
-	// made three useless: on the run where this step failed, the stage reported
-	//
-	//	the port is open but no shell answers: ssh: handshake failed: EOF
-	//
-	// and the SAME guest answered `sw_vers -productVersion` and `id -un` from the same client code
-	// immediately afterwards. So the three attempts were spent inside the window where sshd is up
-	// enough to open the port and not up enough to run a command.
-	//
-	// With the pause `Probe` now takes between attempts, ten attempts is about half a minute of a
-	// daemon that has already accepted a connection - long enough for macOS to finish starting it,
-	// and still a ceiling.
-	if err := guest.Probe(target, 10, 10*time.Second); err != nil {
-		return fail(s.Name, "the port is open but no shell answers: %v", err)
-	}
-	e.Driver.Log(fmt.Sprintf("  ssh answers on port %d after %s",
-		target.Port, time.Since(start).Round(time.Second)))
-
-	// THE CONNECTION IS NOT DROPPED HERE ANY MORE, AND THAT IS THE IMPROVEMENT.
-	//
-	// `require_ssh` USED TO DROP THE DRIVER'S CACHED CONNECTION AFTER A SUCCESSFUL PROBE, because the
-	// probe dials fresh while the driver kept one for the run - so
-	//
-	//	reboot: -> require_ssh: -> ssh:
-	//
-	// had the probe succeed and the next `ssh:` write into the pre-reboot socket:
-	//
-	//	status: failed step 20/20 "read what this boot did"
-	//	error: read what this boot did: ssh session: EOF
-	//
-	// MEASURED on opensuse-tumbleweed, whose last step is exactly that pair. The fix then was a call
-	// here, which meant EVERY OTHER PATH THAT RESTARTED THE GUEST had to remember it too - and
-	// `ssh: systemctl reboot` does not come through this function at all.
-	//
-	// THE SESSION NOW REPAIRS ITSELF: `sshSession.Do` retries once on a fresh connection when an
-	// operation fails because the session died. So there is nothing for this step to remember, and a
-	// reboot is repaired by whichever step needs the guest next.
-	return nil
-}
 
 func (e *Executor) doSSH(s walk.Step) error {
 	command := s.Get("ssh")

@@ -639,10 +639,12 @@ func (e *Executor) doUntilFact(s walk.Step) error {
 		return fail(s.Name, "`until:` must name a boolean a `check:` step produced, written as "+
 			"`until: {fact: done}`")
 	}
-	value, ok := e.facts[name]
-	if !ok {
-		return fail(s.Name, "`until: {fact: %s}` names a boolean no `check:` step has made. A "+
-			"`check:` step has to come first, in file order, with `name: %s`", name, name)
+	value, why, err := e.factValue(s, name)
+	if err != nil {
+		return fail(s.Name, "%v", err)
+	}
+	if why == errNoSuchFact {
+		return fail(s.Name, "`until: %s` names a boolean no `check:` step has made", name)
 	}
 	if !value {
 		return fail(s.Name, "the boolean %q is false", name)
@@ -684,10 +686,15 @@ func (e *Executor) doIf(s walk.Step) error {
 	if strings.TrimSpace(name) == "" {
 		return fail(s.Name, "`if:` must name a boolean a `check:` step produced")
 	}
-	value, ok := e.facts[name]
-	if !ok {
+	// A LIVE MACHINE FACT OR A BOUND BOOLEAN, through the one lookup that knows the difference.
+	value, why, err := e.factValue(s, name)
+	if err != nil {
+		return fail(s.Name, "%v", err)
+	}
+	if why == errNoSuchFact {
 		return fail(s.Name, "`if: %s` names a boolean no `check:` step has made. A `check:` step "+
-			"has to come first, in file order, with `name: %s`", name, name)
+			"has to come first, in file order, with `name: %s` - or name one of the machine's own "+
+			"facts (%s)", name, name, machineFactNames())
 	}
 
 	branch, label := "else", "else"

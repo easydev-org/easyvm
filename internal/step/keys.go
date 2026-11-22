@@ -191,6 +191,17 @@ func Validate(stepName string, mapping map[string]any) error {
 		return err
 	}
 	fields := fieldSetOf(action)
+	// THE `machine_` PREFIX IS RESERVED FOR THE MACHINE'S OWN LIVE FACTS. A `check:` that bound a
+	// name starting with it would be shadowed by the live value, or would shadow it - and either way
+	// the file would read a boolean nobody can predict from the source.
+	if action == "check" {
+		for _, k := range []string{"as", "name"} {
+			if v, ok := mapping[k].(string); ok && strings.HasPrefix(v, "machine_") {
+				return fmt.Errorf("step %q binds the boolean %q, and `machine_` is reserved for the "+
+					"machine's own facts (%s). Name it something else", stepName, v, MachineFactNames())
+			}
+		}
+	}
 	for name, value := range mapping {
 		if name == "name" || name == action {
 			continue

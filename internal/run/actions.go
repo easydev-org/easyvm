@@ -1277,45 +1277,10 @@ func (e *Executor) doWaitUntil(s walk.Step) error {
 		poll = time.Duration(v * float64(time.Second))
 	}
 
-	facts, ok := e.Driver.(interface {
-		Facts() (map[string]string, error)
-	})
-	if !ok {
-		return fail(s.Name, "this driver cannot report the facts a `wait_until:` waits on")
-	}
-
-	// THE CONDITIONS ARE NAMES, AND EACH ONE IS A QUESTION ABOUT A FACT. It is a switch rather than
-	// an expression language on purpose: a file that could write `qemu.running == false` could also
-	// write `qemu.running == false and ssh.ready`, which is two waits wearing one line, and the
-	// failure would not say which half never happened.
-	check := func(f map[string]string) (bool, string) {
-		switch what {
-		case "stopped":
-			return f["qemu_running"] == "false", "the machine is still running"
-		case "started":
-			return f["qemu_running"] == "true", "the machine is not running"
-		case "ssh":
-			return f["ssh_ready"] == "true", "sshd does not accept a connection"
-		case "qga":
-			return f["qga_ready"] == "true", "the guest agent does not answer"
-		case "booted":
-			return f["guest_phase"] == "up", "the guest has not finished starting"
-		case "console_idle":
-			// THE THRESHOLD IS THE STEP'S OWN, because "quiet" is not one number: a boot prompt goes
-			// quiet for a second and an install pauses for a minute between phases.
-			return f["console_idle"] != "" && atLeast(f["console_idle"], s), "the console is still being written"
-		case "disk_idle":
-			return atLeast(f["disk_grow_rate"], s), "the disk is still growing"
-		case "recording":
-			return f["recording"] == "true", "nothing is recording"
-		case "share":
-			return f["share_ready"] == "true", "the share has no directory"
-		case "frame_still":
-			return atLeast(f["frame_age"], s), "the frame is still being captured"
-		}
-		return false, ""
-	}
-
+	// THE CONDITION IS A NAME IN THE MACHINE'S OWN VOCABULARY, and asking it is the same call an
+	// `if:` makes - see machinefact.go. `stopped` is the 1.0 spelling of `machine_stopped`, and it is
+	// kept because 32 steps in this tree write it.
+	name := "machine_" + what
 	switch what {
 	case "stopped", "started", "ssh", "qga", "booted", "console_idle", "disk_idle",
 		"recording", "share", "frame_still":
@@ -1330,19 +1295,27 @@ func (e *Executor) doWaitUntil(s walk.Step) error {
 	start := time.Now()
 	var why string
 	for {
-		f, err := facts.Facts()
+		done, reason, err := e.machineFact(s, name)
 		if err != nil {
 			return fail(s.Name, "%v", err)
 		}
-		done, reason := check(f)
 		if done {
 			e.Driver.Log(fmt.Sprintf("  %s (%s)", what, time.Since(start).Round(time.Second)))
 			return nil
 		}
 		why = reason
 		if time.Since(start) >= limit {
+			// THE FACTS AT THE LAST LOOK ARE THE DIAGNOSIS, so one more snapshot is taken for the
+			// message rather than kept from the loop - a stale map would describe a moment that has
+			// passed, which is the whole reason the live path exists.
+			last := map[string]string{}
+			if drv, ok := e.Driver.(interface{ Facts() (map[string]string, error) }); ok {
+				if f, err := drv.Facts(); err == nil {
+					last = f
+				}
+			}
 			return fail(s.Name, "`wait_until: %s` was never satisfied within %s: %s. The facts at "+
-				"the last look were %s", what, limit, why, describeFacts(f))
+				"the last look were %s", what, limit, why, describeFacts(last))
 		}
 		time.Sleep(poll)
 	}

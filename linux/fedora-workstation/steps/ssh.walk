@@ -10,6 +10,7 @@ var user
   from args.user
 
 
+
 step "boot the disk"
   boot
   # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
@@ -103,6 +104,7 @@ step "boot the disk"
   # EVERY PAGE OF GNOME INITIAL SETUP CARRIES "Previous" AND "Next" in the header - the welcome page
   # included, where they are drawn but disabled. That pair is the wizard's chrome and nothing else on
   # this desktop wears it.
+
 step "the setup wizard is up"
   repeat
     pause 10
@@ -126,9 +128,11 @@ step "the setup wizard is up"
   # `Start Setup` is the only focusable control on that page, so Tab reaches it and Return presses
   # it. A click that lands a few pixels off is a click that does nothing; a keyboard focus ring is
   # not ambiguous.
+
 step "focus the wizard's only button"
   input tab
   settle 2
+
 
 step "start the setup wizard, by keyboard"
   input ret
@@ -289,6 +293,7 @@ step "start the setup wizard, by keyboard"
   # THE PRIVACY PAGE IS LEFT THE SAME WAY - one click on Next, at (1413, 193), the coordinate the
   # wizard draws it at on every page. Its location switch is left alone: this stage is not about
   # location services, and clicking the page's centre would toggle it.
+
 step "leave the privacy page"
   input 1413 193
   settle 5
@@ -298,13 +303,16 @@ step "leave the privacy page"
   # time zone worth having - confirmed by the page's own bubble reading
   # "PST (UTC-08) Los Angeles, United States". It is NOT what makes the page pass: measured, Next on
   # an unanswered Time Zone page is the same blue button and moves the wizard on to Third-Party.
+
 step "point the map at Los Angeles, when the wizard is showing one"
   input 640 690
   settle 3
 
+
 step "leave the time zone page"
   input 1413 193
   settle 5
+
 
 step "leave the third-party repositories page"
   input 1413 193
@@ -330,10 +338,12 @@ step "leave the third-party repositories page"
   #
   # THIS STEP IS NOT OPTIONAL. The four pages above are a route; this is the destination, and a route
   # that ends anywhere else has failed.
+
 step "look at the page the route ended on"
   read
     name account_form
   settle 2
+
 
 step "the create-account form is up, with the cursor in Full Name"
   check
@@ -352,23 +362,28 @@ step "the create-account form is up, with the cursor in Full Name"
   # and inside an `optional` loop a page that never matched left the name unbound and the gate skipped
   # the typing silently - the same "optional step that let the miss through" fault this file's header
   # complains about. A non-optional check has none of that ambiguity: it fails, or it proves.
+
 step "the full name"
   settle 3
   input text "{{ user }}"
   type_gap 0.09
 
+
 step "on to the user name"
   input tab
   settle 2
+
 
 step "clear the auto-filled user name"
   input ctrl+a
   settle 1
 
+
 step "the user name"
   settle 3
   input text "{{ user }}"
   type_gap 0.09
+
 
 step "submit the account page"
   input ret
@@ -380,23 +395,28 @@ step "submit the account page"
   # empty - the focus had not moved into it. Clicking it at (960, 627) put the cursor there and the
   # password was accepted, so the click is what this does. The two fields then match, Next enables, and
   # the wizard finishes on "All done!".
+
 step "the password"
   settle 2
   input text "{{ password }}"
   type_gap 0.09
 
+
 step "put the cursor in the confirmation field, which Tab does not reach"
   input 960 627
   settle 1
+
 
 step "the password, again"
   settle 2
   input text "{{ password }}"
   type_gap 0.09
 
+
 step "leave the password page"
   input 1413 193
   settle 4
+
 
 step "finish the wizard"
   input ret
@@ -424,9 +444,11 @@ step "finish the wizard"
   # `meta_l` LEAVES THE PREVIOUS CONTENT IN THE BOX, which is the whole difference: the wizard's last
   # keystrokes were still in it, so Return ran a search for a command line instead of starting a
   # program.
+
 step "start from a clean desktop"
   input esc
   settle 2
+
 
 step "open the overview"
   input meta_l
@@ -446,9 +468,11 @@ step "open the overview"
   # A click at (960, 59) - the field's own centre - puts the cursor in it, and the same eight
   # characters then produced the Terminal tile immediately. The coordinate is the field's, measured
   # from a frame of this screen, not a guess about where a search box usually sits.
+
 step "put the cursor in the overview's search field"
   input 960 59
   settle 2
+
 
 step "search for the terminal"
   input text terminal
@@ -468,6 +492,7 @@ step "search for the terminal"
   # SO THE TILE IS WAITED FOR, BY ITS OWN WORD. A search that has produced nothing draws no word in
   # that row; one that has produced the app draws "Terminal". The loop presses nothing - a key here
   # would go into the search box and change what is being searched for.
+
 step "the Terminal result has been drawn"
   # THE RECT IS THE TILE AND ITS LABEL, NOT THE WHOLE RESULT AREA. MEASURED with tesseract on a
   # frame of this screen: the wider box `[700, 90, 1250, 240]` returns NOTHING - the tile's icon is
@@ -484,6 +509,7 @@ step "the Terminal result has been drawn"
       scale 1
       words [[terminal]]
     max 10
+
 
 step "open the terminal on the first result"
   input 960 178
@@ -506,6 +532,7 @@ step "open the terminal on the first result"
   # THE LOOP ONLY LOOKS. Its `do:` is a `settle:` and nothing else: the window takes a few seconds to
   # map, and a loop that PRESSED a key to "help" would be pressing it into whatever had the focus -
   # which is exactly how the commands ended up in the search box.
+
 step "the terminal is open, with a prompt"
   repeat
     pause 4
@@ -541,17 +568,21 @@ step "the terminal is open, with a prompt"
   # admin' lost its first two characters) or 'sudo: no password was provided'. Both are the same
   # fault - the password travels in the command line - and both are cured by authenticating once
   # and letting sudo keep the timestamp.
+
 step "unlock sudo once for this session"
   run "printf '%s\\n' {{ password }} | sudo -S -v"
   settle 4
+
 
 step "install openssh-server"
   run "sudo dnf install -y openssh-server"
   settle 60
 
+
 step "allow password authentication"
   run "sudo sed -i \"s/^#\\?\\s*PasswordAuthentication.*/PasswordAuthentication yes/\" /etc/ssh/sshd_config ; sudo grep -i \"^PasswordAuthentication\" /etc/ssh/sshd_config"
   settle 3
+
 
 step "enable ssh at boot"
   run "sudo systemctl enable --now sshd"
@@ -562,37 +593,48 @@ step "enable ssh at boot"
   # This medium is the one distribution in this tree that starts with its firewall on by default,
   # which is why every other ssh walk could get away without a line like this. `--add-service=ssh`
   # is the standard rule and it is what the default zone publishes.
+
 step "open the firewall for ssh"
   run "sudo firewall-cmd --permanent --add-service=ssh"
   settle 4
+
 
 step "reload the firewall"
   run "sudo firewall-cmd --reload"
   settle 5
 
+
 step "show the zone's services"
   run "sudo firewall-cmd --list-services"
   settle 3
 
+
 step "wait for sshd"
-  require_ssh
-  timeout 600
+  repeat
+    until machine_ssh
+    max 60
+    pause 10
+
 
 step "prove the kernel over ssh"
   ssh "uname -a"
   timeout 120
 
+
 step "prove the account over ssh"
   ssh "id -un; hostname"
   timeout 120
+
 
 step "ask the guest to power off"
   ssh "printf '%s\\n' '{{ password }}' | sudo -S -p '' poweroff"
   timeout 300
 
+
 step "wait for the machine to stop"
   wait_until stopped
   timeout 300
+
 
 step "publish the disk"
     save "{{ out }}"

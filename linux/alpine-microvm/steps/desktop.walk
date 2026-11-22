@@ -30,14 +30,17 @@ resolution 1024x768
 # THE VIDEO IS THE ARTIFACT, so its size is stated rather than inherited.
 recording_resolution 1024x768
 
+
 step "needs alpine-vmlinuz alpine-initramfs alpine.qcow2"
   needs [alpine-vmlinuz, alpine-initramfs, alpine.qcow2]
 
   # THE ROOT FILESYSTEM, BUILT BY THE CI STEP AND NOT INSTALLED BY THIS FILE.
   # A microvm has no firmware and no installer: the disk arrives ready, which is what makes the run
   # ninety seconds rather than forty minutes.
+
 step "disk alpine.qcow2"
   disk alpine.qcow2
+
 
 step "boot as a microvm from kernel \"alpine-vmlinuz\" and initramfs \"alpine-initramfs\" with \"console=tty0 console=ttyS0 root=/dev/vda rw rootfstype=ext4\", waiting up to 180s"
   boot
@@ -50,6 +53,7 @@ step "boot as a microvm from kernel \"alpine-vmlinuz\" and initramfs \"alpine-in
 
   # THE GUEST SAYS THIS ON ITS OWN SERIAL LINE, and it is the fact the boot worked: init finished and
   # getty is asking for a login.
+
 step "the console will say \"login\""
   until login
   from console
@@ -58,8 +62,10 @@ step "the console will say \"login\""
   # AND THIS IS THE PART THE OLD FILE COULD NOT DO. The recording runs for the whole walk, so these
   # twenty seconds are twenty frames of a login prompt drawn on the VGA adapter - which is what makes
   # the mp4 a picture of the guest rather than a black field.
+
 step "wait 20s"
   settle 20
+
 
 step "stop the machine by killing it, waiting up to 60s"
   stop kill

@@ -10,6 +10,7 @@ var user
   from args.user
 
 
+
 step "boot the disk"
   boot
   # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
@@ -34,6 +35,7 @@ step "boot the disk"
   #
   # THE BAND IS THE GREETER'S MIDDLE - the user tile and the password field. cachyos reads
   # "Password vmuser" here at scale 2; nixos draws the same GDM, so the same band applies.
+
 step "the greeter is drawn"
   repeat
     pause 5
@@ -47,22 +49,27 @@ step "the greeter is drawn"
       words [[password], [vmuser]]
     max 60
 
+
 step "greeter - wake the screen"
   input esc
   settle 5
 
+
 step "greeter - the user tile"
   input 960 488
   settle 4
+
 
 step "greeter - the password box"
   input text "{{ password }}"
     at 936 628
   settle 4
 
+
 step "greeter - submit"
   input ret
   settle 12
+
 
 step "let the session finish starting"
   settle 240
@@ -76,6 +83,7 @@ step "let the session finish starting"
   #
   # The wait gives it time to appear; three clicks give it the same number of chances the retries
   # elsewhere use; Escape after them closes whatever is left.
+
 step "the welcome dialog is up, when this desktop shows one"
   repeat
     pause 5
@@ -103,9 +111,11 @@ step "the welcome dialog is up, when this desktop shows one"
   # SO BOTH USE THE KEYBOARD THAT IS KNOWN TO WORK ON THIS DESKTOP: Escape closes the dialog (it is
   # a GTK dialog with a close action), and the terminal comes from the overview, which is where this
   # stage opened one successfully before - meta_l, type "terminal", Return on the result.
+
 step "close the welcome dialog"
   input esc
   settle 2
+
 
 step "and clear anything it left behind"
   input esc
@@ -125,6 +135,7 @@ step "and clear anything it left behind"
   # SO THE PROOF IS THE THING THE STAGE ACTUALLY NEEDS: a shell. The greeter has already been
   # answered above, so the session is starting; `run:` needs a window to type into, and it gets one
   # from ctrl+alt+t. `settle` gives Plasma/GNOME the time the words could not be measured against.
+
 step "let the session finish starting, which no band can confirm"
   settle 60
 
@@ -137,17 +148,21 @@ step "let the session finish starting, which no band can confirm"
   # The chord opens a terminal over whatever is up, and this desktop honours it; the search path
   # stays below as a fallback for a GNOME that does not.
   # THE TERMINAL COMES FROM THE OVERVIEW, NOT A CHORD: `ctrl+alt+t` leaves no window on this GNOME.
+
 step "open the overview"
   input meta_l
   settle 4
+
 
 step "search for the terminal"
   settle 3
   input text terminal
   type_gap 0.08
 
+
 step "the result list has had time to draw"
   settle 4
+
 
 step "open the terminal on the first result"
   input ret
@@ -168,6 +183,7 @@ step "open the terminal on the first result"
   # `SCREEN_KEPT_ON` runs straight into `ECHO ADMIN` with no line break: the Return after the first
   # command went to the OTHER window. And the `xset -dpms` failure - "server does not have extension
   # for -dpms option" - is harmless; the screen is still kept awake by `s off` and `s noblank`.
+
 step "keep the screen on, because a blanked screen takes no keys"
   run "xset s off; xset s noblank; echo screen_kept_on"
   settle 5
@@ -178,6 +194,7 @@ step "keep the screen on, because a blanked screen takes no keys"
   # `wait for sshd` then spent ten minutes on 'connection refused' - the same fault as every other
   # distribution in this session, in the file that had the longest commands and so the most to lose
   # from a dropped keystroke.
+
 step "unlock sudo once for this session"
   run "printf '%s\\n' {{ password }} | sudo -S -v"
   settle 5
@@ -194,6 +211,7 @@ step "unlock sudo once for this session"
   # `/^}/i` inserts before the FIRST line that is just `}`, which is the attribute set's closing
   # brace in the file nix ships. `grep -n openssh` after it prints the three new lines with their
   # numbers, so the recording answers the question rather than leaving it to the rebuild.
+
 step "declare openssh in configuration.nix"
   run "sudo sed -i \"/^}/i\\\\  services.openssh.enable = true;\\\\n  services.openssh.settings.PasswordAuthentication = true;\\\\n  networking.firewall.enable = false;\" /etc/nixos/configuration.nix; grep -n \"openssh\\|firewall\" /etc/nixos/configuration.nix; sudo nixos-rebuild dry-build 2>&1 | tail -3"
   settle 30
@@ -211,6 +229,7 @@ step "declare openssh in configuration.nix"
   #
   # `switch` builds, activates, starts the unit, and THEN the session dies. Nothing more is typed,
   # so nothing is typed into a login screen.
+
 step "build and activate the new profile"
   run "sudo nixos-rebuild switch"
   settle 420
@@ -228,13 +247,18 @@ step "build and activate the new profile"
   # needs no key, no terminal and no session - and the port is what the next stage actually uses.
   # An `is-active` report is NOT asked for: a report from a shell that no longer exists can only
   # fail a stage that is otherwise finished.
+
 step "wait for sshd"
-  require_ssh
-  timeout 900
+  repeat
+    until machine_ssh
+    max 90
+    pause 10
+
 
 step "prove the kernel over ssh"
   ssh "uname -a"
   timeout 120
+
 
 step "prove the account over ssh"
   ssh "id -un; hostname"
@@ -253,6 +277,7 @@ step "prove the account over ssh"
   # `poweroff &` RETURNS FIRST AND LETS THE SHELL EXIT CLEANLY, and the step is optional so a clean
   # exit and a cut connection both count; `wait for the machine to stop` is the real assertion, and
   # it is what the next stage depends on.
+
 step "ask the guest to power off"
   # `optional` IS GONE AND THE TOLERANCE IS IN THE COMMAND, WHERE THE LOG SHOWS IT.
   #
@@ -263,9 +288,11 @@ step "ask the guest to power off"
   ssh "printf '%s\\n' '{{ password }}' | sudo -S -p '' sh -c 'nohup poweroff >/dev/null 2>&1 &' || true"
   timeout 300
 
+
 step "wait for the machine to stop"
   wait_until stopped
   timeout 300
+
 
 step "publish the disk"
     save "{{ out }}"

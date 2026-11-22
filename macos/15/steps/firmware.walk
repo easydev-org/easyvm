@@ -4,8 +4,10 @@ var release
   default "15"
   from args.release
 
+
 step "the recovery image this build reads is already on disk"
   needs [recovery.dmg]
+
 
 step "build the firmware the guest boots through"
   fetch opencore

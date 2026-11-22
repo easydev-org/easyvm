@@ -14,15 +14,18 @@ walkthrough "alpine microvm - the vocabulary against the smallest guest"
 resolution 1024x768
 recording_resolution 1024x768
 
+
 step "needs alpine.iso alpine-vmlinuz alpine-initramfs"
   needs [alpine.iso, alpine-vmlinuz, alpine-initramfs]
 
   # THE MEDIUM IS ATTACHED AS A SECOND DISK, not booted from: a microvm is handed its kernel, and
   # Alpine's `modloop=` points at the squashfs inside this ISO. MEASURED without it: the initramfs
   # mounts nothing and drops to `initramfs emergency recovery shell launched`.
+
 step "make a disk \"alpine.qcow2\" of 1 GiB"
   disk alpine.qcow2
   disk_gb 1
+
 
 step "boot as a microvm from kernel \"alpine-vmlinuz\" and initramfs \"alpine-initramfs\", waiting up to 300s"
   boot
@@ -34,6 +37,7 @@ step "boot as a microvm from kernel \"alpine-vmlinuz\" and initramfs \"alpine-in
 
   # THE GUEST SAYS THIS ITSELF, on the serial line, before anything else exists. It is the machine
   # saying "a kernel ran", which is the first fact this walkthrough establishes.
+
 step "wait for the console to say \"Linux version\", waiting up to 180s"
   until "Linux version"
   from console
@@ -42,10 +46,12 @@ step "wait for the console to say \"Linux version\", waiting up to 180s"
   # AND THEN IT SAYS THIS, which is Alpine's own way of saying "init finished and I want a login".
   # This is the fact the whole file exists to establish: the vocabulary started a guest and the
   # guest came all the way up.
+
 step "the console will say \"login\""
   until login
   from console
   timeout 180
+
 
 step "stop the machine by killing it, waiting up to 60s"
   stop kill

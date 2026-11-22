@@ -11,6 +11,7 @@ var user
   from args.user
 
 
+
 step "boot the disk"
   boot
   # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
@@ -36,6 +37,7 @@ step "boot the disk"
   # both. It is typed blind into plymouth - there is no field to click - and Return submits it.
   # `optional` is NOT used here: a disk that needs no unlock must not hang, so the type is guarded
   # by the prompt's own words.
+
 step "the disk asks for its passphrase, when it is encrypted"
   repeat
     pause 5
@@ -50,28 +52,34 @@ step "the disk asks for its passphrase, when it is encrypted"
     max 40
   optional
 
+
 step "answer the passphrase prompt"
   settle 2
   input text "{{ password }}"
   when [unlock]
 
+
 step "submit the passphrase"
   input ret
   settle 20
 
+
 step "greeter - the password box"
   input 1120 283
   when [password, vmuser]
+
 
 step "greeter - log in"
   settle 3
   input text "{{ password }}"
   when [password, vmuser]
 
+
 step "greeter - submit"
   input ret
   settle 12
   when [password, vmuser]
+
 
 step "open the terminal"
   input 1092 1048
@@ -99,6 +107,7 @@ step "open the terminal"
   # admin' lost its first two characters) or 'sudo: no password was provided'. Both are the same
   # fault - the password travels in the command line - and both are cured by authenticating once
   # and letting sudo keep the timestamp.
+
 step "unlock sudo once for this session"
   run "printf '%s\\n' {{ password }} | sudo -S -v"
   settle 4
@@ -116,41 +125,53 @@ step "unlock sudo once for this session"
   # sudo was already unlocked and the terminal was fine - the failure is the index: this disk's
   # apt lists point at a package version pop-os has since replaced. `apt-get update` first, which is
   # what the error message itself recommends.
+
 step "refresh the package index"
   run "sudo apt-get update 2>&1 | tail -3"
   settle 45
+
 
 step "install openssh-server"
   run "sudo apt-get install -y openssh-server"
   settle 60
 
+
 step "allow password authentication"
   run "sudo sed -i \"s/^#\\?\\s*PasswordAuthentication.*/PasswordAuthentication yes/\" /etc/ssh/sshd_config ; sudo grep -i \"^PasswordAuthentication\" /etc/ssh/sshd_config"
   settle 3
+
 
 step "enable ssh at boot"
   run "sudo systemctl enable --now ssh"
   settle 8
 
+
 step "wait for sshd"
-  require_ssh
-  timeout 600
+  repeat
+    until machine_ssh
+    max 60
+    pause 10
+
 
 step "prove the kernel over ssh"
   ssh "uname -a"
   timeout 120
 
+
 step "prove the account over ssh"
   ssh "id -un; hostname"
   timeout 120
+
 
 step "ask the guest to power off"
   ssh "printf '%s\\n' '{{ password }}' | sudo -S -p '' poweroff"
   timeout 300
 
+
 step "wait for the machine to stop"
   wait_until stopped
   timeout 300
+
 
 step "publish the disk"
     save "{{ out }}"

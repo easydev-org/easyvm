@@ -800,7 +800,10 @@ func v2WriteRepeatDirect(b *strings.Builder, indent string, v any) error {
 			return err
 		}
 	}
-	if until, ok := raw["until"].(map[string]any); ok {
+	// `until:` IS EITHER A CONDITION BLOCK OR THE NAME OF A MACHINE FACT. The name goes on one line.
+	if name, ok := raw["until"].(string); ok {
+		fmt.Fprintf(b, "%suntil %s\n", inner, v2Scalar(name))
+	} else if until, ok := raw["until"].(map[string]any); ok {
 		fmt.Fprintf(b, "%suntil\n", inner)
 		if err := v2WriteBody(b, inner+v2Indent, until); err != nil {
 			return err

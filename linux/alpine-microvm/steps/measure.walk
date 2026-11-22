@@ -14,12 +14,15 @@ walkthrough "the measurement primitives, on the smallest guest"
 resolution 720x400
 recording_resolution 720x400
 
+
 step "needs alpine.iso alpine-vmlinuz alpine-initramfs"
   needs [alpine.iso, alpine-vmlinuz, alpine-initramfs]
+
 
 step "make a disk \"alpine.qcow2\" of 1 GiB"
   disk alpine.qcow2
   disk_gb 1
+
 
 step "boot as a microvm from kernel \"alpine-vmlinuz\" and initramfs \"alpine-initramfs\" and medium \"alpine.iso\", waiting up to 300s"
   boot
@@ -32,18 +35,21 @@ step "boot as a microvm from kernel \"alpine-vmlinuz\" and initramfs \"alpine-in
 
   # THE KERNEL PRINTS ON THE SERIAL LINE before a framebuffer exists, so the first fact comes from
   # the console rather than the screen.
+
 step "wait for the console to say \"Welcome to Alpine\", waiting up to 180s"
   until "Welcome to Alpine"
   from console
   timeout 180
 
   # AND NOW THE SCREEN. One capture, two questions about it: the words, and the colour.
+
 step "see the whole screen as \"page\""
   read
     name page
 
   # `want:` COMBINED THREE COMPARISONS INTO ONE BOOLEAN AND WAS USED NOWHERE. A `check:` binds one
   # boolean from one reading, so this is three steps - each one says which measurement it is about.
+
 step "the screen says Alpine"
   check
     source page
@@ -52,6 +58,7 @@ step "the screen says Alpine"
     rect [0, 0, 720, 400]
     rect_at [720, 400]
     words [[Alpine]]
+
 
 step "stop the machine by killing it, waiting up to 60s"
   stop kill

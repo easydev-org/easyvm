@@ -15,8 +15,10 @@ var user
 boot_disk from_caller
 ssh_port 2222
 
+
 step "the media this stage boots from is already on disk"
   needs [boot.img, macos.rom, macos.vars, Xcode_26.3_Universal.xip, node.pkg, python.pkg]
+
 
 step "boot the disk"
   boot
@@ -25,20 +27,27 @@ step "boot the disk"
   os macos
   timeout 900
 
+
 step "wait for sshd"
-  require_ssh
-  timeout 900
+  repeat
+    until machine_ssh
+    max 90
+    pause 10
+
 
 step "copy xcode into the guest"
   copy Xcode_26.3_Universal.xip /tmp/Xcode.xip
+
 
 step "copy run-xcode-install.sh in"
   copy run-xcode-install.sh /tmp/run-xcode-install.sh
   timeout 300
 
+
 step "expand and select xcode"
   ssh "sh /tmp/run-xcode-install.sh"
   timeout 7200
+
 
 step "remove the xip"
   ssh "rm -f /Users/{{ user }}/Xcode.xip && df -h / | tail -1"
@@ -60,55 +69,69 @@ step "remove the xip"
   # `dev-python-pkg`; in this workflow both arrive through `assets:` BEFORE the run starts, which is the
   # rule every stage here follows. So the step has nothing left to do and is removed rather than
   # invented: `scp: [node.pkg, /tmp/node.pkg]` below is the step that proves the files are there.
+
 step "copy the packages into the guest"
   copy node.pkg /tmp/node.pkg
 
+
 step "copy the python package into the guest"
   copy python.pkg /tmp/python.pkg
+
 
 step "copy install-node.sh in"
   copy install-node.sh /tmp/install-node.sh
   timeout 300
 
+
 step "install node"
   ssh "sh /tmp/install-node.sh"
   timeout 1800
+
 
 step "copy install-python.sh in"
   copy install-python.sh /tmp/install-python.sh
   timeout 300
 
+
 step "install python"
   ssh "sh /tmp/install-python.sh"
   timeout 1800
+
 
 step "copy prove-toolchain.sh in"
   copy prove-toolchain.sh /tmp/prove-toolchain.sh
   timeout 300
 
+
 step "prove the toolchain"
   ssh "sh /tmp/prove-toolchain.sh"
   timeout 300
+
 
 step "prove xcode is selected"
   ssh "xcode-select -p && xcodebuild -version"
   timeout 300
 
+
 step "copy swift-check.sh in"
   copy swift-check.sh /tmp/swift-check.sh
   timeout 300
+
 
 step "prove swift compiles"
   ssh "sh /tmp/swift-check.sh"
   timeout 1800
 
+
 step "note what is present"
   ssh "export PATH=/usr/local/bin:$PATH; echo \"node=$(node --version)\"; echo \"python=$(python3 --version)\"; echo \"git=$(git --version)\"; echo \"swift=$(swift --version 2>&1 | head -1)\"; echo \"xcode=$(xcodebuild -version | head -1)\""
   timeout 300
 
+
 step "stop the machine"
   stop "{{ shutdown }}"
   timeout 300
+
 
 step "publish the disk"
     save "{{ out }}"

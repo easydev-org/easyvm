@@ -9,12 +9,15 @@ var user
   default vmuser
   from args.user
 
+
 step "the media this stage boots from is already on disk"
   needs [cachyos.iso]
+
 
 step "create the empty disk"
   disk disk.qcow2
   disk_gb 128
+
 
 step "boot the installer"
   boot
@@ -23,6 +26,7 @@ step "boot the installer"
   memory_mb 4096
   os linux
   timeout 1800
+
 
 step "wait for the live desktop"
   desktop linux/kde
@@ -36,16 +40,20 @@ step "wait for the live desktop"
   reference reference/desktop.png
   timeout 5400
 
+
 step "let the desktop settle"
   settle 15
+
 
 step "open the installer"
   input 960 743
   settle 1
 
+
 step "open the installer, second click"
   input 960 743
   settle 25
+
 
 step "the installer is on screen"
   repeat
@@ -59,6 +67,7 @@ step "the installer is on screen"
       scale 1
       words [[welcome, installer], [欢迎], [cachyos, 安装]]
     max 40
+
 
 step "choose English, retrying until the page says so"
   repeat
@@ -88,9 +97,11 @@ step "choose English, retrying until the page says so"
       words [[program], [questions]]
     max 6
 
+
 step "next from welcome"
   input 1356 751
   settle 8
+
 
 step "the location page arrives after welcome"
   repeat
@@ -105,9 +116,11 @@ step "the location page arrives after welcome"
       words [[Region], [zone]]
     max 30
 
+
 step "next from location"
   input 1356 791
   settle 8
+
 
 step "the keyboard page arrives after location"
   repeat
@@ -122,9 +135,11 @@ step "the keyboard page arrives after location"
       words [[Keyboard], [Layout]]
     max 30
 
+
 step "next from keyboard"
   input 1360 792
   settle 8
+
 
 step "the bootloader page arrives after keyboard"
   repeat
@@ -139,17 +154,21 @@ step "the bootloader page arrives after keyboard"
       words [[snapshot], [chainloading]]
     max 30
 
+
 step "the bootloader page"
   read
     name boot
+
 
 step "choose grub"
   input 500 305
   settle 5
 
+
 step "grub is selected"
   read
     name grub
+
 
 step "the bootloader is grub"
   check
@@ -161,9 +180,11 @@ step "the bootloader is grub"
     scale 1
     words [[grub]]
 
+
 step "next from bootloader"
   input 1356 791
   settle 10
+
 
 step "the partitions page arrives after the bootloader"
   repeat
@@ -178,21 +199,26 @@ step "the partitions page arrives after the bootloader"
       words [[storage], [Erase], [Manual]]
     max 30
 
+
 step "select erase disk"
   input 427 366
   settle 8
+
 
 step "the partitions page with erase selected"
   read
     name parts
 
+
 step "open the filesystem list"
   input 543 425
   settle 5
 
+
 step "choose ext4"
   input 527 517
   settle 6
+
 
 step "the partitions page settles after the filesystem list closes"
   repeat
@@ -207,9 +233,11 @@ step "the partitions page settles after the filesystem list closes"
       words [[storage], [Erase], [Manual]]
     max 24
 
+
 step "the page after choosing ext4"
   read
     name fs
+
 
 step "the root partition is ext4"
   check
@@ -221,25 +249,31 @@ step "the root partition is ext4"
     scale 1
     words [[ext4]]
 
+
 step "next from partitions"
   input 1356 793
   settle 10
+
 
 step "the desktop page"
   read
     name desk
 
+
 step "next from desktop"
   input 1356 793
   settle 12
+
 
 step "the packages page"
   read
     name pkgs
 
+
 step "next from packages"
   input 1356 793
   settle 12
+
 
 step "the users page arrives before anything is typed into it"
   repeat
@@ -254,42 +288,52 @@ step "the users page arrives before anything is typed into it"
       words [[Computer], [Repeat], [Password]]
     max 30
 
+
 step "the users page"
   read
     name users
+
 
 step "the full name"
   input text "{{ user }}"
     at 515 341
   settle 3
 
+
 step "the login name - click the field"
   input 515 412
+
 
 step "the login name - select what is there"
   input ctrl+a
   settle 1
 
+
 step "the login name - delete the selection"
   input backspace
   settle 1
 
+
 step "the login name - type the value"
   input text "{{ user }}"
   settle 3
+
 step "the password"
   input text "{{ password }}"
     at 515 550
   settle 2
+
 
 step "the password again"
   input text "{{ password }}"
     at 720 552
   settle 3
 
+
 step "the users page is filled in"
   read
     name filled
+
 
 step "the password was accepted"
   check
@@ -302,9 +346,11 @@ step "the password was accepted"
     without [match]
     words [vmuser]
 
+
 step "next from users"
   input 1356 793
   settle 10
+
 
 step "the summary page arrives before install is clicked"
   repeat
@@ -319,9 +365,11 @@ step "the summary page arrives before install is clicked"
       words [[overview], [happen]]
     max 30
 
+
 step "the summary page"
   read
     name summary
+
 
 step "the summary names ext4"
   check
@@ -333,23 +381,28 @@ step "the summary names ext4"
     scale 1
     words [[ext4]]
 
+
 step "start the install"
   input 1362 872
   settle 10
+
 
 step "the confirmation dialog"
   read
     name confirm
 
+
 step "install now"
   input 1055 617
   settle 25
+
 
 step "the install writes the disk"
   disk_min_mb 4000
   disk_settle 300
   poll 20
   timeout 3600
+
 
 step "the install is done"
   repeat
@@ -364,9 +417,11 @@ step "the install is done"
       words [[installed]]
     max 80
 
+
 step "stop the machine"
   stop kill
   timeout 600
+
 
 step "publish the disk"
     save "{{ out }}"

@@ -430,8 +430,13 @@ func TestTheLinuxSSHFilesStillInstallAndEnableSSHD(t *testing.T) {
 			if strings.Contains(body, "enable") && strings.Contains(body, "ssh") {
 				enables = true
 			}
-			if s.Has("require_ssh") {
-				waits = true
+			// A WAIT FOR sshd IS A `repeat` WHOSE UNTIL IS THE MACHINE'S OWN ssh FACT, because
+			// `require_ssh:` is gone: the daemon probes ssh on its own ticker and the file repeats
+			// on that answer.
+			if lp, ok := s.Spec["repeat"].(map[string]any); ok {
+				if u, ok := lp["until"].(string); ok && strings.Contains(u, "ssh") {
+					waits = true
+				}
 			}
 		}
 		if !installs {

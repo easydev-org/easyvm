@@ -9,12 +9,15 @@ var user
   default vmuser
   from args.user
 
+
 step "the media this stage boots from is already on disk"
   needs [kubuntu.iso]
+
 
 step "create the empty disk"
   disk disk.qcow2
   disk_gb 128
+
 
 step "boot the installer"
   boot
@@ -24,17 +27,21 @@ step "boot the installer"
   os linux
   timeout 1800
 
+
 step "wait for the installer's launcher"
   desktop linux/kubuntu
   timeout 5400
+
 
 step "open the installer"
   input 1332 844
   settle 20
 
+
 step "calamares is open"
   read
     name cal
+
 
 step "the installer's first page"
   check
@@ -45,37 +52,46 @@ step "the installer's first page"
     rect_at [1920, 1080]
     words [welcome, partitions, next]
 
+
 step "next from welcome"
   input 1777 1059
   settle 8
+
 
 step "next from location"
   input 1777 1059
   settle 8
 
+
 step "next from keyboard"
   input 1777 1059
   settle 8
+
 
 step "the installation mode page"
   read
     name mode
 
+
 step "next from customize"
   input 1777 1059
   settle 8
+
 
 step "the partitions page"
   read
     name parts
 
+
 step "select erase disk"
   input 250 76
   settle 6
 
+
 step "the erase page shows ext4"
   read
     name fs
+
 
 step "the default filesystem is ext4"
   check
@@ -86,82 +102,104 @@ step "the default filesystem is ext4"
     rect_at [1920, 1080]
     words [ext4]
 
+
 step "next from partitions"
   input 1777 1059
   settle 8
 
+
 step "the users page"
   read
     name users
+
 
 step "the full name"
   input text "{{ user }}"
     at 293 51
   settle 2
 
+
 step "the login name - click the field"
   input 293 119
+
 
 step "the login name - select what is there"
   input ctrl+a
   settle 1
 
+
 step "the login name - delete the selection"
   input backspace
   settle 1
 
+
 step "the login name - type the value"
   input text "{{ user }}"
   settle 2
+
 step "the computer name - click the field"
   input 293 187
+
 
 step "the computer name - select what is there"
   input ctrl+a
   settle 1
 
+
 step "the computer name - delete the selection"
   input backspace
   settle 1
 
+
 step "the computer name - type the value"
   input text kubuntu
   settle 2
+
 step "the password - click the field"
   input 293 255
+
 
 step "the password - select what is there"
   input ctrl+a
   settle 1
 
+
 step "the password - delete the selection"
   input backspace
   settle 1
 
+
 step "the password - type the value"
   input text "{{ password }}"
   settle 2
+
 step "the password again - click the field"
   input 500 255
+
 
 step "the password again - select what is there"
   input ctrl+a
   settle 1
 
+
 step "the password again - delete the selection"
   input backspace
   settle 1
 
+
 step "the password again - type the value"
   input text "{{ password }}"
   settle 2
+
 step "log in automatically"
   input 205 295
   settle 3
 
+
 step "the users page is filled in"
   read
     name filled
+
 
 step "the password was accepted"
   check
@@ -173,13 +211,16 @@ step "the password was accepted"
     without [short]
     words [vmuser]
 
+
 step "next from users"
   input 1777 1059
   settle 8
 
+
 step "the summary page"
   read
     name summary
+
 
 step "the summary names ext4"
   check
@@ -190,22 +231,27 @@ step "the summary names ext4"
     rect_at [1920, 1080]
     words [ext4]
 
+
 step "start the install"
   input 1777 1059
   settle 8
+
 
 step "the confirmation dialog"
   read
     name confirm
 
+
 step "install now"
   input 1071 535
   settle 15
+
 
 step "the install writes the disk"
   disk_min_mb 4000
   disk_settle 300
   timeout 3600
+
 
 step "the install is done"
   repeat
@@ -219,9 +265,11 @@ step "the install is done"
       words [installed]
     max 60
 
+
 step "stop the machine"
   stop kill
   timeout 600
+
 
 step "publish the disk"
     save "{{ out }}"

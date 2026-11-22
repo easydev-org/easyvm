@@ -9,12 +9,15 @@ var user
   default vmuser
   from args.user
 
+
 step "the media this stage boots from is already on disk"
   needs [popos.iso]
+
 
 step "create the empty disk"
   disk disk.qcow2
   disk_gb 128
+
 
 step "boot the installer"
   boot
@@ -23,6 +26,7 @@ step "boot the installer"
   memory_mb 4096
   os linux
   timeout 1800
+
 
 step "wait for the live desktop"
   desktop linux/gnome
@@ -43,9 +47,11 @@ step "wait for the live desktop"
   reference reference/desktop.png
   timeout 5400
 
+
 step "open the installer from the dock"
   input 1211 1050
   settle 20
+
 
 step "the installer window is up"
   repeat
@@ -63,6 +69,7 @@ step "the installer window is up"
       words [[Install], [Language], [Clean], [Erase], [Account]]
     max 100
 
+
 step "select the language, all the way to the keyboard page"
   repeat
     do
@@ -79,6 +86,7 @@ step "select the language, all the way to the keyboard page"
       words [[Layout]]
     max 8
 
+
 step "the keyboard page is up"
   repeat
     pause 3
@@ -92,23 +100,29 @@ step "the keyboard page is up"
       words [[Layout], [Type]]
     max 20
 
+
 step "the keyboard layout, which is US"
   input 1190 696
   settle 3
 
+
 step "the layout types latin letters - click the field"
   input 1190 757
+
 
 step "the layout types latin letters - select what is there"
   input ctrl+a
   settle 1
 
+
 step "the layout types latin letters - delete the selection"
   input backspace
   settle 1
 
+
 step "the layout types latin letters - type the value"
   input text abc
+
 
 step "the layout types latin letters - the field took it"
   repeat
@@ -125,9 +139,11 @@ step "the layout types latin letters - the field took it"
       scale 6
     max 4
   settle 1
+
 step "take the keyboard layout"
   input 1367 810
   settle 6
+
 
 step "the install page is up"
   repeat
@@ -142,13 +158,16 @@ step "the install page is up"
       words [[Clean], [Custom]]
     max 20
 
+
 step "clean install"
   input 1000 433
   settle 3
 
+
 step "install"
   input 1367 810
   settle 6
+
 
 step "the drive page is up"
   repeat
@@ -163,13 +182,16 @@ step "the drive page is up"
       words [[drive], [Virtio]]
     max 20
 
+
 step "select a drive"
   input 1185 497
   settle 4
 
+
 step "erase and install"
   input 1367 810
   settle 10
+
 
 step "wait for the account pane"
   repeat
@@ -184,19 +206,24 @@ step "wait for the account pane"
       words [[Account], [User]]
     max 45
 
+
 step "type the display name - click the field"
   input 1190 530
+
 
 step "type the display name - select what is there"
   input ctrl+a
   settle 1
 
+
 step "type the display name - delete the selection"
   input backspace
   settle 1
 
+
 step "type the display name - type the value"
   input text "VM User"
+
 
 step "type the display name - the field took it"
   repeat
@@ -213,6 +240,7 @@ step "type the display name - the field took it"
       words [[VM], [User]]
     max 4
   settle 2
+
 step "create user account, and wait for the password pane"
   repeat
     do
@@ -229,43 +257,54 @@ step "create user account, and wait for the password pane"
       words [[Confirm], [Password]]
     max 6
 
+
 step "type the password - click the field"
   input 1200 448
+
 
 step "type the password - select what is there"
   input ctrl+a
   settle 1
 
+
 step "type the password - delete the selection"
   input backspace
   settle 1
+
 
 step "type the password - type the value"
   input text "{{ password }}"
   type_gap 0.09
   settle 2
+
 step "confirm the password - click the field"
   input 1200 544
+
 
 step "confirm the password - select what is there"
   input ctrl+a
   settle 1
 
+
 step "confirm the password - delete the selection"
   input backspace
   settle 1
+
 
 step "confirm the password - type the value"
   input text "{{ password }}"
   type_gap 0.09
   settle 2
+
 step "account password next"
   input 1367 810
   settle 25
 
+
 step "drive encryption - don't encrypt"
   input 1367 810
   settle 15
+
 
 step "the install has started"
   repeat
@@ -281,15 +320,18 @@ step "the install has started"
     max 20
   settle 35
 
+
 step "the install is written"
   disk_min_mb 512
   disk_settle 180
   poll 20
   timeout 3600
 
+
 step "stop the machine"
   stop kill
   timeout 120
+
 
 step "publish the disk"
     save "{{ out }}"

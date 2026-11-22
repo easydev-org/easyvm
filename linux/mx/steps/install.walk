@@ -9,12 +9,15 @@ var user
   default vmuser
   from args.user
 
+
 step "the media this stage boots from is already on disk"
   needs [mx.iso]
+
 
 step "create the empty disk"
   disk disk.qcow2
   disk_gb 128
+
 
 step "boot the installer"
   boot
@@ -23,6 +26,7 @@ step "boot the installer"
   memory_mb 4096
   os linux
   timeout 1800
+
 
 step "the medium's boot menu is up"
   read
@@ -70,6 +74,7 @@ step "the medium's boot menu is up"
   #
   # THE LANGUAGE PANEL'S FOOTER IS "Use up and down, Hit ENTER to select/deselect", so `up` walks the
   # list and `Return` opens the highlighted row. Four downs from `Language` is `Back to main menu`.
+
 step "that menu is this medium's own language panel"
   repeat
     pause 3
@@ -83,21 +88,26 @@ step "that menu is this medium's own language panel"
       words [[Language], [Keyboard], [Timezone], [Back, to, main, menu]]
     max 20
 
+
 step "down to Keyboard"
   input down
   settle 1
+
 
 step "down to Timezone"
   input down
   settle 1
 
+
 step "down to Reset"
   input down
   settle 1
 
+
 step "down to Back to main menu"
   input down
   settle 1
+
 
 step "enter the rescue menu, which is what that row opens"
   input ret
@@ -111,6 +121,7 @@ step "enter the rescue menu, which is what that row opens"
   #
   # A `loop:` IS THE RETRY. It reads once every few seconds until the words are there, which is what
   # a menu that appears asynchronously needs. Both panels get one.
+
 step "the rescue menu is up, and its footer says ESC leaves it"
   repeat
     pause 3
@@ -123,6 +134,7 @@ step "the rescue menu is up, and its footer says ESC leaves it"
       scale 1
       words [[Boot, Rescue, Menus], [Back, to, main, menu]]
     max 20
+
 
 step "ESC to the main menu, where the live session is"
   input esc
@@ -142,21 +154,26 @@ step "ESC to the main menu, where the live session is"
   #
   # The live session is the FIRST row, and the highlight is on the fourth. `up` walks the list, so
   # three of them put it on the top row; `Return` boots it.
+
 step "up to Check integrity"
   input up
   settle 1
+
 
 step "up to the systemd entry"
   input up
   settle 1
 
+
 step "up to the top row, the live session"
   input up
   settle 1
 
+
 step "boot the live session"
   input ret
   settle 30
+
 
 step "wait for the live desktop"
   desktop linux/xfce
@@ -188,12 +205,14 @@ step "wait for the live desktop"
   #
   # ONE CLICK AND A SETTLE, and the `wait for the terms page` below is the retry: it is already a
   # loop, and a page that has not arrived is what a loop is for.
+
 step "desktop - installer"
   do
     item
       input 81 259
       settle 6
   settle 28
+
 
 step "wait for the terms page"
   repeat
@@ -207,9 +226,11 @@ step "wait for the terms page"
       words [terms, of, use]
     max 30
 
+
 step "terms of use"
   input 1482 889
   settle 14
+
 
 step "wait for the installation type page"
   repeat
@@ -223,9 +244,11 @@ step "wait for the installation type page"
       words [select, type, of, installation]
     max 30
 
+
 step "installation type"
   input 1482 889
   settle 16
+
 
 step "wait for the confirmation page"
   repeat
@@ -239,13 +262,16 @@ step "wait for the confirmation page"
       words [final, review]
     max 30
 
+
 step "installation confirmation - start"
   input 1478 889
   settle 25
 
+
 step "dismiss the invalid settings modal if it is up"
   input 1069 583
   settle 4
+
 
 step "wait for the swap file page"
   repeat
@@ -259,9 +285,11 @@ step "wait for the swap file page"
       words [create, a, swap, file]
     max 40
 
+
 step "swap file"
   input 1482 889
   settle 18
+
 
 step "wait for the computer identity page"
   repeat
@@ -275,9 +303,11 @@ step "wait for the computer identity page"
       words [computer, identity]
     max 40
 
+
 step "computer identity"
   input 1482 889
   settle 18
+
 
 step "wait for the localization page"
   repeat
@@ -291,9 +321,11 @@ step "wait for the localization page"
       words [localization, defaults]
     max 40
 
+
 step "localization defaults"
   input 1482 889
   settle 18
+
 
 step "wait for the account page"
   repeat
@@ -307,28 +339,34 @@ step "wait for the account page"
       words [default, user, login]
     max 30
 
+
 step "account - login name"
   input text "{{ user }}"
     at 1210 342
   settle 2
+
 
 step "account - password"
   input text "{{ password }}"
     at 1210 377
   settle 2
 
+
 step "account - confirm password"
   input text "{{ password }}"
     at 1210 412
   settle 3
 
+
 step "autologin"
   input 700 561
   settle 4
 
+
 step "default user login"
   input 1482 889
   settle 25
+
 
 step "the installer finishes"
   repeat
@@ -345,9 +383,11 @@ step "the installer finishes"
       words [[congratulations], [completed, the, installation]]
     max 90
 
+
 step "stop the machine"
   stop kill
   timeout 120
+
 
 step "publish the disk"
     save "{{ out }}"

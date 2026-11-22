@@ -12,12 +12,15 @@ var shutdown
   default kill
   from args.shutdown
 
+
 step "the media this stage boots from is already on disk"
   needs [recovery.dmg, boot.img, macos.rom, macos.vars]
+
 
 step "create the empty disk"
   disk disk.qcow2
   disk_gb 128
+
 
 step "boot the recovery image"
   boot
@@ -27,8 +30,10 @@ step "boot the recovery image"
   recovery recovery.dmg
   timeout 900
 
+
 step "the recovery menu's rows"
   read recovery
+
 
 step "wait for the recovery menu"
   repeat
@@ -43,13 +48,16 @@ step "wait for the recovery menu"
       words [[restore, time, machine], [reinstall, macos], [safari], [disk, utility]]
     max 180
 
+
 step "select disk utility"
   input 837 514
   settle 3
 
+
 step "open disk utility"
   input 1142 586
   settle 5
+
 
 step "make disk utility full screen"
   at_color [40, 200, 64]
@@ -57,12 +65,15 @@ step "make disk utility full screen"
   color_tolerance 45
   settle 6
 
+
 step "read the first disk"
   input 200 112
   settle 2
 
+
 step "is the first disk the uninitialised one"
   read details
+
 
 step "the first disk is the uninitialised one"
   check
@@ -73,6 +84,7 @@ step "the first disk is the uninitialised one"
     rect_at [1920, 1080]
     scale 4
     text Uninitialized
+
 
 step "step down to the uninitialised disk"
   if uninitialised
@@ -94,6 +106,7 @@ step "step down to the uninitialised disk"
             text Uninitialized
           max 4
 
+
 step "erase - open the sheet"
   repeat
     do
@@ -111,18 +124,22 @@ step "erase - open the sheet"
     max 6
   settle 4
 
+
 step "erase - clear the name field"
   input backspace
   settle 3
+
 
 step "erase - name the volume"
   input text "{{ disk_name }}"
     at 960 415
   settle 4
 
+
 step "erase - confirm"
   input 1150 647
   settle 5
+
 
 step "erase - wait for the report"
   repeat
@@ -136,13 +153,16 @@ step "erase - wait for the report"
       words [[erase, complete], [erase, process]]
     max 60
 
+
 step "erase - done"
   input 1143 601
   settle 5
 
+
 step "close disk utility"
   input meta_l+q
   settle 12
+
 
 step "the recovery menu is back"
   repeat
@@ -156,13 +176,16 @@ step "the recovery menu is back"
       words [reinstall, macos]
     max 60
 
+
 step "select reinstall macos"
   input 837 333
   settle 3
 
+
 step "open the installer"
   input 1142 586
   settle 20
+
 
 step "wait for the installer to load"
   repeat
@@ -176,9 +199,11 @@ step "wait for the installer to load"
       words [[agree, to, the, terms], [english, apple], [select, the, disk], [macos, sequoia]]
     max 24
 
+
 step "welcome continue"
   input 960 712
   settle 5
+
 
 step "wait for the licence pane"
   repeat
@@ -192,9 +217,11 @@ step "wait for the licence pane"
       words [[software, license, agreement], [please, read, this]]
     max 24
 
+
 step "agree to the licence"
   input 1005 713
   settle 5
+
 
 step "wait for the licence sheet"
   repeat
@@ -208,17 +235,21 @@ step "wait for the licence sheet"
       words [[read, and, agree], [disagree, agree]]
     max 12
 
+
 step "agree in the sheet"
   input 1018 520
   settle 10
+
 
 step "select the destination card"
   input 850 550
   settle 5
 
+
 step "destination continue"
   input 1005 712
   settle 10
+
 
 step "the copy runs until the Setup Assistant appears"
   repeat
@@ -232,9 +263,11 @@ step "the copy runs until the Setup Assistant appears"
       words [[select, your, country, or, region], [how, do, you, want, to, connect, to, the, internet], [transfer, your, information, to, this, mac], [choose, a, wireless, network], [sign, in, with, your, apple, id]]
     max 1080
 
+
 step "stop the machine"
   stop "{{ shutdown }}"
   timeout 300
+
 
 step "publish the disk"
     save "{{ out }}"

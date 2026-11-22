@@ -9,12 +9,15 @@ var user
   default vmuser
   from args.user
 
+
 step "the media this stage boots from is already on disk"
   needs [zorin.iso]
+
 
 step "create the empty disk"
   disk disk.qcow2
   disk_gb 128
+
 
 step "boot the installer"
   boot
@@ -23,6 +26,7 @@ step "boot the installer"
   memory_mb 4096
   os linux
   timeout 1800
+
 
 step "wait for the live desktop"
   desktop linux/gnome
@@ -44,17 +48,21 @@ step "wait for the live desktop"
   #
   # SO THE FIRST STRETCH OF THE WAIT PRESSES RETURN, because the welcome dialog is modal and takes
   # the key: that is how the same live session is driven by hand. Then the text check decides.
+
 step "wake the live session, whose welcome dialog takes a key"
   input ret
   settle 20
 
-step "wake it again"
-  input ret
-  settle 20
 
 step "wake it again"
   input ret
   settle 20
+
+
+step "wake it again"
+  input ret
+  settle 20
+
 
 step "wait for the installer to put itself up"
   repeat
@@ -75,6 +83,7 @@ step "wait for the installer to put itself up"
       words [[install, zorin], [try, zorin], [welcome], [false, localization]]
     max 120
 
+
 step "install zorin os"
   do
     item
@@ -84,6 +93,7 @@ step "install zorin os"
       input 1223 586
       settle 3
   settle 40
+
 
 step "install zorin os (once more, if the wizard is not up)"
   do
@@ -96,28 +106,34 @@ step "install zorin os (once more, if the wizard is not up)"
   settle 40
   when_not [keyboard]
 
+
 step "disable the screen saver and the lock"
   run "xrandr --output Virtual-1 --mode 1920x1080 2>/dev/null || xrandr --output Virtual1 --mode 1920x1080 2>/dev/null || xrandr -s 1920x1080 2>/dev/null || true; xset s off; xset -dpms; xset s noblank; gsettings set org.gnome.desktop.session idle-delay 0; gsettings set org.gnome.desktop.screensaver lock-enabled false; ( for i in $(seq 1 1080); do xdotool mousemove_relative -- 1 0 2>/dev/null; xdotool mousemove_relative -- -1 0 2>/dev/null; sleep 20; done ) >/dev/null 2>&1 & exit"
   settle 10
   terminal_wait 8
   type_gap 0.15
 
+
 step "welcome"
   input 1361 764
   settle 15
+
 
 step "keyboard - english (us)"
   input 1106 402
   settle 4
 
+
 step "keyboard"
   input 1361 764
   settle 18
+
 
 step "updates and other software, when this build shows it"
   input 1361 764
   settle 18
   when_not_any [[installation, type]]
+
 
 step "the updates pane is done"
   repeat
@@ -131,6 +147,7 @@ step "the updates pane is done"
       words [[installation, type]]
     max 60
 
+
 step "the keyboard pane is done"
   repeat
     pause 3
@@ -143,9 +160,11 @@ step "the keyboard pane is done"
       words [[installation, type], [updates, and, other, software]]
     max 80
 
+
 step "installation type - install now"
   input 1361 764
   settle 18
+
 
 step "the disk warning is up"
   repeat
@@ -159,9 +178,11 @@ step "the disk warning is up"
       words [[write, the, changes, to, disks], [partition, tables]]
     max 60
 
+
 step "the dialog names the filesystem it will create"
   read
     name format
+
 
 step "the root partition will be ext4"
   check
@@ -172,9 +193,11 @@ step "the root partition will be ext4"
     rect_at [1920, 1080]
     words [ext4]
 
+
 step "write the changes to disks"
   input 1293 673
   settle 20
+
 
 step "the disk warning is answered"
   repeat
@@ -188,9 +211,11 @@ step "the disk warning is answered"
       words [[where, are, you], [time, zone]]
     max 60
 
+
 step "where are you"
   input 1361 764
   settle 18
+
 
 step "the time zone pane is done"
   repeat
@@ -204,36 +229,44 @@ step "the time zone pane is done"
       words [[who, are, you], [your, name]]
     max 60
 
+
 step "who are you - your name"
   input text "{{ user }}"
     at 975 386
   settle 2
+
 
 step "who are you - username"
   input text "{{ user }}"
     at 859 477
   settle 2
 
+
 step "who are you - password"
   input text "{{ password }}"
     at 873 514
   settle 2
+
 
 step "who are you - confirm password"
   input text "{{ password }}"
     at 883 550
   settle 3
 
+
 step "who are you"
   input 1361 764
   settle 20
 
+
 step "the install runs, as measured"
   settle 2400
+
 
 step "stop the machine"
   stop kill
   timeout 120
+
 
 step "publish the disk"
     save "{{ out }}"

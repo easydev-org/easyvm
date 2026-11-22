@@ -9,12 +9,15 @@ var user
   default vmuser
   from args.user
 
+
 step "the media this stage boots from is already on disk"
   needs [manjaro.iso]
+
 
 step "create the empty disk"
   disk disk.qcow2
   disk_gb 128
+
 
 step "boot the installer"
   boot
@@ -23,6 +26,7 @@ step "boot the installer"
   memory_mb 4096
   os linux
   timeout 1800
+
 
 step "wait for the live desktop"
   desktop linux/kde
@@ -35,16 +39,20 @@ step "wait for the live desktop"
   reference reference/desktop.png
   timeout 5400
 
+
 step "let the desktop settle"
   settle 15
+
 
 step "open the installer"
   input [960, 760]
   settle 35
 
+
 step "open the installer - what is on screen"
   read
     name open_the_installer
+
 
 step "open the installer - the screen says so"
   check
@@ -55,38 +63,47 @@ step "open the installer - the screen says so"
     rect_at [1920, 1080]
     words [[welcome], [location]]
 
+
 step "open the installer (once more, if it did not)"
   input [960, 760]
   settle 40
   when_not [welcome]
 
+
 step "welcome"
   input 1325 801
   settle 18
+
 
 step "location"
   input 1325 801
   settle 18
 
+
 step "keyboard"
   input 1325 801
   settle 18
+
 
 step "partitions - erase the disk"
   input 653 340
   settle 6
 
+
 step "open the filesystem list"
   input 955 396
   settle 5
+
 
 step "choose ext4"
   input 933 459
   settle 6
 
+
 step "the partitions page after choosing ext4"
   read
     name fs
+
 
 step "the root partition is ext4"
   check
@@ -97,59 +114,72 @@ step "the root partition is ext4"
     rect_at [1920, 1080]
     words [ext4]
 
+
 step "partitions"
   input 1325 801
   settle 20
+
 
 step "users - full name"
   input text "{{ user }}"
     at 741 320
   settle 2
 
+
 step "users - login name"
   input text "{{ user }}"
     at 741 385
   settle 2
+
 
 step "users - password"
   input text "{{ password }}"
     at 724 523
   settle 2
 
+
 step "users - confirm password"
   input text "{{ password }}"
     at 944 523
   settle 2
+
 
 step "users - root password"
   input text "{{ password }}"
     at 741 650
   settle 2
 
+
 step "users - confirm root password"
   input text "{{ password }}"
     at 944 650
   settle 3
 
+
 step "users"
   input 1325 801
   settle 20
+
 
 step "office suite - no office suite"
   input 700 288
   settle 6
 
+
 step "office suite"
   input 1334 794
   settle 20
+
 
 step "summary - install"
   input 1318 799
   settle 18
 
+
 step "the install confirmation's install now"
   input 1055 537
   settle 30
+
 
 step "the installer finishes"
   repeat
@@ -166,9 +196,11 @@ step "the installer finishes"
       words [[all, done], [you, may, now], [has, been, installed], [todo, listo], [ya, puede], [reiniciar], [instalación, completada], [instalacion, completada]]
     max 180
 
+
 step "stop the machine"
   stop kill
   timeout 120
+
 
 step "publish the disk"
     save "{{ out }}"

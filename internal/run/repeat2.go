@@ -61,10 +61,15 @@ func (e *Executor) doRepeat(s walk.Step) error {
 
 	// `until:` IS THE CONDITION. It is the same vocabulary `expect` uses, so the reader has one way
 	// to ask a question whether the answer ends a loop or fails a step.
-	until, ok := raw["until"].(map[string]any)
-	if !ok || len(until) == 0 {
-		return fail(s.Name, "`repeat:` must say `until:` - the condition that ends it, written the "+
-			"way an `expect` is: `until` then `from screen`, `words [done]`")
+	// `until:` IS EITHER A PICTURE CONDITION OR THE NAME OF A MACHINE FACT. The second form makes
+	// `repeat until machine_stopped` the same question `wait_until: stopped` asks, with the retry
+	// parameters visible instead of implied - see machinefact.go.
+	untilText, isName := raw["until"].(string)
+	until, isBlock := raw["until"].(map[string]any)
+	if !isName && (!isBlock || len(until) == 0) {
+		return fail(s.Name, "`repeat:` must say `until:` - either a condition block (`until` then "+
+			"`source screen`, `words [done]`) or the name of a machine fact such as "+
+			"`machine_stopped`")
 	}
 
 	// `do:` IS THE BODY, and a `repeat` that has none is a pure poll.
@@ -147,7 +152,16 @@ func (e *Executor) doRepeat(s walk.Step) error {
 		// 2. THE CONDITION. A reading that fails is a frame that was not finished, not a loop that
 		// should end: qemu's screendump replies before the PPM write completes, so a capture can
 		// land on a half-written file and the next attempt reads it.
-		err := e.expectOnce(s, until)
+		var err error
+		if isName {
+			var why string
+			_, why, err = e.factValue(s, untilText)
+			if err == nil && why != "" {
+				err = fmt.Errorf("%s", why)
+			}
+		} else {
+			err = e.expectOnce(s, until)
+		}
 		if err == nil {
 			e.Driver.Log(fmt.Sprintf("  repeat: satisfied after %d attempt(s)", attempt))
 			return nil

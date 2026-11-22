@@ -6,8 +6,10 @@ var out
   from args.out
 boot_disk from_caller
 
+
 step "the recovery image this boot reads is already on disk"
   needs [recovery.dmg]
+
 
 step "boot the disk that is already there"
   boot

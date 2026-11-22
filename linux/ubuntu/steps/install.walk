@@ -9,12 +9,15 @@ var user
   default vmuser
   from args.user
 
+
 step "the media this stage boots from is already on disk"
   needs [ubuntu.iso]
+
 
 step "create the empty disk"
   disk disk.qcow2
   disk_gb 128
+
 
 step "boot the installer"
   boot
@@ -29,6 +32,7 @@ step "boot the installer"
   # on the way there is close enough to that to be arguable. A reference answers the same question
   # with a measurement two orders of magnitude wider - 0.0043 for a splash against 0.9669 for a
   # desktop on this very recording.
+
 step "wait for the live desktop"
   desktop linux/gnome
   range [0.9, 1]
@@ -43,9 +47,11 @@ step "wait for the live desktop"
   #
   # AND THE REFERENCE IS THE INSTALLER'S OWN WINDOW, which is what the next step waits for - so the
   # comparison is about "the live session got this far", not "the desktop is empty".
+
 step "close the right-click menu the live session leaves open"
   input esc
   settle 2
+
 
 step "settle 2s"
   settle 2
@@ -61,6 +67,7 @@ step "settle 2s"
   #
   # SO THE WINDOW IS WAITED FOR FIRST, which makes the screen the comparison sees ONE screen instead
   # of three, and the reference is the frame from a run where it was already up.
+
 step "wait for the installer window"
   repeat
     do
@@ -77,11 +84,14 @@ step "wait for the installer window"
       words [[welcome, to, ubuntu], [choose, your, language]]
     max 120
 
+
 step "settle 3s"
   settle 3
 
+
 step "the desktop is the one this file was written against"
   read shot
+
 
 step "the screen is the one this file was written against"
   check
@@ -94,9 +104,11 @@ step "the screen is the one this file was written against"
     rect_at [1920, 1080]
     reference reference/desktop.png
 
+
 step "welcome / language"
   input 1355 848
   settle 12
+
 
 step "wait for the accessibility page, because a click that assumes the page before it is a click that can miss"
   repeat
@@ -110,9 +122,11 @@ step "wait for the accessibility page, because a click that assumes the page bef
       words [[accessibility]]
     max 24
 
+
 step "accessibility"
   input 1355 848
   settle 12
+
 
 step "wait for the keyboard layout page, because a click that assumes the page before it is a click that can miss"
   repeat
@@ -126,9 +140,11 @@ step "wait for the keyboard layout page, because a click that assumes the page b
       words [[keyboard], [layout]]
     max 24
 
+
 step "keyboard layout"
   input 1355 848
   settle 12
+
 
 step "wait for the internet connection page, because a click that assumes the page before it is a click that can miss"
   repeat
@@ -142,12 +158,15 @@ step "wait for the internet connection page, because a click that assumes the pa
       words [[internet], [connection]]
     max 24
 
+
 step "internet connection"
   input 1355 848
   settle 12
 
+
 step "read whether the installer offered to update itself, which blocks every page behind it"
   read page
+
 
 step "is the update dialog up"
   check
@@ -158,12 +177,14 @@ step "is the update dialog up"
     rect_at [1920, 1080]
     words [update, available]
 
+
 step "leave the update page by the same Next every other page uses"
   if update_offered
     then
       item "next, past the update offer"
         input 1355 848
         settle 8
+
 
 step "wait for the what do you want to do with ubuntu page, because a click that assumes the page before it is a click that can miss"
   repeat
@@ -177,9 +198,11 @@ step "wait for the what do you want to do with ubuntu page, because a click that
       words [[install], [ubuntu]]
     max 24
 
+
 step "what do you want to do with ubuntu"
   input 1355 848
   settle 12
+
 
 step "wait for the type of installation page, because a click that assumes the page before it is a click that can miss"
   repeat
@@ -193,9 +216,11 @@ step "wait for the type of installation page, because a click that assumes the p
       words [[interactive], [installation]]
     max 24
 
+
 step "type of installation"
   input 1355 848
   settle 12
+
 
 step "wait for the applications page, because a click that assumes the page before it is a click that can miss"
   repeat
@@ -209,9 +234,11 @@ step "wait for the applications page, because a click that assumes the page befo
       words [[apps]]
     max 24
 
+
 step "applications"
   input 1355 848
   settle 12
+
 
 step "wait for the optimise your computer page, because a click that assumes the page before it is a click that can miss"
   repeat
@@ -225,9 +252,11 @@ step "wait for the optimise your computer page, because a click that assumes the
       words [[proprietary]]
     max 24
 
+
 step "optimise your computer"
   input 1355 848
   settle 12
+
 
 step "wait for the disk setup page, because a click that assumes the page before it is a click that can miss"
   repeat
@@ -241,9 +270,11 @@ step "wait for the disk setup page, because a click that assumes the page before
       words [[erase], [disk]]
     max 24
 
+
 step "disk setup"
   input 1355 848
   settle 12
+
 
 step "wait for the encryption page, because a click that assumes the page before it is a click that can miss"
   repeat
@@ -257,9 +288,11 @@ step "wait for the encryption page, because a click that assumes the page before
       words [[encryption]]
     max 24
 
+
 step "encryption"
   input 1355 848
   settle 12
+
 
 step "wait for the account page before typing into it"
   repeat
@@ -273,69 +306,88 @@ step "wait for the account page before typing into it"
       words [[create, account]]
     max 24
 
+
 step "create your account - full name - click the field"
   input 1139 393
+
 
 step "create your account - full name - select what is there"
   input ctrl+a
   settle 1
 
+
 step "create your account - full name - delete the selection"
   input backspace
   settle 1
 
+
 step "create your account - full name - type the value"
   input text "{{ user }}"
   settle 2
+
 step "create your account - username - click the field"
   input 1139 501
+
 
 step "create your account - username - select what is there"
   input ctrl+a
   settle 1
 
+
 step "create your account - username - delete the selection"
   input backspace
   settle 1
 
+
 step "create your account - username - type the value"
   input text "{{ user }}"
   settle 2
+
 step "create your account - password - click the field"
   input 1050 563
+
 
 step "create your account - password - select what is there"
   input ctrl+a
   settle 1
 
+
 step "create your account - password - delete the selection"
   input backspace
   settle 1
 
+
 step "create your account - password - type the value"
   input text "{{ password }}"
   settle 2
+
 step "create your account - confirm password - click the field"
   input 1139 616
+
 
 step "create your account - confirm password - select what is there"
   input ctrl+a
   settle 1
 
+
 step "create your account - confirm password - delete the selection"
   input backspace
   settle 1
 
+
 step "create your account - confirm password - type the value"
   input text "{{ password }}"
   settle 3
+
 step "clear 'require my password to log in'"
   input 923 670
   settle 3
 
+
 step "create your account"
   input 1355 848
   settle 12
+
 
 step "wait for the time zone page"
   repeat
@@ -349,17 +401,21 @@ step "wait for the time zone page"
       words [[timezone]]
     max 24
 
+
 step "time zone - new york on the map"
   input 762 483
   settle 4
+
 
 step "time zone"
   input 1355 848
   settle 14
 
+
 step "ready to install - the green install button"
   input 1355 848
   settle 30
+
 
 step "the installer finishes"
   repeat
@@ -376,12 +432,15 @@ step "the installer finishes"
       words [[installed, and, ready, to, use], [restart, to, complete, the, installation], [restart, now]]
     max 270
 
+
 step "give the installer its last few seconds, because \"ready to use\" is not \"flushed\""
   settle 20
+
 
 step "stop the machine"
   stop kill
   timeout 120
+
 
 step "publish the disk"
     save "{{ out }}"

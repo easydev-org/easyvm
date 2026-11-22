@@ -10,12 +10,14 @@ var user
   from args.user
 
 
+
 step "boot the disk"
   boot
   # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
   memory_mb 4096
   os linux
   timeout 900
+
 
 step "wait for the greeter's X server to settle on the mode it was given"
   repeat
@@ -29,17 +31,21 @@ step "wait for the greeter's X server to settle on the mode it was given"
       words [[password], [log], [complete, your, setup], [welcome, to, ubuntu]]
     max 24
 
+
 step "greeter - the password box"
   input 936 628
   settle 3
+
 
 step "greeter - log in"
   settle 3
   input text "{{ password }}"
 
+
 step "greeter - submit"
   input ret
   settle 12
+
 
 step "the first-login wizard is up, when this build shows one"
   repeat
@@ -52,6 +58,7 @@ step "the first-login wizard is up, when this build shows one"
       rect_at [1920, 1080]
       words [[welcome, to, ubuntu], [complete, your, setup]]
     max 30
+
 
 step "walk the first-login pages to the end"
   repeat
@@ -70,53 +77,68 @@ step "walk the first-login pages to the end"
       scale 1
     max 12
 
+
 step "open the terminal"
   input ctrl+alt+t
   settle 20
+
 
 step "keep the screen on"
   run "xset s off; xset -dpms; xset s noblank"
   settle 3
 
+
 step "sudo is unlocked for this session"
   run "printf '%s\\n' {{ password }} | sudo -S -v"
   settle 2
+
 
 step "install openssh-server"
   run "sudo apt-get install -y openssh-server"
   settle 5
 
+
 step "allow password authentication"
   run "sudo sed -i s/^#PasswordAuthentication.*/PasswordAuthentication\\ yes/ /etc/ssh/sshd_config && grep -i ^PasswordAuthentication /etc/ssh/sshd_config"
   settle 3
+
 
 step "enable ssh at boot"
   run "sudo systemctl enable --now ssh"
   settle 5
 
+
 step "prove ssh is active"
   run "systemctl is-active ssh"
   settle 3
 
+
 step "wait for sshd"
-  require_ssh
-  timeout 600
+  repeat
+    until machine_ssh
+    max 60
+    pause 10
+
 
 step "prove the kernel over ssh"
   ssh "uname -a"
   timeout 120
 
+
 step "prove the account over ssh"
   ssh "id -un; hostname"
   timeout 120
+
 
 step "ask the guest to power off"
   ssh "printf '%s\\n' '{{ password }}' | sudo -S -p '' poweroff"
   timeout 300
 
+
 step "wait for the machine to stop"
   wait_until stopped
   timeout 300
+
 
 step "publish the disk"
     save "{{ out }}"

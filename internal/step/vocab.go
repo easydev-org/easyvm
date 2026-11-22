@@ -1,5 +1,7 @@
 package step
 
+import "strings"
+
 // THE VOCABULARY, IN ONE PLACE.
 //
 // A STEP IS ONE VERB AND ITS FIELDS, and this file is the only place that says which fields a verb
@@ -190,7 +192,7 @@ var Verbs = map[string]Verb{
 			"terminal_wait": {Name: "terminal_wait", Kind: KindFloat,
 				Summary: "seconds to wait for the console to answer"},
 			"ssh_probe": {Name: "ssh_probe", Kind: KindString,
-				Summary: "with `require_ssh:`: the command the wait runs"},
+				Summary: "with `run:`: the command the wait runs"},
 			"ssh_after_reboot": {Name: "ssh_after_reboot", Kind: KindBool,
 				Summary: "wait out the old daemon first, or the wait passes on the process that is " +
 					"about to die"},
@@ -284,7 +286,8 @@ var Verbs = map[string]Verb{
 			"do": {Name: "do", Kind: KindList,
 				Summary: "the steps to run before each attempt"},
 			"until": {Name: "until", Kind: KindMapping,
-				Summary: "the condition that ends it, written the way a `check:` is"},
+				Summary: "the condition that ends it: a `check:`-shaped block, or the name of one " +
+					"of the machine's own facts such as `machine_stopped`"},
 			"max": {Name: "max", Kind: KindInt,
 				Summary: "the attempt ceiling. Required - a repeat with no ceiling never ends"},
 			"pause": {Name: "pause", Kind: KindFloat,
@@ -301,14 +304,6 @@ var Actions = map[string]Verb{
 	"needs": {Name: "needs", Kind: KindList,
 		Summary: "the files this stage reads must be on disk before it starts",
 		Fields:  map[string]Key{}},
-	"require_ssh": {Name: "require_ssh", Kind: KindBool,
-		Summary: "wait for sshd before the steps that use it",
-		Fields: map[string]Key{
-			"ssh_probe": {Name: "ssh_probe", Kind: KindString,
-				Summary: "the command the wait runs"},
-			"ssh_after_reboot": {Name: "ssh_after_reboot", Kind: KindBool,
-				Summary: "wait out the old daemon before the wait"},
-		}},
 	"desktop": {Name: "desktop", Kind: KindString,
 		Summary: "wait until a desktop of this family is on screen",
 		Fields: map[string]Key{
@@ -483,7 +478,7 @@ var dispatchOrder = []string{
 	"stop",
 	"repeat",
 	"when", "when_not", "when_not_any", "do", "until", "until_any",
-	"needs", "require", "require_ssh",
+	"needs", "require",
 	"disk", "disk_settle",
 	"fetch", "write", "esp_fallback",
 	"desktop", "at_color", "at_bottom", "at_button",
@@ -507,3 +502,17 @@ func DispatchOrder(key string) int {
 	}
 	return 1 << 20
 }
+
+// MachineFacts are the live booleans the machine reports, and a file reads them by name.
+//
+// THEY ARE DECLARED HERE because `Validate` has to know the prefix is reserved, and a second copy in
+// `internal/run` would be the drift this vocabulary keeps removing.
+var MachineFacts = []string{
+	"machine_running", "machine_stopped", "machine_ssh", "machine_ssh_gone",
+	"machine_qga", "machine_booted",
+	"machine_console_idle", "machine_disk_idle", "machine_recording", "machine_share",
+	"machine_frame_still",
+}
+
+// MachineFactNames lists them for a failure message.
+func MachineFactNames() string { return strings.Join(MachineFacts, ", ") }

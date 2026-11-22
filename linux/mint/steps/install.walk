@@ -10,12 +10,15 @@ var user
   default vmuser
   from args.user
 
+
 step "the media this stage boots from is already on disk"
   needs [mint.iso]
+
 
 step "create the empty disk"
   disk disk.qcow2
   disk_gb 128
+
 
 step "boot the installer"
   boot
@@ -25,9 +28,11 @@ step "boot the installer"
   os linux
   timeout 1800
 
+
 step "the medium's GRUB menu is up"
   read
     name grub
+
 
 step "that menu names mint"
   check
@@ -50,17 +55,21 @@ step "that menu names mint"
   # THREE, FIVE SECONDS APART, is what the file already does elsewhere for a screen that appears more
   # than once - and a second Return on a menu that has already gone is harmless, because the live
   # session ignores it.
+
 step "answer the menu, which does not count down"
   input ret
   settle 5
+
 
 step "answer it again, because a firmware menu can miss the first key"
   input ret
   settle 5
 
+
 step "and once more, then let the kernel start"
   input ret
   settle 20
+
 
 step "wait for the live desktop"
   desktop linux/cinnamon
@@ -88,15 +97,18 @@ step "wait for the live desktop"
   reference reference/desktop.png
   timeout 5400
 
+
 step "disable the screen saver, its lock and the dpms blank"
   run "gsettings set org.cinnamon.desktop.session idle-delay 0; gsettings set org.cinnamon.desktop.screensaver lock-enabled false; gsettings set org.cinnamon.desktop.screensaver idle-activation-enabled false; xrandr --output Virtual-1 --mode 1920x1080 2>/dev/null || xrandr --output Virtual1 --mode 1920x1080 2>/dev/null || xrandr -s 1920x1080 2>/dev/null || true; xset s off; xset -dpms; xset s noblank; ( for i in $(seq 1 1080); do xdotool mousemove_relative -- 1 0 2>/dev/null; xdotool mousemove_relative -- -1 0 2>/dev/null; sleep 20; done ) >/dev/null 2>&1 & exit"
   settle 10
   terminal_wait 8
   type_gap 0.15
 
+
 step "the desktop's install icon is on screen"
   read
     name desktop
+
 
 step "that icon names the installer"
   check
@@ -108,13 +120,16 @@ step "that icon names the installer"
     scale 1
     words [[Install]]
 
+
 step "select the installer's icon"
   input 114 52
   settle 3
 
+
 step "open it with the keyboard, because a double-click does not"
   input ret
   settle 25
+
 
 step "the installer window is up"
   repeat
@@ -129,25 +144,31 @@ step "the installer window is up"
       words [[Welcome], [Keyboard], [Multimedia]]
     max 30
 
+
 step "welcome"
   input 1306 727
   settle 12
+
 
 step "keyboard"
   input 1306 727
   settle 12
 
+
 step "multimedia codecs"
   input 1306 727
   settle 12
+
 
 step "installation type"
   input 1306 727
   settle 15
 
+
 step "the dialog names the filesystem it will create"
   read
     name format
+
 
 step "the root partition will be ext4"
   check
@@ -159,36 +180,44 @@ step "the root partition will be ext4"
     scale 1
     words [[ext4]]
 
+
 step "write the changes to disks"
   input 1266 663
   settle 25
+
 
 step "installation type - install now, after the modal"
   input 1307 726
   settle 30
 
+
 step "where are you"
   input 1306 727
   settle 15
+
 
 step "who are you - full name"
   input text "{{ display_name }}"
     at 965 347
   settle 2
 
+
 step "who are you - password"
   input text "{{ password }}"
     at 877 458
   settle 2
+
 
 step "who are you - confirm password"
   input text "{{ password }}"
     at 877 492
   settle 3
 
+
 step "who are you"
   input 1306 727
   settle 20
+
 
 step "the install finishes"
   repeat
@@ -203,9 +232,11 @@ step "the install finishes"
       words [[restart]]
     max 120
 
+
 step "stop the machine"
   stop kill
   timeout 120
+
 
 step "publish the disk"
     save "{{ out }}"

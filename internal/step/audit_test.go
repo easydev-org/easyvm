@@ -349,6 +349,12 @@ func countKeyInDir(t *testing.T, dir, key string) int {
 
 // declared reports whether any table knows this key.
 func declared(k string) bool {
+	// THE MACHINE'S OWN FACTS ARE NAMES A FILE WRITES, so the document may list them.
+	for _, f := range MachineFacts {
+		if k == f {
+			return true
+		}
+	}
 	if _, ok := Shared[k]; ok {
 		return true
 	}

@@ -10,6 +10,7 @@ var user
   from args.user
 
 
+
 step "boot the disk"
   boot
   # A FIXED SIZE FOR EVERY GUEST OF THIS FAMILY: see the header comment.
@@ -31,6 +32,7 @@ step "boot the disk"
   #
   # THE BAND IS THAT CARD: x 80..480, y 480..640, which reads 'Vmuser User' and 'Password' at scale
   # 1 and 2 on that frame.
+
 step "the greeter is drawn"
   repeat
     do
@@ -47,13 +49,16 @@ step "the greeter is drawn"
       words [[vmuser], [password]]
     max 60
 
+
 step "greeter - the password box"
   input 259 568
   settle 2
 
+
 step "greeter - log in"
   settle 3
   input text "{{ password }}"
+
 
 step "greeter - submit"
   input ret
@@ -61,9 +66,11 @@ step "greeter - submit"
 
   # THE SESSION TAKES LONGER THAN THE TWELVE SECONDS AFTER `Return`, AND A CHORD PRESSED IN THAT
   # GAP GOES TO THE GREETER. This is the same gate the same medium's install walk uses.
+
 step "wait for the desktop"
   desktop linux/cinnamon
   timeout 900
+
 
 step "open the terminal"
   input ctrl+alt+t
@@ -91,41 +98,53 @@ step "open the terminal"
   # admin' lost its first two characters) or 'sudo: no password was provided'. Both are the same
   # fault - the password travels in the command line - and both are cured by authenticating once
   # and letting sudo keep the timestamp.
+
 step "unlock sudo once for this session"
   run "printf '%s\\n' {{ password }} | sudo -S -v"
   settle 4
+
 
 step "install openssh-server"
   run "sudo apt-get install -y openssh-server"
   settle 60
 
+
 step "allow password authentication"
   run "sudo sed -i \"s/^#\\?\\s*PasswordAuthentication.*/PasswordAuthentication yes/\" /etc/ssh/sshd_config ; sudo grep -i \"^PasswordAuthentication\" /etc/ssh/sshd_config"
   settle 3
+
 
 step "enable ssh at boot"
   run "sudo systemctl enable --now ssh"
   settle 8
 
+
 step "wait for sshd"
-  require_ssh
-  timeout 600
+  repeat
+    until machine_ssh
+    max 60
+    pause 10
+
 
 step "prove the kernel over ssh"
   ssh "uname -a"
   timeout 120
 
+
 step "prove the account over ssh"
   ssh "id -un; hostname"
   timeout 120
+
 
 step "ask the guest to power off"
   ssh "printf '%s\\n' '{{ password }}' | sudo -S -p '' poweroff"
   timeout 300
 
+
 step "wait for the machine to stop"
   wait_until stopped
   timeout 300
+
 
 step "publish the disk"
     save "{{ out }}"

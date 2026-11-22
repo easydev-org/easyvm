@@ -9,12 +9,15 @@ var user
   default vmuser
   from args.user
 
+
 step "the media this stage boots from is already on disk"
   needs [nixos.iso]
+
 
 step "create the empty disk"
   disk disk.qcow2
   disk_gb 128
+
 
 step "boot the installer"
   boot
@@ -23,6 +26,7 @@ step "boot the installer"
   memory_mb 4096
   os linux
   timeout 1800
+
 
 step "wait for the live desktop"
   desktop linux/gnome
@@ -36,6 +40,7 @@ step "wait for the live desktop"
   reference reference/desktop.png
   timeout 5400
 
+
 step "open the installer"
   do
     item
@@ -45,6 +50,7 @@ step "open the installer"
       input 960 640
       settle 3
   settle 8
+
 
 step "calamares is up"
   repeat
@@ -62,13 +68,16 @@ step "calamares is up"
       words [[welcome], [language], [keyboard]]
     max 30
 
+
 step "the language combo, opened and taken"
   input 1050 736
   settle 3
 
+
 step "take the current entry"
   input ret
   settle 3
+
 
 step "next through the pages, until the users page is up"
   repeat
@@ -86,19 +95,24 @@ step "next through the pages, until the users page is up"
       words [[name], [Password]]
     max 8
 
+
 step "the full name field - click the field"
   input 727 375
+
 
 step "the full name field - select what is there"
   input ctrl+a
   settle 1
 
+
 step "the full name field - delete the selection"
   input backspace
   settle 1
 
+
 step "the full name field - type the value"
   input text "{{ user }}"
+
 
 step "the full name field - the field took it"
   repeat
@@ -114,29 +128,35 @@ step "the full name field - the field took it"
       words [["{{ user }}"]]
     max 4
   settle 2
+
 step "users - allow a short password"
   input 645 537
   settle 3
+
 
 step "users - password"
   input text "{{ password }}"
     at 741 495
   settle 2
 
+
 step "users - repeat password"
   input text "{{ password }}"
     at 959 495
   settle 2
+
 
 step "users - administrator password"
   input text "{{ password }}"
     at 741 609
   settle 2
 
+
 step "users - administrator repeat password"
   input text "{{ password }}"
     at 959 609
   settle 3
+
 
 step "next to the partitions page"
   repeat
@@ -154,9 +174,11 @@ step "next to the partitions page"
       words [[partitioning], [erase]]
     max 8
 
+
 step "partitions - erase the disk"
   input 633 390
   settle 6
+
 
 step "partitions -> summary"
   repeat
@@ -174,6 +196,7 @@ step "partitions -> summary"
       words [[overview]]
     max 6
 
+
 step "summary - install"
   repeat
     do
@@ -190,15 +213,18 @@ step "summary - install"
       words [[Installing]]
     max 6
 
+
 step "the install is written"
   disk_min_mb 1024
   disk_settle 180
   poll 20
   timeout 3600
 
+
 step "stop the machine"
   stop kill
   timeout 120
+
 
 step "publish the disk"
     save "{{ out }}"

@@ -23,6 +23,6 @@ func ExecutableKeys() []string {
 		"read", "screenshot", "desktop", "at_color", "at_bottom", "at_button",
 		// THE GATES AND THE PAUSES.
 		"when", "when_not", "when_not_any", "do", "until", "until_any",
-		"needs", "require", "require_ssh", "wait", "settle",
+		"needs", "require", "wait", "settle",
 	}
 }
