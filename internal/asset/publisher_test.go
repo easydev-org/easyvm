@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/easydev-org/easyvm/internal/opencore"
 )
 
 // THE PUBLISHER AND THE FETCHER MUST NAME THE SAME TAGS, AND NOTHING ELSE CHECKS BOTH ENDS.
@@ -135,13 +134,19 @@ func tagsTheBuildAsksFor(t *testing.T) map[string]bool {
 			"empty sets - and every stage would boot from a file nothing pulled")
 	}
 
-	// AND THE INPUTS OF THE BUILD THAT RUNS INSIDE THE IMAGE. `artifacts-publish.yml`'s `opencore`
-	// job runs `easyvm run macos/15/steps/firmware.yaml`, and that walk's `build: opencore` pulls
-	// four pinned assets by name. The workflow does not spell them, so this reads the same table the
-	// build does - which is what keeps the two from drifting, because a pin added there is a tag the
-	// publisher must already have mirrored.
-	for _, a := range opencore.Assets {
-		out[a.Tag] = true
+	// AND THE INPUTS OF THE FIRMWARE BUILD, WHICH NOW RUNS IN easyvm-macos AND NOT HERE.
+	//
+	// The four pinned macOS assets are still mirrored INTO this package - `artifacts-publish.yml`
+	// has a row for each, and easyvm-macos's build pulls them by tag - so the publisher must keep
+	// publishing them. The build itself is `scripts/build-firmware.py` in that repository, which
+	// is why this list is written here rather than read from a Go table that no longer exists.
+	for _, tag := range []string{
+		"macos-asset-opencore",
+		"macos-asset-opencore-template",
+		"macos-asset-ovmf-code",
+		"macos-asset-ovmf-vars-1920x1080",
+	} {
+		out[tag] = true
 	}
 	return out
 }

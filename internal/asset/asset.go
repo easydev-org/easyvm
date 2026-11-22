@@ -11,7 +11,9 @@
 package asset
 
 import (
+	"archive/tar"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,7 +22,6 @@ import (
 
 	"github.com/easydev-org/easyvm/internal/answer"
 	"github.com/easydev-org/easyvm/internal/oci"
-	"github.com/easydev-org/easyvm/internal/opencore"
 )
 
 // Kind is a file a stage needs on the host before it can copy it in.
@@ -239,24 +240,70 @@ func recoveryMacOSTag(release string) string {
 	return "macos-recovery-" + release
 }
 
-// fetchOpenCore builds the firmware a macOS guest boots through.
+// fetchOpenCore downloads the firmware a macOS guest boots through.
 //
-// THREE OUTPUTS, NOT ONE, and the caller names all three: the boot image is what the firmware
-// starts, the ROM is pflash code, and the variables file is per-guest NVRAM that qemu WRITES to - so
-// it must be a copy, never the pinned template.
+// IT USED TO BUILD IT, AND THE BUILD IS NOW A CI JOB IN THE macOS REPOSITORY. The output is a
+// pure function of five pinned inputs - OpenCore's archive, the LongQT template, OVMF's code and
+// vars, and the recovery image - so building it once and publishing the result turns thirty
+// seconds of every macOS stage into a download. The build itself is `scripts/build-firmware.py`
+// in easyvm-macos, and its output is byte-identical to the Go code it replaced: MEASURED, 144
+// files in the ESP, and a config.plist that differs only in the identity.
+//
+// THREE FILES, NOT ONE, and the caller names all three: the boot image is what the firmware
+// starts, the ROM is pflash code, and the variables file is per-guest NVRAM that qemu WRITES to -
+// so it must be a COPY, never the pinned template.
 func fetchOpenCore(spec Spec) (Result, error) {
-	out, err := opencore.Build(opencore.Spec{
-		Release:  spec.Release,
-		Work:     spec.Work,
-		Recovery: spec.Recovery,
-	}, func(string) {})
-	if err != nil {
+	tag := firmwareTag(spec.Release)
+	dir := spec.Work
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return Result{}, err
 	}
+	boot := filepath.Join(dir, "boot.img")
+	rom := filepath.Join(dir, "macos.rom")
+	varsTemplate := filepath.Join(dir, "macos.vars.template")
+
+	// THE THREE FILES ARRIVE AS ONE ARTIFACT, and the layer is a tar because a registry tag holds
+	// one blob - so `pull` writes the archive and this unpacks it.
+	archive := filepath.Join(dir, "macos-firmware.tar")
+	// THE FLOOR IS 256 MiB, because boot.img alone is that size and a smaller file is a truncated
+	// pull rather than a boot image.
+	if err := pullTag(tag, archive, 256<<20, 20*time.Minute,
+		"easyvm-macos publishes it from scripts/build-firmware.py"); err != nil {
+		return Result{}, fmt.Errorf("the macOS firmware is not published at %s: %w. It is built "+
+			"by easyvm-macos's artifacts-publish workflow; a stage cannot start without it",
+			tag, err)
+	}
+	if err := untar(archive, dir); err != nil {
+		return Result{}, fmt.Errorf("%s: %w", tag, err)
+	}
+	for _, f := range []string{boot, rom, varsTemplate} {
+		if _, err := os.Stat(f); err != nil {
+			return Result{}, fmt.Errorf("%s did not unpack %s: %w", tag, filepath.Base(f), err)
+		}
+	}
+
+	// THE VARS FILE IS A WRITABLE COPY PER GUEST, made once and reused: macOS reboots inside one
+	// VM, and a fresh copy each boot loses the boot entries the installed system just registered.
+	// EVERY GUEST GETS THE SAME INITIAL BYTES, which is right - the template holds no boot entries,
+	// and each copy evolves on its own.
+	vars := filepath.Join(dir, "macos.vars")
+	if _, err := os.Stat(vars); os.IsNotExist(err) {
+		if err := copyFile(varsTemplate, vars); err != nil {
+			return Result{}, err
+		}
+	}
 	return Result{
-		Main:  out.Boot,
-		Extra: []string{out.ROM, out.Vars},
+		Main:  boot,
+		Extra: []string{rom, vars},
 	}, nil
+}
+
+// firmwareTag is the artifact a release's firmware is published under.
+func firmwareTag(release string) string {
+	if release == "" {
+		release = "15"
+	}
+	return "macos-firmware-" + release
 }
 
 // LINUX ISO TAGS ARE NOT `iso-<distribution>`, AND THE THREE THAT ARE NOT WOULD HAVE FAILED.
@@ -460,4 +507,68 @@ func firstLine(s string) string {
 		s = s[:160] + "..."
 	}
 	return s
+}
+
+// untar unpacks the firmware artifact into dir.
+//
+// A REGISTRY TAG HOLDS ONE BLOB, so the three files travel as a tar and are unpacked here. The
+// entries are written by name and no path is followed outside dir: an artifact is data, and data
+// that can write to `../../etc` is a supply-chain hole rather than a convenience.
+func untar(archive, dir string) error {
+	f, err := os.Open(archive)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	tr := tar.NewReader(f)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		name := filepath.Base(hdr.Name)
+		if name == "" || name == "." || name == ".." {
+			continue
+		}
+		dest := filepath.Join(dir, name)
+		if hdr.Typeflag != tar.TypeReg {
+			continue
+		}
+		out, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+		if err != nil {
+			return err
+		}
+		if _, err := io.Copy(out, tr); err != nil {
+			_ = out.Close()
+			return err
+		}
+		if err := out.Close(); err != nil {
+			return err
+		}
+	}
+}
+
+// copyFile copies src to dest, keeping the mode.
+func copyFile(src, dest string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	fi, err := in.Stat()
+	if err != nil {
+		return err
+	}
+	out, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, fi.Mode().Perm())
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		return err
+	}
+	return out.Close()
 }

@@ -25,12 +25,12 @@ import (
 // pointing one of them back. A default is the easiest thing in a program to change and the hardest
 // thing to notice.
 func TestBothDirectionsUseThisRepositorysPackage(t *testing.T) {
-	// THE FILES THAT CHOOSE A REPOSITORY. `asset` fetches the installer images and the guest-agent
-	// archives; `opencore` fetches the four macOS firmware assets. Those are every place a tag is
-	// resolved, so they are every place a default can be wrong.
+	// THE FILE THAT CHOOSES A REPOSITORY. `asset` fetches the installer images, the guest-agent
+	// archives and now the macOS firmware artifact. It is the only place a tag is resolved, so it
+	// is the only place a default can be wrong - the OpenCore BUILD that used to resolve its own
+	// four pins moved to easyvm-macos, where its build script is checked by that repository's CI.
 	files := []string{
 		"../asset/asset.go",
-		"../opencore/opencore.go",
 	}
 
 	// A STRING LITERAL, NOT A COMMENT. The comment that explains this history names the other
