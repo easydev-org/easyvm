@@ -1085,3 +1085,31 @@ func TestAMicrovmDeclaresTheAbsenceOfPCIeUnlessItHasADesktop(t *testing.T) {
 			"than checked", got)
 	}
 }
+
+// A MICROVM DESKTOP MUST REACH THE DAEMON'S ADAPTER SWITCH AS `std`, NOT `absent`.
+//
+// MEASURED, and it cost a full CI matrix: the microvm shape says `video: {kind: absent}`, and
+// `VGAFor` returned that word verbatim. The daemon's switch has cases for `none`, `virtio` and
+// `std` - and NO case for `absent` - so twenty-four desktop variants booted with NO display device.
+// `modprobe virtio-gpu` had nothing to bind, /dev/dri stayed empty, Xorg answered
+// `(EE) no screens found`, and every screenshot was qemu's blank framebuffer (mean 0.7231).
+func TestAMicrovmDesktopReachesTheAdapterSwitch(t *testing.T) {
+	// THE SHAPE IS `absent`, so this is the exact combination that broke.
+	b := Boot{OS: "microvm", MicroVM: true, MicroVMDisplay: "desktop"}
+	if got := b.VGAFor("std"); got != "std" {
+		t.Fatalf("a desktop microvm's VGA kind is %q. The daemon decides the adapter in a switch over "+
+			"`none`/`virtio`/`std`; `absent` matches none of them, so no display device is added and "+
+			"the GPU never binds", got)
+	}
+	// AND THE HEADLESS FORMS ARE UNCHANGED: they still reach the same switch, which is what picks
+	// `isa-vga` for a terminal and nothing at all for serial.
+	for _, d := range []string{"serial", "terminal"} {
+		if got := (Boot{OS: "microvm", MicroVM: true, MicroVMDisplay: d}).VGAFor("std"); got != "std" {
+			t.Errorf("a %s microvm's VGA kind is %q, want the default so the daemon's own switch runs", d, got)
+		}
+	}
+	// A SHAPE THAT REALLY SAYS `none` STILL WINS: macOS supplies its own adapter through extra_args.
+	if got := (Boot{OS: "macos"}).VGAFor("std"); got != "none" {
+		t.Errorf("macOS's VGA kind is %q, want `none` - its adapter is in extra_args", got)
+	}
+}

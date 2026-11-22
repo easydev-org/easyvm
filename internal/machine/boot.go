@@ -937,6 +937,24 @@ const AndroidVGA = "virtio"
 // VGAFor is `VGA` without the prose, so the argument-building code and the refusal in `Validate`
 // answer the same question from the same place and cannot disagree.
 func (b Boot) VGAFor(defaultVGA string) string {
+	// A MICROVM'S ADAPTER IS DECIDED BY `microvm_display`, NOT BY THE SHAPE'S `video.kind`.
+	//
+	// THE SHAPE SAYS `absent`, AND THAT IS RIGHT FOR THE TWO HEADLESS FORMS: a serial guest has no
+	// adapter at all and a `terminal` guest's ISA VGA is chosen in the daemon's own switch. The
+	// `desktop` form is the exception - it asks for a GPU - and if this function short-circuited on
+	// `absent` the daemon would never reach the branch that attaches `virtio-gpu-pci`.
+	//
+	// MEASURED, and it cost a full CI matrix: `absent` matched no case in the daemon's switch, so
+	// TWENTY-FOUR desktop variants booted with no display device at all. `modprobe virtio-gpu` found
+	// nothing to bind, gpu.service created no /dev/dri nodes, Xorg answered `(EE) no screens found`,
+	// and every walk photographed qemu's empty framebuffer - mean brightness 0.7231, the same number
+	// to four decimal places on all of them.
+	//
+	// SO THE SHAPE'S `absent` MEANS "NO DEFAULT ADAPTER", and the daemon's switch decides. Returning
+	// `defaultVGA` here is what lets `case "std"` see the microvm and pick the right device.
+	if b.MicroVM {
+		return defaultVGA
+	}
 	// FOUR ANSWERS, AND EACH ONE IS IN A SHAPE FILE'S `video.kind`.
 	//
 	//	none     another device supplies the adapter - macOS's `vmware-svga` in `extra_args`
