@@ -794,6 +794,89 @@ jobs:
           fi
           pgrep -a qemu-system-x86_64 || true
 
+      # PARTING A DISK IS THE PIPELINE'S WORK, NOT THE DAEMON'S.
+      #
+      # A UEFI guest that installs a loader into /EFI/<vendor> and registers it with efibootmgr
+      # leaves an entry in the VARIABLES store - which this engine deliberately makes fresh every
+      # boot, so no guest inherits another's NVRAM. Firmware with an empty NVRAM looks in exactly one
+      # place, \EFI\BOOT\BOOTX64.EFI, and a disk whose loader is elsewhere does not start:
+      #
+      #	BdsDxe: failed to load Boot0002 "UEFI QEMU HARDDISK QM00011" ... : Not Found
+      #	BdsDxe: No bootable option or device was found.
+      #
+      # MEASURED on android blissos 16.9.7, whose installer finished with "Congratulations!" and
+      # whose ESP held a complete /EFI/BLISSOS tree.
+      #
+      # THE DAEMON USED TO DO THIS ITSELF, as an `esp_fallback:` verb with a hand-written FAT32
+      # driver - 552 lines of GPT parsing, qemu-io hex dumps, cluster chains and directory entries.
+      # It worked and it did not belong there: the engine drives a machine, it does not edit a
+      # filesystem. `mtools` reads and writes the same structures a partition at a byte offset in one
+      # command, and both halves were checked against a REAL published disk - the same file list, the
+      # same sizes, the same rewritten config.
+      #
+      # THE DECLARATION IS THE MATRIX, so a stage that needs it says so and no other stage pays:
+      #
+      #	"disk-parted": {"from": "/EFI/BLISSOS", "search": "/android-2024-10-11/kernel"}
+      #
+      # `from` is the directory the installer wrote. `search` is optional: when it is given, a
+      # `search.fs_uuid <uuid>` line in the copied GRUB.CFG is replaced with a
+      # `search --file <that path>` - because the installer records the UUID BEFORE it formats the
+      # partition, so the value names a filesystem that does not exist.
+      - name: part the disk, for a firmware that has no boot entry
+        if: matrix.disk-parted.from != ''
+        run: |
+          set -eu
+          out="$GITHUB_WORKSPACE/work/${{ matrix.out }}"
+          [ -s "$out" ] || { echo "no disk at $out to part"; exit 1; }
+          from='${{ matrix.disk-parted.from }}'
+          search='${{ matrix.disk-parted.search }}'
+
+          # THE ESP'S OFFSET, READ FROM THE GPT by a script in this repository - a `run:` block is
+          # a YAML scalar and an embedded script's indentation fights its terminator. See the file.
+          esp=$(python3 "$GITHUB_WORKSPACE/.github/esp-offset.py" "$out")
+          echo "=== the ESP is at byte $esp of $(basename "$out")"
+
+          # mtools READS A RAW IMAGE AND NOT A QCOW2, MEASURED: the same command that lists the ESP
+          # of a raw file answers `init :: non DOS media` for the qcow2 it came from. So the disk is
+          # unpacked, edited, and packed back - and the round trip is sparse, so a 128 GiB disk costs
+          # the blocks it actually holds.
+          raw="$GITHUB_WORKSPACE/work/$(basename "$out" .qcow2).raw"
+          qemu-img convert -f qcow2 -O raw "$out" "$raw"
+
+          dev="$raw@@$esp"
+          mdeltree -i "$dev" ::/EFI/BOOT 2>/dev/null || true
+          mmd -i "$dev" ::/EFI/BOOT
+          mcopy -i "$dev" -n "::$from"/*.EFI ::/EFI/BOOT/
+          # THE MENU THE CONFIG SOURCES LIVES BESIDE IT.
+          mcopy -i "$dev" -n "::$from"/*.CFG ::/EFI/BOOT/ 2>/dev/null || true
+          if [ -n "$search" ]; then
+            mtype -i "$dev" "::$from"/GRUB.CFG \
+              | sed "s|^search\.fs_uuid .*|search --no-floppy --set=root --file $search|" \
+              > "$GITHUB_WORKSPACE/work/grub.cfg"
+            # THE OLD COPY IS DELETED FIRST. `mcopy` ONTO AN EXISTING NAME EXITS 1 AND WRITES
+            # NOTHING - MEASURED on the real disk: rc=1 and the file still began `search.fs_uuid`.
+            # A rewrite that silently keeps the stale config is the one failure this step exists to
+            # prevent, so the delete is not tidiness.
+            mdel -i "$dev" ::/EFI/BOOT/GRUB.CFG 2>/dev/null || true
+            mcopy -i "$dev" "$GITHUB_WORKSPACE/work/grub.cfg" ::/EFI/BOOT/GRUB.CFG
+            rm -f "$GITHUB_WORKSPACE/work/grub.cfg"
+          fi
+
+          # THE CLAIM, CHECKED: the loader is at the one path an empty NVRAM looks at, and it is
+          # the installer's own file rather than an empty placeholder.
+          mdir -i "$dev" ::/EFI/BOOT
+          size=$(mdir -i "$dev" ::/EFI/BOOT | awk '$1 ~ /X64/ && $2 == "EFI" {print $3; exit}')
+          [ -n "$size" ] && [ "$size" -gt 100000 ] || {
+            echo "::error::/EFI/BOOT has no BOOTX64.EFI of a real size (got [$size])"
+            exit 1
+          }
+          echo "=== /EFI/BOOT/BOOTX64.EFI is $size bytes"
+
+          # BACK TO A QCOW2, IN PLACE, because that is what the next stage pulls.
+          qemu-img convert -f raw -O qcow2 -c "$raw" "$out"
+          rm -f "$raw"
+          echo "=== /EFI/BOOT holds the loader"
+
       - name: publish the disk
         # A LEG THAT PRODUCED A DISK PUBLISHES IT, AND THAT IS HOW THE NEXT STAGE GETS ITS INPUT.
         #

@@ -18,7 +18,7 @@ func ExecutableKeys() []string {
 		"write",
 		// THE MACHINE.
 		"disk",
-		"acpi", "qga", "wait_until", "esp_fallback",
+		"acpi", "qga", "wait_until",
 		// THE ENDING: `save` is `stop`'s publishing half as a step of its own, which every walk in
 		// every repository uses as its last step.
 		"save",

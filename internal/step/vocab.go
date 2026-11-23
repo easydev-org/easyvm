@@ -332,14 +332,6 @@ var Actions = map[string]Verb{
 			"disk_esp_mib": {Name: "disk_esp_mib", Kind: KindTemplated,
 				Summary: "the EFI system partition's size, in MiB"},
 		}},
-	"esp_fallback": {Name: "esp_fallback", Kind: KindAny,
-		Summary: "edit a FAT filesystem inside a stopped disk, at byte offsets",
-		Fields: map[string]Key{
-			"disk": {Name: "disk", Kind: KindString,
-				Summary: "the disk file to edit"},
-			"from": {Name: "from", Kind: KindString,
-				Summary: "the directory inside it"},
-		}},
 	"write": {Name: "write", Kind: KindString,
 		Summary: "write one of the built-in templates to disk",
 		Fields: map[string]Key{
@@ -442,7 +434,7 @@ var dispatchOrder = []string{
 	"when", "when_not", "when_not_any", "do", "until", "until_any",
 	"needs", "require",
 	"disk",
-	"write", "esp_fallback",
+	"write",
 	"at_color", "at_bottom", "at_button",
 	"wait", "settle",
 }

@@ -164,7 +164,6 @@ IS DROPPED - which is how an optional medium disappears without a conditional an
 | `adb_privileged` | ask adbd for root before the commands that need it |
 | `disk` | make one disk, or name the one a machine starts from |
 | `do` | run a list of steps in order under one name |
-| `esp_fallback` | edit a FAT filesystem inside a stopped disk, at byte offsets |
 | `needs` | the files this stage reads must be on disk before it starts |
 | `qga` | one guest-agent command: ping, info, shutdown, file-read, file-write |
 | `save` | publish the disk to this path: the second half of `stop:` |
@@ -191,13 +190,6 @@ IS DROPPED - which is how an optional medium disappears without a conditional an
 `disk: {file: disk.qcow2, size: 128}` creates it; `disk: disk.qcow2` names one that already exists.
 The mapping's fields are the FOLDED form of `disk_gb:`, `disk_gpt:`, `disk_esp_mib:`, `disk_min_mb:`
 and `disk_settle:`, which are no longer verbs of their own.
-
-### `esp_fallback`
-
-| key | what it does |
-|---|---|
-| `disk` | the disk file to edit |
-| `from` | the directory inside it |
 
 ### `qga`
 

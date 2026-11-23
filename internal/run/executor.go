@@ -484,8 +484,6 @@ func (e *Executor) runOne(s walk.Step) error {
 		return e.doDisk(s)
 	case s.Has("write"):
 		return e.doWrite(s)
-	case s.Has("esp_fallback"):
-		return e.doESPFallback(s)
 
 	// ---- the screen shapes a step may carry on its own ---------------------------------
 	//
@@ -1077,21 +1075,14 @@ func stepNeedsAGuest(s walk.Step) bool {
 	// something, so it must be allowed to run when the answer is "gone".
 	case s.Has("wait_until"):
 		return false
-	// AND ANYTHING THAT EDITS A DISK RATHER THAN ASKS A GUEST. `esp_fallback:` opens the qcow2 with
-	// qemu-io and rewrites FAT structures at byte offsets; the machine it belongs to has usually
-	// just been shut down, which is the point - qemu holds the write lock while it runs.
-	case s.Has("esp_fallback"):
-		return false
 	// AND `save:` IS THE SAME KIND OF THING - IT COPIES THE DISK FILE. `save:` is what `stop`'s
 	// publishing half compiles to, and the ordinary ending of a walk is:
 	//
 	//	step "stop the installer"          stop kill
-	//	step "copy the loader to ..."      esp_fallback
 	//	step "publish the disk"            save "{{ out }}"
 	//
-	// The first stops the machine, the second rewrites the qcow2, and the third copies it. NONE of
-	// them asks the guest anything, and all three must run with qemu gone - qemu holds the disk's
-	// write lock while it runs.
+	// The first stops the machine and the second copies the disk. Neither asks the guest anything,
+	// and both must run with qemu gone - qemu holds the disk's write lock while it runs.
 	//
 	// MEASURED on android blissos16 install, run 45065093494: steps 1 to 31 passed, and the 32nd -
 	// `save` - was refused with "the guest is no longer running, so this step cannot be done. The

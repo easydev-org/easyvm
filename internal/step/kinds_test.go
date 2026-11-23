@@ -56,9 +56,6 @@ func TestEveryKindAcceptsItsShapesAndRefusesTheOthers(t *testing.T) {
 // SO A KEY LANDING HERE IS A DECISION, and it does not get to make it silently: this test fails
 // until somebody writes the reason below.
 var kindAnyReasons = map[string]string{
-	"esp_fallback": "a STRING naming the disk (`disk`), or a MAPPING {disk, from}. The flat form " +
-		"is what the only file uses and the mapping form is what a reader should write, so both are " +
-		"accepted; the two differ in structure rather than in value type.",
 	"stop": "the STEP-LEVEL MARKER for stopping the machine: `true` on the marker with `method` " +
 		"(and optionally `save`) beside it. The structural forms are the marker and its absence.",
 	"copy": "the STEP-LEVEL MARKER for a copy action: `true` on the marker, with `from`/`to` (or " +

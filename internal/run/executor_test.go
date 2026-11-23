@@ -805,8 +805,6 @@ func TestAStepThatNeedsNoGuestSurvivesAShutdown(t *testing.T) {
 		// MEASURED on android blissos16 install: 31 steps passed and the 32nd was refused with
 		// "the guest is no longer running" - a `save` is a file copy, not a question for a guest.
 		{"publish a stopped guest's disk", map[string]any{"name": "publish the disk", "save": "out.qcow2"}, false},
-		{"rewrite a stopped guest's ESP", map[string]any{"name": "copy the loader",
-			"esp_fallback": map[string]any{"disk": "disk", "from": "/EFI/BLISSOS"}}, false},
 		{"stop recording", map[string]any{"name": "x", "record": false}, false},
 		{"start recording", map[string]any{"name": "x", "record": "v.mp4"}, true},
 		{"a click", map[string]any{"name": "x", "input": true, "click": []any{1, 2}}, true},
