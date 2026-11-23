@@ -492,8 +492,26 @@ func (e *Executor) runOne(s walk.Step) error {
 		return e.doESPFallback(s)
 
 	// ---- the screen shapes a step may carry on its own ---------------------------------
-	case s.Has("desktop"):
-		return e.doDesktop(s)
+	//
+	// `desktop:` USED TO BE HERE, and it is gone. It asked "is a desktop of this family on screen"
+	// and answered with SIX FAMILY-WIDE THRESHOLDS in `internal/screen` - brightness, drop, spread,
+	// ratio, saturation, band means - each chosen against one renderer at one size. MEASURED on a
+	// single ubuntu recording, comparing every frame with the desktop reference the file already
+	// shipped:
+	//
+	//	 30s   similarity 0.0004   the boot splash
+	//	 90s   similarity 0.0041   still splashing
+	//	120s   similarity 0.9909   the desktop
+	//	1600s  similarity 0.9767   the desktop, an hour later
+	//
+	// TWO ORDERS OF MAGNITUDE - 0.0043 at the widest for "not a desktop" against 0.9669 at the
+	// tightest for "a desktop" - where the thresholds that windows failed on were three numbers
+	// within a few percent of each other. So the thresholds are deleted rather than tuned, and a
+	// walk waits with `repeat until check {mode: like, reference: ...}`, which is one comparison
+	// every file already had the picture for.
+	//
+	// WHAT IT KEPT IS ELSEWHERE: a loop re-asks when the frame is the wrong SIZE (`errFrameSize` in
+	// doRepeat), and a guest that blanks its screen says so in its own file.
 	case s.Has("at_color"):
 		return e.doAtColor(s)
 	case hasKey(s, "at_bottom"):

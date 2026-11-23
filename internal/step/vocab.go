@@ -304,14 +304,6 @@ var Actions = map[string]Verb{
 	"needs": {Name: "needs", Kind: KindList,
 		Summary: "the files this stage reads must be on disk before it starts",
 		Fields:  map[string]Key{}},
-	"desktop": {Name: "desktop", Kind: KindString,
-		Summary: "wait until a desktop of this family is on screen",
-		Fields: map[string]Key{
-			"poll": {Name: "poll", Kind: KindFloat,
-				Summary: "seconds between looks"},
-			"blind_after": {Name: "blind_after", Kind: KindInt,
-				Summary: "seconds of a blank screen before the wait starts looking"},
-		}},
 	"until": {Name: "until", Kind: KindWords,
 		Summary: "wait for a console line, once",
 		Fields: map[string]Key{
@@ -481,7 +473,7 @@ var dispatchOrder = []string{
 	"needs", "require",
 	"disk", "disk_settle",
 	"fetch", "write", "esp_fallback",
-	"desktop", "at_color", "at_bottom", "at_button",
+	"at_color", "at_bottom", "at_button",
 	"wait", "settle",
 }
 

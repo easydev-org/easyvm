@@ -23,7 +23,7 @@ func ExecutableKeys() []string {
 		// every repository uses as its last step.
 		"save",
 		// THE SCREEN SHAPES.
-		"read", "screenshot", "desktop", "at_color", "at_bottom", "at_button",
+		"read", "screenshot", "at_color", "at_bottom", "at_button",
 		// THE GATES AND THE PAUSES.
 		"when", "when_not", "when_not_any", "do", "until", "until_any",
 		"needs", "require", "wait", "settle",
