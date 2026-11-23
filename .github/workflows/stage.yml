@@ -909,6 +909,17 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -u
+          # AN EMPTY `out:` IS A STAGE THAT PUBLISHES NO DISK, and it is its own case rather than a
+          # missing file. With `matrix.out` empty the path below is `work/` - A DIRECTORY, which `-s`
+          # accepts - so the floor check read 4096 bytes from `stat` and answered "this is a qcow2
+          # header with nothing written to it" about a stage that never had a disk to begin with.
+          #
+          # MEASURED on the first smoke runs (4517...): four of four walk steps passed, including
+          # `BdsDxe: starting` in two seconds, and the leg still reported failure because of this.
+          if [ -z "${{ matrix.out }}" ]; then
+            echo "this stage declares no \`out:\`, so it publishes no disk; its artifact is the recording"
+            exit 0
+          fi
           out="$GITHUB_WORKSPACE/work/${{ matrix.out }}"
           if [ ! -s "$out" ]; then
             echo "no disk to publish at $out (the stage may not write one)"
