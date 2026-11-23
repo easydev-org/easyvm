@@ -155,9 +155,38 @@ func (e *Executor) doRepeat(s walk.Step) error {
 		// land on a half-written file and the next attempt reads it.
 		var err error
 		if isName {
+			// THE FOURTH RETURN IS "WHY IT DID NOT HOLD", AND IT MUST ONLY BE USED WHEN IT DID NOT.
+			//
+			// MEASURED on freebsd ssh, booted from this image in the cluster's own lab pod, with
+			// `machine_ssh` logging what it read:
+			//
+			//	machine_ssh: ssh_ready="true" present=true
+			//	machine_ssh: ssh_ready="true" present=true        (sixty times)
+			//	the repeat ran 60 attempt(s) and the condition never held
+			//
+			// THE FACT WAS TRUE AND THE LOOP STILL FAILED. `machineFact` returns its reason string
+			// whether or not the fact holds - `(true, "sshd does not accept a connection", nil)` -
+			// and this line turned that string into an error unconditionally, so a satisfied
+			// condition was reported as a failure with the description of the failure it was not.
+			//
+			// SO THE BOOLEAN DECIDES, and the string is only its explanation. A fact that is FALSE
+			// still fails with the reason; a fact that is TRUE succeeds with nothing.
+			// `=` AND NOT `:=`: the declaration above is this block's `err`, and `:=` here would
+			// shadow it - which is EXACTLY the bug this took two rounds to see. MEASURED with
+			// `machine_ssh` logging `ssh_ready="false"` on the line before:
+			//
+			//	machine_ssh: ssh_ready="false" present=true
+			//	repeat: satisfied after 1 attempt(s)
+			//
+			// The condition was false, the shadowed `err` was set, and the `err` the loop tests was
+			// still nil.
+			var ok bool
 			var why string
-			_, why, err = e.factValue(s, untilText)
-			if err == nil && why != "" {
+			ok, why, err = e.factValue(s, untilText)
+			if err == nil && !ok {
+				if why == "" {
+					why = fmt.Sprintf("%s is false", untilText)
+				}
 				err = fmt.Errorf("%s", why)
 			}
 		} else {

@@ -34,6 +34,8 @@ type fakeDriver struct {
 	graces   []time.Duration
 	frames   int
 	guestNil bool
+	// facts overrides the map `Facts` returns, so a test can say what a machine fact answers.
+	facts map[string]string
 }
 
 func (f *fakeDriver) Frame() (Frame, error) {
@@ -87,12 +89,16 @@ func (f *fakeDriver) Log(msg string) { f.log = append(f.log, msg) }
 // so a test that stops a machine and waits for it was testing that error rather than the wait.
 func (f *fakeDriver) Facts() (map[string]string, error) {
 	running := f.started > 0 && !f.halted
-	return map[string]string{
+	out := map[string]string{
 		"qemu_running": fmt.Sprintf("%t", running),
 		"ssh_ready":    "false",
 		"qga_ready":    "false",
 		"guest_phase":  "",
-	}, nil
+	}
+	for k, v := range f.facts {
+		out[k] = v
+	}
+	return out, nil
 }
 
 type stubFrame struct{}
