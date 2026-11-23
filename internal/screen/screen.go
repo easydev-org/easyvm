@@ -322,34 +322,6 @@ func Crop(img image.Image, rect [4]int, scale int) (image.Image, error) {
 	return out, nil
 }
 
-// SavePPM writes a binary PPM, which is what tesseract is given.
-//
-// IT IS WRITTEN BY HAND FOR THE SAME REASON THE READER IS NOT: P6 is a nine-byte header and RGB
-// triples, and a library for the write side of a format we already decode is a dependency with one
-// caller.
-func SavePPM(img image.Image, path string) error {
-	b := img.Bounds()
-	w, h := b.Dx(), b.Dy()
-
-	f, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	if _, err := fmt.Fprintf(f, "P6\n%d %d\n255\n", w, h); err != nil {
-		return err
-	}
-	buf := make([]byte, 0, w*h*3)
-	for y := 0; y < h; y++ {
-		for x := 0; x < w; x++ {
-			r, g, bl := rgb8(img.At(b.Min.X+x, b.Min.Y+y))
-			buf = append(buf, r, g, bl)
-		}
-	}
-	_, err = f.Write(buf)
-	return err
-}
 
 // FindColor returns the centre of the largest blob of one colour, inside an optional region.
 //

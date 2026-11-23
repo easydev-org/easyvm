@@ -20,23 +20,6 @@ import (
 	"github.com/easydev-org/easyvm/internal/keys"
 )
 
-// THE PPM READER IS THE PART THAT CAN BE WRONG QUIETLY. A frame whose dimensions are misread makes
-// every brightness measurement silently wrong, and the symptom is a desktop test that never
-// passes rather than an error anyone can see. So it is tested against a file built to the spec and
-// against the three ways a file can be truncated.
-func writePPM(t *testing.T, dir, name string, w, h int, fill byte) string {
-	t.Helper()
-	path := filepath.Join(dir, name)
-	body := make([]byte, w*h*3)
-	for i := range body {
-		body[i] = fill
-	}
-	head := []byte("P6\n" + itoa(w) + " " + itoa(h) + "\n255\n")
-	if err := os.WriteFile(path, append(head, body...), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	return path
-}
 
 func itoa(n int) string {
 	if n == 0 {
@@ -50,55 +33,6 @@ func itoa(n int) string {
 	return string(digits)
 }
 
-func TestPPMDimensionsAreReadFromTheFile(t *testing.T) {
-	dir := t.TempDir()
-	path := writePPM(t, dir, "ok.ppm", 1920, 1080, 0x40)
-	w, h, err := ppmSize(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if w != 1920 || h != 1080 {
-		t.Fatalf("read %dx%d, want 1920x1080", w, h)
-	}
-}
-
-// A HALF-WRITTEN FRAME MUST BE AN ERROR, not a frame with the wrong shape. `screendump` replies
-// before the write finishes, so this is a real race and not a hypothetical.
-func TestTruncatedFrameIsRefused(t *testing.T) {
-	dir := t.TempDir()
-	path := writePPM(t, dir, "short.ppm", 1920, 1080, 0x00)
-
-	full, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Cut the pixel data in half, keeping a valid header.
-	head := strings.Index(string(full), "255\n") + 4
-	truncated := append([]byte{}, full[:head+(len(full)-head)/2]...)
-	if err := os.WriteFile(path, truncated, 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	if _, _, err := ppmSize(path); err == nil {
-		t.Fatal("a truncated frame must be refused; every measurement on it would be wrong")
-	}
-}
-
-func TestNotAPPMIsRefused(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "x.ppm")
-	if err := os.WriteFile(path, []byte("PNG not really"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := ppmSize(path); err == nil {
-		t.Fatal("a file that is not a binary PPM must be refused")
-	}
-}
-
-// --- the one-client rule -------------------------------------------------------------
-
-// QEMU ACCEPTS ONE CLIENT PER SOCKET, so a second ask must be an error that names the first owner
-// rather than a Connect that blocks. This is the bug the Python implementation hit twice.
 func TestSecondAcquireIsRefusedByName(t *testing.T) {
 	r := NewRegistry()
 	// Opening a socket that does not exist fails, so this exercises the bookkeeping half: pretend
@@ -214,75 +148,6 @@ func TestNamedKeysParse(t *testing.T) {
 // MEASURED ON THE FIRST macOS RUN WHOSE GUEST ACTUALLY BOOTED, on the step after it. The frame was
 // complete and the check was wrong - and it would reject that size on every 640x480 capture, which is
 // what a guest draws while the firmware is still switching modes.
-func TestAPerfectPPMIsNotTruncated(t *testing.T) {
-	for _, c := range []struct{ w, h int }{
-		{640, 480},   // what a guest draws while the firmware switches modes
-		{1280, 800},  // qemu's own default
-		{1920, 1080}, // what every coordinate here was measured at
-	} {
-		dir := t.TempDir()
-		header := "P6\n" + com_itoa(c.w) + " " + com_itoa(c.h) + "\n255\n"
-		body := make([]byte, c.w*c.h*3)
-
-		path := filepath.Join(dir, "frame.ppm")
-		if err := os.WriteFile(path, append([]byte(header), body...), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		w, h, err := ppmSize(path)
-		if err != nil {
-			t.Fatalf("%dx%d: a complete frame was rejected: %v", c.w, c.h, err)
-		}
-		if w != c.w || h != c.h {
-			t.Fatalf("dimensions read as %dx%d, want %dx%d", w, h, c.w, c.h)
-		}
-
-		// AND ONE BYTE SHORT IS STILL TRUNCATED, which is the check's whole job: a capture that lands
-		// mid-write must not be measured.
-		short := filepath.Join(dir, "short.ppm")
-		if err := os.WriteFile(short, append([]byte(header), body[:len(body)-1]...), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		if _, _, err := ppmSize(short); err == nil {
-			t.Fatalf("%dx%d: a frame missing its last pixel byte was accepted", c.w, c.h)
-		}
-	}
-}
-
-func com_itoa(v int) string {
-	if v == 0 {
-		return "0"
-	}
-	var b []byte
-	for v > 0 {
-		b = append([]byte{byte('0' + v%10)}, b...)
-		v /= 10
-	}
-	return string(b)
-}
-
-// A CLICK MOVES THE POINTER FIRST, AS ITS OWN REQUEST, AND THE PRESS FOLLOWS.
-//
-// THE PREVIOUS VERSION OF THIS TEST ASSERTED THE OPPOSITE, on a real measurement from popos-install:
-// three requests - move, press, release - produced a pointer that never left the top-left corner, and
-// the conclusion drawn was "the position and the press must be one event list".
-//
-// THAT CONCLUSION WAS WRONG, AND ghostbsd SHOWED IT ON ONE MACHINE, WITH THE KEYBOARD WORKING:
-//
-//	POST /api/click  {"x":1331,"y":785}  -> the pointer did not move AT ALL
-//	POST /api/double {"x":400,"y":300}   -> the pointer moved to (400,300)
-//
-// `DoubleClick` called `moveTo` first; `Click` did not. The popos measurement's real cause was the
-// one-request version applying the press at the position the guest held BEFORE the axes - a HID
-// tablet reports position and buttons separately, so "x, y, pressed" in one report is "the button
-// went down somewhere, and the pointer is now at x,y".
-//
-// THE TWO THINGS THAT MUST BE TRUE, AND BOTH ARE ASSERTED:
-//
-//	1  the move is `moveTo`, which scales pixels into the DEVICE'S RANGE (0..32767) and ESTABLISHES
-//	   the position twice - a corner, then the target - because the first absolute report after
-//	   enumeration can be ignored
-//	2  the press and release are separate requests with a delay between them, because a widget that
-//	   polls needs to see the button DOWN for at least one poll
 func TestAClickMovesBeforeItPresses(t *testing.T) {
 	body, err := os.ReadFile("qmp.go")
 	if err != nil {

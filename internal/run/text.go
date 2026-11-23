@@ -237,14 +237,21 @@ func (e *Executor) readScreen(s walk.Step, label string) ([]string, error) {
 // IT IS SEPARATE FROM `readScreen` SO THAT "WHICH RECTANGLE" AND "READ IT" ARE TWO DECISIONS. The
 // conditions (`until:`, `until_any:` and the rest) reach this through `readScreen`, which takes its
 // rectangle from the step's own `region:`; an `ocr:` step reaches it with a rectangle it validated
-// as required. One tesseract call, one enlargement, one saved ppm - so a gate and a loop cannot
+// as required. One tesseract call, one enlargement, one saved PNG - so a gate and a loop cannot
 // disagree about what the screen said.
+//
+// IT WAS A PPM, AND THE FORMAT WAS THE ONLY PLACE ONE SURVIVED. tesseract reads through leptonica,
+// which decodes PNG as readily as P6 - MEASURED on the image this build pins: a 1920x1080 crop as
+// PPM is 6.2 MB and as PNG is ~100 KB, and the six-megabyte write per read is what made the reader
+// race the recorder on the frames the engine had already stopped writing as PPM. Keeping one format
+// for the frame and for the crop means one decoder, one writer and one thing to look at when a read
+// is wrong.
 func (e *Executor) readCrop(crop image.Image, label string) ([]string, error) {
-	path := filepath.Join(e.Work, "read-"+sanitise(label)+".ppm")
+	path := filepath.Join(e.Work, "read-"+sanitise(label)+".png")
 	if err := os.MkdirAll(e.Work, 0o755); err != nil {
 		return nil, err
 	}
-	if err := screen.SavePPM(crop, path); err != nil {
+	if err := screen.SavePNG(crop, path); err != nil {
 		return nil, err
 	}
 	words, err := tesseract(path, "eng")

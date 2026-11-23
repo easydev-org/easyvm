@@ -142,9 +142,11 @@ func (c *Conn) withMonitor(fn func(qemump.Monitor) error) error {
 
 // Frame is a screen capture on disk.
 type Frame struct {
-	// Path is the PPM qemu wrote.
+	// Path is the PNG qemu wrote.
 	Path string
-	// Width and Height are read from the PPM header, so a caller never has to trust a constant.
+	// Width and Height are read by DECODING the file, so a caller never has to trust a constant -
+	// and the decoder is also what knows the frame is complete, which is why the size comes from
+	// here rather than from a header a truncated write can satisfy.
 	Width, Height int
 }
 
@@ -445,101 +447,8 @@ func frameSize(path string) (int, int, error) {
 	return cfg.Width, cfg.Height, nil
 }
 
-// ppmSize reads the width and height from a binary PPM's header.
-//
-// IT REFUSES A TRUNCATED FILE rather than reporting a size, because a frame that is 1920 wide and
-// 40 tall would make every brightness measurement silently wrong.
-func ppmSize(path string) (int, int, error) {
-	fh, err := os.Open(path)
-	if err != nil {
-		return 0, 0, err
-	}
-	defer fh.Close()
 
-	head := make([]byte, 64)
-	n, _ := fh.Read(head)
-	text := string(head[:n])
-	if !strings.HasPrefix(text, "P6") {
-		return 0, 0, fmt.Errorf("%s: not a binary PPM (starts %q)", path, firstLine(text))
-	}
-	fields := strings.Fields(text)
-	if len(fields) < 3 {
-		return 0, 0, fmt.Errorf("%s: PPM header is incomplete (%q)", path, firstLine(text))
-	}
-	var w, h int
-	if _, err := fmt.Sscanf(fields[1]+" "+fields[2], "%d %d", &w, &h); err != nil {
-		return 0, 0, fmt.Errorf("%s: PPM header has no dimensions (%q)", path, firstLine(text))
-	}
-	if w <= 0 || h <= 0 {
-		return 0, 0, fmt.Errorf("%s: PPM dimensions are %dx%d", path, w, h)
-	}
-	fi, err := fh.Stat()
-	if err != nil {
-		return 0, 0, err
-	}
-	// P6 HAS A 3-BYTE PIXEL, AND THE HEADER LENGTH IS EXACT RATHER THAN APPROXIMATE.
-	//
-	// This used to require `w*h*3 + 16`, assuming a sixteen-byte header. A P6 header is
-	//
-	//	P6\n<width> <height>\n255\n
-	//
-	// which is FIFTEEN bytes for 640x480 and sixteen for nothing in particular - so a perfect 640x480
-	// frame failed by one byte:
-	//
-	//	frame-000001.ppm: 921615 bytes for a 640x480 frame (needs about 921616);
-	//	the write has not finished
-	//
-	// MEASURED ON THE FIRST MACOS RUN WHOSE GUEST ACTUALLY BOOTED. The frame was complete; the check
-	// was wrong - and it would have failed that exact size on every 640x480 capture, which is the
-	// size a guest draws at while the firmware is still switching modes.
-	//
-	// SO THE HEADER IS COUNTED. The payload begins after the maxval field's terminating newline, and
-	// any byte before that is header. A file shorter than header+pixels is a write in progress; a file
-	// that has exactly that is a finished frame.
-	data := head[:n]
-	hdr := ppmHeaderLen(data)
-	if hdr == 0 {
-		return 0, 0, fmt.Errorf("%s: PPM header does not end in a newline within %d bytes",
-			filepath.Base(path), n)
-	}
-	want := int64(hdr) + int64(w*h*3)
-	if fi.Size() < want {
-		return 0, 0, fmt.Errorf("%s: %d bytes for a %dx%d frame (needs %d: %d header + %d pixels); "+
-			"the write has not finished", filepath.Base(path), fi.Size(), w, h, want, hdr, w*h*3)
-	}
-	return w, h, nil
-}
 
-// ppmHeaderLen returns the offset of a binary PPM's pixel data: one past the maxval line's newline.
-//
-// THE FORMAT IS `P6\n<w> <h>\n<maxval>\n` AND THE FIELDS MAY BE SEPARATED BY ANY WHITESPACE, so the
-// count cannot be a constant. Four whitespace-separated tokens are consumed - magic, width, height,
-// maxval - and the byte after the whitespace that ends the last one is the first pixel.
-func ppmHeaderLen(data []byte) int {
-	tokens := 0
-	for i := 0; i < len(data); i++ {
-		switch data[i] {
-		case ' ', '\t', '\r', '\n':
-			continue
-		default:
-			// A token starts here; walk to its end.
-			for i < len(data) && !isPPMSpace(data[i]) {
-				i++
-			}
-			tokens++
-			if tokens == 4 {
-				// The whitespace that ended the maxval is the header's last byte.
-				return i + 1
-			}
-			i--
-		}
-	}
-	return 0
-}
-
-func isPPMSpace(b byte) bool {
-	return b == ' ' || b == '\t' || b == '\r' || b == '\n'
-}
 
 func firstLine(s string) string {
 	if i := strings.IndexByte(s, '\n'); i >= 0 {

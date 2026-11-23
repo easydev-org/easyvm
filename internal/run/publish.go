@@ -103,15 +103,15 @@ func (r *recorder) encode(video string, w, h int, log func(string)) error {
 	// `until:`/`desktop:`/`expect:` that reads the screen. THE FIRST FRAME OF THE RUN IS THE BOOT MENU,
 	// which qemu draws at 640x480 - and the encode used
 	//
-	//	-pattern_type glob -i frame-*.ppm
+	//	-pattern_type glob -i 'frame-*'
 	//
 	// which takes its size from the first file the glob returns. So a desktop at 1920x1080 was
 	// letterboxed into a boot menu's 640x480 for the whole video.
 	//
 	// THE REFERENCE IMPLEMENTATION SOLVED THIS AND ITS NOTE IS WHY: it stages every frame as a JPEG
 	// with a fresh `frame-%04d` number, then encodes the sequence. That fixes three things at once -
-	// only the sampler's frames are encoded, their order is the sampler's, and a mixed set (PPM from
-	// one step, JPEG from another) has one extension.
+	// only the sampler's frames are encoded, their order is the sampler's, and a mixed set (a PNG
+	// frame from one step, a JPEG from another) has one extension.
 	//
 	// AND IT RECORDS THE GLOB TRAP: `-pattern_type glob -i 'frame-*'` with no extension is rejected by
 	// ffmpeg's image2 demuxer, so the staged files are all one type and the input is a NUMBER SEQUENCE.
