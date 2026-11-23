@@ -396,22 +396,38 @@ audited from the words it was made on.
 
 Binds nothing. For a post-mortem nobody had to ask for.
 
-## `desktop:` — wait for a desktop
+## `desktop:` — REMOVED
 
-`doDesktop`
+`desktop:` took a family name — `linux`, `kde`, `gnome`, `cinnamon`, `xfce`, `windows`,
+`macos`, `android` — and chose one of six threshold sets compiled into the engine. **It is
+gone, and there is no replacement key**: a wait for a screen is a `repeat:` whose `until:`
+compares the session's own PICTURE.
 
 ```yaml
-- name: wait for the live desktop
-  desktop: linux            # linux | kde | gnome | cinnamon | xfce | windows | macos | android
-  timeout: 5400
-  poll: 5
-  keep_alive: true
+step "wait for the live desktop"
+  repeat
+    do
+      item
+        read
+          name screen
+    until
+      source screen
+      mode like
+      reference reference/desktop.png
+      range [0.9, 1]
+      rect [0, 0, 1920, 120]
+      rect_at [1920, 1080]
+      must true
+    max 1080
+    pause 5
 ```
 
-Each family is a measurement plus a verdict in Go. **This is the key the redesign is
-about**: `docs/PRIMITIVES.md` shows the panel rule as four `check: colour:` criteria
-that reproduce the Go's verdicts on mint, zorin and mx's BIOS menu — so a new screen
-shape stops being an image build.
+THE REFERENCE IS THE POINT. MEASURED on one ubuntu recording, every frame compared with the
+reference the file already shipped gave 0.0004 at the boot splash, 0.0041 while still
+splashing, and 0.9909 once the desktop was up — two orders of magnitude, where the six
+threshold families were three numbers within a few percent of each other. A machine's shape
+is data now: `os:` names the machine, and a screen is recognised by a picture checked in
+beside the stage rather than by a Go branch compiled into the engine.
 
 ---
 
