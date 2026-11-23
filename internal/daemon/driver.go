@@ -879,6 +879,17 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 	d.qmpMu.Unlock()
 
 	cmd := exec.Command("qemu-system-x86_64", args...)
+	// QEMU RUNS IN THE WORK DIRECTORY, so a file a walk names needs no path at all.
+	//
+	// EVERYTHING A GUEST READS LIVES THERE: its disk, its media, its firmware, its console log. An
+	// argument that said `{{work}}/ubuntu.iso` was naming the directory it was already in - and a
+	// placeholder that only ever expands to one value is a way of saying nothing.
+	//
+	// IT IS ALSO WHAT MAKES A WALK RELOCATABLE. The same file runs in `/work`, in
+	// `/__w/easyvm-linux/.../work` and in a person's temporary directory, because the only absolute
+	// paths in the command line are the ones the DAEMON contributes: the qmp socket, the vnc display
+	// and the serial log.
+	cmd.Dir = d.work
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	d.logf("qemu " + strings.Join(args, " "))
@@ -1851,16 +1862,29 @@ func qemuValues(boot machine.Boot, work string, opts machine.CommonOptions) mach
 
 // bootValues are the substitutions a boot step's `args:` may use.
 //
-// THERE ARE THREE, AND THEY ARE ALL PATHS THE RUN OWNS: the working directory, the disk qemu was
-// given, and the directory the step named. Everything else an argument needs is a LITERAL in the file
-// - an installer image is `{{work}}/ubuntu.iso`, which says both where it is and what it is called,
-// and needs no key to name it a second time.
+// THERE IS ONE, AND IT EXISTS FOR A BOOT THAT WAS HANDED A DISK FROM SOMEWHERE ELSE. Everything a
+// walk names is a file in the work directory, which is where qemu runs (`cmd.Dir`), so a path needs
+// no prefix at all. `--boot-disk` is the exception: CI names an absolute path outside the run's own
+// naming, and `{{disk}}` is how the target is referenced without the file having to know where the
+// caller put it.
 func bootValues(boot machine.Boot, work string) machine.RenderValues {
-	return machine.RenderValues{
-		"work": work,
-		"disk": boot.Disk,
-		"dir":  boot.Dir,
+	return machine.RenderValues{"disk": relativeTo(boot.Disk, work)}
+}
+
+// relativeTo spells a path the way qemu sees it, because qemu runs IN the work directory.
+//
+// A DISK IS THE ONE PATH THAT MAY COME FROM OUTSIDE: `--boot-disk` names a published artifact a leg
+// pulled, and CI passes it as an absolute path. Inside the work directory that is `disk.qcow2` to
+// qemu; anywhere else it stays absolute, because a file genuinely elsewhere has to be spelled out.
+func relativeTo(path, work string) string {
+	if path == "" || work == "" {
+		return path
 	}
+	dir := strings.TrimSuffix(work, "/")
+	if strings.HasPrefix(path, dir+"/") {
+		return strings.TrimPrefix(path, dir+"/")
+	}
+	return path
 }
 
 // renderArgs1 is one argument string with its placeholders filled, for `-machine`.
