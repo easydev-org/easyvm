@@ -34,7 +34,7 @@ func TestEveryPoweroffCarriesItsPassword(t *testing.T) {
 		if err != nil {
 			continue
 		}
-		rel, _ := filepath.Rel(root, path)
+		rel := path
 		var walk func([]Step)
 		walk = func(steps []Step) {
 			for _, s := range steps {
@@ -83,6 +83,13 @@ func mentionsPoweroff(cmd string) bool {
 	if cmd == "" {
 		return false
 	}
+	// `shutdown /r /t 0 /f` IS WINDOWS, NOT LINUX. cmd.exe has its own `shutdown.exe`, and it takes
+	// `/` flags and needs no sudo - so a command with a `/` flag straight after the word is the
+	// Windows program and the rule this test enforces does not apply to it. MEASURED: without this a
+	// Windows `shutdown /r` was reported as a Linux poweroff missing `sudo -S`, which it does not need.
+	if strings.Contains(cmd, "shutdown /") || strings.Contains(cmd, "shutdown.exe") {
+		return false
+	}
 	for _, field := range strings.FieldsFunc(cmd, func(r rune) bool {
 		return r == ' ' || r == '\n' || r == '\t' || r == ';' || r == '|' || r == '&'
 	}) {
@@ -109,7 +116,7 @@ func TestEveryPoweroffIsFollowedByAWait(t *testing.T) {
 		if err != nil {
 			continue
 		}
-		rel, _ := filepath.Rel(root, path)
+		rel := path
 		for i, s := range f.Steps {
 			// A REQUEST THAT STOPS THE GUEST NEEDS A WAIT AFTER IT, WHATEVER SENT IT: the power
 			// button, the agent, or a command over ssh. `wait_until: stopped` is that wait, and it is

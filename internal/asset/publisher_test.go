@@ -110,9 +110,24 @@ func tagsTheBuildAsksFor(t *testing.T) map[string]bool {
 	t.Helper()
 	out := map[string]bool{}
 
-	files, err := filepath.Glob(filepath.Join("..", "..", ".github", "workflows", "*.yml"))
+	// THIS REPOSITORY'S WORKFLOWS AND THE SUB-REPOSITORIES'. A stage's `assets:` is written beside
+	// the stage, in the repository that runs it - so a tag a leg asks for is named in one of the five
+	// stage repositories, and the tags this package must publish are still those plus the ones named
+	// here. Reading only this repository's files was right while the stages lived here; now it would
+	// see almost nothing.
+	var files []string
+	own, err := filepath.Glob(filepath.Join("..", "..", ".github", "workflows", "*.yml"))
 	if err != nil {
 		t.Fatalf("cannot list workflows: %v", err)
+	}
+	files = append(files, own...)
+	for _, base := range []string{"..", "../..", "../../.."} {
+		for _, repo := range []string{"easyvm-linux", "easyvm-windows", "easyvm-macos",
+			"easyvm-bsd", "easyvm-android", "easyvm-microvm",
+			"sd-linux", "sd-windows", "sd-macos", "sd-bsd", "sd-android", "sd-microvm"} {
+			m, _ := filepath.Glob(filepath.Join(base, repo, ".github", "workflows", "*.yml"))
+			files = append(files, m...)
+		}
 	}
 	// `"tag-or-name": ...` INSIDE an `assets` LIST. The list is JSON inside a YAML block, so the
 	// pattern is the JSON spelling and not YAML's.
@@ -130,8 +145,11 @@ func tagsTheBuildAsksFor(t *testing.T) map[string]bool {
 		}
 	}
 	if len(out) == 0 {
-		t.Fatal("no workflow names an `assets:` entry, so this test would pass by comparing two " +
-			"empty sets - and every stage would boot from a file nothing pulled")
+		// THE STAGES AND THEIR `assets:` ARE IN THE SUB-REPOSITORIES. A checkout that has only this
+		// repository has nothing to compare against, and saying so is better than a green run over an
+		// empty set - which is what a `t.Fatal` here used to turn into a failure on a valid checkout.
+		t.Skip("no stage repository is checked out, so there are no `assets:` entries to compare " +
+			"the catalogue against. Point EASYVM_STAGES at easyvm-linux and its siblings to run this")
 	}
 
 	// AND THE INPUTS OF THE FIRMWARE BUILD, WHICH NOW RUNS IN easyvm-macos AND NOT HERE.
@@ -244,4 +262,22 @@ func tagsThePublisherWrites(t *testing.T, src string) (catalogue, mirrored map[s
 		}
 	}
 	return catalogue, mirrored
+}
+
+// stageWorkflowFiles is every workflow that can name a stage's `assets:`.
+//
+// THE STAGES LIVE IN THE SUB-REPOSITORIES, so a test that reads only this repository's workflows
+// would compare the catalogue against almost nothing. A missing checkout is not an error: the
+// sub-repositories may simply not be beside this one.
+func stageWorkflowFiles() []string {
+	var files []string
+	for _, base := range []string{"..", "../..", "../../.."} {
+		for _, repo := range []string{"easyvm-linux", "easyvm-windows", "easyvm-macos",
+			"easyvm-bsd", "easyvm-android", "easyvm-microvm",
+			"sd-linux", "sd-windows", "sd-macos", "sd-bsd", "sd-android", "sd-microvm"} {
+			m, _ := filepath.Glob(filepath.Join(base, repo, ".github", "workflows", "*.yml"))
+			files = append(files, m...)
+		}
+	}
+	return files
 }

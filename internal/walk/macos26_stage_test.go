@@ -20,7 +20,7 @@ import (
 // half-installed disk behind the tag. `until:` reads the screen once and fails the walk when the
 // words are absent, which is the assertion this stage needs.
 func TestMacos26FailsWhenTheSetupAssistantIsAbsent(t *testing.T) {
-	raw, err := os.ReadFile("../../macos/26/steps/setup.walk")
+	raw, err := os.ReadFile(macosStage(t, "26", "setup"))
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
@@ -62,7 +62,7 @@ func TestMacos26FailsWhenTheSetupAssistantIsAbsent(t *testing.T) {
 // installer blanks its own screen at "About 21 minutes remaining" and keeps writing for another
 // twenty minutes, so a pattern that accepts a black frame ends the look mid-install.
 func TestMacos26LooksDoNotEndOnABlackFrame(t *testing.T) {
-	raw, err := os.ReadFile("../../macos/26/steps/setup.walk")
+	raw, err := os.ReadFile(macosStage(t, "26", "setup"))
 	if err != nil {
 		t.Fatalf("%v", err)
 	}

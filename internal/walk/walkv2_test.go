@@ -293,11 +293,22 @@ func readFile(t *testing.T, path string) string {
 
 func realWalkthroughs(t *testing.T) []string {
 	t.Helper()
-	files, err := filepath.Glob(filepath.Join("..", "..", "*", "*", "steps", "*.walk"))
-	if err != nil {
-		t.Fatal(err)
+	// THE STAGES LIVE IN THE SUB-REPOSITORIES, NOT HERE. Each is laid out
+	// `<repo>/<stage>/steps/<stage>.walk`, so the glob covers one level of stage under every root.
+	//
+	// THE FLOOR IS AN ASSERTION, and it is what makes a wrong glob a failure rather than an empty loop:
+	// there are sixty-odd stages across the five repositories, so a number under twenty means the
+	// search found the wrong directory rather than that the tree got smaller.
+	var files []string
+	for _, family := range familyOrder {
+		files = append(files, globSteps("", family)...)
 	}
 	sort.Strings(files)
+	if len(files) == 0 {
+		t.Skip("no stages here: the walkthroughs live in the sub-repositories (easyvm-linux, " +
+			"easyvm-windows, easyvm-macos, easyvm-bsd, easyvm-android). Point EASYVM_STAGES at a " +
+			"checkout of them to run this test")
+	}
 	if len(files) < 20 {
 		t.Fatalf("found only %d walkthroughs; the glob is wrong", len(files))
 	}

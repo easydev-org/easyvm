@@ -213,8 +213,7 @@ func readMigrated(t *testing.T) []string {
 func countKeyUse(t *testing.T) map[string]int {
 	t.Helper()
 	use := map[string]int{}
-	root := filepath.Join("..", "..")
-	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+	err := filepath.Walk(stageRepoRoot(t), func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() {
 			return nil
 		}
@@ -396,4 +395,35 @@ func allDeclared() map[string]bool {
 		}
 	}
 	return out
+}
+
+// stageRepoRoot is where the walkthroughs live, for a test that only needs A tree of them.
+//
+// THE STAGES ARE NOT IN THIS REPOSITORY ANY MORE - each sub-repository (easyvm-linux, easyvm-windows,
+// easyvm-macos, easyvm-bsd, easyvm-android) owns the ones it runs, and the engine's copy is gone. This
+// is the same lookup `internal/walk` uses, kept separate because a test in `step` cannot import a test
+// helper from another package.
+//
+// THE TEST RUNS IN `internal/step`, so the repository root is two levels up and its SIBLINGS are
+// three; all are tried, because a checkout can be a plain repository or a worktree somewhere else.
+// EASYVM_STAGES overrides the lot.
+func stageRepoRoot(t *testing.T) string {
+	t.Helper()
+	if env := os.Getenv("EASYVM_STAGES"); env != "" {
+		for _, one := range strings.Split(env, string(os.PathListSeparator)) {
+			if one != "" {
+				return one
+			}
+		}
+	}
+	for _, base := range []string{"../..", "..", "../../.."} {
+		for _, name := range []string{"easyvm-linux", "sd-linux", "linux"} {
+			dir := filepath.Join(base, name)
+			if fi, err := os.Stat(dir); err == nil && fi.IsDir() {
+				return dir
+			}
+		}
+	}
+	t.Skip("no stages here: the walkthroughs live in the sub-repositories, not in the engine")
+	return ""
 }

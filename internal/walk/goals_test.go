@@ -78,7 +78,10 @@ var forbiddenGoalKeys = map[string]string{
 
 // TestNoStepKeyIsAGoal walks the real files and refuses a key that is a goal rather than an action.
 func TestNoStepKeyIsAGoal(t *testing.T) {
-	root := filepath.Join("..", "..")
+	skipWithoutStages(t, "macos")
+	skipWithoutStages(t, "windows")
+	fams := []string{"macos", "windows"}
+	root, _ := stageFamilyRoot(fams[0])
 	// `globSteps` RATHER THAN A `.yaml` LIST, so a tree mid-migration is read in the format each file
 	// is being migrated TO - a `.walk` wins over the `.yaml` it replaced.
 	var files []string
@@ -197,7 +200,10 @@ func toFloat(v any) (float64, bool) {
 // genuinely continue from another stage's output - and without it, "boots with no disk above it" is
 // indistinguishable from the file that forgot to create one.
 func TestEveryBootHasADiskBeforeIt(t *testing.T) {
-	root := filepath.Join("..", "..")
+	skipWithoutStages(t, "macos")
+	skipWithoutStages(t, "windows")
+	fams := []string{"macos", "windows"}
+	root, _ := stageFamilyRoot(fams[0])
 	// `globSteps` RATHER THAN A `.yaml` LIST, so a tree mid-migration is read in the format each file
 	// is being migrated TO - a `.walk` wins over the `.yaml` it replaced.
 	var files []string
@@ -246,7 +252,8 @@ func TestEveryBootHasADiskBeforeIt(t *testing.T) {
 // `write: launcher`, ghostbsd still had `panes:install_icon`, `wait_for_live_desktop` and
 // `bootstrap_files:smbd_log`. Each needed a different answer, and none of them was "leave it".
 func TestEveryWalkthroughLoads(t *testing.T) {
-	root := filepath.Join("..", "..")
+	skipWithoutAnyStages(t)
+	root, _ := firstStageRoot()
 	var files []string
 	patterns := globStepsAny(root)
 	for _, pat := range patterns {
@@ -298,7 +305,8 @@ func TestEveryWalkthroughLoads(t *testing.T) {
 // THE RULE: a file that has no `boot:` must ALSO have no step that needs a guest. A file that only
 // fetches, or only inspects the host, is fine; a file that clicks needs a machine.
 func TestAFileThatNeedsAGuestStartsOne(t *testing.T) {
-	root := filepath.Join("..", "..")
+	skipWithoutAnyStages(t)
+	root, _ := firstStageRoot()
 	var files []string
 	files = append(files, globStepsAny(root)...)
 	if len(files) == 0 {
@@ -359,7 +367,8 @@ func TestAFileThatNeedsAGuestStartsOne(t *testing.T) {
 // THE NAME IS A STEP'S IDENTITY in `--start-at`, `--stop-before` and in the log, so a duplicate is
 // ambiguous for three things at once.
 func TestNoStepNameRepeats(t *testing.T) {
-	root := filepath.Join("..", "..")
+	skipWithoutAnyStages(t)
+	root, _ := firstStageRoot()
 	var files []string
 	files = append(files, globStepsAny(root)...)
 	if len(files) == 0 {
@@ -401,7 +410,9 @@ func TestNoStepNameRepeats(t *testing.T) {
 // have the steps that DO it. A count would need updating on every edit; the presence of the actions is
 // the fact that matters.
 func TestTheLinuxSSHFilesStillInstallAndEnableSSHD(t *testing.T) {
-	root := filepath.Join("..", "..")
+	skipWithoutStages(t, "linux")
+	fams := []string{"linux"}
+	root, _ := stageFamilyRoot(fams[0])
 	files := globBoth(root, "linux", "ssh")
 	if len(files) == 0 {
 		t.Skip("no Linux ssh walkthroughs here")
@@ -470,7 +481,8 @@ func TestTheLinuxSSHFilesStillInstallAndEnableSSHD(t *testing.T) {
 // THE COMMENT IS NOT THE DEFENCE. This test reads every walkthrough for a `findstr` whose switch is
 // spelled with a dash, because the mistake looks correct in prose and reads correctly in a diff.
 func TestNoFindstrSwitchIsSpelledWithADash(t *testing.T) {
-	root := filepath.Join("..", "..")
+	skipWithoutAnyStages(t)
+	root, _ := firstStageRoot()
 	var checked int
 	{
 		files := globStepsAny(root)
@@ -527,7 +539,9 @@ func TestNoFindstrSwitchIsSpelledWithADash(t *testing.T) {
 // ONE STEP LACKED THE MASK while the six after it had it, so the rule lived in six places and its
 // duplicate did not. This test requires it in ALL of them.
 func TestEveryWingetInstallMasksItsExitCode(t *testing.T) {
-	root := filepath.Join("..", "..")
+	skipWithoutStages(t, "windows")
+	fams := []string{"windows"}
+	root, _ := stageFamilyRoot(fams[0])
 	files := globSteps(root, "windows")
 	if len(files) == 0 {
 		t.Skip("no Windows walkthroughs here")
@@ -597,7 +611,8 @@ func TestEveryWingetInstallMasksItsExitCode(t *testing.T) {
 // THE TEST DERIVES THE HOST PATHS FROM THE SAME TABLES THE FETCHER USES, so a renamed output breaks here
 // rather than inside a guest twenty minutes into a stage.
 func TestEverySCPSourceIsProducedByAnEarlierStep(t *testing.T) {
-	root := filepath.Join("..", "..")
+	skipWithoutAnyStages(t)
+	root, _ := firstStageRoot()
 	files := globStepsAny(root)
 	if len(files) == 0 {
 		t.Skip("no walkthroughs here")
@@ -691,7 +706,9 @@ func TestEverySCPSourceIsProducedByAnEarlierStep(t *testing.T) {
 // POSIX wrapper is a layer that can only be wrong. A `ssh:` body for a Windows guest must not start with
 // `cmd /c '` or contain a POSIX single-quoted argument.
 func TestWindowsSSHStepsDoNotUsePOSIXQuoting(t *testing.T) {
-	root := filepath.Join("..", "..")
+	skipWithoutStages(t, "windows")
+	fams := []string{"windows"}
+	root, _ := stageFamilyRoot(fams[0])
 	files := globSteps(root, "windows")
 	if len(files) == 0 {
 		t.Skip("no Windows walkthroughs here")
@@ -753,7 +770,9 @@ func TestWindowsSSHStepsDoNotUsePOSIXQuoting(t *testing.T) {
 // THE REFERENCE IMPLEMENTATION ALREADY SAID SO and I did not read it: `DesktopWhen(all_of=('welcome',
 // 'ubuntu'))` reads TEXT, with a 5400-second budget rather than the 900 I had guessed.
 func TestAnInstallerIsWaitedForTheWayItAppears(t *testing.T) {
-	root := filepath.Join("..", "..")
+	skipWithoutStages(t, "linux")
+	fams := []string{"linux"}
+	root, _ := stageFamilyRoot(fams[0])
 	files := globBoth(root, "linux", "install")
 	if len(files) == 0 {
 		t.Skip("no Linux install walkthroughs here")
@@ -876,7 +895,8 @@ func TestAnInstallerIsWaitedForTheWayItAppears(t *testing.T) {
 // installation, so a fix written in Python trades a parse error for `command not found`. `awk` is in
 // the base system.
 func TestTheNixOSConfigurationEditDoesNotAssumeItsShape(t *testing.T) {
-	root := filepath.Join("..", "..")
+	skipWithoutStages(t, "linux")
+	root, _ := stageFamilyRoot("linux")
 	path := filepath.Join(root, "linux", "nixos", "steps", "vm-configure.walk")
 	doc, err := Load(path, nil)
 	if err != nil {
@@ -921,7 +941,9 @@ func TestTheNixOSConfigurationEditDoesNotAssumeItsShape(t *testing.T) {
 // A STEP THAT REPORTS 127 HAS NO FURTHER DIAGNOSIS TO GIVE - the shell never ran anything - which is
 // why the fix belongs beside the command rather than in an error message.
 func TestTheShareProofSetsThePathItNeeds(t *testing.T) {
-	root := filepath.Join("..", "..")
+	skipWithoutStages(t, "linux")
+	fams := []string{"linux"}
+	root, _ := stageFamilyRoot(fams[0])
 	files := globBoth(root, "linux", "vm-configure")
 	if len(files) == 0 {
 		t.Skip("no Linux vm-configure walkthroughs here")
@@ -1008,7 +1030,9 @@ func stripHashComments(body string) string {
 // package ships rather than appending a second line beside it - `^#?\s*PasswordAuthentication` matches
 // both forms, so the result is one uncommented line.
 func TestThePasswordSettingReachesTheMainConfig(t *testing.T) {
-	root := filepath.Join("..", "..")
+	skipWithoutStages(t, "linux")
+	fams := []string{"linux"}
+	root, _ := stageFamilyRoot(fams[0])
 	files := globBoth(root, "linux", "ssh")
 	if len(files) == 0 {
 		t.Skip("no Linux ssh walkthroughs here")
@@ -1077,7 +1101,8 @@ func TestThePasswordSettingReachesTheMainConfig(t *testing.T) {
 //
 // `ssh:` MAY BE MULTI-LINE, because it is sent as one command over one channel. `run:` MAY NOT.
 func TestARunBodyIsOneLine(t *testing.T) {
-	root := filepath.Join("..", "..")
+	skipWithoutAnyStages(t)
+	root, _ := firstStageRoot()
 	files := globStepsAny(root)
 	if len(files) == 0 {
 		t.Skip("no walkthroughs here")
@@ -1128,7 +1153,9 @@ func TestARunBodyIsOneLine(t *testing.T) {
 // fill test cannot tell a button from wallpaper. The marker must be a word-pair only the installer
 // draws: this file's own `clean install` footer.
 func TestAnInstallerWaitNamesAnInstallerWord(t *testing.T) {
-	root := filepath.Join("..", "..")
+	skipWithoutStages(t, "linux")
+	fams := []string{"linux"}
+	root, _ := stageFamilyRoot(fams[0])
 	// WORDS THAT EVERY LIVE DESKTOP HAS, so a wait on one of them can pass with no installer at all.
 	generic := map[string]bool{
 		"language": true, "welcome": true, "install": true, "settings": true,
@@ -1149,7 +1176,18 @@ func TestAnInstallerWaitNamesAnInstallerWord(t *testing.T) {
 			if !strings.Contains(strings.ToLower(s.Name), "installer") {
 				continue
 			}
-			sets, _ := s.Spec["until_any"].([]any)
+			// THE CONDITION IS A `repeat:`'S `until:` NOW, not a top-level `until_any:`. The shape
+			// changed in 2.0 and the test kept reading the old key, so it found nothing and skipped -
+			// which is why a rule about what a wait may match was passing over every file.
+			rep, ok := s.Spec["repeat"].(map[string]any)
+			if !ok {
+				continue
+			}
+			cond, ok := rep["until"].(map[string]any)
+			if !ok {
+				continue
+			}
+			sets, _ := cond["words"].([]any)
 			if len(sets) == 0 {
 				continue
 			}
@@ -1203,13 +1241,17 @@ func TestAnInstallerWaitNamesAnInstallerWord(t *testing.T) {
 // refused all thirteen files when the step was first added, which is the vocabulary doing its job: an
 // undeclared variable is a path the engine cannot resolve.
 func TestAnInstallLegPublishesItsDisk(t *testing.T) {
-	root := filepath.Join("..", "..")
+	skipWithoutStages(t, "linux")
+	// THE TWO FAMILIES THAT INSTALL FROM A DESKTOP MEDIUM. `stageFamilyRoot` returns the repository
+	// itself, so the glob is `<repo>/*/steps/install.walk` - the family name is not a directory inside
+	// it.
 	var files []string
-	for _, pat := range []string{
-		filepath.Join(root, "linux", "*", "steps", "install.walk"),
-		filepath.Join(root, "bsd", "*", "steps", "install.walk"),
-	} {
-		got, err := filepath.Glob(pat)
+	for _, family := range []string{"linux", "bsd"} {
+		dir, ok := stageFamilyRoot(family)
+		if !ok {
+			continue
+		}
+		got, err := filepath.Glob(filepath.Join(dir, "*", "steps", "install.walk"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1218,6 +1260,7 @@ func TestAnInstallLegPublishesItsDisk(t *testing.T) {
 	if len(files) == 0 {
 		t.Skip("no install walkthroughs here")
 	}
+	root, _ := firstStageRoot()
 	var checked int
 	for _, path := range files {
 		rel, _ := filepath.Rel(root, path)
@@ -1264,13 +1307,17 @@ func TestAnInstallLegPublishesItsDisk(t *testing.T) {
 // AND THE SHUTDOWN IS `acpi`, NOT `ssh`: AN INSTALL LEG HAS NO ssh AT ALL, because the guest it drives
 // is an installer. `shutdown: ssh` would fail with "no connection, and there is none".
 func TestAnInstallStopsTheMachineBeforePublishingTheDisk(t *testing.T) {
-	root := filepath.Join("..", "..")
+	skipWithoutStages(t, "linux")
+	// THE TWO FAMILIES THAT INSTALL FROM A DESKTOP MEDIUM. `stageFamilyRoot` returns the repository
+	// itself, so the glob is `<repo>/*/steps/install.walk` - the family name is not a directory inside
+	// it.
 	var files []string
-	for _, pat := range []string{
-		filepath.Join(root, "linux", "*", "steps", "install.walk"),
-		filepath.Join(root, "bsd", "*", "steps", "install.walk"),
-	} {
-		got, err := filepath.Glob(pat)
+	for _, family := range []string{"linux", "bsd"} {
+		dir, ok := stageFamilyRoot(family)
+		if !ok {
+			continue
+		}
+		got, err := filepath.Glob(filepath.Join(dir, "*", "steps", "install.walk"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1279,6 +1326,7 @@ func TestAnInstallStopsTheMachineBeforePublishingTheDisk(t *testing.T) {
 	if len(files) == 0 {
 		t.Skip("no install walkthroughs here")
 	}
+	root, _ := firstStageRoot()
 	var checked int
 	for _, path := range files {
 		rel, _ := filepath.Rel(root, path)
@@ -1362,7 +1410,8 @@ func TestAnInstallStopsTheMachineBeforePublishingTheDisk(t *testing.T) {
 // THE SHAPE IS THE BUG, not the language: a `until_any:` entry with a single short word is satisfied
 // by any screen containing that word. Completion pages are recognised by a PHRASE.
 func TestNoCompletionWaitIsASingleShortWord(t *testing.T) {
-	root := filepath.Join("..", "..")
+	skipWithoutAnyStages(t)
+	root, _ := firstStageRoot()
 	files := globStepsAny(root)
 	checked := 0
 	for _, path := range files {
@@ -1414,7 +1463,8 @@ func TestNoCompletionWaitIsASingleShortWord(t *testing.T) {
 // second terminal thirty seconds later and typed into that, so the install's own output was never
 // seen and `systemctl is-active ssh` answered `inactive` while apt was still working.
 func TestOnlyOneTerminalWaitPerFile(t *testing.T) {
-	root := filepath.Join("..", "..")
+	skipWithoutAnyStages(t)
+	root, _ := firstStageRoot()
 	files := globStepsAny(root)
 	checked := 0
 	for _, path := range files {
@@ -1459,7 +1509,9 @@ func TestOnlyOneTerminalWaitPerFile(t *testing.T) {
 // `?` are literal in `-Pattern` rather than regex syntax. A file that needs a backslash should use a
 // `type:` with a slower `type_gap`, or `ssh:` once sshd exists.
 func TestTypedWindowsCommandsCarryNoBackslashOrPipe(t *testing.T) {
-	root := filepath.Join("..", "..")
+	skipWithoutStages(t, "windows")
+	fams := []string{"windows"}
+	root, _ := stageFamilyRoot(fams[0])
 	files := globSteps(root, "windows")
 	checked := 0
 	for _, path := range files {
@@ -1508,7 +1560,8 @@ func TestTypedWindowsCommandsCarryNoBackslashOrPipe(t *testing.T) {
 // ELEVEN OF THE TWELVE LINUX SSH WALKTHROUGHS WERE MISSING IT. Only `ubuntu` gained one here; the
 // other eleven and ghostbsd were fixed in the same pass.
 func TestAnSSHLegWritesTheDiskItsWorkflowPublishes(t *testing.T) {
-	root := filepath.Join("..", "..")
+	skipWithoutAnyStages(t)
+	root, _ := firstStageRoot()
 	// EVERY LEG THAT DECLARES AN `out:` WRITES IT, NOT JUST `ssh`. The same omission was found
 	// again on windows-vm-configure and macos-vm-configure - both published a file neither wrote -
 	// and on the `dev` walkthroughs. `install` and every linux `vm-configure` already had it.
@@ -1570,7 +1623,8 @@ func TestAnSSHLegWritesTheDiskItsWorkflowPublishes(t *testing.T) {
 // the character arrives as `4`, `@` or nothing. `type:` steps have used 0.30s for this reason since
 // the port; `run:` inherited a much faster default and nobody had typed a `$` in one until now.
 func TestATypedDollarNeedsASlowTypeGap(t *testing.T) {
-	root := filepath.Join("..", "..")
+	skipWithoutAnyStages(t)
+	root, _ := firstStageRoot()
 	files := globStepsAny(root)
 	checked := 0
 	for _, path := range files {
@@ -1625,7 +1679,9 @@ func TestATypedDollarNeedsASlowTypeGap(t *testing.T) {
 // PowerShell should be a plain command. This test is about the nesting, not about `$`: a `$` is fine
 // in a `run:` with a slow enough `type_gap`, and several Linux files legitimately use one.
 func TestNoRunNestsPowerShellInsidePowerShell(t *testing.T) {
-	root := filepath.Join("..", "..")
+	skipWithoutStages(t, "windows")
+	fams := []string{"windows"}
+	root, _ := stageFamilyRoot(fams[0])
 	files := globSteps(root, "windows")
 	checked, opened := 0, 0
 	for _, path := range files {
@@ -1673,7 +1729,8 @@ func TestNoRunNestsPowerShellInsidePowerShell(t *testing.T) {
 // is the only thing that tells the two apart, and putting it in the install leg means a bad disk
 // fails where it was made, with its own recording, instead of fifteen minutes into the next stage.
 func TestTheInstallingLegThatWasMeasuredUnbootableRebootsItsDisk(t *testing.T) {
-	root := filepath.Join("..", "..")
+	skipWithoutAnyStages(t)
+	root, _ := firstStageRoot()
 	// WINDOWS ONLY, BECAUSE THAT IS THE ONE THAT WAS MEASURED. `windows-install` published a
 	// 10890 MiB `windows11` that booted to nothing but the TianoCore logo - the ssh leg that pulled
 	// it spent fifteen minutes on `wait for the desktop` with `ratio=0.0x`, and every extracted
@@ -1718,7 +1775,8 @@ func TestTheInstallingLegThatWasMeasuredUnbootableRebootsItsDisk(t *testing.T) {
 // THIS IS A CONSTRAINT ON THE FILES, NOT A DEFAULT IN THE CODE. A walkthrough that says 64 asked for
 // 64, and the answer is that it may not.
 func TestEveryCreatedDiskIs128GiB(t *testing.T) {
-	root := filepath.Join("..", "..")
+	skipWithoutAnyStages(t)
+	root, _ := firstStageRoot()
 	files := globStepsAny(root)
 	checked := 0
 	for _, path := range files {
@@ -1779,7 +1837,8 @@ func TestEveryCreatedDiskIs128GiB(t *testing.T) {
 // condition - so the rectangle and its enlargement are beside the reading rather than inside the
 // condition that uses them.
 func TestTheMacOSRecoveryGateAcceptsReadableRows(t *testing.T) {
-	path := walkPathFor(filepath.Join("..", ".."), "macos/15/steps/setup.yaml")
+	skipWithoutStages(t, "macos")
+	path := walkPathFor("", "macos/15/steps/setup.yaml")
 	doc, err := Load(path, nil)
 	if err != nil {
 		t.Fatalf("%s: %v", path, err)
@@ -1856,7 +1915,8 @@ func TestTheMacOSRecoveryGateAcceptsReadableRows(t *testing.T) {
 //
 // and a reader can check that against the frame.
 func TestEveryRegionSaysWhatSizeItWasMeasuredAt(t *testing.T) {
-	root := filepath.Join("..", "..")
+	skipWithoutAnyStages(t)
+	root, _ := firstStageRoot()
 	files := globStepsAny(root)
 	checked := 0
 	for _, path := range files {
@@ -1895,7 +1955,8 @@ func TestEveryRegionSaysWhatSizeItWasMeasuredAt(t *testing.T) {
 // is on what. Leaving any of the three out makes the reading either unreachable or unscalable, and
 // both were measured as gates that expired on a menu that was plainly on screen.
 func TestEveryOCRStepNamesItsRegionAndSize(t *testing.T) {
-	root := filepath.Join("..", "..")
+	skipWithoutAnyStages(t)
+	root, _ := firstStageRoot()
 	files := globStepsAny(root)
 	checked := 0
 	for _, path := range files {
@@ -1974,7 +2035,8 @@ func TestEveryOCRStepNamesItsRegionAndSize(t *testing.T) {
 // A LOOP IS `repeat:`. A FIXED NUMBER OF PRESSES IS A `do:` LIST. Both are visible in the file, which
 // `repeat: [10, 4]` never was - it could not even say WHICH presses it meant.
 func TestThereIsNoLoopKey(t *testing.T) {
-	root := filepath.Join("..", "..")
+	skipWithoutAnyStages(t)
+	root, _ := firstStageRoot()
 	files := globStepsAny(root)
 	checked := 0
 	for _, path := range files {
@@ -2032,7 +2094,8 @@ func TestThereIsNoLoopKey(t *testing.T) {
 //
 // SO `timeout:` ON A CONDITION IS REFUSED, because accepting it would silently restore the loop.
 func TestAConditionDoesNotCarryATimeout(t *testing.T) {
-	root := filepath.Join("..", "..")
+	skipWithoutAnyStages(t)
+	root, _ := firstStageRoot()
 	files := globStepsAny(root)
 	checked := 0
 	for _, path := range files {
@@ -2127,21 +2190,32 @@ func TestEveryAssetNameIsAKind(t *testing.T) {
 	// `**` is not expanded by filepath.Glob; walk the tree instead. BOTH FORMATS ARE READ: `.walk` is
 	// the format on disk now, and the lines inside it write `fetch == opencore`.
 	var files []string
-	err = filepath.Walk(filepath.Join("..", ".."), func(path string, info os.FileInfo, err error) error {
+	// THE STAGES LIVE IN THE SUB-REPOSITORIES, so the walk starts at each of them rather than at this
+	// repository's root - which holds no stages at all any more.
+	for _, family := range familyOrder {
+		dir, ok := stageFamilyRoot(family)
+		if !ok {
+			continue
+		}
+		err = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if info.IsDir() || !strings.Contains(path, "/steps/") {
+				return nil
+			}
+			if !strings.HasSuffix(path, ".yaml") && !strings.HasSuffix(path, ".walk") {
+				return nil
+			}
+			files = append(files, path)
+			return nil
+		})
 		if err != nil {
-			return err
+			t.Fatal(err)
 		}
-		if info.IsDir() || !strings.Contains(path, "/steps/") {
-			return nil
-		}
-		if !strings.HasSuffix(path, ".yaml") && !strings.HasSuffix(path, ".walk") {
-			return nil
-		}
-		files = append(files, path)
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
+	}
+	if len(files) == 0 {
+		t.Skip("no stages here: the walkthroughs live in the sub-repositories")
 	}
 
 	checked := 0
@@ -2227,13 +2301,34 @@ func sortedKeys(m map[string]bool) []string {
 func workflowAssets(t *testing.T) map[string]bool {
 	t.Helper()
 	out := map[string]bool{}
-	files, err := filepath.Glob(filepath.Join("..", "..", ".github", "workflows", "*.yml"))
-	if err != nil {
-		t.Fatalf("cannot list workflows: %v", err)
+	// THE WORKFLOWS THAT DECLARE `assets:` ARE THE SUB-REPOSITORIES' OWN. Each stage's leg lives in
+	// the repository that runs it, so that is where its `assets:` is written - the engine's copy of
+	// those workflows was the duplicate this change removed.
+	//
+	// THE RESULT IS KEYED BY THE STAGE'S FULL PATH, because a `"file": "15/steps/setup.walk"` is
+	// relative to the repository that declares it and two repositories can have the same relative
+	// shape. The key is joined here, so the caller needs no base of its own.
+	files := map[string]string{} // workflow path -> repository root
+	for _, family := range familyOrder {
+		dir, ok := stageFamilyRoot(family)
+		if !ok {
+			continue
+		}
+		m, err := filepath.Glob(filepath.Join(dir, ".github", "workflows", "*.yml"))
+		if err != nil {
+			t.Fatalf("cannot list workflows: %v", err)
+		}
+		for _, one := range m {
+			files[one] = dir
+		}
 	}
+	if len(files) == 0 {
+		t.Skip("no stages here: the workflows that declare `assets:` belong to the sub-repositories")
+	}
+	_ = files // used below
 	list := regexp.MustCompile(`"assets":\s*\[([^\]]*)\]`)
 	pair := regexp.MustCompile(`"[A-Za-z0-9._-]+:([A-Za-z0-9._/-]+)"`)
-	for _, name := range files {
+	for name := range files {
 		body, err := os.ReadFile(name)
 		if err != nil {
 			t.Fatalf("cannot read %s: %v", name, err)
@@ -2264,7 +2359,7 @@ func workflowAssets(t *testing.T) map[string]bool {
 // here is caught - and so is the reverse, which is the failure that would otherwise be silent until a
 // guest could not boot.
 func TestEveryStageRequiresTheAssetsItsLegPulls(t *testing.T) {
-	root := filepath.Join("..", "..")
+	skipWithoutAnyStages(t)
 	assets := workflowAssetsByStage(t)
 	if len(assets) == 0 {
 		t.Fatal("no workflow declares `assets:`, so this test would pass by checking nothing")
@@ -2278,18 +2373,11 @@ func TestEveryStageRequiresTheAssetsItsLegPulls(t *testing.T) {
 		if len(files) == 0 {
 			continue
 		}
-		// THE WORKFLOW NAMES THE STAGE, and the file it resolves to may be either format: a `.walk`
-		// wins over the `.yaml` it replaced.
-		path := walkPathFor(root, stage)
+		// THE WORKFLOW NAMES THE FILE, ALREADY JOINED TO ITS REPOSITORY. A `.walk` wins over the
+		// `.yaml` it replaced, so the other extension is tried when the named one is absent.
+		path := walkPathForAny(stage)
 		doc, err := Load(path, nil)
 		if err != nil {
-			// AN UPSTREAM `.yaml` THAT HAS NOT BEEN CONVERTED YET is skipped rather than failed: it
-			// still writes `require:` and the old `read:` shape, which this vocabulary no longer
-			// accepts. The list of those files is `*.yaml` WITHOUT a `.walk` beside it, and
-			// `TestEveryWalkthroughLoads` reports them separately so the count stays honest.
-			if strings.HasSuffix(path, ".yaml") && fileExistsNoWalk(root, stage) {
-				continue
-			}
 			t.Errorf("%s: %v", stage, err)
 			continue
 		}
@@ -2339,10 +2427,31 @@ func TestEveryStageRequiresTheAssetsItsLegPulls(t *testing.T) {
 func workflowAssetsByStage(t *testing.T) map[string][]string {
 	t.Helper()
 	out := map[string][]string{}
-	files, err := filepath.Glob(filepath.Join("..", "..", ".github", "workflows", "*.yml"))
-	if err != nil {
-		t.Fatalf("cannot list workflows: %v", err)
+	// THE WORKFLOWS THAT DECLARE `assets:` ARE THE SUB-REPOSITORIES' OWN. Each stage's leg lives in
+	// the repository that runs it, so that is where its `assets:` is written - the engine's copy of
+	// those workflows was the duplicate this change removed.
+	//
+	// THE RESULT IS KEYED BY THE STAGE'S FULL PATH, because a `"file": "15/steps/setup.walk"` is
+	// relative to the repository that declares it and two repositories can have the same relative
+	// shape. The key is joined here, so the caller needs no base of its own.
+	files := map[string]string{} // workflow path -> repository root
+	for _, family := range familyOrder {
+		dir, ok := stageFamilyRoot(family)
+		if !ok {
+			continue
+		}
+		m, err := filepath.Glob(filepath.Join(dir, ".github", "workflows", "*.yml"))
+		if err != nil {
+			t.Fatalf("cannot list workflows: %v", err)
+		}
+		for _, one := range m {
+			files[one] = dir
+		}
 	}
+	if len(files) == 0 {
+		t.Skip("no stages here: the workflows that declare `assets:` belong to the sub-repositories")
+	}
+	_ = files // used below
 	// `"file": "<path>"` and `"assets": [ ... ]` live in the same JSON object, so they are matched as
 	// one span: everything from a `"file":` to the closing bracket of its `"assets":`.
 	// THE SPAN MUST NOT CROSS A `}`: without that a stage with no `assets:` inherits the NEXT
@@ -2350,7 +2459,7 @@ func workflowAssetsByStage(t *testing.T) map[string][]string {
 	// they never boot from.
 	block := regexp.MustCompile(`"file":\s*"([^"]+)"[^}]*?"assets":\s*\[([^\]]*)\]`)
 	pair := regexp.MustCompile(`"[A-Za-z0-9._-]+:([A-Za-z0-9._/-]+)"`)
-	for _, name := range files {
+	for name, repo := range files {
 		body, err := os.ReadFile(name)
 		if err != nil {
 			t.Fatalf("cannot read %s: %v", name, err)
@@ -2361,7 +2470,9 @@ func workflowAssetsByStage(t *testing.T) map[string][]string {
 				names = append(names, e[1])
 			}
 			if len(names) > 0 {
-				out[m[1]] = names
+				// THE `file` IS RELATIVE TO THE REPOSITORY THAT DECLARES IT, so the key is the joined
+				// path - the only thing that is unambiguous across five repositories.
+				out[filepath.Join(repo, m[1])] = names
 			}
 		}
 	}
@@ -2378,14 +2489,19 @@ func globSteps(root, family string) []string {
 	// A `.walk` WINS OVER THE `.yaml` IT REPLACED, so a tree mid-migration is tested in the format the
 	// file is being migrated TO.
 	//
-	// THIS IS A TEMPORARY RULE AND IT IS NAMED AS ONE: the upstream `.yaml` files came back with the
-	// merge and still use `ocr:` and the old `read:` shape, which this vocabulary no longer accepts.
-	// They are kept until they are converted, and `TestEveryWalkthroughLoads` must not fail on a file
-	// whose replacement is already there.
+	// `root` IS IGNORED. It used to be the engine's own tree, and the stages are not there any more -
+	// each lives in the sub-repository that runs it. The parameter stays because its call sites pass
+	// it and some still want a base for `filepath.Rel`; the SEARCH always goes through
+	// `stageFamilyRoot`, so no test can accidentally read a stale local copy.
+	_ = root
+	dir, ok := stageFamilyRoot(family)
+	if !ok {
+		return nil
+	}
 	seen := map[string]bool{}
 	var out []string
 	for _, ext := range []string{"*.walk", "*.yaml"} {
-		m, err := filepath.Glob(filepath.Join(root, family, "*", "steps", ext))
+		m, err := filepath.Glob(filepath.Join(dir, "*", "steps", ext))
 		if err != nil {
 			continue
 		}
@@ -2417,6 +2533,24 @@ func globStepsAny(root string) []string {
 // A test that says `windows/11/steps/install.yaml` is naming a STAGE, not a file, and after the
 // migration the file is `install.walk`. This resolves either.
 func walkPathFor(root, rel string) string {
+	// THE STAGES ARE NOT UNDER THIS REPOSITORY ANY MORE, so a relative name like
+	// `macos/15/steps/setup` is resolved against the FAMILY's own repository. `root` is kept for the
+	// callers that pass one, and used only as a last resort.
+	if m, ok := stageFamilyRoot(strings.SplitN(rel, "/", 2)[0]); ok {
+		// `macos/15/steps/setup` -> `15/steps/setup` under the macos repository: the family is the
+		// repository's NAME, not a directory inside it.
+		base := strings.TrimSuffix(strings.TrimSuffix(rel, ".yaml"), ".walk")
+		if parts := strings.SplitN(base, "/", 2); len(parts) == 2 {
+			base = parts[1]
+		}
+		for _, ext := range []string{".walk", ".yaml"} {
+			full := filepath.Join(m, base+ext)
+			if _, err := os.Stat(full); err == nil {
+				return full
+			}
+		}
+	}
+
 	// A NAME THAT IS ALREADY A `.walk` IS RETURNED AS IT IS, which the first version broke: it
 	// appended `.walk` unconditionally and asked for `setup.walk.yaml`.
 	base := strings.TrimSuffix(strings.TrimSuffix(rel, ".yaml"), ".walk")
@@ -2445,7 +2579,8 @@ func walkPathFor(root, rel string) string {
 //
 // THE RULE IS CHEAP AND TOTAL: every `repeat:` names the boolean it ends on.
 func TestEveryLoopSaysWhatEndsIt(t *testing.T) {
-	root := filepath.Join("..", "..")
+	skipWithoutAnyStages(t)
+	root, _ := firstStageRoot()
 	// `globStepsAny` RATHER THAN A `.yaml` GLOB, so a mid-migration tree is read in the format each
 	// file is being migrated TO.
 	files := globStepsAny(root)
@@ -2498,7 +2633,8 @@ func TestEveryLoopSaysWhatEndsIt(t *testing.T) {
 // phrase-matching expectation this vocabulary does not have, and inventing it would change what every
 // existing single-word entry means.
 func TestNoCheckNamesAPhrase(t *testing.T) {
-	root := filepath.Join("..", "..")
+	skipWithoutAnyStages(t)
+	root, _ := firstStageRoot()
 	files := globStepsAny(root)
 	if len(files) == 0 {
 		t.Fatal("no walkthrough found, so this test checked nothing")
@@ -2574,7 +2710,8 @@ func stepsOf(raw []any) []Step {
 // IT IS THE SAME CLASS OF BUG AS THE `rect_at:` ONE THIS BRANCH FIXED: a number written for one screen
 // read on another. That one was a region; this one is a point.
 func TestEveryCoordinateFitsTheFrameItDeclares(t *testing.T) {
-	root := filepath.Join("..", "..")
+	skipWithoutAnyStages(t)
+	root, _ := firstStageRoot()
 	files := globStepsAny(root)
 
 	// THE KEYS THAT NAME A POINT, and how many leading ints are a point. `at_button` is a RECTANGLE -
@@ -2653,7 +2790,8 @@ func TestEveryCoordinateFitsTheFrameItDeclares(t *testing.T) {
 // its condition holds and gives up after `max` tries. So a `zzzz`-style sentinel written to mean "do
 // this a few times" is a loop that always fails, and it reads as a page that never arrived.
 func TestNoLoopWaitsOnAWordThatCannotAppear(t *testing.T) {
-	root := filepath.Join("..", "..")
+	skipWithoutAnyStages(t)
+	root, _ := firstStageRoot()
 	files := globStepsAny(root)
 	if len(files) == 0 {
 		t.Fatal("no walkthrough found, so this test checked nothing")
@@ -2714,9 +2852,15 @@ func TestNoLoopWaitsOnAWordThatCannotAppear(t *testing.T) {
 // still write `ocr:` and the old `read:` shape, which this vocabulary no longer accepts. Until each is
 // converted, a test must read the `.walk` beside it.
 func globBoth(root, family, stage string) []string {
+	// `root` IS IGNORED, for the reason `globSteps` gives: the stages are in the sub-repositories now.
+	_ = root
+	dir, ok := stageFamilyRoot(family)
+	if !ok {
+		return nil
+	}
 	for _, ext := range []string{".walk", ".yaml"} {
-		p := filepath.Join(root, family, "*", "steps", stage+ext)
-		if m, err := filepath.Glob(p); err == nil && len(m) > 0 {
+		m, err := filepath.Glob(filepath.Join(dir, "*", "steps", stage+ext))
+		if err == nil && len(m) > 0 {
 			return m
 		}
 	}

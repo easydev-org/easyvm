@@ -315,8 +315,7 @@ func TestMatrixIsNotUsedInJobLevelConditions(t *testing.T) {
 // mechanism is a callable workflow here; each OS file declares only its own matrix.
 func TestEachOperatingSystemHasItsOwnGroupAndOneSharedMechanism(t *testing.T) {
 	dir := "../../.github/workflows"
-	files, err := os.ReadDir(dir)
-	if err != nil {
+	if _, err := os.ReadDir(dir); err != nil {
 		t.Skipf("no workflows directory here (%v)", err)
 	}
 
@@ -348,18 +347,39 @@ func TestEachOperatingSystemHasItsOwnGroupAndOneSharedMechanism(t *testing.T) {
 			"second copy is the duplication this file exists to prevent", deviceLines)
 	}
 
-	groups := map[string]string{}
-	for _, f := range files {
-		name := f.Name()
-		if !strings.HasSuffix(name, ".yml") || name == "stage.yml" || name == "image.yml" {
-			continue
+	// THE PER-OS CALLERS ARE NOT IN THIS REPOSITORY ANY MORE. Each distribution's workflow lives in
+	// the repository that runs it - `easyvm-linux/ubuntu.yml`, `easyvm-windows/windows.yml` - because
+	// the stage it drives lives there too. What stays here is `stage.yml`, the mechanism they all
+	// call, and that is checked above.
+	//
+	// SO THE CALLERS ARE FOUND WHERE THEY ARE, and a checkout without them skips rather than claiming
+	// a property of files it never read.
+	callers := map[string]string{} // workflow path -> repository root
+	for _, base := range []string{"..", "../..", "../../.."} {
+		for _, repo := range []string{"easyvm-linux", "easyvm-windows", "easyvm-macos",
+			"easyvm-bsd", "easyvm-android", "easyvm-microvm",
+			"sd-linux", "sd-windows", "sd-macos", "sd-bsd", "sd-android", "sd-microvm"} {
+			m, _ := filepath.Glob(filepath.Join(base, repo, ".github", "workflows", "*.yml"))
+			for _, one := range m {
+				callers[one] = repo
+			}
 		}
-		body, err := os.ReadFile(dir + "/" + name)
+	}
+	if len(callers) == 0 {
+		t.Skip("no caller workflows here: the per-OS workflows live in the sub-repositories " +
+			"(easyvm-linux, easyvm-windows, ...), so a checkout with only this repository has none")
+	}
+
+	groups := map[string]string{}
+	for path := range callers {
+		name := filepath.Base(path)
+		body, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)
 		}
 		text := string(body)
-		if !strings.Contains(text, "uses: ./.github/workflows/stage.yml") {
+		if !strings.Contains(text, "/.github/workflows/stage.yml@") &&
+			!strings.Contains(text, "uses: ./.github/workflows/stage.yml") {
 			continue // not a stage wrapper
 		}
 		// A CONCURRENCY GROUP PER FILE, AND NO TWO THE SAME.
