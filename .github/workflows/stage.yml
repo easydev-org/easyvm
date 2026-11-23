@@ -831,9 +831,20 @@ jobs:
           from='${{ matrix.disk-parted.from }}'
           search='${{ matrix.disk-parted.search }}'
 
-          # THE ESP'S OFFSET, READ FROM THE GPT by a script in this repository - a `run:` block is
-          # a YAML scalar and an embedded script's indentation fights its terminator. See the file.
-          esp=$(python3 "$GITHUB_WORKSPACE/.github/esp-offset.py" "$out")
+          # THE ESP'S OFFSET, READ FROM THE GPT. THE SCRIPT IS ENCODED HERE RATHER THAN NAMED.
+          #
+          # A REUSABLE WORKFLOW CANNOT READ ITS OWN REPOSITORY AT RUNTIME: `$GITHUB_WORKSPACE` is the
+          # CALLER's checkout, so `python3 .github/esp-offset.py` answered
+          #
+          #   can't open file '/__w/easyvm-android/easyvm-android/.github/esp-offset.py'
+          #
+          # on the first android leg that reached this step. It is the trap `pull-artifact.sh`
+          # documents, and the answer is the same: carry the work where it runs.
+          #
+          # AND IT IS BASE64 RATHER THAN A `<<'EOF'` HEREDOC, because a `run: |` block is a YAML
+          # scalar: every line must be indented to the block's column, and a heredoc terminator must
+          # be at column zero. The two cannot both be true. One long line has no such problem.
+          esp=$(printf '%s' 'aW1wb3J0IHN0cnVjdCwgc3VicHJvY2Vzcywgc3lzCmRpc2sgPSBzeXMuYXJndlsxXQpkZWYgcmVhZChvZmYsIG4pOgogICAgdGV4dCA9IHN1YnByb2Nlc3MucnVuKFsicWVtdS1pbyIsIi1mIiwicWNvdzIiLCItciIsIi1jIiwicmVhZCAtdiAlZCAlZCIgJSAob2ZmLCBuKSwgZGlza10sCiAgICAgICAgICAgICAgICAgICAgICAgICAgY2FwdHVyZV9vdXRwdXQ9VHJ1ZSwgdGV4dD1UcnVlKS5zdGRvdXQKICAgIG91dCA9IGJ5dGVhcnJheSgpCiAgICBmb3IgbGluZSBpbiB0ZXh0LnNwbGl0bGluZXMoKToKICAgICAgICBjb2xvbiA9IGxpbmUuZmluZCgiOiIpCiAgICAgICAgaWYgY29sb24gPCAwOgogICAgICAgICAgICBjb250aW51ZQogICAgICAgIGZvciBmaWVsZCBpbiBsaW5lW2NvbG9uKzE6XS5zcGxpdCgpWzoxNl06CiAgICAgICAgICAgIGlmIGxlbihmaWVsZCkgIT0gMjoKICAgICAgICAgICAgICAgIGJyZWFrCiAgICAgICAgICAgIG91dC5hcHBlbmQoaW50KGZpZWxkLCAxNikpCiAgICByZXR1cm4gYnl0ZXMob3V0KQpoZWFkZXIgPSByZWFkKDUxMiwgOTIpCmlmIGhlYWRlclswOjhdICE9IGIiRUZJIFBBUlQiOgogICAgc3lzLmV4aXQoIm5vIEdQVCBoZWFkZXIgYXQgTEJBIDEiKQpsYmEsIGNvdW50LCBzaXplID0gc3RydWN0LnVucGFjaygiPFFJSSIsIGhlYWRlcls3Mjo4OF0pCnRhYmxlID0gcmVhZChsYmEqNTEyLCBjb3VudCpzaXplKQplc3BfdHlwZSA9IGJ5dGVzLmZyb21oZXgoIjI4NzMyYWMxMWZmOGQyMTFiYTRiMDBhMGM5M2VjOTNiIikKZm9yIGkgaW4gcmFuZ2UoY291bnQpOgogICAgZW50cnkgPSB0YWJsZVtpKnNpemU6KGkrMSkqc2l6ZV0KICAgIGlmIGVudHJ5WzA6MTZdID09IGVzcF90eXBlOgogICAgICAgIGZpcnN0LCBfID0gc3RydWN0LnVucGFjaygiPFFRIiwgZW50cnlbMzI6NDhdKQogICAgICAgIHByaW50KGZpcnN0KjUxMikKICAgICAgICBicmVhawplbHNlOgogICAgc3lzLmV4aXQoIm5vIEVGSSBTeXN0ZW0gUGFydGl0aW9uIikK' | base64 -d | python3 - "$out")
           echo "=== the ESP is at byte $esp of $(basename "$out")"
 
           # mtools READS A RAW IMAGE AND NOT A QCOW2, MEASURED: the same command that lists the ESP
