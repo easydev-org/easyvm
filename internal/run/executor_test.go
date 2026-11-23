@@ -532,31 +532,6 @@ func TestSCPLooksInTheWorkDirectory(t *testing.T) {
 // Fifteen minutes spent looking for a WINDOWS DESKTOP on an Ubuntu guest. The family came from
 // `desktop_family` then `os:`, both empty on that step, and the fallback is `windows` - so the key's
 // OWN VALUE was never read.
-func TestDesktopTakesItsFamilyFromItsOwnValue(t *testing.T) {
-	body, err := os.ReadFile("actions.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	src := string(body)
-	start := strings.Index(src, "func (e *Executor) doDesktop(")
-	if start < 0 {
-		t.Fatal("no doDesktop")
-	}
-	rest := src[start:]
-	if end := strings.Index(rest[1:], "\nfunc "); end > 0 {
-		rest = rest[:end+1]
-	}
-	if !strings.Contains(rest, `s.Get("desktop")`) {
-		t.Fatal("`desktop:` reads its family from other keys and not from its own value, so " +
-			"`desktop: linux` is treated as `windows`")
-	}
-	// AND THE VALUE COMES FIRST, before the older spellings.
-	own := strings.Index(rest, `s.Get("desktop")`)
-	fam := strings.Index(rest, `s.Get("desktop_family")`)
-	if fam >= 0 && fam < own {
-		t.Fatal("`desktop_family` is read before `desktop`, so a step with both gets the wrong one")
-	}
-}
 
 // A REGION MEASURED AT ONE RESOLUTION IS READ AT ANOTHER BY SCALING IT, NOT BY GIVING UP.
 //

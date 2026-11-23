@@ -38,7 +38,7 @@ func TestTheMachineHalfIsThePreparationAndTheBoot(t *testing.T) {
 			map[string]any{"name": "create the empty disk", "disk": "disk.qcow2", "disk_gb": 128},
 			map[string]any{"name": "the installer image", "fetch": "linux_iso", "release": "ubuntu"},
 			map[string]any{"name": "boot the installer", "boot": true, "os": "linux", "iso": "installer_iso"},
-			map[string]any{"name": "wait for the desktop", "desktop": "linux"},
+			map[string]any{"name": "read the screen", "read": map[string]any{"name": "screen"}},
 			map[string]any{"name": "click Next", "input": true, "click": []any{10, 20}},
 		},
 	})
@@ -62,12 +62,12 @@ func TestTheMachineHalfIsThePreparationAndTheBoot(t *testing.T) {
 
 	// AND THE REST IS WHAT A PERSON DOES, starting at the first step that is not preparation.
 	if len(rest) != 2 {
-		t.Fatalf("%d step(s) after the machine, want 2 (the desktop wait and the click); a run "+
+		t.Fatalf("%d step(s) after the machine, want 2 (the screen read and the click); a run "+
 			"that dropped these would click nothing, and one that kept the preparation would "+
 			"create a second disk", len(rest))
 	}
-	if rest[0].Name != "wait for the desktop" {
-		t.Fatalf("the remaining steps start at %q, want the desktop wait", rest[0].Name)
+	if rest[0].Name != "read the screen" {
+		t.Fatalf("the remaining steps start at %q, want the screen read", rest[0].Name)
 	}
 
 	// A SANDBOX RUNS THE MACHINE HALF, SO IT MUST BE RUNNABLE - that is the whole fix: `create` gets

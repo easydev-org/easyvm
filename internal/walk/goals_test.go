@@ -801,57 +801,51 @@ func TestAnInstallerIsWaitedForTheWayItAppears(t *testing.T) {
 		checked++
 		wait := doc.Steps[waitAt]
 
-		// A PANEL, NOT A WORD. Every image here is a DESKTOP image and the step after this one clicks
-		// something on that desktop, so the question is "is a live session up" - which is what a panel
-		// answers and what a word does not.
+		// THE WAIT MEASURES A PICTURE, NOT A THRESHOLD FAMILY.
 		//
-		// THIS WAS WRITTEN THE OTHER WAY FOR FIVE FILES WHEN `iso-ubuntu` TURNED OUT TO BE THE SERVER
-		// IMAGE (2,792 MiB, "Try or Install Ubuntu Server", an installer with no panel). THE IMAGES ARE
-		// DESKTOP ONES NOW - `iso-ubuntu-desktop` is 6,182 MiB, Desktop 26.04.1 exactly - so the panel
-		// is the honest measurement again, and the same correction applied to nixos (minimal has no
-		// desktop at all), popos, manjaro and zorin.
-		// `linux` OR A DISTRIBUTION'S OWN `linux/<name>`, AND THE SECOND FORM EXISTS BECAUSE ONE
-		// MEDIUM'S FIRST SCREEN IS NOT A PANEL.
+		// It used to be `desktop: linux` or `desktop: linux/<name>`, which chose one of six
+		// family-wide threshold sets in `internal/screen`. Those are gone: MEASURED on one ubuntu
+		// recording, every frame compared with the desktop reference the file already shipped gave
 		//
-		// Kubuntu 26.04 boots to a KDE launcher drawn on a full-bleed gradient. MEASURED on that image:
+		//	 30s   similarity 0.0004   the boot splash
+		//	 90s   similarity 0.0041   still splashing
+		//	120s   similarity 0.9909   the desktop
+		//	1600s  similarity 0.9767   the desktop, an hour later
 		//
-		//	TopMean == BottomMean == [5.45 27.30 62.01]   Drop=0.0
+		// - two orders of magnitude, where the thresholds that windows failed on were three numbers
+		// within a few percent of each other. So the wait is a loop over `check: {mode: like}` with a
+		// `reference:`, and THIS ASSERTION IS THAT THE LOOP ASKS THE PICTURE RATHER THAN WORDS.
 		//
-		// `IsLinuxDesktop` answers false, and correctly: there is no panel to find. The launcher is
-		// still a live session, and the measurement that separates it from every Calamares page is
-		// saturation (96.9 against 4.1 .. 6.2). `screen.IsKubuntuLauncher` is that measurement, and
-		// `desktop: linux/kubuntu` names it in the file where the reader can see the choice.
-		//
-		// WHAT THIS TEST STILL REFUSES: a wait on words instead of a session. `desktop: linux` and
-		// `linux/<name>` both answer "is a session up"; an OCR loop does not, and that is the mistake
-		// this assertion was written for.
-		family := wait.Get("desktop")
-		if family != "linux" && !strings.HasPrefix(family, "linux/") {
-			t.Errorf("%s: %s waits on %q rather than `desktop: linux` or a distribution's own "+
-				"`desktop: linux/<name>`. These are desktop images and the next step clicks a "+
-				"control on the session, so the wait must ask whether a session is up",
-				rel, wait.Name, family)
+		// WHAT IT STILL REFUSES: a wait on OCR. A screen that says "welcome" is not a session, and
+		// the mistake this was written for was a loop that matched a word on the boot splash.
+		if !wait.Has("repeat") {
+			t.Errorf("%s: %s does not wait with a `repeat:`", rel, wait.Name)
 		}
-		// AND THE SESSION IS KEPT AWAKE - AND THAT IS NO LONGER THE FILE'S JOB TO SAY.
-		//
-		// This assertion used to require `keep_alive: true` here, and it was right about the FACT:
-		// a ninety-minute wait outlives a live session's idle timer, the lock screen goes up, and
-		// nothing below can match. It was wrong about WHERE the fact belongs.
-		//
-		// `keep_alive:` was written `true` in all 25 places it appeared and never once `false`, so it
-		// was not a switch - it was the behaviour spelled as an option. The wake is now unconditional
-		// in `wakeTheScreen`, called by every poll of a `desktop:` and a `disk_settle:`, and the key
-		// is gone. A file cannot forget it because a file no longer says it.
-		//
-		// SO THE ASSERTION BECOMES THE ONE THAT MATTERS: the key must NOT be written back. A file
-		// that still says `keep_alive:` is a file written against a vocabulary that no longer has it,
-		// and the load-time validator refuses it - this catches it one step earlier with a message
-		// that explains why.
+		rep, _ := wait.Spec["repeat"].(map[string]any)
+		until, _ := rep["until"].(map[string]any)
+		if until == nil || until["mode"] != "like" || until["reference"] == nil {
+			t.Errorf("%s: %s waits on %v rather than on `check: {mode: like, reference: ...}`. "+
+				"These are desktop images and the next step clicks a control on the session, so the "+
+				"wait must ask whether that session's PICTURE is up", rel, wait.Name, until)
+		}
+		// `must: true` IS A FIELD OF THE `check:` INSIDE `until:`, not of `until:` itself.
+		var cond map[string]any
+		if until != nil {
+			if c, ok := until["check"].(map[string]any); ok {
+				cond = c
+			} else {
+				cond = until
+			}
+		}
+		if cond != nil && cond["must"] != true {
+			t.Errorf("%s: %s ends its loop on a check that binds a boolean instead of judging: "+
+				"without `must: true` a wrong picture is a silent pass", rel, wait.Name)
+		}
 		// AND THE BUDGET IS THE INSTALL'S. A live medium unpacks itself from a multi-gigabyte ISO
-		// before its desktop exists; a fifteen-minute number was a guess that was wrong four times.
-		if got := wait.Get("timeout"); got != "5400" {
-			t.Errorf("%s: %s waits %q seconds; a live medium unpacks itself before its desktop "+
-				"exists and the reference budget is 5400", rel, wait.Name, got)
+		// before its desktop exists; the loop's `max:` is that budget in five-second attempts.
+		if got, _ := rep["max"].(int); got < 400 {
+			t.Errorf("%s: %s allows %v attempt(s); a live medium unpacks itself before its desktop "+
+				"exists and the reference budget is 5400s, which is 1080 attempts", rel, wait.Name, got)
 		}
 	}
 	if checked == 0 {

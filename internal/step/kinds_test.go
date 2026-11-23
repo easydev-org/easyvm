@@ -19,10 +19,6 @@ func TestEveryKindAcceptsItsShapesAndRefusesTheOthers(t *testing.T) {
 			notOK: []any{[]any{1, 2, 3}}},
 		{key: "at_color", ok: []any{[]any{40, 200, 64}},
 			notOK: []any{[]any{1, 2}, []any{1, 2, 3, 4}}},
-		// `desktop:` NAMES THE FAMILY, WHICH IS A STRING - the declaration said `mapping` and the
-		// executor has always read a string.
-		{key: "desktop", ok: []any{"linux", "linux/kde", "macos", "windows"},
-			notOK: []any{[]any{"linux"}, map[string]any{"os": "linux"}}},
 		{key: "disk", ok: []any{"disk.qcow2", "{{ work }}/disk.qcow2"},
 			notOK: []any{[]any{"disk.qcow2"}, map[string]any{"from": "x"}}},
 		// A TEMPLATE IS SUBSTITUTED AFTER THIS MAP IS READ, so it is legal here and resolved later.

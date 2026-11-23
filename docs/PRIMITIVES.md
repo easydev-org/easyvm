@@ -164,7 +164,6 @@ A step is one of nine verbs, or one of the actions the engine dispatches on, plu
 | `adb` | run a command over adb |
 | `adb_connect` | connect adb before the commands that need it |
 | `adb_privileged` | ask adbd for root before the commands that need it |
-| `desktop` | wait until a desktop of this family is on screen |
 | `disk` | make one disk, or name the one a machine starts from |
 | `disk_settle` | wait until the disk file stops growing, and check it is big enough |
 | `do` | run a list of steps in order under one name |
@@ -179,13 +178,6 @@ A step is one of nine verbs, or one of the actions the engine dispatches on, plu
 | `until_any` | wait for any one of several console lines |
 | `wait_until` | wait for a condition about the machine: `stopped` |
 | `write` | write one of the built-in templates to disk |
-
-### `desktop`
-
-| key | what it does |
-|---|---|
-| `blind_after` | seconds of a blank screen before the wait starts looking |
-| `poll` | seconds between looks |
 
 ### `disk`
 
