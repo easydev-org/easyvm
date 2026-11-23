@@ -17,6 +17,7 @@ package daemon
 // that needs it current is already asking repeatedly.
 
 import (
+	"fmt"
 	"path/filepath"
 	"sync"
 	"time"
@@ -73,8 +74,19 @@ func (d *Daemon) probeOnce() {
 	sshUp := false
 	if tp, ok := drv.(interface{ SSHTarget() guest.Target }); ok {
 		target := tp.SSHTarget()
-		if target.Port != 0 && guest.Probe(target, 1, 2*time.Second) == nil {
-			sshUp = true
+		if target.Port != 0 {
+			err := guest.Probe(target, 1, 2*time.Second)
+			if err == nil {
+				sshUp = true
+			} else if prev := d.lastProbe.sshAnswer(); prev == nil || *prev {
+				// A GUEST WHOSE SSH NEVER COMES UP MUST SAY WHY. MEASURED on freebsd ssh, run
+				// 45096500475: the console showed `Starting sshd.` and a DHCP lease, and the walk
+				// still failed with the whole sentence "sshd does not accept a connection" - which
+				// is true and names nothing. The probe HAD the reason (a refused port, a password
+				// rejection, a handshake that timed out) and threw it away, so the next hour went
+				// into reading qemu arguments instead of the one line that mattered.
+				drv.Log(fmt.Sprintf("  ssh probe: %v", err))
+			}
 		}
 	}
 
