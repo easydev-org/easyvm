@@ -20,7 +20,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/easydev-org/easyvm/internal/answer"
 	"github.com/easydev-org/easyvm/internal/oci"
 )
 
@@ -286,6 +285,11 @@ func fetchOpenCore(spec Spec) (Result, error) {
 	// VM, and a fresh copy each boot loses the boot entries the installed system just registered.
 	// EVERY GUEST GETS THE SAME INITIAL BYTES, which is right - the template holds no boot entries,
 	// and each copy evolves on its own.
+	//
+	// IT IS NOT A BUILD, WHICH IS WHY IT STAYS: `pullTag` + `untar` with `macos.vars` in the tar
+	// would O_TRUNC the file on every run, so a local stage that reuses a work directory would lose
+	// the boot entries the previous boot registered. A copy that only happens when the file is
+	// absent is the whole of that behaviour, and it is three lines.
 	vars := filepath.Join(dir, "macos.vars")
 	if _, err := os.Stat(vars); os.IsNotExist(err) {
 		if err := copyFile(varsTemplate, vars); err != nil {
@@ -378,32 +382,67 @@ func linuxISOTag(release string) string {
 	return "iso-" + release
 }
 
-// fetchAnswerISO builds Windows' answer CD.
+// fetchAnswerISO pulls Windows' answer CD, which is BUILT AND PUBLISHED by easyvm-windows.
 //
-// THE DRIVERS COME OUT OF THE SAME ISO THIS REPOSITORY PUBLISHES, so this either uses one already
-// in the work directory or pulls it - and a failure to get it is a failure to build a CD that can
-// install Windows at all.
+// IT USED TO BE BUILT HERE, and the three things that build did are worth naming because they are
+// the reason it moved: it substituted four placeholders into an XML template, extracted four driver
+// directories out of the virtio-win ISO, and ran xorriso. None of that boots a guest, types anything
+// or needs a screen - so a failure in it read like a guess failure - and none of its inputs ever
+// changed: the four placeholders are the walk's own defaults (vmuser / admin / sandbox / 6) and the
+// drivers come from one pinned ISO.
+//
+// THE IDENTITY IS SHARED ON PURPOSE, the same call macOS's firmware made: a guest's identity is a
+// fact about the IMAGE, not about a run. A published disk whose password changes per run cannot be
+// re-opened by the stage after it.
+//
+// THE BUILDER IS `easyvm-windows/scripts/build-answer.py`, and it produces a BYTE-IDENTICAL tree to
+// the Go code it replaces - 24 files, `diff -r` clean, for the same template and virtio-win ISO.
+// THAT EQUIVALENCE IS THE POINT: this is a move, not a rewrite, so a Windows guest boots the same
+// answer file it booted before.
 func fetchAnswerISO(spec Spec) (Result, error) {
-	if spec.Template == "" {
-		return Result{}, fmt.Errorf("`fetch: answer_iso` needs a `template:` - the answer file to " +
-			"substitute into")
-	}
-	virtio, err := fetchVirtioWin(spec.Work)
-	if err != nil {
+	tag := answerTag(spec.Release)
+	dir := spec.Work
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return Result{}, err
 	}
-	out := filepath.Join(spec.Work, "answer.iso")
-	err = answer.Build(answer.Spec{
-		Template:  spec.Template,
-		Out:       out,
-		VirtioISO: virtio.Main,
-		Values:    spec.Values,
-		Label:     "ANSWER",
-	}, func(msg string) { _ = msg })
+	out := filepath.Join(dir, "answer.iso")
+	archive := filepath.Join(dir, "answer-cd.tar")
+
+	// THE FLOOR IS 100 KiB, which is the same floor the builder itself enforces: an ISO smaller than
+	// that is a boot record with the answer file and none of the installer's drivers, and Setup
+	// accepts it and then cannot see the disk.
+	if err := pullTag(tag, archive, 100<<10, 10*time.Minute,
+		"easyvm-windows publishes it from scripts/build-answer.py"); err != nil {
+		return Result{}, fmt.Errorf("the Windows answer CD is not published at %s: %w. It is "+
+			"built by easyvm-windows's artifacts-publish workflow; a stage cannot start without it",
+			tag, err)
+	}
+	if err := untar(archive, dir); err != nil {
+		return Result{}, fmt.Errorf("%s: %w", tag, err)
+	}
+	if _, err := os.Stat(out); err != nil {
+		return Result{}, fmt.Errorf("%s did not unpack answer.iso: %w", tag, err)
+	}
+
+	// THE DRIVER CD IS A SEPARATE ARTIFACT the boot step names, so it is fetched here rather than
+	// left to a step that would have to know the answer CD needs it beside it.
+	virtio, err := fetchVirtioWin(dir)
 	if err != nil {
 		return Result{}, err
 	}
 	return Result{Main: out, Extra: []string{virtio.Main}}, nil
+}
+
+// answerTag is the artifact a Windows answer CD is published under.
+//
+// NAMED FOR THE GUEST rather than for the file, because the account, the computer name and the image
+// index are all facts about it. A second Windows release is a second tag, not a flag: a flag would be
+// a second place for the same fact.
+func answerTag(release string) string {
+	if release == "" {
+		release = "11"
+	}
+	return "answer-windows" + release
 }
 
 // fetchWindowsAgent extracts the agent MSI and the virtio-serial driver from the virtio-win ISO.
