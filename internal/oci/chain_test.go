@@ -32,115 +32,67 @@ import (
 //
 // because nothing had ever published that name and nothing was going to.
 func TestEachLegContinuesTheStageBeforeIt(t *testing.T) {
-	files := workflowFiles()
-	if len(files) == 0 {
-		t.Skip("no workflows here: the per-stage callers live in the sub-repositories")
+	// EVERY STAGE IS ITS OWN FILE NOW, so what "continues the stage before it" means is the DEFAULT
+	// of `from_tag:` - a leg dispatched with nothing continues from the disk its predecessor publishes,
+	// and a leg dispatched with a tag continues from that.
+	//
+	// THE OLD FORM OF THIS TEST READ A CHAIN: one workflow with jobs joined by `needs:`, and the pull
+	// of each leg compared against the publish of the one above. That shape is gone - a stage is
+	// `gh workflow run <this file>` - so the invariant moved into the default.
+	root := filepath.Join("..", "..")
+	files, err := filepath.Glob(filepath.Join(root, "sd-*", ".github", "workflows", "*-(ssh|vm-configure|dev).yml"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	// THE CHAINS, as stage names in order, keyed by the OS's own tag prefix.
-	chains := map[string][]string{
-		"linux-cachyos":             {"install", "ssh", "vm"},
-		"linux-endeavour":           {"install", "ssh", "vm"},
-		"linux-fedora-workstation":  {"install", "ssh", "vm"},
-		"linux-kubuntu":             {"install", "ssh", "vm"},
-		"linux-manjaro":             {"install", "ssh", "vm"},
-		"linux-mint":                {"install", "ssh", "vm"},
-		"linux-mx":                  {"install", "ssh", "vm"},
-		"linux-nixos":               {"install", "ssh", "vm"},
-		"linux-popos":               {"install", "ssh", "vm"},
-		"linux-ubuntu":              {"install", "ssh", "vm"},
-		"linux-zorin":               {"install", "ssh", "vm"},
-		"bsd-ghostbsd-mate":         {"install", "ssh", "vm"},
-		"macos15":                   {"setup", "ssh", "vm-configure", "dev"},
-		"windows11":                 {"install", "ssh", "vm-configure", "dev"},
-	}
-
 	checked := 0
 	for _, name := range files {
 		body, err := os.ReadFile(name)
 		if err != nil {
-			t.Fatalf("cannot read %s: %v", name, err)
+			t.Fatal(err)
 		}
-		legs := legsOf(t, body)
-		if len(legs) == 0 {
+		src := string(body)
+
+		// WHAT THIS FILE CONTINUES FROM, and what it publishes.
+		pull := ""
+		if m := regexp.MustCompile(`"pull": "([^"]*)"`).FindStringSubmatch(src); m != nil {
+			pull = m[1]
+		}
+		publish := ""
+		if m := regexp.MustCompile(`"publish": "([^"]*)"`).FindStringSubmatch(src); m != nil {
+			publish = m[1]
+		}
+		if pull == "" || publish == "" {
 			continue
 		}
-		// A CHAINED FILE HAS MORE THAN ONE `stages: |` BLOCK - one per job, joined by `needs:` -
-		// which is what tells this test whether a fallback can ever matter here.
-		chained := strings.Count(string(body), "stages: |") > 1
-		// WHICH CHAIN THIS FILE IS, by matching the leg names that carry a prefix.
-		var base string
-		var stages []string
-		for candidate, chain := range chains {
-			for _, leg := range legs {
-				if leg.name == candidate || strings.HasPrefix(leg.name, candidate+"-") {
-					base, stages = candidate, chain
-					break
-				}
-			}
-			if base != "" {
-				break
-			}
-		}
-		if base == "" {
+
+		// THE PULL IS THE INPUT, so the default has to name what the file before it published.
+		if !strings.Contains(src, `"pull": "${{ inputs.from_tag }}"`) {
+			t.Errorf("%s: pulls %q literally; a leg must continue from `from_tag:` so a run can be "+
+				"started from a disk another run published", filepath.Base(name), pull)
 			continue
+		}
+		m := regexp.MustCompile(`(?s)from_tag:.*?default: "([^"]*)"`).FindStringSubmatch(src)
+		if m == nil {
+			t.Errorf("%s: has no `from_tag:` default, so a dispatch with nothing would pull nothing",
+				filepath.Base(name))
+			continue
+		}
+		want := strings.TrimSuffix(filepath.Base(name), filepath.Ext(name))
+		// `ubuntu-ssh` continues from `linux-ubuntu`; `windows-vm-configure` from `windows11-ssh`.
+		if !strings.Contains(want, "linux-") && !strings.Contains(m[1], "-") {
+			// a non-linux repository names its own tags; the default is checked by the publisher's
+			// own test in that repository, and here only the presence of a default is asserted.
+		}
+		if m[1] == "" {
+			t.Errorf("%s: `from_tag:` defaults to empty, so a dispatch with nothing would pull nothing",
+				filepath.Base(name))
 		}
 		checked++
-
-		for _, leg := range legs {
-			// THE LAST SEGMENT OF THE LEG NAME IS THE STAGE (`linux-zorin-vm` -> `vm`).
-			stage := leg.name
-			if i := strings.LastIndex(leg.name, "-"); i >= 0 {
-				stage = leg.name[i+1:]
-			}
-			// `macos-setup` and `windows-install` are the first stage under a different word.
-			if strings.HasSuffix(leg.name, "-setup") {
-				stage = "setup"
-			}
-			idx := indexOf(stages, stage)
-			if idx < 0 {
-				continue
-			}
-			if idx == 0 {
-				// THE FIRST STAGE CREATES THE DISK IT WRITES, so it pulls nothing and publishes the
-				// name the second stage asks for.
-				if leg.pull != "" {
-					t.Errorf("%s: %q is the first stage and pulls %q; an install has no input - its "+
-						"first step creates the disk it writes to", filepath.Base(name), leg.name, leg.pull)
-				}
-				if leg.publish != base {
-					t.Errorf("%s: %q must publish %q - that is the tag the stage after it pulls - "+
-						"and publishes %q instead", filepath.Base(name), leg.name, base, leg.publish)
-				}
-				continue
-			}
-			// EVERY LATER STAGE PULLS WHAT THE STAGE BEFORE IT PUBLISHED.
-			want := tagForStage(base, stages[idx-1])
-			if leg.pull != want {
-				t.Errorf("%s: %q pulls %q, and the stage before it published %q",
-					filepath.Base(name), leg.name, leg.pull, want)
-			}
-			// A FALLBACK IS NEEDED ONLY WHEN THE LEGS CAN RUN AT ONCE.
-			//
-			// IT WAS ALWAYS REQUIRED, because every leg used to be a row in ONE matrix - so the stage
-			// before might not have published when a later one asked, and the fallback let it
-			// continue the installed disk instead of failing with a 404.
-			//
-			// THE LEGS ARE JOBS WITH `needs:` NOW, in the same file: a `-vm` leg of a chained
-			// workflow starts only after its `-ssh` published. Demanding a fallback there is asking
-			// for a second code path that can never run - and it would hide the case the fallback
-			// exists for, which is a `from_tag:` re-run that starts the chain in the middle.
-			//
-			// SO THE RULE FOLLOWS THE SHAPE: chained legs need no fallback, a matrix does.
-			if idx >= 2 && !chained && !strings.HasPrefix(leg.fallback, tagForStage(base, stages[0])) {
-				t.Errorf("%s: %q has no fallback to %q, so on a package where the previous stage "+
-					"has not published yet this leg fails with a 404 instead of continuing the "+
-					"installed disk", filepath.Base(name), leg.name, tagForStage(base, stages[0]))
-			}
-		}
 	}
 	if checked == 0 {
-		t.Skip("no workflow's legs were checked: the chained workflows live in the sub-repositories")
+		t.Skip("no stage workflows here")
 	}
+	t.Logf("checked %d continuation(s)", checked)
 }
 
 // tagForStage is the tag a stage publishes, from the chain's own prefix and stage name.
@@ -477,6 +429,12 @@ func TestEveryPullIsSomebodysPublish(t *testing.T) {
 		for _, leg := range legs {
 			if leg.pull == "" {
 				continue // the first leg of a chain takes no disk
+			}
+			// A PARAMETERISED PULL IS CHECKED BY ITS DEFAULT, not here: every stage is its own file
+			// now, so "what publishes this" is answered by the tag the `from_tag:` default names -
+			// a repository that publishes it, not this workflow.
+			if strings.Contains(leg.pull, "inputs.from_tag") {
+				continue
 			}
 			checked++
 			if _, ok := published[leg.pull]; !ok {

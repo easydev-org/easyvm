@@ -799,6 +799,23 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 	//
 	// EVERYTHING ELSE - `-cpu`, `-smp`, `-m`, every device - is in the file's `args:`, because it is a
 	// qemu argument and this build has no opinion about the machine beyond where its sockets go.
+	// THE VARIABLES STORE IS A COPY, BECAUSE qemu WRITES TO IT.
+	//
+	// `OVMF_VARS` is firmware NVRAM: a guest registers its boot entries there and expects them on the
+	// next boot. The image ships the PACKAGE'S TEMPLATE, which is read-only in every sense - a guest
+	// that wrote into it would leave its entries for the next guest - so each run gets its own copy
+	// made once.
+	//
+	// IT IS MADE WHEN ABSENT RATHER THAN OVERWRITTEN. A stage that reboots inside one run must keep
+	// the entries the last boot registered, and a copy every boot would erase them.
+	varFile := filepath.Join(d.work, "OVMF_VARS.fd")
+	if _, err := os.Stat(varFile); os.IsNotExist(err) {
+		if err := copyFile(ovmfVarsTemplate(d), varFile); err != nil {
+			return fmt.Errorf("the UEFI variables template: %w. Every UEFI guest needs it, and the "+
+				"image installs it at %s", err, ovmfVarsTemplate(d))
+		}
+	}
+
 	args := []string{
 		"-machine", renderArgs1(boot.Machine, boot),
 		"-display", "none",
@@ -1900,3 +1917,15 @@ func (m machineControl) RunningTheSame(args []string) bool {
 	}
 	return true
 }
+
+// ovmfVarsTemplate is the read-only variables store the image ships.
+//
+// THE ENVIRONMENT OVERRIDES IT because a container image carries one OVMF build and a run may point
+// at another; the default is what the `Containerfile` installs.
+func ovmfVarsTemplate(d *Driver) string {
+	if p := os.Getenv("OVMF_VARS_TEMPLATE"); p != "" {
+		return p
+	}
+	return "/usr/share/OVMF/OVMF_VARS_4M.fd"
+}
+
