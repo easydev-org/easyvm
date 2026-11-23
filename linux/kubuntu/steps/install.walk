@@ -29,8 +29,22 @@ step "boot the installer"
 
 
 step "wait for the installer's launcher"
-  desktop linux/kubuntu
-  timeout 5400
+  repeat
+    do
+      item
+        read
+          name screen
+    until
+      bind up
+      source screen
+      mode like
+      reference reference/launcher.png
+      range [0.85, 1]
+      rect [0, 0, 1920, 1080]
+      rect_at [1920, 1080]
+      must true
+    max 540
+    pause 10
 
 
 step "open the installer"
