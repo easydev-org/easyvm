@@ -46,7 +46,6 @@ func TestEachLegContinuesTheStageBeforeIt(t *testing.T) {
 		"linux-mint":                {"install", "ssh", "vm"},
 		"linux-mx":                  {"install", "ssh", "vm"},
 		"linux-nixos":               {"install", "ssh", "vm"},
-		"linux-opensuse-tumbleweed": {"install", "ssh", "vm"},
 		"linux-popos":               {"install", "ssh", "vm"},
 		"linux-ubuntu":              {"install", "ssh", "vm"},
 		"linux-zorin":               {"install", "ssh", "vm"},

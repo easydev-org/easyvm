@@ -86,7 +86,7 @@ func TestATrimMayReachAnInstalledDiskButNeverAnInstaller(t *testing.T) {
 	}{
 		{
 			name:        "an installer must never see a trim",
-			boot:        Boot{OS: MacOS, Disk: "d.qcow2", Recovery: "r.dmg"},
+			boot:        Boot{OS: MacOS, Disk: "d.qcow2", Recovery: "r.dmg", Shape: macOSShape},
 			wantDiscard: false,
 		},
 		{
@@ -96,7 +96,7 @@ func TestATrimMayReachAnInstalledDiskButNeverAnInstaller(t *testing.T) {
 		},
 		{
 			name:        "an INSTALLED macOS disk MAY trim, and this is the row that used to be impossible",
-			boot:        Boot{OS: MacOS, Disk: "d.qcow2"},
+			boot:        Boot{OS: MacOS, Disk: "d.qcow2", Shape: macOSShape},
 			wantDiscard: true,
 		},
 		{
@@ -123,7 +123,7 @@ func TestATrimMayReachAnInstalledDiskButNeverAnInstaller(t *testing.T) {
 	// ALSO allowed to trim. That is a `FreshDisk` boot which is no longer installing - the moment the
 	// installer has finished and the disk is being cleaned up, which is exactly when 26 GiB of freed
 	// blocks need to leave the file.
-	keepsWrites := Boot{OS: MacOS, Disk: "d.qcow2", FreshDisk: true}
+	keepsWrites := Boot{OS: MacOS, Disk: "d.qcow2", FreshDisk: true, Shape: macOSShape}
 	if keepsWrites.WantsOverlay() {
 		t.Fatalf("a fresh disk opened a throwaway diff; there is nothing behind it to protect, and " +
 			"the diff is one more file to flatten")
@@ -138,9 +138,21 @@ func TestATrimMayReachAnInstalledDiskButNeverAnInstaller(t *testing.T) {
 	// THE OLD EXPRESSION WOULD FAIL THIS: with both derived from `installing()`, any boot that could
 	// trim was a boot whose writes went into a diff, and any boot without a diff refused to trim.
 	// Stated as the identity the fix removes, so a change that reintroduces it fails here.
-	installing := Boot{OS: MacOS, Disk: "d.qcow2", Recovery: "r.dmg"}
+	installing := Boot{OS: MacOS, Disk: "d.qcow2", Recovery: "r.dmg", Shape: macOSShape}
 	if installing.WantsOverlay() == installing.Discardable() {
 		t.Fatalf("WantsOverlay and Discardable agree on an installing boot, which is the shape that " +
 			"made the two impossible to combine")
 	}
 }
+
+// macOSShape is the macOS machine, written here rather than loaded from the registry.
+//
+// THE SHAPE IS OWNED BY `easyvm-macos` NOW - that repository's `shapes/macos.yaml` is the definition,
+// and it reaches a daemon through `stage.yml`'s `shapes_dir:`. This build embeds only `linux` and
+// `microvm`, the two machines a bare image can start with nothing mounted beside it, so a test about
+// macOS behaviour has to state the machine it is talking about.
+//
+// ONE FIELD, BECAUSE ONE FIELD IS WHAT `installing()` ASKS: macOS's installer is the recovery image on
+// a USB device, so a boot that attaches one is the boot that writes, and a boot that does not is an
+// installed system whose frees may reach the file.
+var macOSShape = Shape{Name: "macos", InstallMedium: MediumRecovery}

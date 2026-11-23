@@ -1,10 +1,14 @@
 package machine
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/easydev-org/easyvm/internal/machine/shapes"
+	"gopkg.in/yaml.v3"
 )
 
 // A NEW OPERATING SYSTEM IS A FILE, AND THIS IS THE TEST THAT SAYS SO.
@@ -204,20 +208,122 @@ func TestTwoShapesCannotShareAName(t *testing.T) {
 	}
 }
 
-// THE SHAPES THIS BUILD SHIPS WITH ARE THE SIX MACHINES THE WALKTHROUGHS NAME.
+// THIS BUILD SHIPS TWO SHAPES, AND THEY ARE THE TWO THAT NEED NOTHING FROM A REPOSITORY.
 //
-// A MISSING ONE IS NOT A MISSING TEST: `ParseOS` refuses an `os:` it has no shape for, so a build
-// that lost `bsd.yaml` would refuse every BSD walkthrough with a message about the build rather than
+// A MACHINE SHAPE BELONGS TO THE REPOSITORY THAT RUNS IT. `easyvm-windows` owns `windows.yaml`,
+// `easyvm-macos` owns `macos.yaml`, and so on - each passes `shapes_dir:` to `stage.yml`, which hands
+// the daemon `--shapes`. There is no copy of those four here, so a change to what a Windows guest IS
+// happens in one place.
+//
+// THESE TWO STAY EMBEDDED BECAUSE THE IMAGE HAS NO SOURCE TREE. `linux` and `microvm` are the machines
+// a bare image can start with nothing mounted beside it: firmware and a boot sector for the first, a
+// kernel and an initramfs for the second, and neither needs a file from a repository. Without them a
+// container daemon would start no guest at all until somebody mounted a directory.
+//
+// A MISSING ONE IS NOT A MISSING TEST: `ParseOS` refuses an `os:` it has no shape for, so a build that
+// lost `linux.yaml` would refuse every Linux walkthrough with a message about the build rather than
 // about the file.
-func TestTheShippedShapesCoverEveryOSAWalkthroughNames(t *testing.T) {
-	want := []string{"android", "bsd", "linux", "macos", "microvm", "windows"}
-	for _, name := range want {
-		if _, ok := Shapes().Lookup(name); !ok {
-			t.Errorf("this build ships no shape named %q, so a walkthrough with `os: %s` is refused "+
-				"before its guest is started", name, name)
+func TestTheShippedShapesCoverTheTwoMachinesThatNeedNoRepository(t *testing.T) {
+	// THE EMBEDDED FILES, NOT THE REGISTRY. `TestMain` also registers the four machines the
+	// sub-repositories own, when those are checked out beside this one - so the registry is the wrong
+	// place to ask "what does this BINARY carry". `shapes.Files` is what `go:embed` compiled in.
+	want := map[string]bool{"linux.yaml": true, "microvm.yaml": true}
+	entries, err := fs.ReadDir(shapes.Files, ".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".yaml") {
+			got[e.Name()] = true
 		}
 	}
-	if got := Shapes().Len(); got < len(want) {
-		t.Errorf("the registry holds %d shape(s) and the walkthroughs name %d", got, len(want))
+	for name := range want {
+		if !got[name] {
+			t.Errorf("this build embeds no %s, so a container can start no guest of that shape "+
+				"until a shapes directory is mounted", name)
+		}
 	}
+	for name := range got {
+		if !want[name] {
+			t.Errorf("this build embeds %s. The other four machines are owned by easyvm-windows, "+
+				"easyvm-macos, easyvm-bsd and easyvm-android, which pass them with `--shapes`; a copy "+
+				"here would be a second definition of the same machine", name)
+		}
+	}
+	// AND EACH ONE PARSES AND REGISTERS, which is what makes the file worth embedding.
+	for name := range want {
+		raw, err := fs.ReadFile(shapes.Files, name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var f ShapeFile
+		if err := yaml.Unmarshal(raw, &f); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if _, err := f.Validate(); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+}
+// THE TWO EMBEDDED SHAPES ARE THE SUB-REPOSITORIES' OWN, BYTE FOR BYTE.
+//
+// THIS IS THE INVARIANT THAT MAKES "ONE DEFINITION" TRUE. `easyvm-linux` owns `linux.yaml` and
+// `easyvm-microvm` owns `microvm.yaml`; this build embeds a copy of each because a container has no
+// source tree and must be able to start these two with nothing mounted. A copy that is not checked
+// against the original IS a second definition, and it drifts - a device added in the repository and
+// not here would mean a guest that behaves differently in CI than in the image.
+//
+// A CHECKOUT WITHOUT THE SUB-REPOSITORIES SKIPS, and says so. That is the ordinary case for a
+// container build, and inventing a stricter answer would fail every image build for a reason that has
+// nothing to do with the image.
+func TestTheEmbeddedShapesAreTheSubRepositoriesOwn(t *testing.T) {
+	owners := map[string]string{
+		"linux.yaml":   "easyvm-linux",
+		"microvm.yaml": "easyvm-microvm",
+	}
+	var bases []string
+	if env := os.Getenv("EASYVM_STAGES"); env != "" {
+		bases = strings.Split(env, string(os.PathListSeparator))
+	} else {
+		bases = []string{"../..", "..", "../../.."}
+	}
+
+	checked := 0
+	for file, repo := range owners {
+		embedded, err := fs.ReadFile(shapes.Files, file)
+		if err != nil {
+			t.Fatalf("%s is not embedded: %v", file, err)
+		}
+		var found string
+		for _, base := range bases {
+			for _, name := range []string{repo, "sd-" + strings.TrimPrefix(repo, "easyvm-")} {
+				p := filepath.Join(base, name, "shapes", file)
+				if _, err := os.Stat(p); err == nil {
+					found = p
+					break
+				}
+			}
+			if found != "" {
+				break
+			}
+		}
+		if found == "" {
+			continue // this checkout does not have the sub-repositories
+		}
+		checked++
+		theirs, err := os.ReadFile(found)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(embedded) != string(theirs) {
+			t.Errorf("%s differs from %s. The sub-repository is the definition and this copy is what "+
+				"an image ships; two different answers to \"what is this machine\" is the drift this "+
+				"test exists to catch. Copy the repository's file over the embedded one", file, found)
+		}
+	}
+	if checked == 0 {
+		t.Skip("no sub-repositories here: the embedded shapes cannot be compared against their owners")
+	}
+	t.Logf("checked %d embedded shape(s) against the repositories that own them", checked)
 }

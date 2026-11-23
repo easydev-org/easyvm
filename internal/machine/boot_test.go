@@ -789,7 +789,11 @@ func TestTheMacOSAdapterIsBareVmwareSVGA(t *testing.T) {
 	}
 	// AND IT IS IN THE SHAPE FILE, WHICH IS WHERE IT LIVES NOW. The guard moved with the fact: a
 	// search of `boot.go` would pass on a file that no longer mentions the adapter at all.
-	shapes, err := os.ReadFile("shapes/macos.yaml")
+	//
+	// THE FILE IS IN `easyvm-macos`, NOT HERE. macOS's machine shape is owned by the repository that
+	// runs it; this build embeds only `linux` and `microvm`. A checkout without the sub-repositories
+	// skips, and says why.
+	shapes, err := os.ReadFile(macOSShapeFile(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -910,19 +914,19 @@ func TestEveryGuestGetsASoundCard(t *testing.T) {
 		},
 		{
 			name: "windows",
-			boot: Boot{OS: Windows},
+			boot: Boot{OS: Windows, Shape: Shape{Name: "windows", Audio: "hda"}},
 			want: []string{"-audiodev", "none,id=snd0", "ich9-intel-hda", "hda-duplex,audiodev=snd0"},
 			deny: []string{"usb-audio,bus=xhci.0,audiodev=snd0"},
 		},
 		{
 			name: "bsd",
-			boot: Boot{OS: BSD},
+			boot: Boot{OS: BSD, Shape: Shape{Name: "bsd", Audio: "hda"}},
 			want: []string{"-audiodev", "none,id=snd0", "ich9-intel-hda", "hda-duplex,audiodev=snd0"},
 			deny: []string{"usb-audio,bus=xhci.0,audiodev=snd0"},
 		},
 		{
 			name: "macos",
-			boot: Boot{OS: MacOS},
+			boot: Boot{OS: MacOS, Shape: Shape{Name: "macos", Audio: "usb"}},
 			want: []string{"-audiodev", "none,id=snd0", "usb-audio,bus=xhci.0,audiodev=snd0"},
 			deny: []string{"ich9-intel-hda", "hda-duplex,audiodev=snd0"},
 		},
@@ -1109,7 +1113,38 @@ func TestAMicrovmDesktopReachesTheAdapterSwitch(t *testing.T) {
 		}
 	}
 	// A SHAPE THAT REALLY SAYS `none` STILL WINS: macOS supplies its own adapter through extra_args.
-	if got := (Boot{OS: "macos"}).VGAFor("std"); got != "none" {
+	//
+	// THE SHAPE IS STATED RATHER THAN LOOKED UP. `macos` is owned by `easyvm-macos` and is not embedded
+	// in this build - only `linux` and `microvm` are, the two a bare image can start - so a test that
+	// relied on the registry would be testing a machine this binary does not carry.
+	if got := (Boot{OS: "macos", Shape: Shape{Name: "macos", Video: "none"}}).VGAFor("std"); got != "none" {
 		t.Errorf("macOS's VGA kind is %q, want `none` - its adapter is in extra_args", got)
 	}
+}
+
+// macOSShapeFile is `easyvm-macos/shapes/macos.yaml`, or a skip when that repository is not beside
+// this one.
+//
+// THIS TEST RUNS IN `internal/machine`, so the repository root is two levels up and its siblings are
+// three. EASYVM_STAGES overrides the search, which is how a CI job that checks several repositories
+// out at once points at them.
+func macOSShapeFile(t *testing.T) string {
+	t.Helper()
+	var bases []string
+	if env := os.Getenv("EASYVM_STAGES"); env != "" {
+		bases = strings.Split(env, string(os.PathListSeparator))
+	} else {
+		bases = []string{"..", "../..", "../../.."}
+	}
+	for _, base := range bases {
+		for _, repo := range []string{"easyvm-macos", "sd-macos"} {
+			p := filepath.Join(base, repo, "shapes", "macos.yaml")
+			if _, err := os.Stat(p); err == nil {
+				return p
+			}
+		}
+	}
+	t.Skip("no macOS shape here: it lives in easyvm-macos/shapes/macos.yaml, and this build embeds " +
+		"only the two machines that need no repository")
+	return ""
 }
