@@ -673,10 +673,10 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 		}
 	}()
 
-	guestOS, err := machine.ParseOS(spec.OS)
-	if err != nil {
-		return err
-	}
+	// THERE IS NO GUEST NAME TO PARSE. A boot names qemu arguments, and the daemon passes them
+	// through - so what used to be an identity check here is now nothing at all. `guestOS` is kept
+	// only for the message a `MachineBusy` refusal prints, and it is whatever the caller set.
+	guestOS := machine.OS(spec.OS)
 	d.mu.Lock()
 	d.guestOS = spec.OS
 	d.mu.Unlock()
