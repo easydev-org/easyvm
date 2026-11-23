@@ -85,9 +85,20 @@ func (e *Executor) machineFact(s walk.Step, name string) (bool, string, error) {
 		//
 		// THE ANSWER HAS AN AGE. `runProbes` ticks every ten seconds, so a `repeat` that waits on
 		// this must poll at least that slowly - which is why the files say `pause 10`.
-		return f["ssh_ready"] == "true", "sshd does not accept a connection", nil
+		//
+		// AND A `machine_ssh` THAT NEVER HOLDS MUST SAY WHAT THE DRIVER ANSWERED. MEASURED on
+		// freebsd ssh, booted from this image in the cluster's own lab pod: the walk ran all sixty
+		// attempts and failed with "sshd does not accept a connection", while `/api/state` - at the
+		// same second - reported `ssh_ready: true`, and a direct `guest.Probe` against the same
+		// target and password returned nil in 73 MILLISECONDS. The two reads disagree and neither
+		// said what it saw, so the difference is invisible from the log.
+		raw, present := f["ssh_ready"]
+		e.Driver.Log(fmt.Sprintf("  machine_ssh: ssh_ready=%q present=%v", raw, present))
+		return raw == "true", "sshd does not accept a connection", nil
 	case "machine_qga":
-		return f["qga_ready"] == "true", "the guest agent does not answer", nil
+		raw, present := f["qga_ready"]
+		e.Driver.Log(fmt.Sprintf("  machine_qga: qga_ready=%q present=%v", raw, present))
+		return raw == "true", "the guest agent does not answer", nil
 	}
 	return false, "", fmt.Errorf("`%s` is not a machine fact this build knows. The ones it knows "+
 		"are %s", name, machineFactNames())

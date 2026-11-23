@@ -75,7 +75,24 @@ func (d *Daemon) probeOnce() {
 	if tp, ok := drv.(interface{ SSHTarget() guest.Target }); ok {
 		target := tp.SSHTarget()
 		if target.Port != 0 {
-			err := guest.Probe(target, 1, 2*time.Second)
+			// TWO SECONDS WAS TOO SHORT FOR AN SSH HANDSHAKE AND IT MADE THE FACT FLAP.
+			//
+			// MEASURED on freebsd ssh, booted in the cluster's own lab pod from this same image and
+			// this same disk: a plain TCP connect to 172.30.0.1:2222 answered at once and returned
+			// `SSH-2.0-OpenSSH_10.0 FreeBSD`, while this probe reported
+			//
+			//	ssh probe: dial tcp 172.30.0.1:2222: i/o timeout
+			//
+			// on the same second. FreeBSD's sshd completes the key exchange and the password
+			// exchange slowly on its first connection - the same disk's `ssh: "id -un"` step, which
+			// dials with a THIRTY second budget, succeeded. So `machine_ssh` answered FALSE while the
+			// guest was answering ssh perfectly, the walk's `repeat until machine_ssh` ran all sixty
+			// attempts, and the stage ended with "sshd does not accept a connection" on a machine
+			// that accepted them.
+			//
+			// TEN SECONDS IS BETWEEN THE TWO, and it is still shorter than the ticker's own interval
+			// plus the qga probe, so a slow handshake cannot make the ticker fall behind.
+			err := guest.Probe(target, 1, 10*time.Second)
 			if err == nil {
 				sshUp = true
 			} else if prev := d.lastProbe.sshAnswer(); prev == nil || *prev {
