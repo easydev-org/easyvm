@@ -5,7 +5,7 @@ go 1.26.0
 require (
 	github.com/coder/websocket v1.8.15
 	github.com/digitalocean/go-qemu v0.0.0-20250212194115-ee9b0668d242
-	github.com/easydev-org/easytun v0.2.0
+	github.com/easydev-org/easytun v0.3.0
 	github.com/pkg/sftp v1.13.12
 	golang.org/x/crypto v0.58.0
 	gopkg.in/yaml.v3 v3.0.1

@@ -17,25 +17,17 @@ var policyMu sync.Mutex
 
 // lockPolicy serialises a test that mutates the policy or upstream tables.
 //
-// IT ALSO RESETS THE NAME TABLE, because a recorded name is what makes a domain rule match - a test
-// that saw another test's recording would pass or fail for a reason it never set up.
+// THE NAME TABLE IS THE LIBRARY'S NOW, and it has its own reset in `names`. A test here that records a
+// name does so through that package and cannot reach into another test's state by accident, because
+// the table is keyed by address and every test uses its own.
 func lockPolicy(t *testing.T) {
 	t.Helper()
 	policyMu.Lock()
 	oldUp := UpstreamsCopy()
 	oldPolicy, _, _ := Egress()
-
-	dnsNames.mu.Lock()
-	oldNames := dnsNames.byIP
-	dnsNames.byIP = map[string]*dnsEntry{}
-	dnsNames.mu.Unlock()
-
 	t.Cleanup(func() {
 		_ = SetUpstreams(oldUp)
 		_ = SetEgress(oldPolicy)
-		dnsNames.mu.Lock()
-		dnsNames.byIP = oldNames
-		dnsNames.mu.Unlock()
 		policyMu.Unlock()
 	})
 }

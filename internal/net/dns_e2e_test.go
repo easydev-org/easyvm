@@ -4,6 +4,8 @@ import (
 	"net"
 	"testing"
 	"time"
+
+	"github.com/easydev-org/easytun/names"
 )
 
 // THE WHOLE CHAIN, ON THE WIRE: a query goes to the resolver, the answer's address is recorded, and a
@@ -35,11 +37,14 @@ func TestTheDomainRuleMatchesThroughARealQuery(t *testing.T) {
 
 	const answer = "203.0.113.5" // TEST-NET-3, so this address belongs to nothing real
 	upstream := fakeUpstream(t, net.ParseIP(answer), 300)
-	server := newTestServer(t, upstream)
+	server, err := names.Start(names.Config{Bind: "127.0.0.1:0", Upstreams: []string{upstream}})
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer server.Close()
 
 	// --- a guest asks, and gets an answer ---
-	client, err := net.DialUDP("udp", nil, server.conn.LocalAddr().(*net.UDPAddr))
+	client, err := net.Dial("udp", server.Addr())
 	if err != nil {
 		t.Fatal(err)
 	}

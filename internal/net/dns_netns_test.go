@@ -11,6 +11,8 @@ package net
 import (
 	"net"
 	"os/exec"
+
+	"github.com/easydev-org/easytun/names"
 	"strings"
 	"testing"
 	"time"
@@ -82,7 +84,7 @@ func TestE2EDNSRedirectCatchesAQueryToAnotherServer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the redirect did not deliver the query to the resolver: %v", err)
 	}
-	if got := parseAnswers(buf[:n]); len(got) == 0 {
+	if got := answersOf(buf[:n]); len(got) == 0 {
 		t.Fatal("the resolver answered without an address")
 	}
 
@@ -96,16 +98,26 @@ func TestE2EDNSRedirectCatchesAQueryToAnotherServer(t *testing.T) {
 	t.Fatal("the query reached the resolver but the name was not recorded")
 }
 
-// startDNSOn is StartDNS with the address chosen by the caller, so a test can use loopback.
-func startDNSOn(addr string, upstreams []string) (*DNSServer, error) {
-	c, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP(addr), Port: dnsPort})
-	if err != nil {
-		return nil, err
+// startDNSOn is the library's Start with the address chosen by the caller, so a test can use loopback
+// rather than the bridge.
+func startDNSOn(addr string, upstreams []string) (*names.Server, error) {
+	return names.Start(names.Config{
+		Bind:      net.JoinHostPort(addr, itoaPort(dnsPort)),
+		Upstreams: upstreams,
+	})
+}
+
+// itoaPort renders the resolver's constant port.
+func itoaPort(p int) string {
+	if p == 0 {
+		return "0"
 	}
-	s := &DNSServer{upstreams: upstreams, conn: c, done: make(chan struct{})}
-	go s.serve()
-	go s.sweep()
-	return s, nil
+	var b []byte
+	for p > 0 {
+		b = append([]byte{byte('0' + p%10)}, b...)
+		p /= 10
+	}
+	return string(b)
 }
 
 // silence the unused import if the file is built without the test running
