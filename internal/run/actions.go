@@ -86,6 +86,16 @@ func (e *Executor) doBoot(s walk.Step) error {
 		Args:     qemuArgPairs(s),
 		Dir:      s.Get("dir"),
 		Incoming: resumeFrom,
+		// THE FILES THE ARGUMENTS' `{{name}}` PLACEHOLDERS RESOLVE TO. They are not qemu flags, so
+		// they are not in `args:` - they are the VALUES that list names, and without them a
+		// `file={{iso}}` renders as `file=` and the medium is never attached.
+		ISO:          e.assetPath(s.Get("iso")),
+		Recovery:     e.assetPath(s.Get("recovery")),
+		AnswerCD:     e.assetPath(s.Get("answer_cd")),
+		DriverCD:     e.assetPath(s.Get("driver_cd")),
+		Kernel:       e.assetPath(s.Get("kernel")),
+		Initrd:       e.assetPath(s.Get("initrd")),
+		KernelAppend: s.Get("kernel_append"),
 		// THE DISK IS FRESH IF THIS FILE CREATED IT. `disk_gb:` is the only step that makes a disk
 		// rather than naming one, so it is the only thing that can answer this - and the machine needs
 		// the answer twice: a fresh disk runs on itself (no throwaway diff that `ReleaseDiff` deletes),

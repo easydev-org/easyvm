@@ -51,7 +51,14 @@ A step is one of nine verbs, or one of the actions the engine dispatches on, plu
 | key | what it does |
 |---|---|
 | `args` | the qemu argument pairs, in order |
+| `answer_cd` | the file `{{answer}}` names |
 | `dir` | the directory `{{dir}}` names |
+| `driver_cd` | the file `{{driver}}` names |
+| `initrd` | the file `{{initrd}}` names |
+| `iso` | the file `{{iso}}` names |
+| `kernel` | the file `{{kernel}}` names |
+| `kernel_append` | the line `{{append}}` names |
+| `recovery` | the file `{{recovery}}` names |
 | `disk` | the disk to start from, or the disk to make |
 | `disk_esp_mib` | the size of the EFI system partition, in MiB |
 | `disk_gb` | how big to make the disk, in GiB |

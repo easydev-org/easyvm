@@ -54,8 +54,20 @@ func renderPair(pair []string, v RenderValues) ([]string, bool) {
 
 // substituteArg renders one argument, and says whether the PAIR should be dropped.
 //
-// drop IS TRUE ONLY WHEN THE WHOLE ARGUMENT WAS ONE PLACEHOLDER AND IT IS EMPTY. A placeholder in the
-// middle of a longer string contributes nothing, which is how `id=target{{discard}}` keeps working.
+// TWO KINDS OF EMPTY, AND THEY ARE NOT THE SAME. This is the whole difficulty of the drop rule:
+//
+//	file={{iso}},media=cdrom     a drive whose path is EMPTY IS NOT A DRIVE - drop the pair
+//	id=target{{discard}}         `discard` is a SUFFIX; empty means "no discard", keep the pair
+//
+// THE DIFFERENCE IS WHAT THE PLACEHOLDER REPLACES. When it IS the value of a `key=` field - it begins
+// the field and stands alone - an empty answer means the field does not apply, and qemu's own answer
+// to `file=` is a device with no medium that it then refuses to boot. When it is APPENDED to a value
+// (`target{{discard}}`) an empty answer is a fragment that is not there.
+//
+// MEASURED on ubuntu-install, run 45148972712: the ISO pull had not run, `{{iso}}` was empty, and the
+// argument reached qemu as `-drive file=,media=cdrom,...`. The guest then had a CD-ROM with no
+// medium, the firmware found no bootable device, and the run sat on `BdsDxe: No bootable option`
+// for forty minutes instead of failing at its first step.
 func substituteArg(a string, v RenderValues) (string, bool) {
 	out := a
 	for {
@@ -72,11 +84,18 @@ func substituteArg(a string, v RenderValues) (string, bool) {
 		if !known {
 			break
 		}
+		if val == "" {
+			// IS THIS PLACEHOLDER A WHOLE FIELD VALUE? It is when what precededs it ends in `=`
+			// (or it starts the argument) and what follows is `,` or the end.
+			before := out[:i]
+			after := out[i+j+2:]
+			wholeField := (before == "" || strings.HasSuffix(before, "=")) &&
+				(after == "" || strings.HasPrefix(after, ","))
+			if wholeField {
+				return "", true
+			}
+		}
 		out = out[:i] + val + out[i+j+2:]
-	}
-	// THE WHOLE ARGUMENT WAS THE PLACEHOLDER, AND IT CAME OUT EMPTY.
-	if out == "" && strings.HasPrefix(strings.TrimSpace(a), "{{") && strings.HasSuffix(strings.TrimSpace(a), "}}") {
-		return "", true
 	}
 	return out, false
 }
