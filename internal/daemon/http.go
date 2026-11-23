@@ -3,7 +3,6 @@ package daemon
 import (
 	"encoding/json"
 	"fmt"
-	"image"
 	"io"
 	"net"
 	"net/http"
@@ -374,18 +373,6 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.WriteHeader(code)
 	_, _ = w.Write(append(body, '\n'))
 }
-
-// writerOnly is a bytes.Buffer that does not grow the API surface of this file.
-type writerOnly struct{ bytes []byte }
-
-func (w *writerOnly) Write(p []byte) (int, error) {
-	w.bytes = append(w.bytes, p...)
-	return len(p), nil
-}
-
-// it is also an io.Writer for png.Encoder, which is the only thing that writes to it.
-var _ = image.Rect
-var _ = os.Getenv
 
 // vncPort is the port the CURRENT machine's VNC listener is on, or 0 when there is no machine.
 //
