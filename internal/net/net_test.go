@@ -417,8 +417,12 @@ func TestTheProxyRedirectsToTheBridgeAndNotToTheLoopback(t *testing.T) {
 		t.Error("the proxy chain still contains a REDIRECT --to-ports rule")
 	}
 	// AND THE LISTENER HAS TO BE ON THE ADDRESS THE RULE NAMES.
-	if !strings.Contains(src, "net.Listen(\"tcp\", BridgeIP+\":0\")") {
-		t.Error("the listener does not bind the bridge address, so a DNATed guest connection " +
+	//
+	// THE LISTENER IS THE LIBRARY'S NOW, so this asserts the BIND IT IS GIVEN rather than a
+	// `net.Listen` inside this file: a bind on loopback would arrive at a port nothing is listening on,
+	// which is measured as zero packets in FORWARD.
+	if !strings.Contains(src, "Bind:     BridgeIP + \":0\"") {
+		t.Error("the listener is not bound to the bridge address, so a DNATed guest connection " +
 			"would arrive at a port nothing is listening on")
 	}
 	// AND THE UPSTREAM EXEMPTION THAT STOPS THE TUNNEL TALKING TO ITSELF.

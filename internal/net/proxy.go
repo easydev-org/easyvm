@@ -1,14 +1,11 @@
 package net
 
 import (
-	"bufio"
-	"encoding/binary"
 	"fmt"
-	"io"
 	"net"
 	"strconv"
-	"sync"
-	"time"
+
+	"github.com/easydev-org/easytun"
 )
 
 // THE TRANSPARENT PROXY: A GUEST THAT KNOWS NOTHING ABOUT PROXIES STILL GOES THROUGH ONE.
@@ -26,12 +23,12 @@ import (
 // happened to read the variable is a bake that measures those tools rather than the system.
 //
 // SO THE REDIRECTION IS DONE WHERE THE GUEST CANNOT SEE IT: its packets reach this container, and
-// this container is a machine we control. The rule is one iptables jump -
+// this container is a machine we control. An iptables jump sends every outbound TCP connection to a
+// listener on the bridge, and THE LISTENER IS github.com/easydev-org/easytun's - it speaks CONNECT,
+// recovers the original destination and copies bytes, and none of that is about a virtual machine.
 //
-//	-A EASYVM_FWD -p tcp -j REDIRECT --to-ports <port>
-//
-// - and every outbound TCP connection the guest makes lands on the listener below instead of on the
-// internet. This file is that listener.
+// WHAT IS LEFT IN THIS FILE IS THE PART THAT IS: the iptables chains (below), the port they name, and
+// the verdict-to-Route translation that connects this daemon's rules to the library's listener.
 //
 // WHY REDIRECT NEEDS A PROGRAM AT ALL. `REDIRECT` rewrites the DESTINATION and delivers the socket;
 // it does not speak a proxy protocol. mihomo's 7890 is an HTTP proxy, which expects a
@@ -65,16 +62,18 @@ import (
 // point at nothing.
 const proxyEnv = "EASYVM_TRANSPARENT_PROXY"
 
-// TransparentProxy is a running listener plus the rules that feed it.
+// TransparentProxy is what this daemon keeps: the port its rules name, and the library listener behind
+// it.
+//
+// THE LISTENER IS github.com/easydev-org/easytun's. What is here is the port (which an iptables rule
+// names) and the shutdown, because those are the daemon's.
 type TransparentProxy struct {
-	// Port is the loopback port iptables redirects to. It is 0 when no proxy was configured.
+	// Port is the bridge port iptables redirects to. It is 0 when no proxy was configured.
 	Port int
 	// Upstream is the host:port this listener tunnels to, empty when no proxy is configured.
 	Upstream string
 
-	listener net.Listener
-	done     chan struct{}
-	once     sync.Once
+	tcp *easytun.TCP
 }
 
 // ProxyConfigured reports the upstream this build was told to use, and whether there is one.
@@ -90,337 +89,75 @@ func ProxyConfigured() (string, bool) {
 	return v, true
 }
 
-// StartTransparentProxy listens on a loopback port and tunnels every connection through upstream.
+// StartTransparentProxy listens on the bridge and tunnels every connection to where the rules say.
 //
-// `127.0.0.1:0` RATHER THAN A FIXED PORT: the port is written into an iptables rule, so a second
-// proxy on the same host (a second daemon, a restart) must not collide with the first. The kernel
-// picks a free one and Port reports it.
+// THE LISTENER BINDS THE BRIDGE, NOT THE LOOPBACK, AND THAT IS THE WHOLE FIX.
+//
+// MEASURED: with the rule written as `REDIRECT --to-ports <port>` the listener came up on 127.0.0.1 and
+// accepted nothing from a guest. The guest's packets are not addressed to this machine - they are
+// FORWARDED through it from 172.30.0.2 - and a `REDIRECT` rewrites them to 127.0.0.1:<port>, an address
+// that belongs to the guest's own stack the moment the packet is no longer local. The counters said
+// exactly that:
+//
+//	EASYVM_PROXY  REDIRECT   108 packets
+//	FORWARD       ACCEPT       0 packets
+//	guest         pkg        Could not connect to server
+//
+// So the rule is `DNAT --to-destination <bridge>:<port>` and the listener has to be reachable at that
+// address. Binding the bridge makes the guest's connection an ordinary one to a host on its own /24,
+// which is the only shape a forwarded packet can complete.
+//
+// THE PORT IS CHOSEN BY THE KERNEL (port 0) because it is written into an iptables rule, so a second
+// proxy on the same host - a second daemon, a restart - must not collide with the first.
 func StartTransparentProxy(upstream string) (*TransparentProxy, error) {
-	host, port, err := net.SplitHostPort(upstream)
-	if err != nil {
-		return nil, fmt.Errorf("EASYVM_TRANSPARENT_PROXY=%q is not host:port: %w", upstream, err)
-	}
-	if _, err := strconv.Atoi(port); err != nil {
-		return nil, fmt.Errorf("EASYVM_TRANSPARENT_PROXY=%q has no numeric port: %w", upstream, err)
-	}
-	// THE UPSTREAM IS RESOLVED ONCE, AT START, so a daemon whose DNS is briefly broken still fails
-	// here - at startup, with a sentence - rather than on the guest's first request.
-	if _, err := net.LookupHost(host); err != nil {
-		return nil, fmt.Errorf("EASYVM_TRANSPARENT_PROXY=%q does not resolve: %w", upstream, err)
-	}
-
-	// THE LISTENER BINDS THE BRIDGE, NOT THE LOOPBACK, AND THAT IS THE WHOLE FIX.
-	//
-	// MEASURED: with the rule written as `REDIRECT --to-ports <port>` the listener came up on
-	// 127.0.0.1 and accepted nothing from a guest. The guest's packets are not addressed to this
-	// machine - they are FORWARDED through it from 172.30.0.2 - and a `REDIRECT` rewrites them to
-	// 127.0.0.1:<port>, an address that belongs to the guest's own stack the moment the packet is
-	// no longer local. The counters said exactly that:
-	//
-	//	EASYVM_PROXY  REDIRECT   108 packets
-	//	FORWARD       ACCEPT       0 packets
-	//	guest         pkg        Could not connect to server
-	//
-	// So the rule is `DNAT --to-destination <bridge>:<port>` and the listener has to be reachable at
-	// that address. Binding the bridge makes the guest's connection an ordinary one to a host on its
-	// own /24, which is the only shape a forwarded packet can complete.
-	l, err := net.Listen("tcp", BridgeIP+":0")
-	if err != nil {
-		return nil, fmt.Errorf("listening for the transparent proxy: %w", err)
-	}
-	p := &TransparentProxy{
-		Port:     l.Addr().(*net.TCPAddr).Port,
+	tcp, err := easytun.StartTCP(easytun.TCPConfig{
+		Bind:     BridgeIP + ":0",
 		Upstream: upstream,
-		listener: l,
-		done:     make(chan struct{}),
+		Route:    tcpRoute,
+		Logf:     func(format string, args ...any) { logf(format, args...) },
+	})
+	if err != nil {
+		return nil, err
 	}
-	go p.serve()
-	return p, nil
+	if tcp == nil {
+		return nil, fmt.Errorf("the listener did not start")
+	}
+	return &TransparentProxy{Port: tcp.Port, Upstream: upstream, tcp: tcp}, nil
 }
 
-// Close stops the listener and waits for the accept loop to finish.
+// tcpRoute turns an egress verdict into what the TCP listener should do.
+//
+// IT IS THE SAME TABLE THE UDP RELAY ASKS, which is the whole point of a policy engine: a rule for
+// `.youtube.com` means the same thing to an HTTPS connection and to a QUIC one.
+func tcpRoute(dst net.IP, port uint16) easytun.Route {
+	// THE NAME, WHEN THIS DAEMON INVENTED THE ADDRESS. A fake address exists nowhere, so the name is
+	// the only thing that reaches the real host - and it is also what a name rule matched.
+	host, _ := NameForFakeIP(dst)
+
+	v := VerdictFor(dst, int(port))
+	switch v.Kind {
+	case KindBlock:
+		return easytun.Route{Kind: easytun.RouteDrop, Host: host}
+	case KindDirect:
+		return easytun.Route{Kind: easytun.RouteDirect, Host: host}
+	}
+	if v.Upstream != "" {
+		if addr, ok := httpFor(v.Upstream); ok {
+			return easytun.Route{Upstream: addr, Host: host}
+		}
+		// A NAMED UPSTREAM WITH NO HTTP ADDRESS CANNOT CARRY TCP. Refusing is honest; dialling the
+		// default would be a rule that silently did something other than what it says.
+		return easytun.Route{Kind: easytun.RouteDrop, Host: host}
+	}
+	return easytun.Route{Host: host}
+}
+
+// Close stops the listener.
 func (p *TransparentProxy) Close() {
-	if p == nil {
+	if p == nil || p.tcp == nil {
 		return
 	}
-	p.once.Do(func() {
-		close(p.done)
-		_ = p.listener.Close()
-	})
-}
-
-func (p *TransparentProxy) serve() {
-	for {
-		conn, err := p.listener.Accept()
-		if err != nil {
-			select {
-			case <-p.done:
-				return
-			default:
-			}
-			// A FAILED ACCEPT IS NOT FATAL: the listener stays up and the next connection is
-			// handled. The alternative - returning - turns one transient error into a proxy that
-			// silently stopped.
-			time.Sleep(10 * time.Millisecond)
-			continue
-		}
-		go p.handle(conn)
-	}
-}
-
-// handle turns one redirected connection into one CONNECT request.
-func (p *TransparentProxy) handle(conn net.Conn) {
-	// THE GUEST THINKS IT OPENED A CONNECTION TO THE INTERNET; THE KERNEL REMEMBERS WHERE IT WAS
-	// GOING. SO_ORIGINAL_DST is that memory, and without it the destination is this listener's own
-	// address - which would make the proxy connect back to itself.
-	dst, err := originalDestination(conn)
-	if err != nil {
-		_ = conn.Close()
-		return
-	}
-	p.tunnel(conn, dst)
-}
-
-// tunnel is the part that can be tested without a redirected socket, and it is separate for exactly
-// that reason: `handle` needs SO_ORIGINAL_DST, which only the kernel can supply, so a test that went
-// through `handle` could assert nothing but "the connection closed".
-//
-// IT TAKES THE DESTINATION rather than reading it, which is the whole seam: production passes the
-// kernel's answer, and a test passes whatever it wants to see on the wire.
-func (p *TransparentProxy) tunnel(conn net.Conn, dst string) {
-	defer conn.Close()
-
-	// THE RULES ARE CONSULTED BEFORE THE PROXY IS, BECAUSE THEY DECIDE WHETHER IT IS USED AT ALL.
-	//
-	// `block` closes the connection here: the guest sees a refused connection, which is what a
-	// firewall looks like from inside and is the honest answer. `direct` dials the destination from
-	// THIS pod with no proxy in the path - the same code, one branch, and the copy loop below is
-	// shared so neither path can drift from the other.
-	// THE UPSTREAM IS THE RULE'S DECISION WHEN A RULE MATCHED, AND THE DEFAULT OTHERWISE.
-	//
-	// `defaultUpstream` IS READ ONCE AT STARTUP AND IS WHAT p.Upstream WAS: the address this daemon
-	// was told about by `EASYVM_TRANSPARENT_PROXY`. A rule that names an upstream only changes this
-	// one thing - which proxy is dialled - so the CONNECT framing, the refusal handling and the copy
-	// loop below are all shared by every upstream, and a new one cannot behave differently.
-	upstream := p.Upstream
-	// THE DESTINATION THE GUEST NAMED, WHEN THERE IS ONE. In fake-ip mode `dst` is an address this
-	// daemon invented, so `CONNECT 198.18.7.3:443` would ask the proxy for an address that exists
-	// nowhere. The name is what the guest asked for, so it is what the proxy is told - and it is also
-	// what a name rule matched, which is the reason the fake address was handed out at all.
-	connectTo := dst
-	if name, ok := NameForFakeIP(parseHost(dst)); ok {
-		connectTo = net.JoinHostPort(name, portOf(dst))
-	}
-	if ip, port, err := splitDst(dst); err == nil {
-		v := VerdictFor(ip, port)
-		switch v.Kind {
-		case KindBlock:
-			return
-		case KindDirect:
-			// A DIRECT CONNECTION CANNOT DIAL THE FAKE ADDRESS, because it leads back here. The name
-			// is resolved against the upstreams directly - see resolveReal - and the connection is
-			// made to the real address, unproxied, which is what `direct` means.
-			target := dst
-			if name, ok := NameForFakeIP(ip); ok {
-				real, err := resolveReal(name)
-				if err != nil {
-					return
-				}
-				target = net.JoinHostPort(real.String(), portOf(dst))
-			}
-			up, err := net.DialTimeout("tcp", target, 15*time.Second)
-			if err != nil {
-				return
-			}
-			defer up.Close()
-			_ = up.SetDeadline(time.Time{})
-			copyBoth(conn, up, up, true)
-			return
-		}
-		if v.Upstream != "" {
-			// A NAMED UPSTREAM THAT HAS NO HTTP ADDRESS CANNOT CARRY TCP. Dialling the default in
-			// that case would be a rule that silently did something other than what it says, so the
-			// connection is refused instead - and the rules API validates the name at apply time, so
-			// this is the case of a table that changed underneath a rule.
-			if addr, ok := httpFor(v.Upstream); ok {
-				upstream = addr
-			} else {
-				return
-			}
-		}
-	}
-
-	// `CONNECT host:port HTTP/1.1` IS THE WHOLE PROTOCOL. There is no TLS to negotiate here: the
-	// guest's TLS runs end to end THROUGH this tunnel, which is why the proxy needs no certificate
-	// and cannot read the traffic.
-	up, err := net.DialTimeout("tcp", upstream, 15*time.Second)
-	if err != nil {
-		return
-	}
-	defer up.Close()
-	_ = up.SetDeadline(time.Time{})
-
-	// THE CONNECT GOES TO THE PROXY, AND THE 200 COMES BACK BEFORE ANY GUEST BYTE IS FORWARDED.
-	// A tunnel that starts copying first would send the guest's TLS ClientHello into a socket the
-	// proxy is still expecting a request line on.
-	if _, err := fmt.Fprintf(up, "CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", connectTo, connectTo); err != nil {
-		return
-	}
-	br := bufio.NewReader(up)
-	resp, err := br.ReadString('\n')
-	if err != nil {
-		return
-	}
-	// `200` IS THE ONLY SUCCESS THE PROTOCOL HAS, and a proxy that refuses says 403 or 502 here.
-	// Nothing is reported to the guest: it sees its connection close, which is what a refused
-	// connection looks like from inside a program that never knew a proxy was involved.
-	if len(resp) < 12 || resp[9:12] != "200" {
-		return
-	}
-	// THE REST OF THE HEADERS ARE DRAINED, because they belong to the CONNECT response and not to
-	// the tunnelled bytes behind it. A leftover `Proxy-Agent:` line would arrive as garbage at the
-	// front of the guest's TLS stream.
-	for {
-		line, err := br.ReadString('\n')
-		if err != nil {
-			return
-		}
-		if line == "\r\n" || line == "\n" {
-			break
-		}
-	}
-
-	// BOTH DIRECTIONS, AND EITHER ONE CLOSING ENDS THE PAIR. A tunnel is over when the guest is
-	// done; waiting for the upstream as well would hold the connection open for the proxy's own
-	// idle timeout.
-	copyBoth(conn, up, br, false)
-}
-
-// copyBoth runs the two directions and returns when EITHER finishes, which is what makes a tunnel end
-// when one side closes rather than waiting for the other's idle timeout.
-//
-// `from` IS SEPARATE FROM `to` BECAUSE THE PROXY PATH HAS A bufio.Reader: the CONNECT response was
-// read through a buffered reader and any bytes after its headers are the start of the tunnel, so the
-// upstream-to-guest direction has to drain THAT reader rather than the socket.
-// copyBoth runs the two directions and returns when the GUEST side is done, with `drain` controlling
-// whether the reply side is given time to finish.
-//
-// THE TWO PATHS GENUINELY NEED DIFFERENT ANSWERS, AND TREATING THEM THE SAME WAS A BUG.
-//
-// A CONNECT TUNNEL IS A BYTE PIPE: when one end closes, the other has nothing left to say, and waiting
-// for it would hold a socket open on a peer that has gone. That is the original `<-done` and it is
-// right for the proxy path.
-//
-// A DIRECT CONNECTION IS NOT. MEASURED: with `<-done`, `curl http://deb.debian.org` printed
-// `Connected to deb.debian.org (199.232.162.132) port 80` and then `Operation timed out with 0 bytes
-// received` - because the guest's direction finishes the moment its request line is written, `<-done`
-// returned, and `tunnel`'s `defer conn.Close()` tore down a socket whose reply was still in flight.
-//
-// SO THE DIRECT PATH WAITS FOR THE REPLY, BOUNDED. The bound is what keeps a peer that half-closed and
-// went silent from holding the tunnel open forever.
-func copyBoth(guest net.Conn, up net.Conn, from io.Reader, drainReply bool) {
-	done := make(chan struct{}, 2)
-	go func() {
-		_, _ = io.Copy(up, guest)
-		// HALF-CLOSE, NOT CLOSE: the other direction may still have a response to deliver.
-		if tc, ok := up.(*net.TCPConn); ok {
-			_ = tc.CloseWrite()
-		}
-		done <- struct{}{}
-	}()
-	go func() {
-		_, _ = io.Copy(guest, from)
-		if tc, ok := guest.(*net.TCPConn); ok {
-			_ = tc.CloseWrite()
-		}
-		done <- struct{}{}
-	}()
-	<-done
-	if !drainReply {
-		return
-	}
-	// A SHORT GRACE, NOT A SECOND FULL COPY. The reply is usually already in the kernel buffer or
-	// arrives within a round trip; this window is for that, not for streaming a large body.
-	_ = up.SetReadDeadline(time.Now().Add(5 * time.Second))
-	<-done
-}
-
-// splitDst turns "1.2.3.4:443" into its parts, for the rules lookup.
-func splitDst(dst string) (net.IP, int, error) {
-	host, port, err := net.SplitHostPort(dst)
-	if err != nil {
-		return nil, 0, err
-	}
-	p, err := strconv.Atoi(port)
-	if err != nil {
-		return nil, 0, err
-	}
-	ip := net.ParseIP(host)
-	if ip == nil {
-		return nil, 0, fmt.Errorf("%q is not an address", host)
-	}
-	return ip, p, nil
-}
-
-// originalDestination reads SO_ORIGINAL_DST from a redirected socket.
-//
-// THE OPTION IS LINUX-SPECIFIC AND ITS NUMBER DIFFERS BY PROTOCOL: `80` for IPv4 and `81` for IPv6,
-// in the SOL_IP / SOL_IPV6 level. Both are tried, because a guest may reach either family and a
-// proxy that worked only for v4 would fail on the first AAAA answer.
-//
-// THE PARSING IS BY HAND RATHER THAN THROUGH A HELPER LIBRARY: the payload is a `sockaddr_in` -
-// family, port (network byte order), address, padding - and there is no protocol here worth a
-// dependency for sixteen bytes.
-func originalDestination(conn net.Conn) (string, error) {
-	tc, ok := conn.(*net.TCPConn)
-	if !ok {
-		return "", fmt.Errorf("not a tcp connection")
-	}
-	rc, err := tc.SyscallConn()
-	if err != nil {
-		return "", err
-	}
-
-	var addr string
-	var sockErr error
-	err = rc.Control(func(fd uintptr) {
-		addr, sockErr = originalDstFromFD(int(fd))
-	})
-	if err != nil {
-		return "", err
-	}
-	if sockErr != nil {
-		return "", sockErr
-	}
-	return addr, nil
-}
-
-// originalDstFromFD does the getsockopt and the byte order.
-func originalDstFromFD(fd int) (string, error) {
-	// SOL_IP = 0, SO_ORIGINAL_DST = 80. The buffer holds `struct sockaddr_in`, which is 16 bytes,
-	// so 128 is generous and keeps a kernel that returns more from being truncated.
-	buf := make([]byte, 128)
-	n := uint32(len(buf))
-	if err := getsockopt(fd, solIP, soOriginalDst, buf, &n); err != nil {
-		// IPv6 IS TRIED SECOND, because a v4 socket answers ENOENT and a v6 one answers the same
-		// for the v4 option - so the failure of the first is not the answer.
-		if err6 := getsockopt(fd, solIPv6, soOriginalDst, buf, &n); err6 != nil {
-			return "", fmt.Errorf("SO_ORIGINAL_DST: v4: %v; v6: %v", err, err6)
-		}
-	}
-	if n < 8 {
-		return "", fmt.Errorf("SO_ORIGINAL_DST returned %d bytes", n)
-	}
-	// THE PORT IS BIG-ENDIAN AND SITS AT OFFSET 2: family is two bytes at 0, then the port.
-	port := binary.BigEndian.Uint16(buf[2:4])
-	var host string
-	// FAMILY 10 IS AF_INET6, WHOSE ADDRESS IS AT OFFSET 8 AND IS SIXTEEN BYTES.
-	if binary.LittleEndian.Uint16(buf[0:2]) == 10 {
-		host = net.IP(buf[8:24]).String()
-	} else {
-		host = net.IP(buf[4:8]).String()
-	}
-	return net.JoinHostPort(host, strconv.Itoa(int(port))), nil
+	_ = p.tcp.Close()
 }
 
 // --- the rules that feed the listener ----------------------------------------------------
