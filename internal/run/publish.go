@@ -10,8 +10,6 @@ import (
 	"sync"
 	"syscall"
 	"time"
-
-	"github.com/easydev-org/easyvm/internal/walk"
 )
 
 // --- recording ------------------------------------------------------------------------
@@ -313,7 +311,6 @@ func (e *Executor) stopSampler() {
 }
 
 // --- waiting for a disk to stop growing ------------------------------------------------
-
 
 // installedBytes is how big the SYSTEM is, which for a diff is not the same as the diff's own file.
 //
