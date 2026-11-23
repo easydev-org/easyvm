@@ -305,10 +305,26 @@ var Actions = map[string]Verb{
 		}},
 	"wait_until": {Name: "wait_until", Kind: KindString,
 		Summary: "wait for a condition about the machine: `stopped`",
-		Fields:     map[string]Key{}},
+		Fields:  map[string]Key{}},
 	"disk": {Name: "disk", Kind: KindStringOrMapping,
 		Summary: "make one disk, or name the one a machine starts from",
+		// THE MAPPING FORM IS WHAT THE OLD VERBS BECAME. `disk_gb`, `disk_gpt`, `disk_esp_mib`,
+		// `disk_min_mb` and `disk_settle` used to be keys of their own beside a `disk:` that named a
+		// file - six keys for one file's size and layout. They are fields now, and the two flat keys
+		// below stay because a boot's argument list still writes them.
 		Fields: map[string]Key{
+			"file": {Name: "file", Kind: KindString,
+				Summary: "the disk file; required when `disk:` is a mapping"},
+			"size": {Name: "size", Kind: KindTemplated,
+				Summary: "how big to make it, in GiB"},
+			"gpt": {Name: "gpt", Kind: KindBool,
+				Summary: "write a GPT partition table"},
+			"esp_mib": {Name: "esp_mib", Kind: KindTemplated,
+				Summary: "the EFI system partition's size, in MiB"},
+			"min_mb": {Name: "min_mb", Kind: KindTemplated,
+				Summary: "the smallest a finished disk may be, in MiB"},
+			"wait": {Name: "wait", Kind: KindTemplated,
+				Summary: "wait this long for the disk file to stop growing"},
 			"disk_gb": {Name: "disk_gb", Kind: KindTemplated,
 				Summary: "how big to make it, in GiB"},
 			"disk_gpt": {Name: "disk_gpt", Kind: KindBool,
@@ -359,7 +375,6 @@ var Actions = map[string]Verb{
 		Summary: "publish the disk to this path: the second half of `stop:`",
 		Fields:  map[string]Key{}},
 }
-
 
 // Roles classifies every key, and it is DERIVED rather than written: a key is an action if a verb
 // declares it, an argument if a verb declares it as a field, and a modifier if it is shared.

@@ -56,8 +56,6 @@ A step is one of nine verbs, or one of the actions the engine dispatches on, plu
 | `disk_esp_mib` | the size of the EFI system partition, in MiB |
 | `disk_gb` | how big to make the disk, in GiB |
 | `disk_gpt` | write a GPT partition table |
-| `disk_min_mb` | the smallest a finished disk may be, in MiB |
-| `disk_settle` | wait this long for the disk file to stop growing |
 | `incoming` | a `snapshot:` file to load instead of booting |
 | `machine` | the `-machine` value |
 
@@ -165,7 +163,6 @@ IS DROPPED - which is how an optional medium disappears without a conditional an
 | `adb_connect` | connect adb before the commands that need it |
 | `adb_privileged` | ask adbd for root before the commands that need it |
 | `disk` | make one disk, or name the one a machine starts from |
-| `disk_settle` | wait until the disk file stops growing, and check it is big enough |
 | `do` | run a list of steps in order under one name |
 | `esp_fallback` | edit a FAT filesystem inside a stopped disk, at byte offsets |
 | `needs` | the files this stage reads must be on disk before it starts |
@@ -180,18 +177,20 @@ IS DROPPED - which is how an optional medium disappears without a conditional an
 
 ### `disk`
 
-| key | what it does |
-|---|---|
-| `disk_esp_mib` | the EFI system partition's size, in MiB |
-| `disk_gb` | how big to make it, in GiB |
-| `disk_gpt` | write a GPT partition table |
-
-### `disk_settle`
+`disk:` is a file name, or a mapping that makes the disk and says how:
 
 | key | what it does |
 |---|---|
-| `disk_min_mb` | the smallest a finished disk may be, in MiB |
-| `poll` | seconds between looks |
+| `file` | the disk file; required when `disk:` is a mapping |
+| `size` | how big to make it, in GiB |
+| `gpt` | write a GPT partition table |
+| `esp_mib` | the EFI system partition's size, in MiB |
+| `min_mb` | the smallest a finished disk may be, in MiB |
+| `wait` | wait this long for the disk file to stop growing |
+
+`disk: {file: disk.qcow2, size: 128}` creates it; `disk: disk.qcow2` names one that already exists.
+The mapping's fields are the FOLDED form of `disk_gb:`, `disk_gpt:`, `disk_esp_mib:`, `disk_min_mb:`
+and `disk_settle:`, which are no longer verbs of their own.
 
 ### `esp_fallback`
 
