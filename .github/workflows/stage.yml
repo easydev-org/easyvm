@@ -433,8 +433,25 @@ jobs:
             case "$dest" in
               *.tar)
                 echo "=== unpack $dest"
+                # THE NAME THE WALK ASKS FOR IS THE ONE THE ASSET DECLARED, and the member inside the
+                # tar is whatever the publisher called it - `mirror-one.sh` writes `$tag`, so an image
+                # arrives as `iso-blissos-16.9.7` while the walk's `needs:` says
+                # `blissos-16.9.7.iso`. Unpacking and then renaming to `basename` minus `.tar` makes
+                # the two agree without a table of exceptions here.
+                before=$(mktemp)
+                ls -1 "$GITHUB_WORKSPACE/work" > "$before"
                 tar -xf "$dest" -C "$GITHUB_WORKSPACE/work"
                 rm -f "$dest"
+                wanted="$GITHUB_WORKSPACE/work/$(basename "$dest" .tar)"
+                # THE ONE FILE THE ARCHIVE ADDED, when the name the walk wants is not there.
+                if [ ! -e "$wanted" ]; then
+                  added=$(ls -1 "$GITHUB_WORKSPACE/work" | grep -vxF -f "$before" | head -2)
+                  if [ "$(printf '%s\n' "$added" | wc -l)" = "1" ]; then
+                    mv "$GITHUB_WORKSPACE/work/$added" "$wanted"
+                    echo "renamed $added -> $(basename "$wanted")"
+                  fi
+                fi
+                rm -f "$before"
                 ;;
               *)
                 echo "::error::$dest is not a tar. Every published asset is one, because a stage's"
