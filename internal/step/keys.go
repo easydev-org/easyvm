@@ -258,15 +258,41 @@ func actionOf(stepName string, mapping map[string]any) (string, error) {
 		// A STEP WHOSE KEYS ARE ALL FIELDS OF ONE VERB IS THAT VERB WITHOUT ITS MARKER. The compiler
 		// writes `input 960 628` as `{input: true, click: [...]}`, but a step that carries only the
 		// shape - `{at_color, color_region}` - is the same action and must load.
+		//
+		// `input` IS THE ONE VERB THAT MAY NOT BE INFERRED FROM ITS OWN SHAPES, AND THAT ASYMMETRY IS
+		// DELIBERATE. `click:`, `key:` and `text:` are how this engine ALSO spells three 1.0 step keys,
+		// and `runOne` has no branch for any of them - so a file that writes
+		//
+		//	step "erase - open the sheet"
+		//	  click [1681, 57]
+		//
+		// is accepted here, dispatched to nothing, and fails at run time with
+		//
+		//	no implementation for this step's keys
+		//
+		// MEASURED on macos 15 setup, run 45101316130: thirty-six lines in five converted files kept
+		// the 1.0 spelling inside a `do:` where the conversion never looked, and every boot test
+		// failed on a different one of them. `easyvm check` passed every file.
+		//
+		// SO A STEP THAT NAMES AN INPUT SHAPE MUST SAY `input`. The shapes it accepts without the
+		// marker are the ones that are ALSO a whole address on their own - `at_color`, `button`,
+		// `colour` - which is what this fallback was written for.
+		inputs := map[string]bool{"click": true, "key": true, "text": true, "double": true, "type": true}
 		for verb, v := range Verbs {
 			hit := false
+			onlyInputShapes := true
 			for name := range mapping {
+				if name == "name" {
+					continue
+				}
 				if _, ok := v.Fields[name]; ok {
 					hit = true
-					break
+					if !inputs[name] {
+						onlyInputShapes = false
+					}
 				}
 			}
-			if hit {
+			if hit && (verb != "input" || !onlyInputShapes) {
 				return verb, nil
 			}
 		}
