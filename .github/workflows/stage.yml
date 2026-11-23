@@ -641,6 +641,42 @@ jobs:
                 *"status: failed"*)
                   echo "=== THE WALKTHROUGH FAILED ==="
                   cat "$GITHUB_WORKSPACE/work/daemon.log" 2>/dev/null || true
+                  # THE NETWORK, WHEN THE GUEST IS UP AND NOTHING CAN REACH IT.
+                  #
+                  # MEASURED on bsd ssh, run 45103494289: the console log showed `Starting sshd.`, a
+                  # DHCP lease on 172.30.0.2, and the probe still answered
+                  #
+                  #	ssh probe: dial tcp 172.30.0.1:2222: i/o timeout
+                  #
+                  # The same disk, booted in the cluster's own lab pod on this same image, answered a
+                  # `TCP connect` and an `SSH-2.0-OpenSSH_10.0 FreeBSD` banner on 172.30.0.1:2222 -
+                  # so the engine's forwarding is right and something about THIS runner's network is
+                  # not. These five commands are what tells the two apart, and none of them was in the
+                  # log that took an hour to read.
+                  echo "=== THE NETWORK AS THE RUNNER HAS IT ==="
+                  ip -4 addr show 2>&1 | head -30 || true
+                  echo "--- the route to the guest ---"
+                  ip route get 172.30.0.2 2>&1 || true
+                  echo "--- the bridge and the tap ---"
+                  ip link show type bridge 2>&1 | head -10 || true
+                  ip link show type tap 2>&1 | head -10 || true
+                  echo "--- the nat table (DNAT lives here) ---"
+                  iptables -t nat -S 2>&1 | head -40 || true
+                  echo "--- the filter table (FORWARD policy drops the reply) ---"
+                  iptables -S FORWARD 2>&1 | head -20 || true
+                  echo "--- the guest, from the container ---"
+                  printf '%s\n' 'import socket' \
+                    'for host, port in (("172.30.0.1", 2222), ("172.30.0.2", 22)):' \
+                    '    s = socket.socket(); s.settimeout(4)' \
+                    '    try:' \
+                    '        s.connect((host, port))' \
+                    '        b = s.recv(60) if port == 2222 else b""' \
+                    '        print(host, port, "OPEN", b)' \
+                    '    except Exception as e:' \
+                    '        print(host, port, type(e).__name__, e)' \
+                    '    finally:' \
+                    '        s.close()' > /tmp/probe.py
+                  python3 /tmp/probe.py 2>&1 || true
                   exit 1 ;;
               esac
               sleep 60
