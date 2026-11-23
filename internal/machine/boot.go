@@ -903,39 +903,7 @@ func (b Boot) FirmwareArgs(ovmfCode, ovmfVars string) []string {
 	}
 }
 
-// ExtraArgs is everything else the guest needs, and each line is a measured fact.
-//
-// THE MACOS LIST IS LONG BECAUSE THE GUEST IS FUSSY. Every entry is from macos/15/machine.py, where
-// each was added after a specific failure:
-//
-//	ICH9-LPC.disable_s3 / disable_s4    ICH9's sleep states hang this guest at a black screen
-//	acpi-pci-hotplug-with-bridge=off    macOS mishandles the PCIe hotplug bridge on ICH9
-//	-rtc base=utc                       macOS reads the clock from the RTC and expects UTC
-//	-smbios type=2                      the baseboard record macOS's platform check reads
-//	vmware-svga,vgamem_mb=256           the adapter macOS's own driver recognises; virtio-vga left
-//	                                    a 7 MB framebuffer with "No Kext Loaded", so the wallpaper
-//	                                    layer could not be drawn
-func (b Boot) ExtraArgs() []string {
-	// THE LIST ITSELF IS IN THE SHAPE FILE, COMMENT AND ALL, because it is macOS's and macOS's alone.
-	// Its comments carry the measurement that made each entry what it is - the `vmware-svga` one in
-	// particular, where adding `vgamem_mb=256` cost three quarters of a recording.
-	return append([]string(nil), b.shape().ExtraArgs...)
-}
 
-// SMCArgs is the Apple SMC device and its key.
-//
-// THE KEY IS NOT A SECRET AND IS NOT OPTIONAL. macOS reads it from the SMC to decide whether the
-// firmware is Apple's, and without it the kernel stops before it draws anything. Every hackintosh
-// carries the same string.
-func (b Boot) SMCArgs(osk string) []string {
-	if !b.shape().SMC {
-		return nil
-	}
-	if osk == "" {
-		osk = OSK
-	}
-	return []string{"-device", "isa-applesmc,osk=" + osk}
-}
 
 // CPU is the processor. The base model is the same for every guest; macOS adds flags.
 //
@@ -975,67 +943,6 @@ func (b Boot) SMP(cpus int) string {
 	return fmt.Sprint(cpus)
 }
 
-// VGA is the video adapter, and the shape says which one.
-//
-// ON q35, `-vga` CREATES AN ISA VGA DEVICE ON THE LEGACY BUS and macOS expects the PCIe one, which is
-// why the macOS shape has `vmware-svga` as a device in `extra_args` and `video.kind: none` here.
-//
-// ANDROID NEEDS A DRM NODE, AND `std` VGA DOES NOT PROVIDE ONE. MEASURED, and it is the difference
-// between a desktop and what looks like a hang: the installed system runs Android's HWC with
-// `HWC=drm_minigbm`, which opens /dev/dri/card0. `-device VGA` gives a framebuffer and NO DRM device,
-// so Android brings up no display at all and the screen STOPS ON INITRD'S LAST LINE - measured at
-// 240 s, 600 s and 600 s again before the cause was found, with nothing in the console saying so.
-//
-// A MICROVM GETS `absent`, because a machine with no PCI bus cannot create a `-device VGA` and `-vga
-// std` warns that it created nothing. Its adapter, when it has one, is chosen on the `boot:` step:
-// that is a fact about the guest's SESSION rather than about the machine.
-func (b Boot) VGA(defaultVGA string) string {
-	return b.VGAFor(defaultVGA)
-}
-
-// AndroidVGA is the one adapter Android may be given, spelled as the daemon's `-device` value.
-//
-// `virtio` rather than `virtio-vga`: the daemon turns the short name into
-// `-device virtio-vga,xres=...,yres=...`, which is the only form that can carry a resolution.
-const AndroidVGA = "virtio"
-
-// VGAFor is `VGA` without the prose, so the argument-building code and the refusal in `Validate`
-// answer the same question from the same place and cannot disagree.
-func (b Boot) VGAFor(defaultVGA string) string {
-	// A MICROVM'S ADAPTER IS DECIDED BY `microvm_display`, NOT BY THE SHAPE'S `video.kind`.
-	//
-	// THE SHAPE SAYS `absent`, AND THAT IS RIGHT FOR THE TWO HEADLESS FORMS: a serial guest has no
-	// adapter at all and a `terminal` guest's ISA VGA is chosen in the daemon's own switch. The
-	// `desktop` form is the exception - it asks for a GPU - and if this function short-circuited on
-	// `absent` the daemon would never reach the branch that attaches `virtio-gpu-pci`.
-	//
-	// MEASURED, and it cost a full CI matrix: `absent` matched no case in the daemon's switch, so
-	// TWENTY-FOUR desktop variants booted with no display device at all. `modprobe virtio-gpu` found
-	// nothing to bind, gpu.service created no /dev/dri nodes, Xorg answered `(EE) no screens found`,
-	// and every walk photographed qemu's empty framebuffer - mean brightness 0.7231, the same number
-	// to four decimal places on all of them.
-	//
-	// SO THE SHAPE'S `absent` MEANS "NO DEFAULT ADAPTER", and the daemon's switch decides. Returning
-	// `defaultVGA` here is what lets `case "std"` see the microvm and pick the right device.
-	if b.MicroVM {
-		return defaultVGA
-	}
-	// FOUR ANSWERS, AND EACH ONE IS IN A SHAPE FILE'S `video.kind`.
-	//
-	//	none     another device supplies the adapter - macOS's `vmware-svga` in `extra_args`
-	//	virtio   virtio-vga, the only form that carries a resolution AND provides a DRM node
-	//	absent   no display at all, which is a microvm that draws nothing
-	//	vga      the default: `-device VGA,xres=...,yres=...`
-	switch b.shape().Video {
-	case "none":
-		return "none"
-	case "virtio":
-		return AndroidVGA
-	case "absent":
-		return "absent"
-	}
-	return defaultVGA
-}
 
 // AudioArgs is the sound card, because a guest without one reports every capture failure as its own
 // fault.
@@ -1314,4 +1221,119 @@ func requireFirmwareFiles(pair []string, dir, where string) error {
 		}
 	}
 	return nil
+}
+
+// KernelAppendline is the guest's boot line, with the defaults and the one flag this build must add.
+//
+// IT IS THE ONE PIECE OF `KernelArgs` THAT IS NOT THE SHAPE'S ARGUMENTS, and it stays in Go for a
+// reason that is about the KERNEL rather than about the machine: `pci=off` is prepended when the
+// machine has no PCIe bus, because a kernel that finds an ACPI root assumes a PCI host bridge exists
+// and stops with `PCI: Fatal: No config space access function found`. MEASURED on NixOS, which died
+// at 0.05s without it and boots with it.
+//
+// A DESKTOP MICROVM HAS A PCIe BUS ON PURPOSE, so it must NOT carry `pci=off`: that would hide the
+// bus its virtio-gpu is attached to and the GPU would vanish.
+func (b Boot) KernelAppendline(machineString string) string {
+	cmdline := b.KernelAppend
+	if cmdline == "" {
+		// ALPINE'S OWN `syslinux.cfg` LINE plus `console=ttyS0`: a microvm's serial line is its only
+		// output, and without it the kernel writes to an adapter that does not exist and the console
+		// stays EMPTY - which reads as "the guest never booted".
+		cmdline = "console=ttyS0 modules=loop,squashfs,sd-mod modloop=/dev/vda"
+	}
+	// `pci=off` IS FOR A MACHINE WITH NO PCIe BUS, which the profile's own `-machine` string states.
+	if !strings.Contains(machineString, "pcie=off") {
+		return cmdline
+	}
+	if strings.Contains(cmdline, "pci=off") {
+		return cmdline
+	}
+	return "pci=off " + cmdline
+}
+
+// DiscardFragment is `,discard=unmap` when a trim may reach the disk, and empty otherwise.
+//
+// IT IS A PLACEHOLDER RATHER THAN A CONDITIONAL IN THE SHAPE because the SHAPE cannot know: whether
+// a trim is safe depends on whether an installer is attached to THIS boot, which is a fact about the
+// run. During a macOS install `discard` is destructive - measured: 42009463444 wrote 36774 MiB,
+// dropped to 19761 and froze at "About 48 minutes remaining", because qemu honoured every TRIM for
+// clusters the APFS snapshot still referred to.
+func (b Boot) DiscardFragment() string {
+	if b.Discardable() {
+		return ",discard=unmap"
+	}
+	return ""
+}
+
+// AudioDevArg and AudioCardArg are the two halves of the sound card, as placeholders.
+//
+// THEY ARE SEPARATE BECAUSE A SHAPE'S `qemu.args` IS A LIST OF PAIRS, and `-audiodev X` / `-device Y`
+// is two pairs. Returning one string that a caller splits would put a qemu argument grammar in a
+// string, which is what the pair rule exists to avoid.
+//
+// EITHER BOTH ARE NON-EMPTY OR NEITHER IS, so the drop rule removes the two pairs together and a
+// guest never gets a device that names an audiodev qemu was not given.
+func (b Boot) AudioDevArg() string {
+	if b.audioCard() == "" {
+		return ""
+	}
+	return "none,id=snd0"
+}
+
+// AudioCardArg is the device, or empty when this machine cannot have one.
+func (b Boot) AudioCardArg() string { return b.audioCard() }
+
+// audioCard is the one place the sound-card decision lives.
+//
+// `none` IS A REAL ANSWER RATHER THAN AN ABSENCE: a microvm has no PCI bus, so `ich9-intel-hda` -
+// the default - cannot attach, and the device it cannot have is the one that stops the machine at
+// startup. A DESKTOP microvm is the exception, because it turns PCIe on for its virtio-gpu.
+func (b Boot) audioCard() string {
+	switch b.shape().Audio {
+	case "none":
+		// A DESKTOP MICROVM HAS A PCIe BUS ON PURPOSE, so the card attaches. The headless forms do
+		// not, and asking them for one is `No 'PCI' bus found for device 'ich9-intel-hda'` at
+		// startup - qemu exits and the step reports a qmp socket error.
+		if b.MicroVM && b.MicroVMDisplay == "desktop" {
+			return "ich9-intel-hda"
+		}
+		return ""
+	case "usb":
+		// `usb-audio` NEEDS THE xHCI CONTROLLER, which macOS's own device list creates. On a guest
+		// with neither, `bus=xhci.0` names a bus that does not exist and qemu refuses to start.
+		return "usb-audio,bus=xhci.0,audiodev=snd0"
+	}
+	// `hda-duplex` RATHER THAN `hda-output`: duplex carries line-out AND line-in, so one codec gives
+	// the guest a speaker endpoint and a microphone endpoint.
+	return "hda-duplex,audiodev=snd0"
+}
+
+
+
+
+// ProfileName is which of a shape's `qemu.profiles` this boot runs.
+//
+// IT IS THE DISPLAY MODE FOR A MICROVM, because that is the axis a microvm's command line actually
+// varies on: `serial` has no adapter and no PCIe, `terminal` an ISA VGA, `desktop` a virtio-gpu on a
+// PCIe bus it turns on. Every other guest has one configuration, so this is empty and the shape's
+// `qemu.default` answers.
+func (b Boot) ProfileName() string {
+	if b.MicroVM {
+		if b.MicroVMDisplay == "" {
+			return "terminal"
+		}
+		return b.MicroVMDisplay
+	}
+	// A RECOVERY IMAGE IS WHAT MAKES A BOOT AN INSTALL for a machine whose install medium is one -
+	// which is macOS and nothing else here, and the shape says so rather than this function. That is
+	// the same fact `installing()` reads, stated once: the profile that attaches a recovery image is
+	// the profile that installs, and the profile that does not is an installed system whose freed
+	// blocks may reach the file.
+	if b.shape().InstallMedium == MediumRecovery {
+		if b.Recovery != "" {
+			return "install"
+		}
+		return "disk"
+	}
+	return ""
 }

@@ -357,18 +357,6 @@ var Actions = map[string]Verb{
 			"from": {Name: "from", Kind: KindString,
 				Summary: "the directory inside it"},
 		}},
-	"fetch": {Name: "fetch", Kind: KindString,
-		Summary: "obtain a prepared asset by name",
-		Fields: map[string]Key{
-			"release": {Name: "release", Kind: KindString,
-				Summary: "which release of it"},
-			"template": {Name: "template", Kind: KindString,
-				Summary: "the built-in template to render"},
-			"os": {Name: "os", Kind: KindString,
-				Summary: "the guest family the asset is for"},
-			"recovery": {Name: "recovery", Kind: KindString,
-				Summary: "macOS's recovery image"},
-		}},
 	"write": {Name: "write", Kind: KindString,
 		Summary: "write one of the built-in templates to disk",
 		Fields: map[string]Key{
@@ -472,7 +460,7 @@ var dispatchOrder = []string{
 	"when", "when_not", "when_not_any", "do", "until", "until_any",
 	"needs", "require",
 	"disk", "disk_settle",
-	"fetch", "write", "esp_fallback",
+	"write", "esp_fallback",
 	"at_color", "at_bottom", "at_button",
 	"wait", "settle",
 }

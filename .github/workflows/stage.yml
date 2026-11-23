@@ -418,7 +418,31 @@ jobs:
               echo "::error::artifacts-publish.yml is what puts it there; read that job's log."
               exit 1
             }
-            ls -l "$dest"
+
+            # EVERY ASSET IS A TAR, AND IT IS UNPACKED HERE.
+            #
+            # THAT IS THE ONE SHAPE THIS ENGINE UNDERSTANDS: a `fetch:` step used to exist because a
+            # stage needed files that were not on disk yet - a firmware unpacked from a tar, an answer
+            # CD assembled from an ISO - and that put "how to prepare a file" inside the walkthrough,
+            # in a second place beside this one. There is one place now, and it is this step.
+            #
+            # A TAR OF ONE FILE IS STILL A TAR: an installer image arrives as `ubuntu.tar` holding
+            # `ubuntu.iso`, so the walk's `iso: ubuntu.iso` is a name in the work directory whether
+            # that thing came out of an archive or not. The archive is removed, because a 6 GiB ISO
+            # plus the tar that held it is 12 GiB on a runner that does not have it.
+            case "$dest" in
+              *.tar)
+                echo "=== unpack $dest"
+                tar -xf "$dest" -C "$GITHUB_WORKSPACE/work"
+                rm -f "$dest"
+                ;;
+              *)
+                echo "::error::$dest is not a tar. Every published asset is one, because a stage's"
+                echo "::error::files have to arrive by one mechanism. See artifacts-publish.yml."
+                exit 1
+                ;;
+            esac
+            ls -l "$GITHUB_WORKSPACE/work"
           done
 
       - name: the guest's memory has to fit in the runner's

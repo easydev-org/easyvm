@@ -2171,112 +2171,6 @@ func TestAConditionDoesNotCarryATimeout(t *testing.T) {
 // it did not exist: a walkthrough is DATA, so the Go compiler never sees the string, and the name only
 // fails when a run reaches that step.
 //
-// THE TEST ASKS THE SOURCE OF TRUTH - the `Kind` constants in internal/asset - and then refuses any
-// `asset:` value in any walkthrough that is not one of them. A file that names a PATH instead of a KIND
-// is `boot:`'s `iso:` (which goes through `assetPath` and may be a path) and is not checked here.
-func TestEveryAssetNameIsAKind(t *testing.T) {
-	src, err := os.ReadFile(filepath.Join("..", "asset", "asset.go"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	kinds := map[string]bool{}
-	for _, m := range regexp.MustCompile(`(\w+)\s+Kind\s*=\s*"([a-z_]+)"`).FindAllStringSubmatch(string(src), -1) {
-		kinds[m[2]] = true
-	}
-	if len(kinds) == 0 {
-		t.Fatal("no asset kinds were found in internal/asset/asset.go, so this checks nothing")
-	}
-
-	// `**` is not expanded by filepath.Glob; walk the tree instead. BOTH FORMATS ARE READ: `.walk` is
-	// the format on disk now, and the lines inside it write `fetch == opencore`.
-	var files []string
-	// THE STAGES LIVE IN THE SUB-REPOSITORIES, so the walk starts at each of them rather than at this
-	// repository's root - which holds no stages at all any more.
-	for _, family := range familyOrder {
-		dir, ok := stageFamilyRoot(family)
-		if !ok {
-			continue
-		}
-		err = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-			if err != nil {
-				return err
-			}
-			if info.IsDir() || !strings.Contains(path, "/steps/") {
-				return nil
-			}
-			if !strings.HasSuffix(path, ".yaml") && !strings.HasSuffix(path, ".walk") {
-				return nil
-			}
-			files = append(files, path)
-			return nil
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-	if len(files) == 0 {
-		t.Skip("no stages here: the walkthroughs live in the sub-repositories")
-	}
-
-	checked := 0
-	for _, path := range files {
-		body, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for i, line := range strings.Split(string(body), "\n") {
-			trimmed := strings.TrimSpace(line)
-			// `fetch:` IS THE OLD YAML SPELLING AND `fetch ==` THE `.walk` ONE; both are read so this
-			// guardian sees whichever format a file is in.
-			if strings.HasPrefix(trimmed, "#") {
-				continue
-			}
-			// THREE SPELLINGS: `fetch: x` and `fetch == x` are the two older forms, and `fetch x` is
-			// the 2.0 one - a key and its value on one line, which is what the tree holds now.
-			var value string
-			switch {
-			case strings.HasPrefix(trimmed, "fetch:"), strings.HasPrefix(trimmed, "asset:"):
-				value = strings.TrimSpace(strings.SplitN(trimmed, ":", 2)[1])
-			case strings.HasPrefix(trimmed, "fetch =="), strings.HasPrefix(trimmed, "asset =="):
-				value = strings.TrimSpace(strings.SplitN(trimmed, "==", 2)[1])
-			case strings.HasPrefix(trimmed, "fetch "), strings.HasPrefix(trimmed, "asset "):
-				value = strings.TrimSpace(strings.SplitN(trimmed, " ", 2)[1])
-			default:
-				continue
-			}
-			name := strings.Trim(strings.TrimSpace(value), `"'`)
-			checked++
-			// `guest_agent` IS A NAME THE ASSET LAYER RESOLVES, NOT A KIND IT STORES, and the
-			// distinction is the whole reason this list has an exception.
-			//
-			// `internal/asset.Fetch` opens with
-			//
-			//	if kind == "guest_agent" {
-			//		switch spec.Family {
-			//		case "macos": kind = GuestAgentMacOS
-			//		default:      kind = GuestAgentWindows
-			//
-			// so a file that says `asset: guest_agent` beside `family: macos` is asking for a real
-			// asset and the suffix is resolved for it. The alternative - making every file repeat
-			// `guest_agent_macos` - is the vocabulary leak that branch was written to remove.
-			//
-			// MEASURED: without this exception the test failed on macos/15/steps/vm-configure.yaml:41
-			// and windows/11/steps/vm-configure.yaml:42, both of which are correct files.
-			if name == "guest_agent" {
-				continue
-			}
-			if !kinds[name] {
-				t.Errorf("%s:%d names `asset: %s`, which is not a kind in internal/asset. The kinds are: %s",
-					path, i+1, name, strings.Join(sortedKeys(kinds), ", "))
-			}
-		}
-	}
-	if checked == 0 {
-		t.Fatal("no `fetch:` or `asset:` step was found in any walkthrough, so this checks nothing")
-	}
-	t.Logf("checked %d `asset:` name(s) against %d kind(s)", checked, len(kinds))
-}
-
 // sortedKeys is a stable ordering for the failure message.
 func sortedKeys(m map[string]bool) []string {
 	out := make([]string, 0, len(m))
@@ -2409,6 +2303,11 @@ func TestEveryStageRequiresTheAssetsItsLegPulls(t *testing.T) {
 			named[s] = true
 		}
 		for _, f := range files {
+			// A `.tar` IS UNPACKED AND DELETED BEFORE THE WALK STARTS, so a stage cannot name it and
+			// must not be asked to: what it names is what came OUT of the archive.
+			if strings.HasSuffix(f, ".tar") {
+				continue
+			}
 			if !named[f] {
 				t.Errorf("%s: the leg pulls %q and the first step's `require:` does not name it. A "+
 					"file the workflow places and the stage never checks is one a truncated pull can "+

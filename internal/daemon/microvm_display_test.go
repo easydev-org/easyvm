@@ -85,28 +85,62 @@ func TestTheDesktopMicrovmTurnsPCIeOnAndGraphicsOff(t *testing.T) {
 	}
 }
 
-// TestTheDesktopMicrovmGetsThePCIGPUAdapters checks the ADAPTER, not the machine: the display branch
-// must ask for `virtio-gpu-pci` for a desktop and `isa-vga` otherwise.
+// TestTheDesktopMicrovmGetsThePCIGPUAdapters checks the ADAPTER, which is now a line in the shape.
+//
+// THE DESKTOP PROFILE ASKS FOR `virtio-gpu-pci`, AND THE OTHERS DO NOT. A desktop microvm's GPU is a
+// PCIe device: `virtio-gpu-device` on virtio-MMIO attaches with status 0x83 and its driver never
+// binds, so there is no card and every screenshot is qemu's blank framebuffer.
+//
+// THE SHAPE IS READ FROM THE SUB-REPOSITORIES when they are checked out; a deployment that has only
+// this repository has the two embedded ones, which is where microvm lives.
 func TestTheDesktopMicrovmGetsThePCIGPUAdapters(t *testing.T) {
-	body, err := readSrc(t, "driver.go")
+	sh, ok := machine.Shapes().Lookup("microvm")
+	if !ok {
+		t.Skip("no microvm shape here")
+	}
+	desktop, err := sh.Profile("desktop")
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("the microvm shape has no `desktop` profile: %v", err)
 	}
-	code := dropLineComments(string(body))
-	i := strings.Index(code, "func (m machineControl) Boot(")
-	if i < 0 {
-		t.Fatal("no machineControl.Boot, so the adapter list has moved again")
+	var joined []string
+	for _, pair := range desktop.Args {
+		joined = append(joined, pair...)
 	}
-	tail := code[i:]
-	if !strings.Contains(tail, "virtio-gpu-pci") {
-		t.Fatalf("no `virtio-gpu-pci` in the boot path. A desktop microvm's GPU is a PCIe device: "+
-			"`virtio-gpu-device` on virtio-MMIO attaches with status 0x83 and its driver never "+
-			"binds, so there is no card. Src:\n%s", tail[:1200])
+	text := strings.Join(joined, " ")
+	if !strings.Contains(text, "virtio-gpu-pci") {
+		t.Fatalf("the `desktop` profile names no `virtio-gpu-pci`, so the guest's GPU never binds: "+
+			"\n%s", text)
 	}
-	if strings.Contains(tail, `"virtio-gpu-device"`) {
-		t.Errorf("the boot path still names `virtio-gpu-device`, which does not bind on a microvm. "+
-			"A desktop takes `virtio-gpu-pci`; a text console takes `isa-vga`")
+	if strings.Contains(text, "virtio-gpu-device") {
+		t.Errorf("the `desktop` profile names `virtio-gpu-device`, which does not bind on a microvm. "+
+			"A desktop takes `virtio-gpu-pci`; a text console takes `isa-vga`:\n%s", text)
 	}
+	// AND PCIe IS TURNED ON FOR IT - that bus is where the GPU lives.
+	if !strings.Contains(desktop.Machine, "pcie=on") {
+		t.Errorf("the `desktop` profile's machine is %q; a virtio-gpu-pci needs a PCIe bus", desktop.Machine)
+	}
+	for _, name := range []string{"serial", "terminal"} {
+		prof, err := sh.Profile(name)
+		if err != nil {
+			t.Fatalf("no %q profile: %v", name, err)
+		}
+		if strings.Contains(prof.Machine, "pcie=on") {
+			t.Errorf("the %q profile turns PCIe on; only a desktop needs it, and the other two are "+
+				"virtio-MMIO machines", name)
+		}
+		if strings.Contains(strings.Join(flatten(prof.Args), " "), "virtio-gpu") {
+			t.Errorf("the %q profile names a GPU; it draws no display", name)
+		}
+	}
+}
+
+// flatten joins a profile's argument pairs into one list, for a text assertion.
+func flatten(pairs [][]string) []string {
+	var out []string
+	for _, pair := range pairs {
+		out = append(out, pair...)
+	}
+	return out
 }
 
 // TestAMicrovmIsNotAskedForFirmware is the other half of the same machine: `FirmwareArgs` returns

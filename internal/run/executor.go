@@ -484,8 +484,6 @@ func (e *Executor) runOne(s walk.Step) error {
 		return e.doDisk(s)
 	case s.Has("disk_settle"):
 		return e.doDiskSettle(s)
-	case s.Has("fetch"), s.Has("asset"), s.Has("build"), s.Has("generate"):
-		return e.doFetch(s)
 	case s.Has("write"):
 		return e.doWrite(s)
 	case s.Has("esp_fallback"):

@@ -11,20 +11,24 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// A NEW OPERATING SYSTEM IS A FILE, AND THIS IS THE TEST THAT SAYS SO.
+// ADDING A MACHINE IS WRITING A FILE, AND THIS IS THE TEST THAT SAYS SO.
 //
-// THE CLAIM BEING PINNED IS NOT "the loader works" - it is that NOTHING IN GO HAS TO CHANGE. A
-// `chromeos` guest that no constant, no `switch` and no builder in this package has ever heard of is
-// started by writing one YAML file into a shapes directory, and the argument list that comes out is
-// the one the file describes.
+// THE CLAIM BEING PINNED IS NOT "the loader works" - it is that NOTHING IN GO HAS TO CHANGE. The
+// shape below describes a machine this build has never heard of: no constant, no `switch`, no builder
+// in this package names it. It is loaded from a directory and the arguments that come out are the
+// ones the file wrote.
+//
+// THE NAME IS DELIBERATELY NOT A REAL OPERATING SYSTEM. An earlier version called it `chromeos`,
+// which reads as though this build supports ChromeOS - it does not, and there is no ChromeOS
+// walkthrough anywhere. The machine here exists only inside this test, and its name says so.
 //
 // IF THIS TEST EVER NEEDS A CODE CHANGE TO PASS, THE DESIGN HAS REGRESSED: the machine shapes were
 // supposed to move out of the engine, and a shape that needs a Go constant is still in it.
-func TestANewOSIsAFileAndNoCodeChanges(t *testing.T) {
+func TestAddingAMachineNeedsNoGoCode(t *testing.T) {
 	dir := t.TempDir()
 	// A MACHINE THIS BUILD HAS NEVER SEEN, with every field set to something non-default so the
 	// assertions below cannot pass by accident.
-	chromeos := `name: chromeos
+	machine := `name: a-machine-this-build-has-never-seen
 description: "a guest this build was not compiled for"
 firmware:
   kind: ovmf
@@ -39,14 +43,21 @@ video:
 audio: hda
 smc: false
 install_medium: iso
-extra_args:
-  - ["-global", "some-device.some-property=1"]
 media:
   iso: true
   recovery: false
+qemu:
+  default: main
+  profiles:
+    main:
+      machine: "q35,accel=kvm,some-machine-property=1"
+      args:
+        - ["-global", "some-device.some-property=1"]
+        - ["-device", "virtio-vga,xres=1920,yres=1080"]
+        - ["-drive", "file={{disk}},if=none,format=qcow2,id=target{{discard}}"]
 `
-	path := filepath.Join(dir, "chromeos.yaml")
-	if err := os.WriteFile(path, []byte(chromeos), 0o644); err != nil {
+	path := filepath.Join(dir, "unheard-of.yaml")
+	if err := os.WriteFile(path, []byte(machine), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -57,13 +68,13 @@ media:
 		t.Fatalf("loading a shape for an operating system this build has no constant for: %v", err)
 	}
 
-	shape, ok := reg.Lookup("chromeos")
+	shape, ok := reg.Lookup("a-machine-this-build-has-never-seen")
 	if !ok {
 		t.Fatal("the shape was not registered; a name that is not a Go constant is the whole point")
 	}
 
 	// AND IT IS A REAL MACHINE, not a record that parsed: every builder reads it.
-	b := Boot{OS: "chromeos", Shape: shape, Disk: "/w/disk.qcow2"}
+	b := Boot{OS: "a-machine-this-build-has-never-seen", Shape: shape, Disk: "/w/disk.qcow2"}
 
 	if got := b.FirmwareArgs("/usr/share/OVMF/OVMF_CODE_4M.fd", "/w/vars.fd"); len(got) != 4 {
 		t.Fatalf("firmware = %v; an ovmf shape is two -drive pairs", got)
@@ -76,18 +87,25 @@ media:
 		t.Fatalf("cpu = %q; the shape's suffix must be appended verbatim - that is how every qemu CPU "+
 			"flag is spelled", cpu)
 	}
-	if got := b.VGA("std"); got != AndroidVGA {
-		t.Fatalf("VGA = %q, want %q; `video.kind: virtio` is virtio-vga whatever came before the comma",
-			got, AndroidVGA)
-	}
 	if got := b.SMP(4); got != "4" {
 		t.Fatalf("SMP = %q, want a bare count", got)
 	}
-	if args := b.ExtraArgs(); len(args) != 2 || args[0] != "-global" {
-		t.Fatalf("ExtraArgs = %v; the shape's pairs are appended verbatim", args)
+	// AND THE PROFILE IS THE MACHINE. This is the assertion that replaces the three removed builders:
+	// the `-machine` value and every device come out of the file, with `{{disk}}` and `{{discard}}`
+	// substituted, so a machine this build has never heard of starts with the arguments it wrote.
+	prof, err := shape.Profile("")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if args := b.SMCArgs(""); len(args) != 0 {
-		t.Fatalf("SMCArgs = %v; `smc: false` means no Apple SMC", args)
+	if prof.Machine != "q35,accel=kvm,some-machine-property=1" {
+		t.Fatalf("machine = %q; the profile's value is used verbatim", prof.Machine)
+	}
+	args := RenderArgs(prof.Args, RenderValues{"disk": "/w/disk.qcow2", "discard": ""})
+	joined := strings.Join(args, " ")
+	for _, want := range []string{"some-device.some-property=1", "file=/w/disk.qcow2", "virtio-vga"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("the profile's arguments lost %q:\n%s", want, joined)
+		}
 	}
 	if b.installing() != false {
 		t.Fatal("installing() = true with no ISO attached; `install_medium: iso` means the ISO is what " +
@@ -110,6 +128,13 @@ audio: none
 video: {kind: absent}
 install_medium: none
 media: {iso: false, iso_reason: "a machine with no firmware cannot boot an ISO", recovery: false}
+qemu:
+  default: main
+  profiles:
+    main:
+      machine: "q35,accel=kvm"
+      args:
+        - ["-device", "isa-vga"]
 `
 	if err := os.WriteFile(filepath.Join(dir, "only.yaml"), []byte(one), 0o644); err != nil {
 		t.Fatal(err)
@@ -142,21 +167,11 @@ func TestAMalformedShapeIsRefusedAtLoad(t *testing.T) {
 		body string
 		want string
 	}{
-		{
-			name: "odd extra_args",
-			body: "name: x\nfirmware: {kind: none}\naudio: none\nextra_args:\n  - [\"-device\"]\n" +
-				"media: {iso: false, iso_reason: \"none\", recovery: false}\n",
-			want: "extra_args[0]",
-		},
-		{
-			name: "unknown video",
-			body: "name: x\nfirmware: {kind: none}\naudio: none\nvideo: {kind: s3-trio}\n" +
-				"media: {iso: false, iso_reason: \"none\", recovery: false}\n",
-			want: "not an adapter this build knows",
-		},
+
+
 		{
 			name: "iso refused without a reason",
-			body: "name: x\nfirmware: {kind: none}\naudio: none\nmedia: {iso: false, recovery: false}\n",
+			body: "name: x\nfirmware: {kind: none}\naudio: none\nmedia: {iso: false, recovery: false}\nqemu:\n  profiles:\n    main:\n      machine: \"q35\"\n      args:\n        - [\"-device\", \"x\"]\n",
 			want: "iso_reason",
 		},
 		{
@@ -195,7 +210,9 @@ func TestAMalformedShapeIsRefusedAtLoad(t *testing.T) {
 func TestTwoShapesCannotShareAName(t *testing.T) {
 	reg := NewRegistry()
 	one := []byte("name: dup\nfirmware: {kind: none}\naudio: none\n" +
-		"media: {iso: false, iso_reason: \"none\", recovery: false}\n")
+		"media: {iso: false, iso_reason: \"none\", recovery: false}\n" +
+		"qemu:\n  profiles:\n    main:\n      machine: \"q35\"\n      args:\n" +
+		"        - [\"-device\", \"x\"]\n")
 	if err := reg.LoadBytes("a.yaml", one); err != nil {
 		t.Fatal(err)
 	}

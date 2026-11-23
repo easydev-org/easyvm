@@ -103,15 +103,26 @@ type ShapeFile struct {
 	Audio    string       `yaml:"audio"`
 	// SMC is Apple's System Management Controller, which only macOS reads.
 	SMC bool `yaml:"smc"`
+	// QGA is how the guest agent's chardev reaches the guest: `virtio-serial` (the default) or
+	// `isa-serial`.
+	//
+	// TWO GUESTS NEED `isa-serial`, FOR DIFFERENT REASONS, AND NEITHER IS A PREFERENCE:
+	//
+	//	macOS      Apple's own agent never loads under qemu, and the third-party one that does probes
+	//	           `/dev/cu.serial1` - the FIRST isa-serial device qemu adds, so this must be the only
+	//	           one.
+	//	a microvm  `virtio-serial` is a PCI device and a microvm has no PCI bus:
+	//	           `-device virtio-serial: No 'PCI' bus found for device 'virtio-serial-pci'`.
+	//
+	// It is a SHAPE FIELD rather than a name check because both of those are facts about a machine,
+	// and the daemon that assembles the argument list should read them rather than decide them.
+	QGA string `yaml:"qga"`
 	// InstallMedium is which attached medium marks this boot as an install.
 	InstallMedium InstallMedium `yaml:"install_medium"`
-	// ExtraArgs are qemu arguments appended verbatim, one array per argument pair.
-	//
-	// ONE ARRAY PER PAIR RATHER THAN ONE FLAT LIST, so a file cannot end up with an odd number of
-	// arguments - a flat list whose `-device` lost its value is a qemu error naming the device.
-	ExtraArgs [][]string `yaml:"extra_args"`
 	// Media is which media this guest may be given, and refused otherwise.
 	Media MediaSpec `yaml:"media"`
+	// QEMU is the raw command line this machine needs. See `QEMUSpec`.
+	QEMU QEMUSpec `yaml:"qemu"`
 }
 
 // FirmwareSpec is what the `-drive if=pflash` lines name.
@@ -151,11 +162,68 @@ type SMPSpec struct {
 	Format SMPFormat `yaml:"format"`
 }
 
-// VideoSpec is the adapter.
+// VideoSpec is the adapter, as a`kind` the daemon used to switch on.
+//
+// IT IS STILL HERE BECAUSE `VGA()` READS IT, and `kind` now means "which of `qemu.video` to use"
+// rather than a branch in Go. See `QEMUSpec`.
 type VideoSpec struct {
-	// Kind is `vga` (the -device VGA,xres= form), `virtio` (virtio-vga), `none` (no adapter at all,
-	// because another device supplies one) or `absent` (a microvm with no display).
+	// Kind is the adapter this shape wants: `vga`, `virtio`, `none` or `absent`. It names one of
+	// `qemu.video`'s entries when that map is used, and is otherwise a label for a reader.
 	Kind string `yaml:"kind"`
+}
+
+// QEMUSpec is THE RAW QEMU COMMAND LINE THIS MACHINE NEEDS, written by the shape.
+//
+// IT REPLACES SIX FUNCTIONS AND A BOOL: `VGA`, `StorageArgs`' two branches, `AudioArgs`' two,
+// `SMCArgs`, `KernelArgs`, `microvm`'s six conditionals and `virtioBlk`/`VirtioNet`. Every one of
+// them answered "what does this machine look like", which is a fact about a guest and belongs in a
+// file somebody can read.
+//
+// A SHAPE MAY HOLD MORE THAN ONE PROFILE because one machine can be started in more than one
+// CONFIGURATION and the difference is not a placeholder: a microvm draws on nothing, an ISA VGA, or a
+// virtio-gpu depending on whether its session is serial, a text console or a desktop - and each of
+// those changes the `-machine` options, the adapter AND whether PCIe exists. Writing that as
+// `{{pcie}}`/`{{graphics}}`/`{{video}}` put three conditionals back in the file in a different
+// spelling. A profile writes each configuration out literally instead.
+type QEMUSpec struct {
+	// Default is the profile a step gets when it names none. Empty means the first profile in name
+	// order, which keeps a single-profile shape from having to state one.
+	Default string `yaml:"default"`
+	// Profiles are the configurations, keyed by the name a step selects.
+	Profiles map[string]QEMUProfile `yaml:"profiles"`
+}
+
+// QEMUProfile is one configuration of one machine.
+//
+// THE PLACEHOLDERS ARE THE ONLY THING THE ENGINE SUBSTITUTES, and every one is a value only the run
+// knows - never a choice between configurations:
+//
+//	{{disk}}       the target disk's path
+//	{{iso}}        the installer medium, empty when none
+//	{{recovery}}   the recovery image, empty when none
+//	{{answer}}     Windows Setup's answer CD
+//	{{driver}}     Windows Setup's driver CD
+//	{{dir}}        the firmware directory (`firmware.dir`)
+//	{{work}}       the run's working directory
+//	{{kernel}}     the kernel a microvm boots
+//	{{initrd}}     its initramfs
+//	{{append}}     its kernel command line
+//	{{discard}}    `,discard=unmap` when a trim may reach the disk, empty otherwise
+//
+// A PAIR WITH AN EMPTY PLACEHOLDER IS DROPPED, which is how `{{iso}}` and `{{recovery}}` make an
+// optional medium disappear without a conditional.
+type QEMUProfile struct {
+	// Machine is the `-machine` value.
+	Machine string `yaml:"machine"`
+	// Args are the device and drive arguments, in order, one array per argument pair.
+	//
+	// THE ORDER IS THE FILE'S, not this build's: a bus must precede the device that names it, a
+	// `-audiodev` must precede the sound card, and an OpenCore disk must be `bootindex=0` before the
+	// target.
+	Args [][]string `yaml:"args"`
+	// KernelArgs are appended when the boot names a kernel, instead of firmware reading a boot
+	// sector. `{{kernel}}`, `{{initrd}}` and `{{append}}` are substituted.
+	KernelArgs [][]string `yaml:"kernel_args"`
 }
 
 // MediaSpec is which of the optional media a guest may be given.
@@ -216,9 +284,13 @@ type Shape struct {
 	Video         string
 	Audio         string
 	SMC           bool
+	QGA           string
 	InstallMedium InstallMedium
-	ExtraArgs     []string
 	Media         MediaSpec
+	// QEMU is `qemu`, with each profile checked and kept as written.
+	QEMU map[string]QEMUProfile
+	// QEMUDefault is the profile a step gets when it names none.
+	QEMUDefault string
 }
 
 // Validate compiles a ShapeFile, refusing anything the builders could not render.
@@ -312,6 +384,37 @@ func (f ShapeFile) Validate() (Shape, error) {
 		s.RecoveryArgs = append(s.RecoveryArgs, pair...)
 	}
 
+	if len(f.QEMU.Profiles) == 0 {
+		return s, fmt.Errorf("shape %q: `qemu.profiles` is empty; a shape with no command line "+
+			"describes a machine nothing can start", f.Name)
+	}
+	for name, prof := range f.QEMU.Profiles {
+		if prof.Machine == "" {
+			return s, fmt.Errorf("shape %q: `qemu.profiles.%s.machine` is empty; it is the `-machine` "+
+				"value and qemu has no default for it", f.Name, name)
+		}
+		for i, pair := range prof.Args {
+			if len(pair) != 2 {
+				return s, fmt.Errorf("shape %q: `qemu.profiles.%s.args[%d]` has %d element(s). Each "+
+					"entry is ONE argument pair, because a qemu flag without its value is an error "+
+					"naming the flag rather than what was meant", f.Name, name, i, len(pair))
+			}
+		}
+		for i, pair := range prof.KernelArgs {
+			if len(pair) != 2 {
+				return s, fmt.Errorf("shape %q: `qemu.profiles.%s.kernel_args[%d]` has %d element(s); "+
+					"each entry is one argument pair", f.Name, name, i, len(pair))
+			}
+		}
+	}
+	if f.QEMU.Default != "" {
+		if _, ok := f.QEMU.Profiles[f.QEMU.Default]; !ok {
+			return s, fmt.Errorf("shape %q: `qemu.default: %q` names no profile; the profiles are %s",
+				f.Name, f.QEMU.Default, strings.Join(sortedKeysQEMU(f.QEMU.Profiles), ", "))
+		}
+	}
+	s.QEMU, s.QEMUDefault = f.QEMU.Profiles, f.QEMU.Default
+
 	s.CPUSuffix = f.CPU.Suffix
 
 	switch f.SMP.Format {
@@ -358,15 +461,6 @@ func (f ShapeFile) Validate() (Shape, error) {
 			f.Name, f.InstallMedium, MediumISO, MediumRecovery, MediumNone)
 	}
 
-	for i, pair := range f.ExtraArgs {
-		if len(pair) != 2 {
-			return s, fmt.Errorf("shape %q: `extra_args[%d]` has %d element(s); every qemu argument is "+
-				"an OPTION and a VALUE, so each entry must be exactly two - a flat list whose `-device` "+
-				"lost its value is a qemu error naming the device rather than the file",
-				f.Name, i, len(pair))
-		}
-		s.ExtraArgs = append(s.ExtraArgs, pair...)
-	}
 
 	s.Media = f.Media
 	// A SHAPE THAT CAN TAKE AN INSTALL ISO MUST SAY SO, because the refusal for the others names a
@@ -380,6 +474,15 @@ func (f ShapeFile) Validate() (Shape, error) {
 			"does not say why sends a reader looking for a bug in the engine", f.Name)
 	}
 	s.SMC = f.SMC
+	switch f.QGA {
+	case "":
+		s.QGA = "virtio-serial"
+	case "virtio-serial", "isa-serial":
+		s.QGA = f.QGA
+	default:
+		return s, fmt.Errorf("shape %q: `qga: %q` is not a transport this build knows; one of "+
+			"\"virtio-serial\" or \"isa-serial\"", f.Name, f.QGA)
+	}
 	return s, nil
 }
 
@@ -537,4 +640,38 @@ func (s Shape) highestFirmwareBootIndex() int {
 		}
 	}
 	return best
+}
+
+
+// sortedKeysQEMU is a stable ordering for an error message.
+func sortedKeysQEMU(m map[string]QEMUProfile) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// Profile returns the named profile, or the default when the name is empty.
+//
+// AN UNKNOWN NAME IS AN ERROR rather than a fallback: a walk that says `microvm_display: dekstop`
+// should be told so, not handed the terminal profile and left to wonder why its GPU never appeared.
+func (s Shape) Profile(name string) (QEMUProfile, error) {
+	if len(s.QEMU) == 0 {
+		return QEMUProfile{}, fmt.Errorf("shape %q has no `qemu` section", s.Name)
+	}
+	if name == "" {
+		name = s.QEMUDefault
+	}
+	if name == "" {
+		// THE FIRST IN NAME ORDER, so a single-profile shape needs no `default:`.
+		return s.QEMU[sortedKeysQEMU(s.QEMU)[0]], nil
+	}
+	prof, ok := s.QEMU[name]
+	if !ok {
+		return QEMUProfile{}, fmt.Errorf("shape %q has no `qemu` profile named %q; it has %s",
+			s.Name, name, strings.Join(sortedKeysQEMU(s.QEMU), ", "))
+	}
+	return prof, nil
 }

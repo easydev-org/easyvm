@@ -265,13 +265,45 @@ jobs:
                    "${{ matrix.artifact.size }}")
           echo "path=$path" >> "$GITHUB_OUTPUT"
 
+      - name: pack into a tar
+        if: steps.wanted.outputs.wanted == 'yes'
+        # EVERY PUBLISHED ASSET IS ONE TAR, AND THIS IS WHERE THAT STARTS.
+        #
+        # A LEG HAS ONE WAY TO PREPARE ITS WORK DIRECTORY: pull the named artifact, unpack it, delete
+        # the archive. That is what removed `fetch:` from the engine - the step that used to know a
+        # firmware was three files, or that an answer CD was assembled from an ISO, now knows nothing
+        # and the archive says it instead.
+        #
+        # A TAR OF ONE FILE IS STILL A TAR. `ubuntu.iso` goes in as itself, so `iso: ubuntu.iso` is a
+        # name in the work directory whether it came out of an archive or not - and the one mechanism
+        # covers both without a special case.
+        #
+        # `-C` AND THE BASENAME so the archive holds a bare name, not the runner's absolute path:
+        # MEASURED, `tar -cf out.tar /home/runner/.../ubuntu.iso` unpacks to the whole path and the
+        # walk's `iso: ubuntu.iso` finds nothing.
+        run: |
+          set -eu
+          src="${{ steps.fetch.outputs.path }}"
+          dir=$(dirname "$src")
+          base=$(basename "$src")
+          case "$base" in
+            *.tar) echo "already a tar: $src" ;;
+            *)
+              tar -cf "$dir/$base.tar" -C "$dir" "$base"
+              rm -f "$src"
+              echo "packed $src -> $dir/$base.tar"
+              echo "path=$dir/$base.tar" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
+        id: pack
+
       - name: push
         if: steps.wanted.outputs.wanted == 'yes'
         # THE TRANSFER IS THE ACTION THAT KNOWS THE REGISTRY: it installs oras idempotently, logs in
         # explicitly, and refuses a push whose bytes are identical to an earlier artifact.
         uses: easydev-org/easyactions/oci-push@main
         with:
-          path: ${{ steps.fetch.outputs.path }}
+          path: ${{ steps.pack.outputs.path || steps.fetch.outputs.path }}
           tag: ${{ matrix.artifact.tag }}
           repository: ${{ inputs.disks_repository || github.repository }}
           media-type: application/vnd.easydev.artifact

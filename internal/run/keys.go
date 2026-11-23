@@ -15,7 +15,7 @@ func ExecutableKeys() []string {
 		"boot", "input", "run", "copy", "read", "check", "control", "if", "stop", "repeat",
 		// THE TRANSPORTS AND THE PREPARATION A VERB MAY NAME.
 		"ssh", "adb", "adb_connect", "adb_privileged",
-		"fetch", "asset", "build", "generate", "write",
+		"write",
 		// THE MACHINE.
 		"disk", "disk_settle",
 		"acpi", "qga", "wait_until", "esp_fallback",

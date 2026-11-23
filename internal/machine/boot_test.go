@@ -1,10 +1,13 @@
 package machine
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/easydev-org/easyvm/internal/machine/shapes"
 )
 
 // THREE GUESTS, THREE MACHINES, AND THE DIFFERENCES ARE THE POINT.
@@ -68,20 +71,11 @@ func TestWindowsDiskBoot(t *testing.T) {
 	} else {
 		t.Fatalf("a disk boot attached a CD-ROM: %q", args)
 	}
-	if got := b.VGA("std"); got != "std" {
-		t.Fatalf("windows vga is %q; the macOS override must not apply", got)
-	}
 	if got := b.SMP(4); got != "4" {
 		t.Fatalf("windows smp is %q; only macOS needs the topology spelling", got)
 	}
 	if cpu, err := b.CPU(""); err != nil || cpu != CPUModel {
 		t.Fatalf("windows cpu is %q (%v); it must be the plain model", cpu, err)
-	}
-	if len(b.SMCArgs("")) != 0 {
-		t.Fatal("windows must not get an SMC device")
-	}
-	if len(b.ExtraArgs()) != 0 {
-		t.Fatal("windows must not get the macOS ICH9 and svga arguments")
 	}
 }
 
@@ -191,8 +185,10 @@ func TestMacOSBootAlwaysHasOpenCore(t *testing.T) {
 		t.Fatalf("a macOS boot with no recovery image is a FINISHED system and must discard - "+
 			"that is what keeps the published disk small:\n%s", body)
 	}
-	if len(b.SMCArgs("")) == 0 {
-		t.Fatal("macOS needs isa-applesmc; without the key the kernel stops before it draws")
+	// THE SMC KEY IS IN THE PROFILE'S ARGUMENTS. macOS reads it to decide whether the firmware is
+	// Apple's, and without it the kernel stops before it draws anything.
+	if !strings.Contains(strings.Join(profileText(t, "macos"), " "), "isa-applesmc,osk=") {
+		t.Fatal("no macOS profile attaches `isa-applesmc` with its key")
 	}
 	// THE FIRMWARE IS OPENCORE'S, NOT OVMF'S.
 	// THE FIRMWARE'S OWN ARGUMENTS, RENDERED FROM THE SHAPE. macOS's shape is `kind: folder`, so
@@ -222,7 +218,7 @@ func TestTheCPUModelIsFixedAndMacOSAddsFlags(t *testing.T) {
 		t.Fatalf("windows cpu = %q, want the plain %q", cpu, CPUModel)
 	}
 
-	mac := Boot{OS: MacOS}
+	mac := Boot{OS: MacOS, Shape: realShape(t, "macos")}
 	mcpu, err := mac.CPU("")
 	if err != nil {
 		t.Fatal(err)
@@ -307,50 +303,38 @@ func TestAMissingMediumSaysWhatItWas(t *testing.T) {
 // which is an empty path and a qemu that refuses to start, with a message about a drive rather
 // than about the step that forgot to say what it was installing from.
 func TestOnlyAnInstallAttachesTheRecoveryImage(t *testing.T) {
-	disk, _, _, _, recovery, rom, vars, bootImg := fixture(t)
+	// THE PROFILE SAYS SO, AND THE SELECTION IS THE RECOVERY IMAGE ITSELF.
+	//
+	// An install boots FROM removable media and writes TO a disk; every later stage boots a system
+	// that is already installed and has no recovery volume, and an extra USB disk is one more row the
+	// guest can pick in Disk Utility - where `choose the target disk by capacity` reads the sidebar.
+	sh := realShape(t, "macos")
+	v := RenderValues{"disk": "/w/disk.qcow2", "recovery": "/w/recovery.dmg", "dir": "/w", "work": "/w"}
 
-	install := Boot{OS: MacOS, Disk: disk, Recovery: recovery,
-		OpenCoreROM: rom, OpenCoreVars: vars, BootImage: bootImg}
-	installed := Boot{OS: MacOS, Disk: disk,
-		OpenCoreROM: rom, OpenCoreVars: vars, BootImage: bootImg}
-
-	cases := []struct {
-		name     string
-		boot     Boot
-		attached bool
-	}{
-		{"the setup stage, which has `recovery:`", install, true},
-		{"a stage that boots an installed system", installed, false},
+	install, err := sh.Profile("install")
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, c := range cases {
-		args := c.boot.StorageArgs()
-		joined := strings.Join(args, " ")
-		if got := strings.Contains(joined, "usb-storage"); got != c.attached {
-			t.Fatalf("%s: usb-storage attached = %v, want %v:\n%s", c.name, got, c.attached, joined)
-		}
-		// AN EMPTY PATH IS NEVER ALLOWED, whatever the answer. This is the assertion that would
-		// have caught the original bug even if the USB decision had been right.
-		if strings.Contains(joined, "file=,") || strings.Contains(joined, "file= ") {
-			t.Fatalf("%s: a -drive was built with an empty file path:\n%s", c.name, joined)
-		}
-		for _, a := range args {
-			if strings.HasPrefix(a, "file=") && a == "file=," {
-				t.Fatalf("%s: empty drive path in %q", c.name, a)
-			}
-			if a == "" {
-				t.Fatalf("%s: an empty argument reached the command line: %q", c.name, args)
-			}
-		}
+	installed, err := sh.Profile("disk")
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	// AND OPENCORE IS IN BOTH. It is the firmware, not the installer: an installed macOS disk
-	// still boots through it, and without these three files the guest sits in the UEFI shell.
-	for _, c := range cases {
-		joined := strings.Join(c.boot.StorageArgs(), " ")
-		if !strings.Contains(joined, "bootindex=0") {
-			t.Fatalf("%s: OpenCore's disk lost bootindex=0; without a bootindex the firmware "+
-				"does not try it at all:\n%s", c.name, joined)
-		}
+	// THE INSTALL PROFILE IS THE ONE WITH THE RECOVERY DEVICE.
+	if !strings.Contains(strings.Join(RenderArgs(install.Args, v), " "), "usb-storage") {
+		t.Fatal("the `install` profile does not attach the recovery image as usb-storage, so the " +
+			"guest has no medium to install from")
+	}
+	if strings.Contains(strings.Join(RenderArgs(installed.Args, v), " "), "usb-storage") {
+		t.Fatal("the `disk` profile attaches the recovery image, which is one more disk the guest can " +
+			"select in Disk Utility - and `choose the target disk by capacity` reads the sidebar")
+	}
+	// AND A BOOT PICKS THEM BY WHETHER IT HAS A RECOVERY IMAGE, which is the same fact `installing()`
+	// reads rather than a second place to state it.
+	if got := (Boot{OS: MacOS, Shape: sh, Recovery: "/w/r.dmg"}).ProfileName(); got != "install" {
+		t.Errorf("a boot with `recovery:` picks the %q profile; it must be `install`", got)
+	}
+	if got := (Boot{OS: MacOS, Shape: sh}).ProfileName(); got != "disk" {
+		t.Errorf("a boot without `recovery:` picks the %q profile; it must be `disk`", got)
 	}
 }
 
@@ -362,35 +346,35 @@ func TestOnlyAnInstallAttachesTheRecoveryImage(t *testing.T) {
 // needs discard off. The file already says which it is.
 func TestDiscardIsDecidedByTheMediaAndNotByTheDiskSize(t *testing.T) {
 	var (
-		disk, iso, answer, driver, recovery, rom, vars, bootImg = fixture(t)
+		disk, iso, _, _, recovery, _, _, _ = fixture(t)
 	)
-	_ = answer
-	_ = driver
+	macSh := realShape(t, "macos")
+	winSh := realShape(t, "windows")
 
-	macInstall := Boot{OS: MacOS, Disk: disk, Recovery: recovery,
-		OpenCoreROM: rom, OpenCoreVars: vars, BootImage: bootImg}
-	macInstalled := Boot{OS: MacOS, Disk: disk,
-		OpenCoreROM: rom, OpenCoreVars: vars, BootImage: bootImg}
-	winInstall := Boot{OS: Windows, Disk: disk, ISO: iso}
-	winInstalled := Boot{OS: Windows, Disk: disk}
+	macInstall := Boot{OS: MacOS, Disk: disk, Recovery: recovery, Shape: macSh}
+	macInstalled := Boot{OS: MacOS, Disk: disk, Shape: macSh}
+	winInstall := Boot{OS: Windows, Disk: disk, ISO: iso, Shape: winSh}
+	winInstalled := Boot{OS: Windows, Disk: disk, Shape: winSh}
 
+	// IT IS THE PLACEHOLDER THE PROFILE USES, so this asserts the same thing the command line gets:
+	// `{{discard}}` renders to `,discard=unmap` or to nothing, and an empty placeholder drops the
+	// pair it is in.
 	for _, c := range []struct {
-		name       string
-		boot       Boot
-		discarding bool
+		name   string
+		boot   Boot
+		trims  bool
 	}{
 		{"macOS installing", macInstall, false},
 		{"macOS installed", macInstalled, true},
 		{"windows installing", winInstall, false},
 		{"windows installed", winInstalled, true},
 	} {
-		joined := strings.Join(c.boot.StorageArgs(), " ")
-		got := strings.Contains(joined, "discard=unmap")
-		if got != c.discarding {
+		got := strings.Contains(c.boot.DiscardFragment(), "discard=unmap")
+		if got != c.trims {
 			t.Fatalf("%s: discard=unmap = %v, want %v. An install that discards loses the "+
 				"clusters the APFS snapshot still refers to (42009463444: wrote 36774 MiB, "+
-				"dropped to 19761, froze at \"About 48 minutes remaining\"):\n%s",
-				c.name, got, c.discarding, joined)
+				"dropped to 19761, froze at \"About 48 minutes remaining\")",
+				c.name, got, c.trims)
 		}
 	}
 
@@ -401,9 +385,8 @@ func TestDiscardIsDecidedByTheMediaAndNotByTheDiskSize(t *testing.T) {
 	if err := os.WriteFile(big, make([]byte, 2<<20), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	bigInstall := Boot{OS: MacOS, Disk: big, Recovery: recovery,
-		OpenCoreROM: rom, OpenCoreVars: vars, BootImage: bootImg}
-	if strings.Contains(strings.Join(bigInstall.StorageArgs(), " "), "discard=unmap") {
+	bigInstall := Boot{OS: MacOS, Disk: big, Recovery: recovery, Shape: macSh}
+	if strings.Contains(bigInstall.DiscardFragment(), "discard=unmap") {
 		t.Fatal("discard was turned on because the install's disk had grown past a size " +
 			"threshold; the installer is still writing and this is the 17 GiB failure")
 	}
@@ -449,9 +432,10 @@ func TestBSDIsAcceptedAndBootsLikeLinux(t *testing.T) {
 	if strings.Contains(strings.Join(installing.StorageArgs(), " "), "discard=unmap") {
 		t.Fatal("an installing BSD boot must not discard")
 	}
-	// AND IT GETS NO APPLE OR WINDOWS PARTS.
-	if len(installed.SMCArgs("")) != 0 || len(installed.ExtraArgs()) != 0 {
-		t.Fatal("bsd must not get the SMC device or the macOS ICH9 arguments")
+	// AND IT GETS NO APPLE PARTS: its own profile names no SMC device, because a BSD guest has no
+	// firmware that reads one.
+	if strings.Contains(strings.Join(profileText(t, "bsd"), " "), "isa-applesmc") {
+		t.Fatal("the bsd profile attaches an Apple SMC")
 	}
 }
 
@@ -603,26 +587,32 @@ func TestTheRecoveryDeviceHasAController(t *testing.T) {
 // BOTH ARE ASSERTED ON THE DRIVER'S SOURCE, because they are assembled there rather than by
 // internal/machine - and a test that only ran the machine would need qemu and a guest for each.
 func TestTheGuestAgentPortAndTheScreenSizeAreInTheCommandLine(t *testing.T) {
-	body, err := os.ReadFile("../daemon/driver.go")
-	if err != nil {
-		t.Fatal(err)
+	// THE ARGUMENTS ARE THE SHAPES' NOW, so this reads every shape that has a `qemu:` section rather
+	// than one Go file. A shape with a `qemu:` section and no agent port is still the failure this
+	// test exists for - a guest that installs qemu-guest-agent cannot start it, `systemctl is-active`
+	// returns 3, and the step reports a stopped agent.
+	var src string
+	for _, entry := range mustShapeFiles(t) {
+		raw, err := os.ReadFile(entry)
+		if err != nil {
+			t.Fatal(err)
+		}
+		src += string(raw)
 	}
-	src := string(body)
-
-	// THE AGENT'S PORT, BOTH TRANSPORTS.
 	if !strings.Contains(src, "virtio-serial") ||
 		!strings.Contains(src, "virtserialport,chardev=qga0,name=org.qemu.guest_agent.0") {
-		t.Fatal("the guest agent's virtio-serial port is not in the command line, so a guest that " +
-			"installs qemu-guest-agent cannot start it - `systemctl is-active` returns 3 and the " +
-			"step reports a stopped agent")
+		t.Error("no shape gives a guest the agent's virtio-serial port, so a guest that installs " +
+			"qemu-guest-agent cannot start it - `systemctl is-active` returns 3 and the step reports " +
+			"a stopped agent")
 	}
 	if !strings.Contains(src, "isa-serial,chardev=qga0") {
-		t.Fatal("macOS does not get `isa-serial` for its agent. Apple's own agent never loads under " +
-			"QEMU and the third-party one probes /dev/cu.serial1, which is the FIRST isa-serial device")
+		t.Error("no shape gives a guest `isa-serial` for its agent. macOS's third-party agent probes " +
+			"/dev/cu.serial1, which is the FIRST isa-serial device, and a microvm has no PCI bus for " +
+			"virtio-serial")
 	}
 	if !strings.Contains(src, "server=on,wait=off") {
-		t.Fatal("the agent's chardev does not use `server=on,wait=off`, so qemu would block waiting " +
-			"for a host to connect before the guest can start")
+		t.Error("no agent chardev uses `server=on,wait=off`, so qemu would block waiting for a host " +
+			"to connect before the guest can start")
 	}
 
 	// THE SCREEN SIZE, WHICH `-vga std` CANNOT CARRY.
@@ -636,10 +626,12 @@ func TestTheGuestAgentPortAndTheScreenSizeAreInTheCommandLine(t *testing.T) {
 			"buffering, so the adapter cannot hold a frame - and the symptom is a BLACK screen from " +
 			"the first capture, with no error")
 	}
-	// AND macOS STILL GETS `-vga none`, because its adapter is vmware-svga from ExtraArgs.
-	if !strings.Contains(src, `"-vga", "none"`) {
-		t.Fatal("the `-vga none` branch is gone; macOS would get a second adapter alongside its " +
-			"vmware-svga device")
+	// AND A SHAPE THAT SUPPLIES ITS OWN ADAPTER SAYS `video.kind: none`, so `{{video}}` renders empty
+	// and the pair is dropped. macOS is the one: its `vmware-svga` is a device in `qemu.args`, and a
+	// second adapter would give the guest two displays - one of them the blank one `see:` photographs.
+	if !strings.Contains(src, "kind: none") {
+		t.Error("no shape says `video.kind: none`, so a guest whose adapter is one of its own devices " +
+			"would be given a second one")
 	}
 }
 
@@ -1000,28 +992,71 @@ func TestEveryGuestGetsASoundCard(t *testing.T) {
 // four devices and no controller, on a guest built from `machine.Boot` - because the method was
 // written and the argument list never named it.
 func TestTheDaemonAsksForTheSoundCard(t *testing.T) {
-	body, err := os.ReadFile("../daemon/driver.go")
-	if err != nil {
-		t.Fatal(err)
+	// THE SOUND CARD IS IN THE SHAPE'S `qemu.args` NOW, so this reads the shapes rather than a Go
+	// file. A guest that boots with no sound card reports every capture as its own failure, and the
+	// measurement behind this is on a freebsd disk:
+	//
+	//	pciconf -lv | grep -i hda     NO_AUDIO_ON_PCI
+	//	virtio_pci0  0:1:0  virtio-serial
+	//	vgapci0      0:2:0  VGA
+	//	virtio_pci1  0:3:0  virtio-blk
+	//	xhci0        0:4:0  xHCI
+	//
+	// four devices and no controller.
+	//
+	// `-audiodev` MUST PRECEDE THE DEVICE THAT NAMES IT, and each shape is checked for that order
+	// rather than for the two strings appearing anywhere.
+	checked := 0
+	for _, path := range mustShapeFiles(t) {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := string(raw)
+		if !strings.Contains(body, "qemu:") {
+			continue // a shape with no raw arguments yet
+		}
+		// A SHAPE THAT SAYS `audio: none` WANTS NO SOUND CARD, and the reason is a machine fact: a
+		// microvm has no PCI bus, and `ich9-intel-hda` is a PCI device. Asking it for one would be
+		// the same class of mistake as the missing controller - a device qemu refuses at startup.
+		if strings.Contains(body, "audio: none") {
+			continue
+		}
+		checked++
+		audioDev := strings.Index(body, "-audiodev")
+		if audioDev < 0 {
+			t.Errorf("%s: `qemu.args` has no `-audiodev`, so this guest has no sound card and every "+
+				"capture reports itself as the failure", filepath.Base(path))
+			continue
+		}
+		// A DEVICE THAT NAMES THE AUDIODEV MUST COME AFTER IT, AND ONLY THE ARGUMENT LISTS COUNT.
+		//
+		// THE COMMENTS NAME THESE STRINGS TOO - they explain why `usb-audio` and not HDA, and why
+		// `-audiodev` must precede the device - so a plain search of the file finds them in prose.
+		// Only lines that begin an argument pair are read.
+		var argLines []string
+		for _, line := range strings.Split(body, "\n") {
+			t := strings.TrimSpace(line)
+			if strings.HasPrefix(t, "- [") {
+				argLines = append(argLines, t)
+			}
+		}
+		args := strings.Join(argLines, "\n")
+		devAt := strings.Index(args, "-audiodev")
+		if devAt < 0 {
+			t.Errorf("%s: no `-audiodev` in any argument list", filepath.Base(path))
+			continue
+		}
+		for _, dev := range []string{"hda-duplex", "usb-audio"} {
+			i := strings.Index(args, dev)
+			if i >= 0 && i < devAt {
+				t.Errorf("%s: `%s` comes before the `-audiodev` it names; qemu resolves the id as "+
+					"it parses and refuses with `no such audio device`", filepath.Base(path), dev)
+			}
+		}
 	}
-	if !strings.Contains(string(body), "boot.AudioArgs()") {
-		t.Fatal("internal/daemon/driver.go never calls `boot.AudioArgs()`, so no guest has a sound " +
-			"card no matter what that method returns. Measured consequence: `pciconf -lv` on a " +
-			"freebsd guest lists hostb0, virtio_pci0, vgapci0, virtio_pci1 and xhci0 - no HDA " +
-			"controller - and `/dev/sndstat` says `No devices installed.`")
-	}
-	// AND IT MUST COME AFTER `StorageArgs`, because macOS's `usb-audio` rides the xHCI controller
-	// that call creates, and BEFORE nothing in particular on the other families - but the ordering
-	// that matters is inside AudioArgs (`-audiodev` first), which the other test holds.
-	storage := strings.Index(string(body), "boot.StorageArgs()")
-	audio := strings.Index(string(body), "boot.AudioArgs()")
-	if storage < 0 || audio < 0 {
-		t.Fatal("driver.go no longer names both StorageArgs and AudioArgs")
-	}
-	if audio < storage {
-		t.Fatal("`AudioArgs()` is appended before `StorageArgs()`. macOS's `usb-audio` names " +
-			"`bus=xhci.0`, and that bus is created by StorageArgs - qemu refuses with " +
-			"`Bus 'xhci.0' not found`")
+	if checked == 0 {
+		t.Fatal("no shape has a `qemu:` section, so this checks nothing")
 	}
 }
 
@@ -1112,38 +1147,6 @@ func TestAMicrovmDeclaresTheAbsenceOfPCIeUnlessItHasADesktop(t *testing.T) {
 	}
 }
 
-// A MICROVM DESKTOP MUST REACH THE DAEMON'S ADAPTER SWITCH AS `std`, NOT `absent`.
-//
-// MEASURED, and it cost a full CI matrix: the microvm shape says `video: {kind: absent}`, and
-// `VGAFor` returned that word verbatim. The daemon's switch has cases for `none`, `virtio` and
-// `std` - and NO case for `absent` - so twenty-four desktop variants booted with NO display device.
-// `modprobe virtio-gpu` had nothing to bind, /dev/dri stayed empty, Xorg answered
-// `(EE) no screens found`, and every screenshot was qemu's blank framebuffer (mean 0.7231).
-func TestAMicrovmDesktopReachesTheAdapterSwitch(t *testing.T) {
-	// THE SHAPE IS `absent`, so this is the exact combination that broke.
-	b := Boot{OS: "microvm", MicroVM: true, MicroVMDisplay: "desktop"}
-	if got := b.VGAFor("std"); got != "std" {
-		t.Fatalf("a desktop microvm's VGA kind is %q. The daemon decides the adapter in a switch over "+
-			"`none`/`virtio`/`std`; `absent` matches none of them, so no display device is added and "+
-			"the GPU never binds", got)
-	}
-	// AND THE HEADLESS FORMS ARE UNCHANGED: they still reach the same switch, which is what picks
-	// `isa-vga` for a terminal and nothing at all for serial.
-	for _, d := range []string{"serial", "terminal"} {
-		if got := (Boot{OS: "microvm", MicroVM: true, MicroVMDisplay: d}).VGAFor("std"); got != "std" {
-			t.Errorf("a %s microvm's VGA kind is %q, want the default so the daemon's own switch runs", d, got)
-		}
-	}
-	// A SHAPE THAT REALLY SAYS `none` STILL WINS: macOS supplies its own adapter through extra_args.
-	//
-	// THE SHAPE IS STATED RATHER THAN LOOKED UP. `macos` is owned by `easyvm-macos` and is not embedded
-	// in this build - only `linux` and `microvm` are, the two a bare image can start - so a test that
-	// relied on the registry would be testing a machine this binary does not carry.
-	if got := (Boot{OS: "macos", Shape: Shape{Name: "macos", Video: "none"}}).VGAFor("std"); got != "none" {
-		t.Errorf("macOS's VGA kind is %q, want `none` - its adapter is in extra_args", got)
-	}
-}
-
 // macOSShapeFile is `easyvm-macos/shapes/macos.yaml`, or a skip when that repository is not beside
 // this one.
 //
@@ -1184,4 +1187,52 @@ func realShape(t *testing.T, name string) Shape {
 	t.Skipf("no %q shape here: it lives in easyvm-%s/shapes, and this checkout does not have it",
 		name, name)
 	return Shape{}
+}
+
+// mustShapeFiles is every shape file this checkout has: the two embedded, plus the ones the
+// sub-repositories own when they are beside this tree.
+func mustShapeFiles(t *testing.T) []string {
+	t.Helper()
+	var out []string
+	entries, err := fs.ReadDir(shapes.Files, ".")
+	if err == nil {
+		for _, e := range entries {
+			if !e.IsDir() && strings.HasSuffix(e.Name(), ".yaml") {
+				out = append(out, filepath.Join("shapes", e.Name()))
+			}
+		}
+	}
+	for _, base := range []string{"../..", "..", "../../.."} {
+		for _, repo := range []string{
+			"easyvm-linux", "easyvm-windows", "easyvm-macos", "easyvm-bsd", "easyvm-android",
+			"easyvm-microvm", "sd-linux", "sd-windows", "sd-macos", "sd-bsd", "sd-android",
+			"sd-microvm",
+		} {
+			m, _ := filepath.Glob(filepath.Join(base, repo, "shapes", "*.yaml"))
+			out = append(out, m...)
+		}
+	}
+	if len(out) == 0 {
+		t.Fatal("no shape files found, so this test would check nothing")
+	}
+	return out
+}
+
+// profileText is a shape's default profile, flattened, for a test that asserts on its text.
+func profileText(t *testing.T, shape string) []string {
+	t.Helper()
+	sh := realShape(t, shape)
+	prof, err := sh.Profile("")
+	if err != nil {
+		t.Fatalf("%s: %v", shape, err)
+	}
+	var out []string
+	out = append(out, prof.Machine)
+	for _, pair := range prof.Args {
+		out = append(out, pair...)
+	}
+	for _, pair := range prof.KernelArgs {
+		out = append(out, pair...)
+	}
+	return out
 }

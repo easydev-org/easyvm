@@ -12,7 +12,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/easydev-org/easyvm/internal/asset"
 	"github.com/easydev-org/easyvm/internal/bootstrap"
 	"github.com/easydev-org/easyvm/internal/screen"
 	"github.com/easydev-org/easyvm/internal/walk"
@@ -725,114 +724,6 @@ func (e *Executor) userForPaths() string {
 	return "vmuser"
 }
 
-// doFetch produces a host-side asset.
-//
-// THE VALUES ARE THE FILE'S OWN VARIABLES, because an answer file's placeholders are exactly the
-// facts the walkthrough already names: the account, its password, the computer name. A `fetch:`
-// that took them from the environment instead would be a second place those facts live, and the
-// disk would be installed with one account and driven with another.
-func (e *Executor) doFetch(s walk.Step) error {
-	// ONE KIND, FOUR KEY NAMES, AND NOW ONE. `asset:`, `build:` and `generate:` all dispatched to
-	// this function and differed only in the WORD the file chose - taking a published file,
-	// assembling one, or rendering one. MEASURED: `asset:` 1, `build:` 2, `generate:` 1, so the
-	// distinction was never load-bearing; the KIND is the value, and `fetch:` is the verb.
-	//
-	// THE OLD THREE ARE STILL READ so a file that has not been renamed runs, and the migration is
-	// per file.
-	kind := s.Get("fetch")
-	if kind == "" {
-		return fail(s.Name, "the step must name what it prepares: `fetch: <kind>` - an installer "+
-			"image, a guest agent, a firmware, an answer CD")
-	}
-	// `os:` AND NOT `family:`: the family spelling is gone from the vocabulary, and this was the
-	// last reader of it.
-	family := s.Get("os")
-	if family == "" && e.File != nil {
-		for _, other := range e.File.Steps {
-			if v := other.Get("os"); v != "" {
-				family = v
-				break
-			}
-		}
-	}
-
-	spec := asset.Spec{
-		Kind:     asset.Kind(kind),
-		Family:   family,
-		Work:     e.Work,
-		Template: s.Get("template"),
-		Release:  s.Get("release"),
-		// THE RECOVERY IMAGE IS AN INPUT TO THE OPENCORE BUILD, not a device this step gives a
-		// guest: Apple's APFS driver comes out of that image, and OpenCore cannot read an APFS
-		// partition without it. The two are separate facts, which is why this is a path here and a
-		// `recovery:` on a boot step.
-		Recovery: e.assetPath(s.Get("recovery")),
-	}
-	if spec.Release == "" && e.File != nil {
-		if v, ok := e.File.Vars["release"]; ok {
-			spec.Release = str(v)
-		}
-	}
-	// THE ANSWER FILE'S PLACEHOLDERS. `{{ user }}` and `{{ password }}` are resolved by the
-	// walkthrough loader, so a file writes them the same way it writes every other fact; these
-	// are the WINDOWS names the template uses.
-	if e.File != nil {
-		vars := e.File.Vars
-		spec.Values = map[string]string{
-			"__ADMIN_USER__":          str(vars["user"]),
-			"__ADMIN_PASSWORD__":      str(vars["password"]),
-			"__COMPUTER_NAME__":       str(vars["computer_name"]),
-			"__WINDOWS_IMAGE_INDEX__": str(vars["windows_image_index"]),
-		}
-	}
-
-	res, err := asset.Fetch(spec)
-	if err != nil {
-		return fail(s.Name, "%v", err)
-	}
-	e.Driver.Log(fmt.Sprintf("  ready: %s", res.Main))
-	for _, extra := range res.Extra {
-		e.Driver.Log(fmt.Sprintf("  also: %s", extra))
-	}
-	// THE STEPS AFTER THIS ONE NAME THIS FILE, so it is remembered rather than guessed: a `boot:`
-	// with `answer_cd: auto` or a later step asking "where is the answer CD" gets the truth.
-	if e.assets == nil {
-		e.assets = map[string]string{}
-	}
-	if e.assetExtras == nil {
-		e.assetExtras = map[string][]string{}
-	}
-	e.assets[kind] = res.Main
-	if len(res.Extra) > 0 {
-		e.assetExtras[kind] = res.Extra
-	}
-	// THE ANSWER CD IS BUILT FROM THE VENDOR ISO, and the boot step needs that ISO attached as the
-	// driver CD - "the same drivers again, for the installed system". Recording it here means the
-	// file is named in ONE place (the asset layer) rather than spelled into the YAML.
-	if kind == string(asset.AnswerISO) {
-		for _, extra := range res.Extra {
-			if strings.HasSuffix(extra, "virtio-win.iso") {
-				e.assets[string(asset.VirtioWin)] = extra
-			}
-		}
-	}
-	return nil
-}
-
-// str renders a resolved variable for a placeholder. An absent one is the empty string, and a
-// placeholder left empty is caught by answer.Build rather than here - the message belongs where the
-// file is read, not where its value is missing.
-func str(v any) string {
-	if v == nil {
-		return ""
-	}
-	if s, ok := v.(string); ok {
-		return s
-	}
-	return fmt.Sprint(v)
-}
-
-// --- macOS's own steps ----------------------------------------------------------------
 func (e *Executor) doScreenshot(s walk.Step) error {
 	dest := s.Get("screenshot")
 	if dest == "" {
@@ -1242,3 +1133,4 @@ func (e *Executor) renderForCopy(s walk.Step, local string) string {
 	e.Driver.Log(fmt.Sprintf("  rendered %s with this file's vars", filepath.Base(local)))
 	return out.Name()
 }
+

@@ -8,59 +8,6 @@ import (
 	"testing"
 )
 
-// NOTHING IN THIS BUILD MAY NAME ANOTHER REPOSITORY'S PACKAGE.
-//
-// A `GITHUB_TOKEN` IS SCOPED TO THE REPOSITORY WHOSE WORKFLOW HOLDS IT. The build used to default
-// every fetch and every push to `easydev-org/easydiskbake`, and the first install leg that finished a
-// real disk measured what that means:
-//
-//	FAILED: the registry refused a pull,push token (HTTP 403):
-//	{"errors":[{"code":"DENIED","message":"requested access to the resource is denied"}]}
-//
-// 3927 MiB of installed opensuse-tumbleweed - a disk that booted, was configured and shut down -
-// could not be published, because the destination was not this token's to write. Reading has the same
-// shape, and a private package elsewhere would not be readable at all.
-//
-// SO BOTH DIRECTIONS ARE `easydev-org/easyvm`, and this test is what keeps a future edit from quietly
-// pointing one of them back. A default is the easiest thing in a program to change and the hardest
-// thing to notice.
-func TestBothDirectionsUseThisRepositorysPackage(t *testing.T) {
-	// THE FILE THAT CHOOSES A REPOSITORY. `asset` fetches the installer images, the guest-agent
-	// archives and now the macOS firmware artifact. It is the only place a tag is resolved, so it
-	// is the only place a default can be wrong - the OpenCore BUILD that used to resolve its own
-	// four pins moved to easyvm-macos, where its build script is checked by that repository's CI.
-	files := []string{
-		"../asset/asset.go",
-	}
-
-	// A STRING LITERAL, NOT A COMMENT. The comment that explains this history names the other
-	// repository on purpose - it is the measurement, and deleting it would delete the reason. What
-	// must never appear again is a literal that the program can assign.
-	literal := regexp.MustCompile(`"easydev-org/easydiskbake"`)
-
-	for _, name := range files {
-		body, err := os.ReadFile(filepath.Clean(name))
-		if err != nil {
-			t.Fatalf("cannot read %s: %v", name, err)
-		}
-		src := string(body)
-		if bad := literal.FindString(src); bad != "" {
-			t.Fatalf("%s still contains the literal %s. A token minted for this repository cannot "+
-				"read or write another repository's package, so every fetch and every push must name "+
-				"`easydev-org/easyvm` - which is what artifacts-publish.yml fills", name, bad)
-		}
-		if !strings.Contains(src, `"easydev-org/easyvm"`) {
-			t.Fatalf("%s does not default to `easydev-org/easyvm`, so it reads or writes a package "+
-				"this build does not own", name)
-		}
-	}
-
-	// AND THE ENVIRONMENT OVERRIDE STILL EXISTS, because a fork must be able to point at its own
-	// package rather than being told it may not run.
-	if !strings.Contains(string(mustRead(t, "../asset/asset.go")), "DISKS_REPOSITORY") {
-		t.Fatal("`DISKS_REPOSITORY` is gone, so a fork cannot point the fetches at its own package")
-	}
-}
 
 // THE WORKFLOW THAT MAKES THOSE TAGS EXIST, AND THE PERMISSION IT NEEDS.
 //

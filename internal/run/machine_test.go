@@ -36,7 +36,6 @@ func TestTheMachineHalfIsThePreparationAndTheBoot(t *testing.T) {
 		"name": "probe",
 		"steps": []any{
 			map[string]any{"name": "create the empty disk", "disk": "disk.qcow2", "disk_gb": 128},
-			map[string]any{"name": "the installer image", "fetch": "linux_iso", "release": "ubuntu"},
 			map[string]any{"name": "boot the installer", "boot": true, "os": "linux", "iso": "installer_iso"},
 			map[string]any{"name": "read the screen", "read": map[string]any{"name": "screen"}},
 			map[string]any{"name": "click Next", "input": true, "click": []any{10, 20}},
@@ -53,9 +52,6 @@ func TestTheMachineHalfIsThePreparationAndTheBoot(t *testing.T) {
 	if machine.Disk == nil || machine.Disk.Path != "disk.qcow2" || machine.Disk.GB != 128 {
 		t.Fatalf("the disk half came out %+v; the `disk:` step must be part of the machine", machine.Disk)
 	}
-	if len(machine.Fetch) != 1 || machine.Fetch[0].Kind != "linux_iso" {
-		t.Fatalf("the fetch half came out %+v; the ISO is fetched FOR the boot", machine.Fetch)
-	}
 	if machine.Boot == nil {
 		t.Fatal("no boot step")
 	}
@@ -71,10 +67,11 @@ func TestTheMachineHalfIsThePreparationAndTheBoot(t *testing.T) {
 	}
 
 	// A SANDBOX RUNS THE MACHINE HALF, SO IT MUST BE RUNNABLE - that is the whole fix: `create` gets
-	// three steps instead of one, and the first two are what a boot needs.
+	// the disk and the boot, and the disk is what the boot needs. There is no fetch step: every file a
+	// stage reads is placed by the leg before the walk starts.
 	steps := MachineSteps(machine)
-	if len(steps) != 3 {
-		t.Fatalf("the machine half is %d step(s), want 3 (disk, fetch, boot)", len(steps))
+	if len(steps) != 2 {
+		t.Fatalf("the machine half is %d step(s), want 2 (disk, boot)", len(steps))
 	}
 }
 
@@ -109,49 +106,6 @@ func TestAnExplicitMachineBlockIsUsed(t *testing.T) {
 	if len(rest) != 1 {
 		t.Fatalf("%d step(s) remain, want 1; a `machine:` block means the file already split "+
 			"itself, so nothing is taken from the step list", len(rest))
-	}
-}
-
-// COMING FROM AN ISO OR A RECOVERY IMAGE IS THE SAME SHAPE, WHICH IS THE POINT OF THE SPLIT.
-//
-// The boot names a medium and the fetch prepares it; what differs is only which fetch and which
-// medium, and neither is the step list's business.
-func TestAnISOAndARecoveryAreTheSameShape(t *testing.T) {
-	cases := []struct {
-		name  string
-		fetch map[string]any
-		boot  map[string]any
-	}{
-		{"an installer ISO", map[string]any{"kind": "linux_iso", "release": "ubuntu"},
-			map[string]any{"os": "linux", "iso": "installer_iso"}},
-		{"a recovery image", map[string]any{"kind": "recovery_macos", "release": "15"},
-			map[string]any{"os": "macos", "recovery": "recovery_macos"}},
-	}
-	for _, c := range cases {
-		doc, err := loadFixture(t, map[string]any{
-			"name":    c.name,
-			"machine": map[string]any{"disk_gb": 128, "fetch": c.fetch, "boot": c.boot},
-			"steps":   []any{map[string]any{"name": "wait", "settle": 1}},
-		})
-		if err != nil {
-			t.Fatalf("%s: %v", c.name, err)
-		}
-		machine, _, err := MachineHalf(doc)
-		if err != nil {
-			t.Fatalf("%s: %v", c.name, err)
-		}
-		steps := MachineSteps(machine)
-		// disk, fetch, boot - in that order, because the medium must exist before the boot names it.
-		if len(steps) != 3 {
-			t.Fatalf("%s: %d machine step(s), want 3", c.name, len(steps))
-		}
-		// `hasAny` RATHER THAN `Has`: a synthesized `disk_gb: 0` is present but empty, and `Has`
-		// asks whether the key carries a value. The order is what this asserts.
-		if !stepHasKey(steps[0], "disk") || !stepHasKey(steps[1], "fetch") || !stepHasKey(steps[2], "boot") {
-			t.Fatalf("%s: the machine half is out of order: %v (keys: %v / %v / %v)", c.name,
-				[]string{steps[0].Name, steps[1].Name, steps[2].Name},
-				keysOf(steps[0]), keysOf(steps[1]), keysOf(steps[2]))
-		}
 	}
 }
 

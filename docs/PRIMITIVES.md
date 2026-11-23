@@ -168,7 +168,6 @@ A step is one of nine verbs, or one of the actions the engine dispatches on, plu
 | `disk_settle` | wait until the disk file stops growing, and check it is big enough |
 | `do` | run a list of steps in order under one name |
 | `esp_fallback` | edit a FAT filesystem inside a stopped disk, at byte offsets |
-| `fetch` | obtain a prepared asset by name |
 | `needs` | the files this stage reads must be on disk before it starts |
 | `qga` | one guest-agent command: ping, info, shutdown, file-read, file-write |
 | `save` | publish the disk to this path: the second half of `stop:` |
@@ -200,15 +199,6 @@ A step is one of nine verbs, or one of the actions the engine dispatches on, plu
 |---|---|
 | `disk` | the disk file to edit |
 | `from` | the directory inside it |
-
-### `fetch`
-
-| key | what it does |
-|---|---|
-| `os` | the guest family the asset is for |
-| `recovery` | macOS's recovery image |
-| `release` | which release of it |
-| `template` | the built-in template to render |
 
 ### `qga`
 

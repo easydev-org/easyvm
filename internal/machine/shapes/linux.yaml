@@ -40,3 +40,74 @@ extra_args: []
 media:
   iso: true
   recovery: false
+# THE RAW QEMU COMMAND LINE. See `QEMUProfile` in internal/machine/shape.go.
+#
+# THIS IS THE SHAPE EVERY OTHER ONE IS A DEVIATION FROM, so its list is the reference: q35, a
+# virtio-blk disk on PCI, a `-device VGA` at the resolution the coordinates were measured at, HDA
+# audio, and a usb-tablet on its own xHCI controller.
+#
+# ONE PROFILE, because a Linux guest is started the same way whether it installs, boots an installed
+# disk or runs a stage that only types.
+qemu:
+  default: q35
+
+  profiles:
+    q35:
+      # `accel=kvm` MAKES A MISSING KVM LOUD rather than a guest at a fiftieth of the speed; `vmport=off`
+      # disables q35's VMware backdoor port, whose `vmmouse` handler claims every absolute pointer
+      # event and refuses it:
+      #
+      #	click (965, 981): pointer to (965, 981): Input handler not found for event type abs
+      machine: "q35,accel=kvm,vmport=off"
+
+      args:
+        # THE AGENT'S PORT. `server=on,wait=off` so qemu starts without a client - the host connects
+        # when it wants to ask something, and a guest with no host attached is normal.
+        - ["-chardev", "socket,id=qga0,path={{work}}/qga.sock,server=on,wait=off"]
+        - ["-device", "virtio-serial"]
+        - ["-device", "virtserialport,chardev=qga0,name=org.qemu.guest_agent.0"]
+
+        # THE SCREEN. `-device VGA` is the only form that carries a resolution, and `vgamem_mb=32` is
+        # not tuning: the default 8 MiB cannot hold 1920x1080 at 32 bits, and the symptom is a black
+        # screen from the first capture with no error at all.
+        - ["-device", "VGA,xres=1920,yres=1080,vgamem_mb=32"]
+
+        # THE USB CONTROLLER COMES FIRST, because every device below that names `bus=xhci.0` needs it
+        # to exist: qemu resolves `bus=` as it parses, and `Bus 'xhci.0' not found` is an exit.
+        #
+        # THE POINTER AND THE KEYBOARD RIDE IT. A guest with no PS/2 - and every q35 guest is one -
+        # has no pointer at all without this.
+        - ["-device", "qemu-xhci,id=xhci"]
+        - ["-device", "usb-tablet,bus=xhci.0"]
+        - ["-device", "usb-kbd,bus=xhci.0"]
+
+        # THE INSTALLER MEDIUM, when there is one. A pair whose `{{iso}}` is empty is dropped, so a
+        # disk boot needs no conditional. The bootindex is what makes a fresh OVMF_VARS find it: an
+        # implicit scan is the firmware's choice rather than a request, and measured it chose nothing.
+        - ["-drive", "file={{iso}},media=cdrom,readonly=on,if=none,id=media0"]
+        - ["-device", "ide-cd,drive=media0,bootindex=0"]
+
+        # THE TWO EXTRA CDS WINDOWS SETUP READS, also dropped when absent. They are on USB because
+        # q35's IDE controller has exactly one unit - `-device ide-cd,drive=media1,bootindex=1` is
+        # "Can't create IDE unit 1, bus supports only 1 units".
+        - ["-drive", "file={{answer}},media=cdrom,readonly=on,if=none,id=media1"]
+        - ["-device", "usb-storage,bus=xhci.0,drive=media1"]
+        - ["-drive", "file={{driver}},media=cdrom,readonly=on,if=none,id=media2"]
+        - ["-device", "usb-storage,bus=xhci.0,drive=media2"]
+
+        # THE TARGET DISK. `bootindex` is a DEVICE property, not a `-drive` one - it was put on the
+        # drive first and qemu refused to start.
+        - ["-drive", "file={{disk}},if=none,format=qcow2,id=target{{discard}}"]
+        - ["-device", "virtio-blk-pci,drive=target,bootindex=1"]
+
+        # THE SOUND CARD. `-audiodev` must precede the device that names it, or qemu fails with
+        # `audiodev snd0 not found`. `hda-duplex` rather than `hda-output`: duplex carries line-out
+        # AND line-in, so one codec gives the guest a speaker endpoint and a microphone endpoint.
+        - ["-audiodev", "none,id=snd0"]
+        - ["-device", "ich9-intel-hda"]
+        - ["-device", "hda-duplex,audiodev=snd0"]
+
+        # THE NETWORK. `romfile=` and `host_mtu=` are options every virtio-net-pci device has; the
+        # mmio form a microvm needs has neither.
+        - ["-netdev", "tap,id=net0,ifname=qemutap0,script=no,downscript=no"]
+        - ["-device", "virtio-net-pci,netdev=net0,mac=52:54:00:56:4d:01,romfile=,host_mtu=1450"]

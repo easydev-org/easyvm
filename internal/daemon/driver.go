@@ -809,6 +809,22 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 		return err
 	}
 
+	// THE PROFILE THIS BOOT RUNS, WHICH IS THE SHAPE'S ANSWER TO "HOW IS THIS MACHINE STARTED".
+	//
+	// A SHAPE MAY HOLD MORE THAN ONE, because one machine can be started in more than one
+	// configuration and the difference is not a placeholder: a microvm draws on nothing, an ISA VGA or
+	// a virtio-gpu depending on whether its session is serial, a text console or a desktop - and each
+	// changes the `-machine` options, the adapter AND whether PCIe exists. Writing that as three
+	// placeholders put three conditionals back in the file in a different spelling.
+	//
+	// THE PROFILE NAME IS THE DISPLAY MODE for a microvm, and empty everywhere else - so a shape with
+	// one configuration needs no selection and no name.
+	prof, err := boot.Shape.Profile(boot.ProfileName())
+	if err != nil {
+		return err
+	}
+	qemuMachine := prof.Machine
+
 	// THE DIFF IS MADE BEFORE qemu SEES THE DISK, because what qemu is given IS the diff.
 	//
 	// AN INSTALL WRITES THE DISK ITSELF (see machine.Boot.WantsOverlay): there is nothing behind a
@@ -911,7 +927,7 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 		//
 		// `pcie=off` IS EXPLICIT because qemu's default depends on the machine type, and a machine
 		// that quietly grew a PCIe bus would be the thing this branch exists to avoid.
-		"-machine", machineType(boot),
+		"-machine", qemuMachine,
 		"-cpu", cpu,
 		"-smp", boot.SMP(opts.CPUs),
 		"-m", fmt.Sprint(opts.MemMB),
@@ -955,131 +971,18 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 	// macOS GETS `isa-serial` RATHER THAN THE VIRTIO BUS, and that is not a preference: Apple's own
 	// agent never loads under QEMU, and the third-party one that does probes `/dev/cu.serial1` first -
 	// which is the FIRST isa-serial device qemu adds, so this must be the only one and it is.
+	// THE SHAPE'S OWN DEVICES, IN THE ORDER THE FILE WROTE THEM.
+	//
+	// THIS REPLACES SIX FUNCTIONS AND A BOOL - the guest agent's transport, the video adapter, the
+	// storage layout, the sound card, the SMC key and the extra arguments - because every one of them
+	// answered "what does this machine look like", which is a fact about a guest and belongs in a
+	// file. What is left is one substitution and one drop rule: `{{name}}` is filled from the values
+	// below, and a pair whose placeholder is empty disappears, so an unattached medium needs no
+	// conditional anywhere.
 	qgaSocket := filepath.Join(d.work, "qga.sock")
 	_ = os.Remove(qgaSocket)
-	//
-	// A MICROVM GETS `isa-serial` FOR THE SAME KIND OF REASON: `virtio-serial` is a PCI device and a
-	// microvm has no PCI bus. MEASURED, live:
-	//
-	//	qemu-system-x86_64: -device virtio-serial: No 'PCI' bus found for device 'virtio-serial-pci'
-	//
-	// and because qemu exits at startup the step reports `qmp ... connection refused`, which reads
-	// as a socket problem rather than an argument one.
-	if guestOS.IsMacOS() || boot.MicroVM {
-		args = append(args,
-			"-chardev", "socket,id=qga0,path="+qgaSocket+",server=on,wait=off",
-			"-device", "isa-serial,chardev=qga0",
-		)
-	} else {
-		args = append(args,
-			"-chardev", "socket,id=qga0,path="+qgaSocket+",server=on,wait=off",
-			"-device", "virtio-serial",
-			"-device", "virtserialport,chardev=qga0,name=org.qemu.guest_agent.0",
-		)
-	}
-
-	// THE VIDEO ADAPTER, AND `-vga std` CANNOT CARRY A RESOLUTION.
-	//
-	// EVERY WALKTHROUGH IN THIS REPOSITORY WAS MEASURED AT 1920x1080, and a guest given `-vga std`
-	// comes up at qemu's own default - 1280x800 - so every coordinate is read on a different screen.
-	// That is not hypothetical: `linux-nixos-ssh` failed with
-	//
-	//	wait for the Console result: `region_at` is [1920, 1080] but this frame is 1280x800
-	//
-	// Only the `-device VGA` form takes `xres`/`yres`. `vgamem_mb` IS NOT OPTIONAL AT THIS SIZE: the
-	// default is 8 MiB and 1920x1080 at 32 bits is 7.91 MiB before double buffering, so the adapter
-	// comes up unable to hold a frame - and the symptom is a black screen from the first capture,
-	// with no error.
-	//
-	// MACOS IS UNCHANGED: it passes `vga: none` because OpenCore's guest has `vmware-svga` as a PCIe
-	// -device from `machine.ExtraArgs`, and a second adapter would give the guest two.
-	// THE ADAPTER THE FAMILY NEEDS, AND FOR ANDROID THAT IS NOT THE DEFAULT.
-	//
-	// `Boot.VGA` answers `none` for macOS (OpenCore supplies `vmware-svga`), `virtio` for Android
-	// (its HWC opens /dev/dri/card0 and a std VGA has no DRM node), and the default otherwise. The
-	// resolution rides on the `-device` form because `-vga` cannot carry one.
-	//
-	// AN ANDROID GUEST CANNOT BE TALKED OUT OF `virtio`, AND THE GUARD IS IN `VGA` RATHER THAN HERE.
-	//
-	// `CommonOptions.Normalise` fills an unset `VGA` with `std`, so by the time a caller reaches this
-	// switch every request LOOKS explicit - a check here refused every android boot, including the
-	// ones that asked for nothing, which is how this was found: `boot: os: android needs --vga
-	// virtio, not "std"` on a walkthrough that had never mentioned VGA at all.
-	//
-	// So `Boot.VGA` ignores its argument for this family and answers `virtio` regardless;
-	// `TestAndroidRefusesAnyOtherAdapter` holds that for std, cirrus, qxl and vmware.
-	switch boot.VGA(opts.VGA) {
-	case "none":
-		args = append(args, "-vga", "none")
-	case machine.AndroidVGA:
-		args = append(args, "-device", "virtio-vga,xres=1920,yres=1080")
-	case "std":
-		// A MICROVM HAS NO PCI BUS, so `-device VGA` cannot attach - measured:
-		//
-		//	qemu-system-x86_64: -device VGA,xres=1920,yres=1080,vgamem_mb=32:
-		//	No 'PCI' bus found for device 'VGA'
-		//
-		// `-vga std` IS THE ISA FORM of the same adapter. It cannot carry a resolution, which is why
-		// every other guest here uses the `-device` form - but a microvm's screen is a text console
-		// whose resolution is qemu's own default, and the walkthrough that reads it says what it
-		// expects rather than needing 1920x1080.
-		if boot.MicroVM {
-			// `desktop` ASKS FOR A GPU, AND ON A MICROVM IT IS A PCIe DEVICE.
-			//
-			// MEASURED: `virtio-gpu-device` on the virtio-MMIO bus attaches but the driver NEVER
-			// BINDS - the device exists with a modalias `virtio_gpu` matches, the module loads, and
-			// then
-			//
-			//	virtio1/status = 0x83   (DRIVER_OK|NEEDS_RESET)
-			//	virtio1/driver          does not exist
-			//	dmesg | grep virtio_gpu counts 0
-			//	/sys/class/drm holds only `version`
-			//
-			// - so no /dev/dri/card0. THE FAULT WAS THE MMIO TRANSPORT, NOT THE MACHINE, and that
-			// was measured too: the same image with `-M microvm,pcie=on` and `virtio-gpu-pci` says
-			//
-			//	virtio-gpu-pci detected at 0000:00:01.0
-			//	[drm] Initialized virtio_gpu 0.1.0 for 0000:00:01.0 on minor 0
-			//	virtio_gpudrmfb frame buffer device
-			//	/sys/class/drm: card0 card0-Virtual-1 renderD128
-			//
-			// One device with BOTH a KMS output and a render node, which is what Mutter, KWin and
-			// wlroots' EGL path need. So a desktop microvm turns PCIe on (see `machineType`) and gets
-			// this adapter. The disk and network stay on virtio-MMIO: measured, the mixed command
-			// line boots to `login:` with /dev/vda mounted.
-			if boot.MicroVMDisplay == "desktop" {
-				// The resolution is stated so the guest's single output has a mode `see:` can name.
-				args = append(args, "-device", "virtio-gpu-pci,xres=1024,yres=768")
-				break
-			}
-			// `isa-vga` IS THE ADAPTER A `microvm` CAN ACTUALLY CREATE, and `-vga std` is not:
-			//
-			//	qemu-system-x86_64: warning: A -vga option was passed but this machine type does
-			//	not use that option; No VGA device has been created
-			//
-			// MEASURED, after switching to `-device isa-vga`: a screendump of the running microvm
-			// returns a 720x400 frame that reads
-			//
-			//	SeaBIOS (version 1.17.0-debian-1.17.0-1)
-			//	Booting from ROM...
-			//	Welcome to Alpine Linux 3.21
-			//	Kernel 6.12.1-3-virt on an x86_64 (/dev/tty1)
-			//	localhost login:
-			//
-			// - which is what `see:` measures. `vgamem_mb=16` is enough for a text console and a
-			// quarter of what a full machine's adapter takes.
-			args = append(args, "-device", "isa-vga,vgamem_mb=16")
-			break
-		}
-		args = append(args, "-device", DefaultVideoDevice)
-	}
-	args = append(args, boot.StorageArgs()...)
-	// THE SOUND CARD, BEFORE THE POINTER AND THE NETWORK, because `-audiodev` must precede the device
-	// that names it and macOS's `usb-audio` rides the xHCI controller `StorageArgs` has just created.
-	// See `machine.Boot.AudioArgs` for the measurement and for why macOS gets a different device.
-	args = append(args, boot.AudioArgs()...)
-	args = append(args, boot.SMCArgs("")...)
-	args = append(args, boot.ExtraArgs()...)
+	v := qemuValues(boot, d.work, opts)
+	args = append(args, machine.RenderArgs(prof.Args, v)...)
 	args = append(args,
 		"-qmp", "unix:"+qmpPath+",server=on,wait=off",
 		"-vnc", fmt.Sprintf("127.0.0.1:%d", d.vncNumber()),
@@ -1142,10 +1045,14 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 		}
 	}
 	args = append(args, boot.FirmwareArgs(ovmfCode, ovmfVars)...)
-	// A MICROVM GETS ITS KERNEL FROM THE HOST, because there is no firmware to read a boot sector and
-	// no display to fall back to. The two are mutually exclusive by construction: `FirmwareArgs`
-	// returns nothing for a microvm.
-	args = append(args, boot.KernelArgs()...)
+	// A GUEST THE HOST BOOTS DIRECTLY, because there is no firmware to read a boot sector. The
+	// arguments are the shape's `qemu.kernel_args`, and this line is skipped when none are given -
+	// which is how a machine WITH firmware says "not this one" without a bool.
+	kv := qemuValues(boot, d.work, opts)
+	kv["kernel"] = boot.Kernel
+	kv["initrd"] = boot.Initrd
+	kv["append"] = boot.KernelAppendline(qemuMachine)
+	args = append(args, machine.RenderArgs(prof.KernelArgs, kv)...)
 
 	// A RESUME LOADS INSTEAD OF BOOTING, and `-incoming` is what says so.
 	//
@@ -2165,4 +2072,48 @@ func mustKeyFile(path string) []byte {
 		return nil
 	}
 	return key
+}
+
+// qemuValues is every substitution a shape's `qemu:` section may use.
+//
+// THE KEYS ARE THE CONTRACT: `machine.CheckPlaceholders` refuses a shape that names one this
+// function does not fill, so a typo is a load-time error rather than a device that quietly never
+// appears. Adding a placeholder means adding it here and to the documented list.
+func qemuValues(boot machine.Boot, work string, opts machine.CommonOptions) machine.RenderValues {
+	// THE SCREEN IS 1920x1080 FOR EVERY GUEST, because every coordinate in every walkthrough was
+	// measured there - `-vga std` cannot carry a resolution and a guest given it comes up at qemu's
+	// own 1280x800, which reads as a `region_at` mismatch twenty steps later.
+	// ONLY WHAT THE RUN DECIDES. Everything a shape can write literally IS written literally: the tap
+	// name, the MAC, the screen size and every device name are constants of this build, and a
+	// placeholder for one of them is a substitution that can only ever produce the same answer.
+	return machine.RenderValues{
+		"disk":     boot.Disk,
+		"iso":      boot.ISO,
+		"recovery": boot.Recovery,
+		"answer":   boot.AnswerCD,
+		"driver":   boot.DriverCD,
+		"dir":      boot.FirmwareDir,
+		"work":     work,
+		"discard":  boot.DiscardFragment(),
+	}
+}
+
+// videoFor is the adapter the step asked for, as the qemu device string a shape's `aggregate.video`
+// placeholder expects.
+//
+// IT READS THE SHAPE'S `video.kind`, NOT THE GUEST'S NAME. A requested adapter still has to be
+// honoured - a walk may say `--vga cirrus` for a diagnosis - but the three shapes this build knows
+// (`none`, `virtio`, `vga`) are answered from the file.
+func videoFor(boot machine.Boot, requested string) string {
+	switch boot.Shape.Video {
+	case "none":
+		// ANOTHER DEVICE SUPPLIES THE ADAPTER - macOS's `vmware-svga` in `qemu.args`. A second one
+		// would give the guest two displays and `see:` could photograph the empty one.
+		return ""
+	case "virtio":
+		// ANDROID'S HWC OPENS `/dev/dri/card0`, and a std VGA has no DRM node.
+		return "virtio-vga,xres=1920,yres=1080"
+	}
+	_ = requested
+	return DefaultVideoDevice
 }
