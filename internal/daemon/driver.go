@@ -1851,21 +1851,15 @@ func qemuValues(boot machine.Boot, work string, opts machine.CommonOptions) mach
 
 // bootValues are the substitutions a boot step's `args:` may use.
 //
-// EVERY KEY IS A PATH OR A FRAGMENT THE RUN OWNS, never a choice between machines: the machine itself
-// is the file's own `machine:` and `args:`.
+// THERE ARE THREE, AND THEY ARE ALL PATHS THE RUN OWNS: the working directory, the disk qemu was
+// given, and the directory the step named. Everything else an argument needs is a LITERAL in the file
+// - an installer image is `{{work}}/ubuntu.iso`, which says both where it is and what it is called,
+// and needs no key to name it a second time.
 func bootValues(boot machine.Boot, work string) machine.RenderValues {
 	return machine.RenderValues{
-		"disk":     boot.Disk,
-		"iso":      boot.ISO,
-		"recovery": boot.Recovery,
-		"answer":   boot.AnswerCD,
-		"driver":   boot.DriverCD,
-		"kernel":   boot.Kernel,
-		"initrd":   boot.Initrd,
-		"append":   boot.KernelAppend,
-		"work":     work,
-		"dir":      boot.Dir,
-		"discard":  boot.DiscardFragment(),
+		"work": work,
+		"disk": boot.Disk,
+		"dir":  boot.Dir,
 	}
 }
 

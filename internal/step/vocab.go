@@ -105,30 +105,12 @@ var Verbs = map[string]Verb{
 			// THE ONLY KEYS A BOOT TAKES. Everything else about a machine - its firmware, its CPU
 			// flags, its disk order, its adapter, its sound card - is a qemu argument, and the file
 			// that knows what machine it wants writes them.
+			"args": {Name: "args", Kind: KindList,
+				Summary: "the qemu argument pairs, in order. `{{work}}`, `{{disk}}`, `{{dir}}` and " +
+					"`{{discard}}` are filled from the run; a pair whose placeholder is empty is " +
+					"dropped, which is how an optional device disappears"},
 			"dir": {Name: "dir", Kind: KindString,
 				Summary: "the working directory the arguments' `{{dir}}` names"},
-			// THE VALUES THE ARGUMENTS' PLACEHOLDERS NAME. These are not qemu flags - they are what
-			// `{{iso}}` and its siblings resolve to, and without them an argument that names a medium
-			// gets an empty string and the medium is not attached.
-			"iso": {Name: "iso", Kind: KindString,
-				Summary: "the file `{{iso}}` names"},
-			"recovery": {Name: "recovery", Kind: KindString,
-				Summary: "the file `{{recovery}}` names"},
-			"answer_cd": {Name: "answer_cd", Kind: KindString,
-				Summary: "the file `{{answer}}` names"},
-			"driver_cd": {Name: "driver_cd", Kind: KindString,
-				Summary: "the file `{{driver}}` names"},
-			"kernel": {Name: "kernel", Kind: KindString,
-				Summary: "the file `{{kernel}}` names"},
-			"initrd": {Name: "initrd", Kind: KindString,
-				Summary: "the file `{{initrd}}` names"},
-			"kernel_append": {Name: "kernel_append", Kind: KindString,
-				Summary: "the line `{{append}}` names"},
-			"args": {Name: "args", Kind: KindList,
-				Summary: "the qemu argument pairs, in order. `{{disk}}`, `{{iso}}`, `{{recovery}}`, " +
-					"`{{answer}}`, `{{driver}}`, `{{kernel}}`, `{{initrd}}`, `{{append}}`, `{{work}}` " +
-					"and `{{dir}}` are filled from the step; a pair whose placeholder is empty is " +
-					"dropped, which is how an optional medium disappears"},
 			"machine": {Name: "machine", Kind: KindString,
 				Summary: "the `-machine` value, with the same placeholders"},
 			"incoming": {Name: "incoming", Kind: KindString,
