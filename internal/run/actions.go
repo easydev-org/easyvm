@@ -37,15 +37,19 @@ func (e *Executor) doBoot(s walk.Step) error {
 	// THE `os:` STILL HAS TO MATCH, when the step names one. A file that says `os: windows` against a
 	// running Linux guest is a mistake, not a no-op, and it would otherwise be discovered by a click
 	// landing on the wrong screen.
+	// A RUNNING MACHINE IS REUSED RATHER THAN COMPARED, because a boot no longer names a guest - it
+	// names qemu arguments. Two boots in one file that write the SAME arguments are one machine, which
+	// is what a sandbox means; two that write different ones are a different machine, and the only
+	// honest answer to that is a `stop:` first, because a daemon holds one qemu.
+	//
+	// THE ARGUMENTS ARE ALREADY RUNNING, so a differing set is refused rather than silently ignored:
+	// a file that asked for a different machine and got the old one would discover it as a screen that
+	// never changes.
 	if running, ok := m.(interface{ IsRunning() bool }); ok && running.IsRunning() {
-		want := s.Get("os")
-		if want != "" {
-			if named, ok := m.(interface{ OS() string }); ok {
-				if have := named.OS(); have != "" && have != want {
-					return fail(s.Name, "the machine is already running %s, and this step asks "+
-						"for %s. One daemon holds one machine; `destroy` it to change the guest", have, want)
-				}
-			}
+		if same, known := m.(interface{ RunningTheSame([]string) bool }); known && !same.RunningTheSame(bootArgs(s)) {
+			return fail(s.Name, "this machine is already running with different qemu arguments. "+
+				"One daemon holds one machine, so a boot that describes another one needs a `stop:` "+
+				"first - otherwise the steps below drive the guest the earlier boot started")
 		}
 		e.Driver.Log(fmt.Sprintf("  already running: %s", s.Name))
 		return nil
@@ -53,10 +57,7 @@ func (e *Executor) doBoot(s walk.Step) error {
 	// `family:` WAS THE SAME KEY UNDER ANOTHER NAME and is gone: MEASURED 15 uses against `os:`'s
 	// 56, every one of them meaning the same thing, and the reader had to guess which spelling a
 	// given file used. `os:` is the name.
-	osName := s.Get("os")
-	if osName == "" {
-		return fail(s.Name, "a boot step must name `os:` (windows, linux or macos)")
-	}
+	// THERE IS NO `os:` - a boot names qemu arguments, and the engine does not classify the guest.
 
 	// `boot_from:` IS A RESUME, AND IT IS A SEPARATE KEY FROM `boot:` ON PURPOSE.
 	//
@@ -75,12 +76,15 @@ func (e *Executor) doBoot(s walk.Step) error {
 		}
 	}
 	spec := BootSpec{
-		OS:       osName,
 		Disk:     e.bootDisk(),
-		ISO:      e.assetPath(s.Get("iso")),
-		AnswerCD: e.assetPath(s.Get("answer_cd")),
-		DriverCD: e.assetPath(s.Get("driver_cd")),
-		Recovery: e.assetPath(s.Get("recovery")),
+		// THE FILE'S OWN ARGUMENTS, WHICH ARE THE WHOLE OF WHAT IT SAYS ABOUT ITS MACHINE.
+		//
+		// THERE IS NO `os:`, NO `iso:` AND NO `microvm:`: a boot names qemu arguments. The engine
+		// contributes only what the host owns - the machine string it was given, `-display none`, the
+		// serial file a step polls, and this daemon's own qmp and vnc sockets.
+		Machine:  s.Get("machine"),
+		Args:     qemuArgPairs(s),
+		Dir:      s.Get("dir"),
 		Incoming: resumeFrom,
 		// THE DISK IS FRESH IF THIS FILE CREATED IT. `disk_gb:` is the only step that makes a disk
 		// rather than naming one, so it is the only thing that can answer this - and the machine needs
@@ -88,52 +92,7 @@ func (e *Executor) doBoot(s walk.Step) error {
 		// and a disk that came from somewhere keeps its writes.
 		FreshDisk: e.madeDisk,
 	}
-	// THE SIZE COMES OFF THE STEP, WHICH IS WHERE `MachineSteps` PUT IT.
-	//
-	// WITHOUT THIS THE TWO KEYS WERE DECORATION: `machineFromBlock` read `memory_mb:` into the spec,
-	// `MachineSteps` emitted the steps and dropped it, and qemu always got the 4096 MiB default. See
-	// the long comment in machine.go for the guest that measured it.
-	// BOTH SPELLINGS: `mem_mb` is what the vocabulary's own summary named, and a file written
-	// against that sentence must not be a machine that silently keeps the default.
-	mb, err := s.Float("memory_mb", 0)
-	if err != nil || mb == 0 {
-		mb, _ = s.Float("mem_mb", 0)
-	}
-	if mb > 0 {
-		spec.MemMB = int(mb)
-	}
-	if n, err := s.Float("cpus", 0); err == nil && n > 0 {
-		spec.CPUs = int(n)
-	}
-	// `microvm: true` SELECTS THE SMALLEST MACHINE, and it is a property of the step rather than of
-	// the file because a file may install a distribution and then verify it in the same run.
-	if v, ok := s.Spec["microvm"].(bool); ok && v {
-		spec.MicroVM = true
-		spec.Kernel = e.assetPath(s.Get("kernel"))
-		spec.Initrd = e.assetPath(s.Get("initrd"))
-		spec.KernelAppend = s.Get("kernel_append")
-		spec.MicroVMDisplay = s.Get("microvm_display")
-		if spec.MicroVMDisplay == "" {
-			spec.MicroVMDisplay = "terminal"
-		}
-		if spec.CPUs == 0 {
-			spec.CPUs = 1
-		}
-		if spec.MemMB == 0 {
-			spec.MemMB = 512
-		}
-	}
-	// WHERE A `kind: folder` FIRMWARE LIVES IS THE SHAPE'S ANSWER, NOT THIS FUNCTION'S.
-	//
-	// THIS USED TO BE `if osName == "macos"`, which is the hard-coding this whole change removes: it
-	// named three files - `boot.img`, `macos.rom`, `macos.vars` - and three fields on the boot spec,
-	// so the only firmware this build could lay out was OpenCore's. The shape's `firmware.dir:` says
-	// where the directory is, and its `args:`/`disks:` say which files in it matter; `{{work}}` there
-	// is this directory.
-	spec.FirmwareDir = e.Work
-
-	e.Driver.Log(fmt.Sprintf("  booting %s from %s%s", spec.OS, bootSourceName(spec),
-		mediaNote(spec)))
+	e.Driver.Log(fmt.Sprintf("  booting with %d qemu argument(s)", len(spec.Args)))
 	if err := m.Boot(spec); err != nil {
 		return fail(s.Name, "boot: %v", err)
 	}
@@ -1134,3 +1093,34 @@ func (e *Executor) renderForCopy(s walk.Step, local string) string {
 	return out.Name()
 }
 
+
+// qemuArgPairs flattens a boot step's `args:` into the one list qemu is given.
+//
+// IT REFUSES AN ODD LENGTH, because every qemu flag takes a value: a flat list whose `-device` lost
+// its argument is an error naming the flag rather than what was meant, and it arrives at startup
+// forty minutes into a stage.
+func qemuArgPairs(s walk.Step) []string {
+	raw, ok := s.Spec["args"].([]any)
+	if !ok {
+		return nil
+	}
+	var out []string
+	for _, item := range raw {
+		switch v := item.(type) {
+		case []any:
+			for _, one := range v {
+				out = append(out, fmt.Sprint(one))
+			}
+		case string:
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// bootArgs is the qemu argument list a boot step writes, for the "is this the same machine" check.
+func bootArgs(s walk.Step) []string {
+	out := []string{s.Get("machine")}
+	out = append(out, qemuArgPairs(s)...)
+	return out
+}

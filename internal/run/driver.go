@@ -185,9 +185,6 @@ type BootSpec struct {
 	BootImage    string
 	// FirmwareDir is the directory a `kind: folder` firmware's files are in.
 	FirmwareDir string
-	// CPUs and MemMB are the machine's size.
-	CPUs  int
-	MemMB int
 	// Kernel and Initrd are the guest's kernel, for a microvm: there is no firmware to read a boot
 	// sector, so the host supplies them.
 	Kernel string
@@ -219,4 +216,19 @@ type BootSpec struct {
 	// sat in "the console will say login" until its timeout. The default is right for one shape and
 	// wrong for every other.
 	KernelAppend string
+
+	// Args ARE THE QEMU ARGUMENTS THIS FILE WROTE, IN ORDER, as `-flag value` pairs.
+	//
+	// THIS IS THE WHOLE OF WHAT THE ENGINE KNOWS ABOUT A MACHINE'S DEVICES NOW. There is no shape, no
+	// firmware kind, no adapter type: the file that wants a VGA at 1920x1080 writes the argument, and
+	// a machine this build has never heard of boots without a line of Go changing.
+	//
+	// `{{name}}` INSIDE AN ARGUMENT IS FILLED FROM THE STEP'S OWN FACTS - `{{disk}}`, `{{iso}}`,
+	// `{{work}}` - and a pair whose placeholder is empty is DROPPED, which is how an optional medium
+	// disappears without a conditional anywhere.
+	Args []string
+	// Machine is the `-machine` value, with the same placeholders.
+	Machine string
+	// Dir is the step's `dir:`, which `{{dir}}` names.
+	Dir string
 }

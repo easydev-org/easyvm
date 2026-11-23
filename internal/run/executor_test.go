@@ -151,11 +151,28 @@ func (m *fakeMachine) Stop(method string, grace time.Duration) error {
 }
 func (m *fakeMachine) Reboot() error { return nil }
 
-// OS is what `doBoot` compares against a step's `os:` when a machine is already running.
+// RunningTheSame is what `doBoot` compares when a machine is already up.
 //
-// WITHOUT IT THE FAKE HAD NO OS AND THE GUARD COULD NOT FIRE: a test that asked "is a second guest on
-// a running machine refused" was answered by a machine whose family was unknown, which is the one
-// answer that skips the check.
+// A BOOT NAMES QEMU ARGUMENTS NOW, not a guest family, so "is it the same machine" is a comparison of
+// what the two boots asked for. WITHOUT IT THE FAKE ANSWERED `false` FOR EVERY SECOND BOOT and the
+// guard fired on a machine the file had described identically.
+func (m *fakeMachine) RunningTheSame(args []string) bool {
+	if m.d.boot == nil {
+		return false
+	}
+	have := append([]string{m.d.boot.Machine}, m.d.boot.Args...)
+	if len(have) != len(args) {
+		return false
+	}
+	for i := range have {
+		if have[i] != args[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// OS is kept for the tests that assert what a boot asked for; nothing switches on it any more.
 func (m *fakeMachine) OS() string {
 	if m.d.boot == nil {
 		return ""

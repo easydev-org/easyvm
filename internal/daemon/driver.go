@@ -85,6 +85,9 @@ type Driver struct {
 	// IT IS NOT READ FROM THE FILE, because a sandbox runs several files against one machine and the
 	// file in hand may not be the one that booted it. What is true is what was passed to qemu.
 	guestOS string
+	// bootArgs is what the running machine was started from, so a second boot can tell "this machine
+	// again" from "a different machine", which a daemon cannot hold.
+	bootArgs []string
 	port    int
 	pass    string
 
@@ -767,11 +770,6 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 	if err := machine.CheckKVM(); err != nil {
 		d.logf("  " + err.Error())
 	}
-	opts, err := machine.CommonOptions{CPUs: spec.CPUs, MemMB: spec.MemMB, SSHPort: d.port}.
-		Normalise()
-	if err != nil {
-		return err
-	}
 
 	// THE BOOT DESCRIPTION GOES THROUGH Validate BEFORE ANY PATH IS USED. A stage that never ran
 	// its `fetch:` gets a sentence naming what is missing, not qemu's message about a drive.
@@ -799,15 +797,15 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 		// a firmware path resolved against the process's own directory.
 		Work:        d.work,
 		FirmwareDir: spec.FirmwareDir,
+		// THE FILE'S OWN ARGUMENTS. When it wrote none, the shape's profile fills them - that is the
+		// transition: a stage gains `args:` and the shape stops mattering for it.
+		Machine: spec.Machine,
+		Dir:     spec.Dir,
 	}
 	if err := boot.Validate(); err != nil {
 		return err
 	}
 
-	cpu, err := boot.CPU("")
-	if err != nil {
-		return err
-	}
 
 	// THE PROFILE THIS BOOT RUNS, WHICH IS THE SHAPE'S ANSWER TO "HOW IS THIS MACHINE STARTED".
 	//
@@ -823,7 +821,17 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 	if err != nil {
 		return err
 	}
-	qemuMachine := prof.Machine
+	// A STEP THAT WROTE ITS OWN ARGUMENTS OVERRIDES THE SHAPE ENTIRELY.
+	if boot.Machine == "" {
+		boot.Machine = prof.Machine
+	}
+	if len(spec.Args) > 0 {
+		boot.Args = spec.Args
+	} else {
+		for _, pair := range prof.Args {
+			boot.Args = append(boot.Args, pair...)
+		}
+	}
 
 	// THE DIFF IS MADE BEFORE qemu SEES THE DISK, because what qemu is given IS the diff.
 	//
@@ -880,190 +888,39 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 	}
 	_ = os.Remove(qmpPath)
 
+	// THE MACHINE, FROM THE FILE THAT WROTE IT.
+	//
+	// EVERY ARGUMENT BELOW `-machine` USED TO BE BUILT HERE, from a shape: the firmware pair, the
+	// guest agent's bus, the video adapter, the disk order, the sound card, the SMC key. All of that
+	// is a qemu argument, and the file that knows what machine it wants writes it - so this function
+	// contributes only what the HOST owns:
+	//
+	//	-machine / -cpu / -smp / -m   the machine the step named, with its size
+	//	-display none                 there is no local display
+	//	-serial file:                 the console a step polls
+	//	-qmp / -vnc                   this daemon's own sockets
+	//	-incoming                     a resume
+	//
+	// AND NOTHING ELSE. A device the engine has never heard of needs no line of Go: it is a term in
+	// the step's `args:`.
+	// THE ONLY ARGUMENTS THIS FUNCTION CONTRIBUTES ARE THE HOST'S OWN.
+	//
+	//	-machine   the value the file wrote (it may hold placeholders)
+	//	-display   there is no local display
+	//	-serial    the console a step polls
+	//
+	// EVERYTHING ELSE - `-cpu`, `-smp`, `-m`, every device - is in the file's `args:`, because it is a
+	// qemu argument and this build has no opinion about the machine beyond where its sockets go.
 	args := []string{
-		// THE ACCELERATOR IS NAMED, AND ITS ABSENCE WAS THE REASON EVERY LEG RAN ON TCG.
-		//
-		// `-machine q35` WITH NO `-accel` LETS QEMU CHOOSE, and qemu's default is `tcg` - pure
-		// software emulation. It does not fail, it does not warn in a way that reads as a problem,
-		// and the guest boots: slowly. Measured on run 43063744565's macos-setup leg, whose log is
-		// full of
-		//
-		//	qemu-system-x86_64: warning: TCG doesn't support requested feature:
-		//	  CPUID[80000007h].EDX.invtsc [bit 8]
-		//
-		// - `+invtsc` is one of the twenty CPU flags macOS needs, and TCG cannot provide it. That is
-		// the deadlock documented in internal/machine: every vCPU at 100%, block I/O frozen, the
-		// serial output ending at `[EB|LOG:HANDOFF TO XNU]` with no panic.
-		//
-		// `-accel kvm` MAKES THE FAILURE LOUD: a container without a usable /dev/kvm now says so at
-		// startup instead of running at a fiftieth of the speed and timing out forty minutes later.
-		// `vmport=off` IS WHAT MAKES THE ABSOLUTE POINTER WORK ON A q35 GUEST.
-		//
-		// q35 GIVES THE GUEST THE VMWARE BACKDOOR PORT BY DEFAULT, and Linux's `psmouse` driver binds
-		// `vmmouse` through it and CLAIMS THE ABSOLUTE-POINTER ROLE. QMP's `input-send-event` with an
-		// `abs` axis then goes to a device that cannot read it, and qemu refuses the event outright:
-		//
-		//	click (965, 981): pointer to (965, 981): Input handler not found for event type abs
-		//
-		// MEASURED ON A DISK PULLED FROM ghcr: `macos-setup`'s ssh leg reached step 7 of 33 and died
-		// there, on the first click of a walk whose earlier stages ran on the SAME qemu arguments -
-		// because the guests that were driven before this one did not have `vmmouse` bound, and the
-		// macOS disk boots into a state where it is:
-		//
-		//	QEMU PS/2 Mouse      current=False  abs=False
-		//	QEMU HID Tablet      current=False  abs=True
-		//	vmmouse              current=True   abs=True     <- every absolute event lands here
-		//
-		// THE TABLET IS STILL ATTACHED (`usb-tablet,bus=xhci.0`): this disables the COMPETING handler,
-		// so the events reach the device the walkthrough was measured against.
-		// A MICROVM IS `microvm` RATHER THAN `q35`, AND THAT IS THE WHOLE DIFFERENCE: no PCIe bus, no
-		// IDE controller, no USB controller, no VGA - only virtio-mmio devices and a serial line.
-		//
-		// IT IS FOR WALKTHROUGHS THAT PROVE THE VOCABULARY RATHER THAN INSTALL A DISTRIBUTION. A
-		// distribution installer needs UEFI, a virtio-blk disk, a VGA adapter and a USB tablet; a
-		// walk whose job is "drive a guest and read its screen" pays for all four and needs none.
-		// MEASURED: the kubuntu install is 4 GiB of RAM, 128 GiB of disk and forty minutes for
-		// thirty-eight steps; the alpine microvm below is 512 MiB, 1 GiB and under two minutes.
-		//
-		// `pcie=off` IS EXPLICIT because qemu's default depends on the machine type, and a machine
-		// that quietly grew a PCIe bus would be the thing this branch exists to avoid.
-		"-machine", qemuMachine,
-		"-cpu", cpu,
-		"-smp", boot.SMP(opts.CPUs),
-		"-m", fmt.Sprint(opts.MemMB),
+		"-machine", renderArgs1(boot.Machine, boot),
 		"-display", "none",
-		// THE CONSOLE GOES TO A FILE, BECAUSE ONE STEP HAS TO READ IT.
-		//
-		// A Windows install ISO does not boot by itself. The El Torito boot image prints
-		//
-		//	Press any key to boot from CD or DVD...
-		//
-		// and waits about five seconds; nothing pressing it means the firmware falls through to
-		// PXE and the run ends with four thousand bytes of firmware output and no Windows. That
-		// prompt is in the boot sector, before setup.exe runs, so no answer-file setting can
-		// suppress it - the only way past it is a keypress, and the only way to know when is the
-		// console.
-		//
-		// OVMF's own marker comes first and is what the Python implementation actually keys on:
-		// `UEFI QEMU ... DVD-ROM` appears seconds before the prompt and in every UEFI boot.
-		//
-		// `-serial file:` rather than a chardev socket: the reader is a step that polls a file,
-		// and a socket would need its own owner.
 		"-serial", "file:" + filepath.Join(d.work, "console.log"),
 	}
-	// THE GUEST'S OWN DEVICES, IN THE ORDER THE GUEST READS THEM. This is where the three-way split
-	// between a Windows disk boot, a Windows ISO boot and a macOS boot lives - all of it in
-	// internal/machine, none of it here.
-	// THE QEMU GUEST AGENT'S PORT, WHICH WAS MISSING ENTIRELY.
-	//
-	// `vm-configure` INSTALLS `qemu-guest-agent` AND THEN PROVES IT IS RUNNING, and the proof failed:
-	//
-	//	prove the guest agent is running: the command exited 3
-	//
-	// THREE IS `systemctl is-active`'s "inactive". The agent was installed and could not start, because
-	// the device it talks on does not exist: `/dev/virtio-ports/org.qemu.guest_agent.0` is created by a
-	// `virtserialport` on a `virtio-serial` bus, and neither was in this command line. The Python
-	// implementation has both, behind `shape.qga_socket`.
-	//
-	// `server=on,wait=off` SO QEMU STARTS WITHOUT A CLIENT: the host connects when it wants to ask
-	// something, and a guest with no host attached is normal.
-	//
-	// macOS GETS `isa-serial` RATHER THAN THE VIRTIO BUS, and that is not a preference: Apple's own
-	// agent never loads under QEMU, and the third-party one that does probes `/dev/cu.serial1` first -
-	// which is the FIRST isa-serial device qemu adds, so this must be the only one and it is.
-	// THE SHAPE'S OWN DEVICES, IN THE ORDER THE FILE WROTE THEM.
-	//
-	// THIS REPLACES SIX FUNCTIONS AND A BOOL - the guest agent's transport, the video adapter, the
-	// storage layout, the sound card, the SMC key and the extra arguments - because every one of them
-	// answered "what does this machine look like", which is a fact about a guest and belongs in a
-	// file. What is left is one substitution and one drop rule: `{{name}}` is filled from the values
-	// below, and a pair whose placeholder is empty disappears, so an unattached medium needs no
-	// conditional anywhere.
-	qgaSocket := filepath.Join(d.work, "qga.sock")
-	_ = os.Remove(qgaSocket)
-	v := qemuValues(boot, d.work, opts)
-	args = append(args, machine.RenderArgs(prof.Args, v)...)
+	args = append(args, machine.RenderList(boot.Args, bootValues(boot, d.work))...)
 	args = append(args,
 		"-qmp", "unix:"+qmpPath+",server=on,wait=off",
 		"-vnc", fmt.Sprintf("127.0.0.1:%d", d.vncNumber()),
-		"-netdev", fmt.Sprintf("tap,id=net0,ifname=%s,script=no,downscript=no",
-			easyvmnet.TapName),
-		// `romfile=` AND `host_mtu=` ARE NOT OPTIONS EVERY VIRTIO NET DEVICE HAS. `virtio-net-device`
-		// - the mmio form a microvm needs - has neither:
-		//
-		//	-device virtio-net-device,netdev=net0,...,romfile=,host_mtu=1450:
-		//	Property 'virtio-net-device.romfile' not found
-		"-device", netDevice(boot, easyvmnet.TapMAC, easyvmnet.UplinkMTU()),
 	)
-	// THE POINTER IS ADDED BY `StorageArgs`, NOT HERE, AND THAT IS THE FIX FOR WINDOWS.
-	//
-	//	qemu-system-x86_64: -device qemu-xhci,id=xhci: Duplicate ID 'xhci' for device
-	//
-	// The daemon used to append the controller and the tablet at the end of its own argument list. A
-	// Windows boot already has an ANSWER CD and a DRIVER CD, so `StorageArgs` had created the xHCI
-	// controller for those - and the daemon, unable to see that, asked for a second one with the same
-	// id. qemu refuses rather than merging, so the machine never started and the failure arrived as
-	//
-	//	boot: qmp /work/drive.sock.qmp: connect: no such file or directory (waited 30s)
-	//
-	// which points at the socket rather than at the argument that killed qemu. See `Boot.StorageArgs`.
-
-	// FIRMWARE. OVMF for Windows and Linux, OpenCore for macOS - and the variables file is COPIED
-	// rather than referenced, because qemu writes to it.
-	ovmfCode := os.Getenv("OVMF_CODE")
-	if ovmfCode == "" {
-		ovmfCode = "/usr/share/OVMF/OVMF_CODE_4M.fd"
-	}
-	ovmfVars := filepath.Join(d.work, "OVMF_VARS.fd")
-	tmpl := os.Getenv("OVMF_VARS_TEMPLATE")
-	if tmpl == "" {
-		tmpl = "/usr/share/OVMF/OVMF_VARS_4M.fd"
-	}
-	// A MICROVM HAS NO FIRMWARE, SO IT MUST NOT BE ASKED FOR ONE.
-	//
-	// `FirmwareArgs` returns nothing for a microvm - there is no pflash, no boot order and no UEFI to
-	// read - but this function used to call `TouchOvmfVars` UNCONDITIONALLY first, which copies the
-	// template into the work directory and fails when the template is absent. MEASURED on a GitHub
-	// runner, which has no `ovmf` package installed:
-	//
-	//	boot: firmware variables template /usr/share/OVMF/OVMF_VARS_4M.fd:
-	//	      open /usr/share/OVMF/OVMF_VARS_4M.fd: no such file or directory
-	//
-	// for a guest that boots a kernel handed to it by the host and could not use the file if it were
-	// there. The two decisions belong together, so the condition is the same one `FirmwareArgs` uses.
-	// THE VARIABLES FILE IS COPIED ONLY WHEN THE FIRMWARE IS OVMF'S, and the SHAPE is what says so -
-	// not the operating system's name. `guestOS.IsMacOS()` here was a hard-coded exception:
-	//
-	//	if !boot.MicroVM && !guestOS.IsMacOS() {
-	//
-	// - correct, because macOS is the one guest that does not use OVMF, and wrong in the way that
-	// matters: a `kind: folder` firmware for any other guest would still have had OVMF's variable
-	// store copied into its work directory, and a macOS boot through a DIFFERENT firmware would not.
-	if !boot.MicroVM && boot.Shape.Firmware == machine.FirmwareOVMF {
-		if err := machine.TouchOvmfVars(tmpl, ovmfVars); err != nil {
-			return err
-		}
-	}
-	args = append(args, boot.FirmwareArgs(ovmfCode, ovmfVars)...)
-	// A GUEST THE HOST BOOTS DIRECTLY, because there is no firmware to read a boot sector. The
-	// arguments are the shape's `qemu.kernel_args`, and this line is skipped when none are given -
-	// which is how a machine WITH firmware says "not this one" without a bool.
-	kv := qemuValues(boot, d.work, opts)
-	kv["kernel"] = boot.Kernel
-	kv["initrd"] = boot.Initrd
-	kv["append"] = boot.KernelAppendline(qemuMachine)
-	args = append(args, machine.RenderArgs(prof.KernelArgs, kv)...)
-
-	// A RESUME LOADS INSTEAD OF BOOTING, and `-incoming` is what says so.
-	//
-	// IT GOES LAST BECAUSE IT IS NOT A DEVICE - qemu reads the whole machine first and then loads the
-	// state into it, so the device set must already be described. That is also why the arguments
-	// before this line must match the ones the snapshot was taken with: a different cpu, a different
-	// machine type or a different device set is refused with
-	//
-	//	load of migration failed: Unknown section or instance 'apic' 2
-	//
-	// which names a section rather than the argument that differed.
 	if boot.Incoming != "" {
 		args = append(args, "-incoming", "file:"+boot.Incoming)
 	}
@@ -1203,6 +1060,9 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 	d.proc = cmd
 	d.qmp = conn
 	d.booting = false
+	// THE IDENTITY OF THIS MACHINE, so a second boot in the same file can tell "this machine again"
+	// from "a different one". A boot names arguments now, so the arguments are the identity.
+	d.bootArgs = append([]string{spec.Machine}, spec.Args...)
 	d.mu.Unlock()
 	ok = true
 
@@ -2116,4 +1976,73 @@ func videoFor(boot machine.Boot, requested string) string {
 	}
 	_ = requested
 	return DefaultVideoDevice
+}
+
+// bootValues are the substitutions a boot step's `args:` may use.
+//
+// EVERY KEY IS A PATH OR A FRAGMENT THE RUN OWNS, never a choice between machines: the machine itself
+// is the file's own `machine:` and `args:`.
+func bootValues(boot machine.Boot, work string) machine.RenderValues {
+	return machine.RenderValues{
+		"disk":     boot.Disk,
+		"iso":      boot.ISO,
+		"recovery": boot.Recovery,
+		"answer":   boot.AnswerCD,
+		"driver":   boot.DriverCD,
+		"kernel":   boot.Kernel,
+		"initrd":   boot.Initrd,
+		"append":   boot.KernelAppend,
+		"work":     work,
+		"dir":      boot.Dir,
+		"discard":  boot.DiscardFragment(),
+	}
+}
+
+// renderArgs1 is one argument string with its placeholders filled, for `-machine`.
+func renderArgs1(s string, boot machine.Boot) string {
+	got, _ := renderOne(s, boot)
+	return got
+}
+
+// renderOne substitutes a single string and says whether anything was missing.
+func renderOne(s string, boot machine.Boot) (string, bool) {
+	v := bootValues(boot, boot.Work)
+	out := s
+	for {
+		i := strings.Index(out, "{{")
+		if i < 0 {
+			break
+		}
+		j := strings.Index(out[i:], "}}")
+		if j < 0 {
+			break
+		}
+		name := out[i+2 : i+j]
+		val, ok := v[name]
+		if !ok {
+			break
+		}
+		out = out[:i] + val + out[i+j+2:]
+	}
+	return out, true
+}
+
+// RunningTheSame reports whether the machine that is up was started from these arguments.
+//
+// A BOOT NO LONGER NAMES A GUEST, so "is it the same machine" is no longer a name comparison. What a
+// second boot in one file means is either "this machine again" - a sandbox adding a toolchain - or a
+// different machine, which a daemon cannot hold. The argument list is the identity.
+func (m machineControl) RunningTheSame(args []string) bool {
+	m.d.mu.Lock()
+	have := m.d.bootArgs
+	m.d.mu.Unlock()
+	if len(have) != len(args) {
+		return false
+	}
+	for i := range have {
+		if have[i] != args[i] {
+			return false
+		}
+	}
+	return true
 }

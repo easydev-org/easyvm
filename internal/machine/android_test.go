@@ -82,13 +82,21 @@ func TestAndroidRefusesAnyOtherAdapter(t *testing.T) {
 
 // profileArgs is a shape's default profile, flattened, for a test that asserts on its text.
 func profileArgs(t *testing.T, shape string) string {
+	return profileArgsNamed(t, shape, "install")
+}
+
+// profileArgsNamed is one named profile's arguments, flattened.
+//
+// `install` IS THE DEFAULT FOR THESE TESTS because the adapter and the media order are what an
+// INSTALL asserts; a disk boot has no medium to order.
+func profileArgsNamed(t *testing.T, shape, name string) string {
 	t.Helper()
 	sh, ok := Shapes().Lookup(shape)
 	if !ok {
 		t.Skipf("no %q shape here: it lives in easyvm-%s/shapes, and this checkout does not have it",
 			shape, shape)
 	}
-	prof, err := sh.Profile("")
+	prof, err := sh.Profile(name)
 	if err != nil {
 		t.Fatalf("%s: %v", shape, err)
 	}

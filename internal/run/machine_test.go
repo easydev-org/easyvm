@@ -3,6 +3,7 @@ package run
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -36,7 +37,8 @@ func TestTheMachineHalfIsThePreparationAndTheBoot(t *testing.T) {
 		"name": "probe",
 		"steps": []any{
 			map[string]any{"name": "create the empty disk", "disk": "disk.qcow2", "disk_gb": 128},
-			map[string]any{"name": "boot the installer", "boot": true, "os": "linux", "iso": "installer_iso"},
+			map[string]any{"name": "boot the installer", "boot": true,
+				"args": []any{[]any{"-device", "isa-vga"}}},
 			map[string]any{"name": "read the screen", "read": map[string]any{"name": "screen"}},
 			map[string]any{"name": "click Next", "input": true, "click": []any{10, 20}},
 		},
@@ -176,6 +178,12 @@ func keysOf(s walk.Step) []string {
 // SO THIS TEST IS ABOUT THE CABLE, NOT THE VALUE: whatever a file writes must be on the step the
 // executor runs, in both spellings - the `machine:` block and a plain `boot:` step.
 func TestTheGuestSizeReachesTheBootStep(t *testing.T) {
+	// THE SIZE IS A QEMU ARGUMENT, so what this asserts is that the number the file writes survives to
+	// the step the executor runs - in the `machine:` block's own spelling and in a plain `boot:` step.
+	//
+	// A SIZE THAT STOPS AT A STRUCT IS A SIZE QEMU NEVER SEES, which is what this test was written for:
+	// `machineFromBlock` stored it, `MachineSteps` dropped it, and every guest ran at the 4096 MiB
+	// default whatever the file said. There is no struct field now - `-m` is in the list.
 	for _, tc := range []struct {
 		name string
 		doc  map[string]any
@@ -183,12 +191,11 @@ func TestTheGuestSizeReachesTheBootStep(t *testing.T) {
 		{"machine block", map[string]any{
 			"name": "sized",
 			"machine": map[string]any{
-				"disk_gb":   128,
-				"memory_mb": 8192,
-				"cpus":      4,
-				"boot":      map[string]any{"os": "bsd", "iso": "installer_iso"},
+				"disk_gb": 128,
+				"boot": map[string]any{
+					"args": []any{[]any{"-m", "8192"}, []any{"-device", "isa-vga"}},
+				},
 			},
-			// A `machine:` file states its own steps; the block is the machine, not the walk.
 			"steps": []any{
 				map[string]any{"name": "wait", "settle": 5},
 			},
@@ -197,8 +204,8 @@ func TestTheGuestSizeReachesTheBootStep(t *testing.T) {
 			"name": "sized",
 			"steps": []any{
 				map[string]any{"name": "disk", "disk": "disk.qcow2", "disk_gb": 128},
-				map[string]any{"name": "boot it", "boot": true, "os": "bsd",
-					"memory_mb": 8192, "cpus": 4},
+				map[string]any{"name": "boot it", "boot": true,
+					"args": []any{[]any{"-m", "8192"}, []any{"-device", "isa-vga"}}},
 				map[string]any{"name": "wait", "settle": 5},
 			},
 		}},
@@ -212,28 +219,22 @@ func TestTheGuestSizeReachesTheBootStep(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if spec.MemoryMB != 8192 {
-				t.Errorf("the machine is %d MiB, and the file says 8192 - a size that stops at the "+
-					"struct is a size qemu never sees", spec.MemoryMB)
-			}
-
-			// AND THE STEPS ARE WHAT THE EXECUTOR ACTUALLY RUNS, so the number has to survive the
-			// round trip. `create` narrows a file to exactly this list.
+			// AND THE STEPS ARE WHAT THE EXECUTOR ACTUALLY RUNS.
 			var boot *walk.Step
-			for i, s := range MachineSteps(spec) {
+			steps := MachineSteps(spec)
+			for i, s := range steps {
 				if s.Has("boot") {
-					boot = &MachineSteps(spec)[i]
+					boot = &steps[i]
+					break
 				}
 			}
 			if boot == nil {
-				t.Fatal("the machine's steps contain no boot, so nothing would start")
+				t.Fatal("no boot step in the machine half")
 			}
-			if got, _ := boot.Float("memory_mb", 0); int(got) != 8192 {
-				t.Errorf("the boot step says memory_mb=%v, and the file says 8192 - qemu reads the "+
-					"step, so this is the number that decides the guest", got)
-			}
-			if got, _ := boot.Float("cpus", 0); int(got) != 4 {
-				t.Errorf("the boot step says cpus=%v, and the file says 4", got)
+			joined := strings.Join(qemuArgPairs(*boot), " ")
+			if !strings.Contains(joined, "-m 8192") {
+				t.Fatalf("the boot step carries no `-m 8192`, so the executor would run it at the "+
+					"default and the file's 8192 would be decoration:\n%s", joined)
 			}
 		})
 	}
@@ -258,11 +259,9 @@ recording_resolution 1024x768
 needs alpine-vmlinuz alpine-initramfs
 step "boot the root filesystem"
   boot
-    os microvm
     disk alpine.qcow2
-    kernel alpine-vmlinuz
-    initrd alpine-initramfs
-    memory_mb 768
+    machine "microvm,accel=kvm,pcie=off"
+    args [["-m", "768"], ["-kernel", "alpine-vmlinuz"], ["-initrd", "alpine-initramfs"]]
 `
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)

@@ -4,6 +4,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/easydev-org/easyvm/internal/machine"
 )
 
 // THERE IS ONE NETWORK MODE AND IT IS THE TAP.
@@ -31,25 +33,29 @@ func TestThereIsNoUserModeNetworking(t *testing.T) {
 			"bridge address and a user-mode guest cannot reach it, so every share_mount: step " +
 			"would fail with an error that reads as a broken share")
 	}
-	if !strings.Contains(code, "tap,id=") {
-		t.Fatal("no tap netdev found; the guest must be on the bridge")
+	// THE NETDEV IS IN THE SHAPES NOW, so the assertion reads them. Every profile of every shape a
+	// stage can boot must put the guest on the bridge: the host's smbd listens on the bridge address
+	// and a user-mode guest cannot reach it.
+	joined := strings.Join(shapeArgs(t), " ")
+	if !strings.Contains(joined, "tap,id=") {
+		t.Fatal("no shape puts a guest on a tap; the guest must be on the bridge")
 	}
-	// AND THE TAP MUST NEVER RUN A HELPER SCRIPT. qemu's default is /etc/qemu-ifup, which a
-	// container does not have, and the failure arrives after the guest has been created.
-	if !strings.Contains(code, "script=no") || !strings.Contains(code, "downscript=no") {
-		t.Fatal("the tap netdev must say script=no,downscript=no: qemu would otherwise run " +
+	if !strings.Contains(joined, "script=no") || !strings.Contains(joined, "downscript=no") {
+		t.Fatal("a shape's netdev does not say script=no,downscript=no: qemu would otherwise run " +
 			"/etc/qemu-ifup, which does not exist in a container")
 	}
-	// AND THE MTU FEATURE MUST BE SET. A guest at 1500 over a 1450 tap drops every full segment,
-	// and the symptom is a TLS handshake that never completes.
-	if !strings.Contains(code, "host_mtu=") {
-		t.Fatal("virtio-net must carry host_mtu=: without it the guest keeps 1500 over a " +
-			"1450-byte link and every full segment is dropped")
+	// AND THE MTU FEATURE AND AN EMPTY `romfile=` ARE THE SHAPE'S, for the same reason.
+	//
+	// `host_mtu=` IS NOT DECORATION: without it the guest keeps 1500 over a 1450-byte link and every
+	// full segment is dropped, and the symptom is a TLS handshake that never completes.
+	//
+	// `romfile=` MUST BE PRESENT AND EMPTY: it suppresses the iPXE option ROM, and a non-empty value
+	// is read as a firmware image path.
+	if !strings.Contains(joined, "host_mtu=") {
+		t.Fatal("a shape's virtio-net does not carry host_mtu=")
 	}
-	// AND `romfile=` MUST BE EMPTY, because a value is read as a firmware path.
-	if !strings.Contains(code, "romfile=,") && !strings.Contains(code, `romfile=%s`) {
-		t.Fatal("romfile must be present and empty: it suppresses the iPXE option ROM, and a " +
-			"non-empty value is read as a firmware image path")
+	if !strings.Contains(joined, "romfile=,") {
+		t.Fatal("a shape's virtio-net does not carry an empty `romfile=`")
 	}
 }
 
@@ -97,4 +103,26 @@ func stripComments(src string) string {
 		out = append(out, line)
 	}
 	return strings.Join(out, "\n")
+}
+
+// shapeArgs is every argument pair of every profile the shapes this checkout has.
+func shapeArgs(t *testing.T) []string {
+	t.Helper()
+	var out []string
+	for _, name := range machine.Shapes().Names() {
+		sh, _ := machine.Shapes().Lookup(name)
+		for _, prof := range []string{"install", "disk", "q35", "serial", "terminal", "desktop", ""} {
+			pr, err := sh.Profile(prof)
+			if err != nil {
+				continue
+			}
+			for _, pair := range pr.Args {
+				out = append(out, strings.Join(pair, " "))
+			}
+		}
+	}
+	if len(out) == 0 {
+		t.Skip("no shapes here, so there is no command line to read")
+	}
+	return out
 }

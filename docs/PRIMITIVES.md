@@ -50,24 +50,24 @@ A step is one of nine verbs, or one of the actions the engine dispatches on, plu
 
 | key | what it does |
 |---|---|
-| `answer_cd` | Windows Setup's answer file, on its own CD |
-| `cpus` | how many virtual CPUs |
-| `disk` | the disk to start from, or the disk to make: `{file, size, gpt, esp_mib, min_mb, wait}`. A bare file name is a disk that already exists |
+| `args` | the qemu argument pairs, in order |
+| `dir` | the directory `{{dir}}` names |
+| `disk` | the disk to start from, or the disk to make |
 | `disk_esp_mib` | the size of the EFI system partition, in MiB |
 | `disk_gb` | how big to make the disk, in GiB |
 | `disk_gpt` | write a GPT partition table |
 | `disk_min_mb` | the smallest a finished disk may be, in MiB |
 | `disk_settle` | wait this long for the disk file to stop growing |
-| `driver_cd` | the virtio driver CD Windows Setup reads |
-| `initrd` | with `microvm:`: the initramfs |
-| `iso` | the installer medium to boot from |
-| `kernel` | with `microvm:`: the kernel the host hands qemu |
-| `kernel_append` | with `microvm:`: the guest's own kernel command line |
-| `memory_mb` | the guest's memory, in MiB |
-| `microvm` | the smallest machine that can boot a modern Linux kernel: no firmware, no emulated devices the guest does not need |
-| `microvm_display` | with `microvm:`: desktop, terminal or serial |
-| `os` | the guest family - linux, windows, macos, bsd, android, microvm |
-| `recovery` | macOS's recovery image |
+| `incoming` | a `snapshot:` file to load instead of booting |
+| `machine` | the `-machine` value |
+
+A BOOT NAMES QEMU ARGUMENTS, NOT A GUEST FAMILY. There is no `os:`, no `iso:` and no `microvm:`: the
+file that wants a VGA at 1920x1080 writes `["-device", "VGA,xres=1920,yres=1080,vgamem_mb=32"]`, and a
+machine this build has never heard of boots without a line of Go changing.
+
+`{{disk}}`, `{{iso}}`, `{{recovery}}`, `{{answer}}`, `{{driver}}`, `{{kernel}}`, `{{initrd}}`,
+`{{append}}`, `{{work}}` and `{{dir}}` are filled from the step, and A PAIR WHOSE PLACEHOLDER IS EMPTY
+IS DROPPED - which is how an optional medium disappears without a conditional anywhere.
 
 ### `check`
 

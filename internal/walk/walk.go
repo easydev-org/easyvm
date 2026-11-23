@@ -317,9 +317,28 @@ func loadDocument(path string, doc map[string]any, overrides map[string]string) 
 				"a short `settle:` inside the loop's `do:` between attempts. A `settle:` is for a "+
 				"pause with NO fact to wait on", path, name)
 		}
-		substituted, err := substitute(mapping, f.Vars)
+		// A `boot:` STEP'S ARGUMENTS ARE NOT WALK VARIABLES. They name what the MACHINE has -
+		// `{{disk}}`, `{{iso}}`, `{{recovery}}` - which only exists at the moment the step runs, and
+		// an empty one means "this medium is not attached" rather than the empty string. The engine
+		// fills them and drops the pair when one is empty; substituting here would either fail on a
+		// name the file never declared or turn an absent CD into `file=,media=cdrom`.
+		toSub := any(mapping)
+		if has(mapping, "boot") {
+			toSub = shallowWithout(mapping, "args", "machine")
+		}
+		substituted, err := substitute(toSub, f.Vars)
 		if err != nil {
 			return nil, fmt.Errorf("%s: step %q: %w", path, name, err)
+		}
+		if has(mapping, "boot") {
+			// PUT THEM BACK AS WRITTEN. `substitute` returns a new map, so these two keys survive
+			// only if they are copied across after it.
+			out, _ := substituted.(map[string]any)
+			for _, k := range []string{"args", "machine"} {
+				if v, ok := mapping[k]; ok {
+					out[k] = v
+				}
+			}
 		}
 		spec, _ := substituted.(map[string]any)
 		f.Steps = append(f.Steps, Step{Index: i + 1, Name: name, Spec: spec})
@@ -545,4 +564,24 @@ func (f *File) Render(text string) (string, error) {
 	}
 	s, _ := out.(string)
 	return s, nil
+}
+
+// shallowWithout copies a step's mapping minus the named keys.
+//
+// IT IS HOW THE TWO ARGUMENT-BEARING KEYS ESCAPE SUBSTITUTION while everything else in the same step
+// is still resolved - a `boot:` step carrying `memory_mb: "{{ mem }}"` must have that filled in, and
+// its `args:` must not.
+func shallowWithout(m map[string]any, keys ...string) map[string]any {
+	skip := map[string]bool{}
+	for _, k := range keys {
+		skip[k] = true
+	}
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		if skip[k] {
+			continue
+		}
+		out[k] = v
+	}
+	return out
 }

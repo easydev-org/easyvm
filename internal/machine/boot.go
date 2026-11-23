@@ -173,6 +173,16 @@ type Boot struct {
 	OpenCoreVars string
 	// BootImage is OpenCore's own disk image, the one the firmware boots first.
 	BootImage string
+	// Args ARE THE QEMU ARGUMENTS THE STEP WROTE, in order, as `-flag value` pairs.
+	//
+	// THIS IS THE WHOLE OF WHAT THIS BUILD KNOWS ABOUT A MACHINE'S DEVICES. There is no shape, no
+	// firmware kind and no adapter type: the file that wants a VGA at 1920x1080 writes the argument,
+	// and a machine this build has never heard of boots without a line of Go changing.
+	Args []string
+	// Machine is the `-machine` value, with `{{name}}` placeholders the run fills.
+	Machine string
+	// Dir is the step's `dir:`, which `{{dir}}` names.
+	Dir string
 	// Work is the run's working directory, which is what `{{work}}` in a shape's `firmware.dir:`
 	// stands for and the base a relative one is joined onto.
 	Work string
@@ -339,6 +349,18 @@ func (b Boot) Validate() error {
 				return err
 			}
 		}
+		// THE PROFILE IS WHERE THE FILES ARE NAMED NOW, so that is what is checked. `firmware.args`
+		// and `firmware.disks` are still read for a shape that uses the older spelling, and a shape
+		// that merged them into `qemu.args` - which is what macOS did - is checked through there.
+		prof, perr := b.shape().Profile(b.ProfileName())
+		if perr != nil {
+			return perr
+		}
+		for _, pair := range prof.Args {
+			if err := requireFirmwareFiles(pair, b.firmwareDir(), "qemu.args"); err != nil {
+				return err
+			}
+		}
 		for _, pair := range b.shape().FirmwareDisks {
 			if err := requireFirmwareFiles(pair, b.firmwareDir(), "firmware.disks"); err != nil {
 				return err
@@ -399,384 +421,6 @@ func requireFile(path, why string) error {
 
 // --- the command line ------------------------------------------------------------------
 
-// StorageArgs is the disk and the media, in the order the guest reads them.
-//
-// THE ORDER IS THE MODULE'S JOB BECAUSE IT IS PART OF THE MEANING. Two different things are being
-// ordered and only one of them is about index numbers:
-//
-//	the BOOT MEDIUM     the firmware boots the first thing it can, so the installer ISO must come
-//	                    before the disk
-//	the DISK INDEX      Windows numbers only FIXED disks, so a virtio disk after two CD-ROMs is
-//	                    still DiskID 0 and the answer file stays valid
-//
-// A caller that assembled this list would eventually get one of those backwards, and the failure is
-// not a message: it is Setup offering to install onto the wrong disk, or a firmware screen.
-//
-// AND `discard=unmap` IS NOT ALWAYS RIGHT. It is what lets a guest's TRIM free clusters in the
-// qcow2, which keeps a published disk small - but during an INSTALL it is destructive. Measured on
-// the macOS 26 installs, which are the two runs that differ in exactly this argument:
-//
-//	41835253323   no discard,  128G   finished in 46 minutes
-//	42009463444   discard,     128G   wrote 36774 MiB, dropped to 19761, never moved again
-//
-// The 17 GiB that vanished was the installer's own staging data. macOS writes about 36 GiB, takes an
-// APFS snapshot, discards its staging volume and switches root; with discard on, every TRIM is
-// honoured immediately and the clusters the SNAPSHOT STILL REFERS TO are deallocated under it. The
-// progress bar froze at "About 48 minutes remaining".
-//
-// So discard is off while an installer is attached, and on otherwise. See installing() for what
-// "attached" means and for why it is read from the media rather than guessed from the file.
-func (b Boot) StorageArgs() []string {
-	args := []string{}
-
-	if b.shape().Firmware == FirmwareFolder {
-		// THE FIRMWARE'S OWN BOOT DISKS COME FIRST, before the guest's target. A loader that boots
-		// from a disk of its own has to be `bootindex=0`, or the firmware reports it cannot load
-		// Boot0001 and the guest never starts.
-		for _, pair := range b.shape().FirmwareDisks {
-			args = append(args, renderFirmwareArgs(pair, b.firmwareDir())...)
-		}
-		// THE BUS AND THE POINTER COME BEFORE ANY DISK THAT NAMES THEM. qemu resolves `bus=` as it
-		// parses, so a `usb-storage,bus=xhci.0` written before the controller is
-		// `Bus 'xhci.0' not found` and qemu exits - which reads as a qmp socket error, not a device.
-		args = append(args, b.shape().DeviceArgs...)
-		args = append(args, b.targetDiskArgs()...)
-		// AND THE RECOVERY IMAGE, IF ONE IS ATTACHED, in the order the shape wrote.
-		//
-		// THE CONTROLLER IS IN `media.recovery_args` - every pair of the list, not just the ones that
-		// name the image - because a `usb-storage,bus=xhci.0` device needs its bus created first.
-		if b.Recovery != "" {
-			for _, pair := range b.shape().FirmwareRecoveryPairs() {
-				for _, a := range pair {
-					args = append(args, strings.ReplaceAll(
-						strings.ReplaceAll(a, "{{dir}}", b.firmwareDir()),
-						"{{recovery}}", b.Recovery))
-				}
-			}
-		}
-		return args
-	}
-
-	if b.shape().Firmware == FirmwareOpenCore {
-		// OPENCORE'S OWN DISK, FIRST AND WITH bootindex=0. "A disk with no bootindex is not in the
-		// boot order at all" - the firmware then reports it could not load Boot0001, six runs in a
-		// row.
-		args = append(args,
-			"-drive", "file="+b.BootImage+",format=raw,if=none,id=oc",
-			"-device", "virtio-blk-pci,drive=oc,bootindex=0",
-		)
-		// THE TARGET, WITH discard ONLY WHEN NOTHING IS INSTALLING.
-		target := "file=" + b.Disk + ",if=none,format=qcow2,id=target"
-		if b.Discardable() {
-			target = "file=" + b.Disk + ",if=none,format=qcow2,discard=unmap,id=target"
-		}
-		args = append(args,
-			"-drive", target,
-			"-device", "virtio-blk-pci,drive=target,bootindex=1",
-		)
-		// AND THE RECOVERY IMAGE AS REMOVABLE MEDIA, ONLY WHEN THIS BOOT INSTALLS.
-		//
-		// macOS installs FROM removable media; the disk it installs TO is not the disk it boots
-		// FROM. That is why the SETUP stage attaches it - and why every LATER stage must not:
-		// those boot a system that is already installed and has no recovery volume, and an extra
-		// USB disk is one more row the guest can pick in Disk Utility, where
-		// `choose the target disk by capacity` reads the sidebar. Attaching it on an installed
-		// disk could select the recovery volume instead of the target.
-		//
-		// AND IT NEEDS A CONTROLLER TO BE ATTACHED TO.
-		//
-		// `usb-storage,bus=xhci.0` NAMES A BUS THAT DOES NOT EXIST UNLESS SOMETHING CREATES IT, and qemu
-		// refuses at startup:
-		//
-		//	-device usb-storage,bus=xhci.0,drive=rec: Bus 'xhci.0' not found
-		//
-		// - and then exits, so the QMP socket never appears and the boot step reports a socket error
-		// rather than the missing device. Measured on the first macos-setup run that got past
-		// OpenCore: `qmp .../drive.sock.qmp: connect: connection refused`.
-		//
-		// THE CONTROLLER IS UNCONDITIONAL WHEN THERE IS A RECOVERY IMAGE, and it is not only for the
-		// disk: lib/vm.py gives the same bus a usb-tablet and a usb-kbd, because a macOS guest has no
-		// PS/2 and every pointer or key it receives arrives over USB.
-		//
-		// THE TABLET IS ON THIS BUS - `usb-tablet,bus=xhci.0`, below and again for a disk boot. THIS
-		// COMMENT USED TO SAY the build gave the tablet "its own `virtio-tablet-pci`, which macOS
-		// drives", AND THAT DEVICE HAS NEVER BEEN IN THE ARGUMENT VECTOR: `grep virtio-tablet-pci`
-		// finds this sentence, a test's failure message, and nothing that qemu is ever given.
-		//
-		// IT IS WORTH CORRECTING RATHER THAN DELETING, because the sentence described a real design
-		// and the difference explains a real failure. A `virtio-tablet-pci` would meet q35's `vmmouse`
-		// on equal terms; a `usb-tablet` does not, and on a guest where Linux binds `vmmouse` the
-		// absolute events reach that instead:
-		//
-		//	click (965, 981): pointer to (965, 981): Input handler not found for event type abs
-		//
-		// The fix for that is `-machine q35,...,vmport=off` (see the daemon's argument list), not a
-		// different tablet - the tablet the walkthroughs were measured against is this one.
-		//
-		// `usb-storage` has no bootindex and does not need one: the firmware reaches it only
-		// after OpenCore hands over.
-		// THE POINTER IS ATTACHED WHETHER OR NOT THERE IS A RECOVERY IMAGE, AND THAT WAS THE BUG.
-		//
-		// `usb-tablet,bus=xhci.0` USED TO LIVE INSIDE `if b.Recovery != ""`, so a macOS guest booted
-		// FROM AN INSTALLED DISK - every `ssh`, `vm-configure` and `dev` leg - had NO POINTER AT ALL.
-		// The first click of such a walk died in qemu rather than on the screen:
-		//
-		//	click (965, 981): pointer to (965, 981): Input handler not found for event type abs
-		//
-		// MEASURED ON THE DISK THIS REPOSITORY PUBLISHED AS `macos15`, pulled back and driven: the
-		// machine booted to its Setup Assistant - the screen was right - and the walk could not touch
-		// it. The device list had NO POINTER IN IT:
-		//
-		//	isa-serial  virtio-blk-pci(oc)  virtio-blk-pci(target)  vmware-svga  virtio-net-pci
-		//
-		// AND A MAC HAS NO PS/2, so a pointer that is not on USB is a pointer that does not exist.
-		// `vmport=off` in the daemon's `-machine` does not help either: it removes a competing
-		// HANDLER, and there was no device for the handler to belong to.
-		//
-		// SO THE CONTROLLER AND THE TABLET COME FIRST AND UNCONDITIONALLY, and the recovery image is
-		// what is conditional - it is one more device ON the bus that is already there.
-		args = append(args, "-device", "qemu-xhci,id=xhci")
-		if b.Recovery != "" {
-			args = append(args,
-				"-drive", "file="+b.Recovery+",media=disk,if=none,id=rec,readonly=on",
-				"-device", "usb-storage,bus=xhci.0,drive=rec",
-			)
-		}
-		args = append(args, "-device", "usb-tablet,bus=xhci.0")
-		// AND THE KEYBOARD THE COMMENT ABOVE SAYS THIS GUEST NEEDS. `lib/vm.py` gives this bus a
-		// `usb-tablet` AND a `usb-kbd`, "because a macOS guest has no PS/2 and every pointer or key
-		// it receives arrives over USB" - and only the tablet was ever added here. The walks have
-		// been typing into macOS over USB anyway, which is why this was not caught: qemu's HID
-		// keyboard falls back to the PS/2 port for keycodes, and the firmware's own menus are the
-		// one place that fallback does not reach.
-		args = append(args, "-device", "usb-kbd,bus=xhci.0")
-		return args
-	}
-
-	// WINDOWS AND LINUX: THE INSTALLER, THE ANSWER CD, THE DISK, THE DRIVERS - IN THAT ORDER.
-	//
-	// THAT ORDER IS MEASURED, NOT ARBITRARY, and it is NOT "the disk first". The Python
-	// implementation's comment gives the reason:
-	//
-	//     "Three CDs at most, and the order matters only for the boot device: the install ISO is
-	//      first so the firmware boots it. ... The drivers travel on the answer CD, which keeps the
-	//      virtio disk at index 0 so the answer file's DiskID stays correct."
-	//
-	// A CD-ROM DOES NOT TAKE A DISK INDEX. Windows numbers only fixed disks, so a virtio disk after
-	// two CD-ROMs is still DiskID 0 - which is why the answer file's disk reference stays valid.
-	// Putting the CD-ROMs after the disk would ALSO work for DiskID and would break the other half:
-	// the firmware boots the first thing it can, and the installer must be it.
-	//
-	// THE DRIVER CD IS LAST for its own reason: "The same drivers again, for the installed system
-	// to pick up network and ballooning. Setup only reads $WinPEDriver$ during windowsPE." It has
-	// to be attached for the installed system, but nothing during setup needs it in a particular
-	// place - so it goes after the disk, where it cannot be mistaken for the boot medium.
-	//
-	// EVERY MEDIUM CARRIES A `bootindex`, AND THAT IS NOT DECORATION. The note ten lines up - "a disk
-	// with no bootindex is not in the boot order at all" - was learned on the macOS path and applied
-	// only there. The comment here said "the firmware boots the first thing it can", which assumed OVMF
-	// would scan the CD-ROM and find a bootable El Torito image.
-	//
-	// MEASURED ON UBUNTU-INSTALL: `console.log` was 24 KB of firmware output and the screen was
-	// `drop=+0.0 ratio=0.0x sat=+0.00` for fifteen minutes - A BLACK MACHINE. A fresh OVMF_VARS has no
-	// saved boot entry, and an implicit scan is the firmware's choice rather than a request.
-	//
-	// THE ORDER IS THE ARGUMENT ORDER, made explicit: whatever is installing gets 0, the target disk
-	// gets 1, and anything else gets 2 or more so it cannot win.
-	nextIndex := 0
-	nextID := 0
-	// A CD ABOARD A USB BUS, FOR THE ONES THAT ARE NOT THE BOOT MEDIUM.
-	//
-	// q35's IDE CONTROLLER HAS EXACTLY ONE UNIT, AND qemu SAYS SO PLAINLY:
-	//
-	//	-device ide-cd,drive=media1,bootindex=1: Can't create IDE unit 1, bus supports only 1 units
-	//
-	// Measured on windows-install, which attaches THREE CDs - the installer, the answer CD with the
-	// virtio drivers, and the driver CD for the installed system. Only the installer needs to be on a
-	// bus the firmware boots from, so it takes the IDE unit and the others go on USB, which is a bus
-	// with as many ports as there are devices.
-	//
-	// THE XHCI CONTROLLER IS CREATED ONCE, on first use, and it is the same `qemu-xhci,id=xhci` the
-	// macOS branch needs for its recovery disk.
-	xhciAdded := false
-	appendUSBCD := func(path string) {
-		if path == "" {
-			return
-		}
-		if !xhciAdded {
-			args = append(args, "-device", "qemu-xhci,id=xhci")
-			xhciAdded = true
-		}
-		id := fmt.Sprintf("media%d", nextID)
-		nextID++
-		args = append(args,
-			"-drive", fmt.Sprintf("file=%s,media=cdrom,readonly=on,if=none,id=%s", path, id),
-			"-device", fmt.Sprintf("usb-storage,bus=xhci.0,drive=%s", id),
-		)
-	}
-	// `bootindex` IS A DEVICE PROPERTY AND CANNOT GO ON A `-drive`, WHICH IS MEASURED RATHER THAN
-	// ASSUMED - I put it there first and qemu refused to start:
-	//
-	//	qemu-system-x86_64: -drive file=...,if=virtio,format=qcow2,bootindex=0,discard=unmap:
-	//	Block format 'qcow2' does not support the option 'bootindex'
-	//
-	// AND THE SYMPTOM WAS NOT THAT MESSAGE. It was
-	//
-	//	boot the disk: qmp .../drive.sock.qmp: connect: connection refused (waited 30s)
-	//
-	// because qemu exits before it creates the socket. A boot step reporting a socket error is the
-	// shape of EVERY qemu argument mistake, which is why the daemon's own log line - the one above -
-	// has to be read rather than the step's.
-	//
-	// SO A MEDIUM IS TWO ARGUMENTS: `-drive if=none,id=X` and a `-device` that names X and carries
-	// the index. That is the same form the macOS branch uses for OpenCore, and the same reason.
-	//
-	// A CD-ROM IS `ide-cd` ON q35 - the machine has an IDE controller for it and no SATA bus unless one
-	// is asked for, and the installer is a CD-R.
-	appendVirtioDisk := func(path string) {
-		if path == "" {
-			return
-		}
-		id := fmt.Sprintf("media%d", nextID)
-		nextID++
-		// NO `bootindex`: the host hands the kernel over, so nothing on this bus is booted from. It
-		// is a BLOCK DEVICE the guest reads `modloop=` out of.
-		//
-		// MEASURED, and the reason it matters: giving it one collided with the target disk's index 0
-		//
-		//	-device virtio-blk-device,drive=target,bootindex=0: The bootindex 0 has already been used
-		//
-		// - qemu refused at startup and the step reported `qmp ... connection refused`.
-		args = append(args,
-			"-drive", fmt.Sprintf("file=%s,if=none,format=raw,readonly=on,id=%s", path, id),
-			"-device", fmt.Sprintf("virtio-blk-device,drive=%s", id),
-		)
-	}
-	appendMedia := func(path string) {
-		if path == "" {
-			return
-		}
-		idx := nextIndex
-		nextIndex++
-		id := fmt.Sprintf("media%d", nextID)
-		nextID++
-		args = append(args,
-			"-drive", fmt.Sprintf("file=%s,media=cdrom,readonly=on,if=none,id=%s", path, id),
-			"-device", fmt.Sprintf("ide-cd,drive=%s,bootindex=%d", id, idx),
-		)
-	}
-
-	// 1. THE INSTALLER, SO THE FIRMWARE BOOTS IT - and the ONLY one on the IDE bus.
-	//
-	// A MICROVM HAS NO FIRMWARE AND NO IDE, so its medium is a virtio-blk disk at the next index.
-	// That is not a workaround: an Alpine microvm boots a kernel the host hands it and reads its
-	// `modloop=` squashfs out of this image, so what it needs is a BLOCK DEVICE, not a bootable
-	// CD-ROM - which is exactly what a virtio disk is.
-	if b.MicroVM {
-		appendMedia = appendVirtioDisk
-	}
-	appendMedia(b.ISO)
-
-	// 2. THE ANSWER CD. Windows Setup scans removable media for Autounattend.xml and
-	//    $WinPEDriver$ at its root, which is why the virtio drivers also live here.
-	appendUSBCD(b.AnswerCD)
-
-	// 3. THE TARGET DISK, AT INDEX 0.
-	//
-	// `discard=unmap` IS ON WHEN NOTHING IS INSTALLING, for the same reason and with the opposite
-	// sign as macOS: after a system is on the disk, its TRIMs are information the qcow2 can use to
-	// stay small.
-	// A MICROVM'S TARGET IS INDEX 0, BECAUSE NOTHING ELSE IS IN THE BOOT ORDER: the host hands the
-	// kernel over, so no medium carries a `bootindex` and the counter is still 0. Using it there
-	// collided the disk with itself -
-	//
-	//	-device virtio-blk-device,drive=target,bootindex=0: The bootindex 0 has already been used
-	//
-	// - and every other machine keeps the counter, where the installer is 0 and the target is 1 so
-	// the firmware cannot outrank the medium it was told to boot.
-	//
-	// AND A MICROVM'S TARGET IS INDEX 1 RATHER THAN 0, measured the hard way: qemu takes index 0 for
-	// the kernel it was handed, so the disk answering 0 is
-	//
-	//	-device virtio-blk-device,drive=target,bootindex=0: The bootindex 0 has already been used
-	//
-	// - and the same command line has NO other `bootindex` in it, which is what made this look like a
-	// duplicate-device bug for three attempts.
-	diskIndex := nextIndex
-	if b.MicroVM {
-		diskIndex = 1
-	} else {
-		nextIndex++
-	}
-	disk := fmt.Sprintf("file=%s,if=none,format=qcow2,id=target", b.Disk)
-	if b.Discardable() {
-		disk += ",discard=unmap"
-	}
-	args = append(args,
-		"-drive", disk,
-		// A MICROVM HAS NO PCI BUS, so its disk is the virtio-mmio device. `virtio-blk-device` and
-		// `virtio-blk-pci` are the same driver to the guest, and the mmio form is what a machine with
-		// no PCIe can attach.
-		"-device", fmt.Sprintf("%s,drive=target,bootindex=%d", b.virtioBlk(), diskIndex),
-	)
-
-	// 4. THE DRIVER CD, FOR THE SYSTEM THAT WILL RUN ON THIS DISK.
-	appendUSBCD(b.DriverCD)
-
-	// 5. THE POINTER, WHICH BELONGS ON THE SAME CONTROLLER AS EVERYTHING ELSE HERE.
-	//
-	// IT WAS ADDED BY THE DAEMON INSTEAD, AND THAT IS WHERE IT BROKE WINDOWS:
-	//
-	//	qemu-system-x86_64: -device qemu-xhci,id=xhci: Duplicate ID 'xhci' for device
-	//
-	// A Windows boot has an ANSWER CD and a DRIVER CD, so `appendUSBCD` above had already created
-	// `qemu-xhci,id=xhci` - and the daemon then added it again for the tablet, without any way to know.
-	// `xhciAdded` IS THE FACT THAT MATTERS, and it lives here: the pointer is one more thing on this
-	// machine's USB bus, not a separate decision made by a caller that cannot see the bus.
-	//
-	// A MAC IS THE ONE EXCEPTION, and for a reason that is about macOS rather than about buses: its
-	// pointing device comes through OpenCore, and the tablet is still attached so a person can drive the
-	// recovery screen. `StorageArgs` has already created the controller for the recovery disk there,
-	// which is the same variable.
-	// A MICROVM HAS NO PCI BUS, so there is no xHCI controller for a USB tablet to hang from - and
-	// measured, asking for one stops qemu at startup:
-	//
-	//	qemu-system-x86_64: -device qemu-xhci,id=xhci: No 'PCI' bus found for device 'qemu-xhci'
-	//
-	// A guest whose job is to prove the vocabulary does not need a pointer: the steps that click are
-	// exercised on the full machines, where a pointer exists. What this machine proves is that the
-	// vocabulary starts a guest, reads its console, and measures its screen.
-	if b.MicroVM {
-		return args
-	}
-	if !xhciAdded {
-		args = append(args, "-device", "qemu-xhci,id=xhci")
-		xhciAdded = true
-	}
-	args = append(args, "-device", "usb-tablet,bus=xhci.0")
-	// AND A KEYBOARD ON THE SAME BUS, BECAUSE SOME MENUS ONLY READ USB INPUT.
-	//
-	// MEASURED ON RUN 44484688558 (mx), whose recording is the SAME UEFI "Select Language" panel for
-	// its whole 80 minutes:
-	//
-	//	=== that menu is the language submenu this medium opens on     (the check PASSED - it read
-	//	                                                                Language, Keyboard, Timezone)
-	//	=== leave the language submenu for the real boot menu   key esc
-	//	=== up to the first entry ... up again ... and once more  key up
-	//	=== boot it                                             key ret
-	//	=== wait for the live desktop                           80 minutes of the same frame
-	//
-	// Every key was sent and none arrived. This guest had `usb-tablet` and NO KEYBOARD AT ALL: q35
-	// gives it PS/2, and OVMF's graphical menu does not read PS/2 - it reads EFI Simple Text Input,
-	// which on this machine is USB. The menu is a device list, which is why a pointer would not have
-	// helped either.
-	//
-	// `usb-kbd` IS WHAT macOS ALREADY NEEDS and what `lib/vm.py` gives every guest on this bus. It is
-	// harmless elsewhere: a guest that already has a PS/2 keyboard just has a second one, and the
-	// keycodes the daemon sends are the same either way.
-	args = append(args, "-device", "usb-kbd,bus=xhci.0")
-	return args
-}
 
 // installing reports whether a medium is writing to the disk, which is when discard must be off.
 //
@@ -1208,6 +852,12 @@ func (b Boot) firmwareDir() string {
 // exists to avoid.
 func requireFirmwareFiles(pair []string, dir, where string) error {
 	for _, a := range pair {
+		// ONLY PATHS UNDER `{{dir}}` ARE THIS FIRMWARE'S. A profile also names `{{disk}}`,
+		// `{{recovery}}` and `{{work}}`, which the run fills in and `Validate` cannot resolve - and
+		// checking one of those would report a file that is not the caller's business.
+		if !strings.Contains(a, "{{dir}}") {
+			continue
+		}
 		for _, part := range strings.Split(a, ",") {
 			if !strings.HasPrefix(part, "file=") {
 				continue
@@ -1324,12 +974,23 @@ func (b Boot) ProfileName() string {
 		}
 		return b.MicroVMDisplay
 	}
-	// A RECOVERY IMAGE IS WHAT MAKES A BOOT AN INSTALL for a machine whose install medium is one -
-	// which is macOS and nothing else here, and the shape says so rather than this function. That is
-	// the same fact `installing()` reads, stated once: the profile that attaches a recovery image is
-	// the profile that installs, and the profile that does not is an installed system whose freed
-	// blocks may reach the file.
-	if b.shape().InstallMedium == MediumRecovery {
+	// AN ATTACHED MEDIUM IS WHAT MAKES A BOOT AN INSTALL, AND THE SHAPE SAYS WHICH MEDIUM.
+	//
+	//	install_medium: iso        `iso:` attached -> install, otherwise an installed disk
+	//	install_medium: recovery   `recovery:` attached -> install, otherwise an installed disk
+	//	install_medium: none       one profile; a machine with no medium has no install
+	//
+	// THIS IS THE SAME FACT `installing()` READS, stated once. It is not cosmetic: an install puts the
+	// MEDIUM first in the boot order and its target second, an installed system puts the disk first
+	// because there is nothing else to try - and a device with no `bootindex` is not in the boot order
+	// at all, which is what "failed to load Boot0001" meant for six runs.
+	switch b.shape().InstallMedium {
+	case MediumISO:
+		if b.ISO != "" {
+			return "install"
+		}
+		return "disk"
+	case MediumRecovery:
 		if b.Recovery != "" {
 			return "install"
 		}

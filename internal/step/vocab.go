@@ -100,46 +100,22 @@ var Shared = map[string]Key{
 var Verbs = map[string]Verb{
 	// ---- 1. `boot` -------------------------------------------------------------------------
 	"boot": {Name: "boot",
-		Summary: "start the machine this file owns",
+		Summary: "start the machine this file owns, from the arguments this file writes",
 		Fields: map[string]Key{
-			"os": {Name: "os", Kind: KindString,
-				Summary: "the guest family - linux, windows, macos, bsd, android, microvm"},
-			"iso": {Name: "iso", Kind: KindString,
-				Summary: "the installer medium to boot from"},
-			"answer_cd": {Name: "answer_cd", Kind: KindString,
-				Summary: "Windows Setup's answer file, on its own CD"},
-			"driver_cd": {Name: "driver_cd", Kind: KindString,
-				Summary: "the virtio driver CD Windows Setup reads"},
-			"recovery": {Name: "recovery", Kind: KindString,
-				Summary: "macOS's recovery image"},
-			"memory_mb": {Name: "memory_mb", Kind: KindInt,
-				Summary: "the guest's memory, in MiB"},
-			"cpus": {Name: "cpus", Kind: KindInt,
-				Summary: "how many virtual CPUs"},
-			"microvm": {Name: "microvm", Kind: KindBool,
-				Summary: "the smallest machine that can boot a modern Linux kernel: no firmware, " +
-					"no emulated devices the guest does not need"},
-			"kernel": {Name: "kernel", Kind: KindString,
-				Summary: "with `microvm:`: the kernel the host hands qemu"},
-			"initrd": {Name: "initrd", Kind: KindString,
-				Summary: "with `microvm:`: the initramfs"},
-			"kernel_append": {Name: "kernel_append", Kind: KindString,
-				Summary: "with `microvm:`: the guest's own kernel command line"},
-			"microvm_display": {Name: "microvm_display", Kind: KindString,
-				Summary: "with `microvm:`: desktop, terminal or serial"},
-			"disk": {Name: "disk", Kind: KindStringOrMapping,
-				Summary: "the disk to start from, or the disk to make: `{file, size, gpt, esp_mib, " +
-					"min_mb, wait}`. A bare file name is a disk that already exists"},
-			"disk_gb": {Name: "disk_gb", Kind: KindTemplated,
-				Summary: "how big to make the disk, in GiB"},
-			"disk_gpt": {Name: "disk_gpt", Kind: KindBool,
-				Summary: "write a GPT partition table"},
-			"disk_esp_mib": {Name: "disk_esp_mib", Kind: KindTemplated,
-				Summary: "the size of the EFI system partition, in MiB"},
-			"disk_min_mb": {Name: "disk_min_mb", Kind: KindInt,
-				Summary: "the smallest a finished disk may be, in MiB"},
-			"disk_settle": {Name: "disk_settle", Kind: KindFloat,
-				Summary: "wait this long for the disk file to stop growing"},
+			// THE ONLY KEYS A BOOT TAKES. Everything else about a machine - its firmware, its CPU
+			// flags, its disk order, its adapter, its sound card - is a qemu argument, and the file
+			// that knows what machine it wants writes them.
+			"dir": {Name: "dir", Kind: KindString,
+				Summary: "the working directory the arguments' `{{dir}}` names"},
+			"args": {Name: "args", Kind: KindList,
+				Summary: "the qemu argument pairs, in order. `{{disk}}`, `{{iso}}`, `{{recovery}}`, " +
+					"`{{answer}}`, `{{driver}}`, `{{kernel}}`, `{{initrd}}`, `{{append}}`, `{{work}}` " +
+					"and `{{dir}}` are filled from the step; a pair whose placeholder is empty is " +
+					"dropped, which is how an optional medium disappears"},
+			"machine": {Name: "machine", Kind: KindString,
+				Summary: "the `-machine` value, with the same placeholders"},
+			"incoming": {Name: "incoming", Kind: KindString,
+				Summary: "a `snapshot:` file to load instead of booting"},
 		}},
 
 	// ---- 2. `input` ------------------------------------------------------------------------

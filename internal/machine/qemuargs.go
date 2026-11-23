@@ -160,3 +160,22 @@ var KnownPlaceholders = []string{
 	"disk", "iso", "recovery", "answer", "driver", "dir", "work",
 	"kernel", "initrd", "append", "discard",
 }
+
+// RenderList renders a FLAT argument list, which is what a boot step writes after `args:` is
+// flattened. `RenderArgs` takes pairs because a shape file writes them as pairs; a step's list has
+// already been flattened by the parser, so the drop rule is applied per element.
+func RenderList(flat []string, v RenderValues) []string {
+	if len(flat) == 0 {
+		return nil
+	}
+	// IT IS RENDERED AS PAIRS, because every qemu flag takes a value and the drop rule is about a
+	// PAIR: an empty `{{iso}}` in `file={{iso}},media=cdrom` removes the flag AND its argument, never
+	// one of them.
+	var out []string
+	for i := 0; i+1 < len(flat); i += 2 {
+		if got, ok := renderPair(flat[i:i+2], v); ok {
+			out = append(out, got...)
+		}
+	}
+	return out
+}

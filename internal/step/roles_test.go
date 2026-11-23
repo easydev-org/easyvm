@@ -139,9 +139,10 @@ func TestAVerbAndItsFieldsAreOneAction(t *testing.T) {
 		},
 		{
 			name: "boot and its own arguments",
-			spec: map[string]any{"boot": true, "os": "linux", "iso": "x.iso"},
-			ok:   true,
-			why:  "`os` and `iso` are arguments of boot, not actions",
+			spec: map[string]any{"boot": true, "machine": "q35",
+				"args": []any{[]any{"-device", "isa-vga"}}},
+			ok:  true,
+			why: "`machine` and `args` are arguments of boot, not actions",
 		},
 		{
 			name: "run does not read a key",

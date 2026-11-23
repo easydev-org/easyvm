@@ -12,7 +12,7 @@ import (
 // so that ONE recording contains both desktops? That is what the xfce-then-openbox e2e test needs, and
 // what `macos/26/steps/resume.yaml` relies on in the other direction (a guest that is already there).
 //
-// THE MACHINE SLOT IS THE THING THAT DECIDES. `doBoot` refuses a different `os:` while a machine is
+// THE MACHINE SLOT IS THE THING THAT DECIDES. `doBoot` refuses different qemu arguments while a machine is
 // RUNNING - "one daemon holds one machine" - and that check is guarded by `IsRunning()`, so a stopped
 // machine is not a machine. Whether the second boot is allowed is therefore a question about whether
 // `Stop` leaves the driver able to start again.
@@ -23,9 +23,11 @@ import (
 func TestOneWalkCanStopAGuestAndStartAnother(t *testing.T) {
 	d := &fakeDriver{}
 	ex, steps := newExec(d,
-		map[string]any{"name": "boot windows", "boot": true, "os": "windows", "iso": "win.iso"},
+		map[string]any{"name": "boot windows", "boot": true, "machine": "q35",
+			"args": []any{[]any{"-drive", "file=win.iso"}}},
 		map[string]any{"name": "stop it", "stop": "kill", "timeout": float64(60)},
-		map[string]any{"name": "boot linux", "boot": true, "os": "linux", "iso": "linux.iso"},
+		map[string]any{"name": "boot linux", "boot": true, "machine": "q35",
+			"args": []any{[]any{"-drive", "file=linux.iso"}}},
 	)
 	ex.Work = t.TempDir()
 	if _, err := ex.Run(steps); err != nil {
@@ -39,8 +41,9 @@ func TestOneWalkCanStopAGuestAndStartAnother(t *testing.T) {
 	if len(d.stopped) != 1 || d.stopped[0] != "kill" {
 		t.Fatalf("stops = %v, want one kill", d.stopped)
 	}
-	if d.boot == nil || d.boot.OS != "linux" {
-		t.Fatalf("the second boot asked for %+v, and the walk said os: linux", d.boot)
+	if d.boot == nil || len(d.boot.Args) == 0 ||
+		!strings.Contains(strings.Join(d.boot.Args, " "), "linux.iso") {
+		t.Fatalf("the second boot asked for %+v, and the walk named linux.iso", d.boot)
 	}
 }
 
@@ -50,8 +53,10 @@ func TestOneWalkCanStopAGuestAndStartAnother(t *testing.T) {
 func TestASecondBootOfTheSameRunningGuestIsANoOp(t *testing.T) {
 	d := &fakeDriver{}
 	ex, steps := newExec(d,
-		map[string]any{"name": "boot", "boot": true, "os": "linux", "iso": "x.iso"},
-		map[string]any{"name": "boot again", "boot": true, "os": "linux", "iso": "x.iso"},
+		map[string]any{"name": "boot", "boot": true, "machine": "q35",
+			"args": []any{[]any{"-device", "isa-vga"}}},
+		map[string]any{"name": "boot again", "boot": true, "machine": "q35",
+			"args": []any{[]any{"-device", "isa-vga"}}},
 	)
 	ex.Work = t.TempDir()
 	if _, err := ex.Run(steps); err != nil {
@@ -67,8 +72,10 @@ func TestASecondBootOfTheSameRunningGuestIsANoOp(t *testing.T) {
 func TestADifferentGuestOnARunningMachineIsRefused(t *testing.T) {
 	d := &fakeDriver{}
 	ex, steps := newExec(d,
-		map[string]any{"name": "boot windows", "boot": true, "os": "windows", "iso": "win.iso"},
-		map[string]any{"name": "boot linux without stopping", "boot": true, "os": "linux", "iso": "l.iso"},
+		map[string]any{"name": "boot windows", "boot": true, "machine": "q35",
+			"args": []any{[]any{"-drive", "file=win.iso"}}},
+		map[string]any{"name": "boot linux without stopping", "boot": true, "machine": "q35",
+			"args": []any{[]any{"-drive", "file=l.iso"}}},
 	)
 	ex.Work = t.TempDir()
 	_, err := ex.Run(steps)
@@ -100,7 +107,8 @@ func TestADifferentGuestOnARunningMachineIsRefused(t *testing.T) {
 func TestAWalkCanWaitForTheMachineItJustStopped(t *testing.T) {
 	d := &fakeDriver{}
 	ex, steps := newExec(d,
-		map[string]any{"name": "boot", "boot": true, "os": "linux", "iso": "x.iso"},
+		map[string]any{"name": "boot", "boot": true, "machine": "q35",
+			"args": []any{[]any{"-device", "isa-vga"}}},
 		map[string]any{"name": "stop it", "stop": "kill", "timeout": float64(60)},
 		map[string]any{"name": "wait for the machine to stop", "wait_until": "stopped",
 			"timeout": float64(5), "poll": float64(1)},

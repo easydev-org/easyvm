@@ -51,7 +51,7 @@ func TestWindowsDiskBoot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	args := strings.Join(b.StorageArgs(), " ")
+	args := strings.Join(renderedArgs(t, b), " ")
 	// THE TARGET IS A virtio DEVICE, WHICH IS NOW SAID BY THE `-device` RATHER THAN BY `if=virtio`:
 	// `bootindex` cannot go on a `-drive` ("Block format 'qcow2' does not support the option
 	// 'bootindex'"), so the drive is `if=none,id=target` and the device names it.
@@ -90,7 +90,7 @@ func TestWindowsISOBoot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	args := b.StorageArgs()
+	args := renderedArgs(t, b)
 	joined := strings.Join(args, " ")
 
 	// THE ORDER IS INSTALLER, ANSWER, DISK, DRIVERS - MEASURED, NOT ARBITRARY.
@@ -130,17 +130,17 @@ func TestWindowsISOBoot(t *testing.T) {
 // "boot.img OpenCore, bootindex=0: a disk with no bootindex is not in the boot order at all, which
 // is what 'failed to load Boot0001' meant for six runs."
 func TestMacOSBootAlwaysHasOpenCore(t *testing.T) {
-	disk, _, _, _, recovery, rom, vars, bootImg := fixture(t)
+	// THE PROFILES ARE THE MACHINE NOW, so this reads them with the placeholders filled in - which is
+	// exactly what the daemon hands qemu.
 	sh := realShape(t, "macos")
-	b := Boot{OS: MacOS, Disk: disk, Recovery: recovery, Shape: sh,
-		OpenCoreROM: rom, OpenCoreVars: vars, BootImage: bootImg,
-		// The shape says `{{work}}`, so the boot needs a work directory to render it against.
-		Work: filepath.Dir(disk), FirmwareDir: filepath.Dir(disk)}
-	if err := b.Validate(); err != nil {
+	v := RenderValues{
+		"disk": "/w/disk.qcow2", "recovery": "/w/recovery.dmg", "dir": "/w", "work": "/w",
+	}
+	install, err := sh.Profile("install")
+	if err != nil {
 		t.Fatal(err)
 	}
-
-	joined := strings.Join(b.StorageArgs(), " ")
+	joined := strings.Join(RenderArgs(install.Args, v), " ")
 	if !strings.Contains(joined, "bootindex=0") {
 		t.Fatalf("OpenCore's disk must be bootindex=0; without a bootindex the firmware does "+
 			"not try it at all:\n%s", joined)
@@ -149,58 +149,51 @@ func TestMacOSBootAlwaysHasOpenCore(t *testing.T) {
 		t.Fatalf("the target must be bootindex=1, so OpenCore finds the system after the "+
 			"installer writes it:\n%s", joined)
 	}
-	// THE RECOVERY IMAGE IS REMOVABLE, and it is attached on EVERY macOS boot: OpenCore reads
-	// Apple's APFS driver out of it.
+	// THE RECOVERY IMAGE IS REMOVABLE, and it is attached on an INSTALL: OpenCore reads Apple's APFS
+	// driver out of it, and macOS installs FROM removable media.
 	if !strings.Contains(joined, "usb-storage") {
-		t.Fatalf("the recovery image must be usb-storage; a virtio disk would be in the boot "+
-			"order and macOS installs from removable media:\n%s", joined)
+		t.Fatalf("the `install` profile does not attach the recovery image as usb-storage:\n%s", joined)
 	}
 	// AND AN INSTALL MUST NOT DISCARD, because it is the one boot that writes.
 	//
 	//     41835253323   no discard, 128G   finished in 46 minutes
 	//     42009463444   discard,    128G   wrote 36774 MiB, dropped to 19761, never moved again
 	if strings.Contains(joined, "discard=unmap") {
-		t.Fatalf("discard is on while the recovery image is attached, which is the install. "+
-			"Measured: it loses the clusters the APFS snapshot still refers to and the "+
-			"progress bar freezes at \"About 48 minutes remaining\":\n%s", joined)
+		t.Fatalf("discard is on in the `install` profile. Measured: it loses the clusters the APFS "+
+			"snapshot still refers to and the progress bar freezes at \"About 48 minutes "+
+			"remaining\":\n%s", joined)
 	}
 
-	// AND WITHOUT A RECOVERY IMAGE THERE IS NO USB DEVICE AT ALL, AND DISCARD IS ON, because a
-	// later stage boots a system that is already installed. An extra USB disk is one more row the
-	// guest can pick in Disk Utility, where `choose the target disk by capacity` reads the
-	// sidebar; and discard is then exactly what keeps the published disk small.
-	installed := Boot{OS: MacOS, Disk: disk, Shape: sh,
-		OpenCoreROM: rom, OpenCoreVars: vars, BootImage: bootImg,
-		Work: filepath.Dir(disk), FirmwareDir: filepath.Dir(disk)}
-	if err := installed.Validate(); err != nil {
-		t.Fatalf("a macOS boot without a recovery image must be allowed - only an INSTALL needs "+
-			"the recovery device: %v", err)
+	// AND AN INSTALLED DISK IS THE OTHER PROFILE: no recovery device, and discard IS on, because that
+	// is what keeps the published qcow2 small. An extra USB disk would be one more row the guest can
+	// pick in Disk Utility, where `choose the target disk by capacity` reads the sidebar.
+	installed, err := sh.Profile("disk")
+	if err != nil {
+		t.Fatal(err)
 	}
-	body := strings.Join(installed.StorageArgs(), " ")
+	body := strings.Join(RenderArgs(installed.Args, v), " ")
 	if strings.Contains(body, "usb-storage") {
-		t.Fatalf("a macOS boot with no recovery image attached a USB device anyway; that is one "+
-			"more disk the guest can select:\n%s", body)
+		t.Fatalf("the `disk` profile attaches a USB device; that is one more disk the guest can "+
+			"select:\n%s", body)
 	}
 	if !strings.Contains(body, "discard=unmap") {
-		t.Fatalf("a macOS boot with no recovery image is a FINISHED system and must discard - "+
-			"that is what keeps the published disk small:\n%s", body)
+		t.Fatalf("the `disk` profile is a FINISHED system and must discard - that is what keeps "+
+			"the published disk small:\n%s", body)
 	}
 	// THE SMC KEY IS IN THE PROFILE'S ARGUMENTS. macOS reads it to decide whether the firmware is
 	// Apple's, and without it the kernel stops before it draws anything.
 	if !strings.Contains(strings.Join(profileText(t, "macos"), " "), "isa-applesmc,osk=") {
 		t.Fatal("no macOS profile attaches `isa-applesmc` with its key")
 	}
-	// THE FIRMWARE IS OPENCORE'S, NOT OVMF'S.
-	// THE FIRMWARE'S OWN ARGUMENTS, RENDERED FROM THE SHAPE. macOS's shape is `kind: folder`, so
-	// these are the file's `firmware.args:` with `{{dir}}` substituted - this build does not know
-	// that `macos.rom` is a ROM or that `macos.vars` is a variable store.
-	fw := strings.Join(b.FirmwareArgs("/usr/share/OVMF/OVMF_CODE_4M.fd", "/tmp/OVMF_VARS.fd"), " ")
-	if !strings.Contains(fw, "macos.rom") || !strings.Contains(fw, filepath.Dir(disk)) {
-		t.Fatalf("macOS must boot its own firmware, rendered into the work directory - not OVMF's:"+
-			"\n%s", fw)
+	// AND THE FIRMWARE IS OPENCORE'S, RENDERED FROM THE PROFILE - not OVMF's, which this build would
+	// otherwise copy into the work directory. The pflash pair is in `qemu.args` now, so that is what
+	// is checked: `macos.rom` and `macos.vars` under the directory the shape named.
+	if !strings.Contains(joined, "macos.rom") || !strings.Contains(joined, "macos.vars") {
+		t.Fatalf("the `install` profile does not attach OpenCore's pflash pair:\n%s", joined)
 	}
-	if strings.Contains(fw, "OVMF") {
-		t.Fatalf("macOS was given OVMF's pflash files:\n%s", fw)
+	if strings.Contains(joined, "OVMF") {
+		t.Fatalf("the `install` profile names OVMF's files, and a macOS guest given those boots "+
+			"to a crossed-out circle:\n%s", joined)
 	}
 }
 
@@ -266,7 +259,7 @@ func TestTheWrongMediumForTheOSIsRefused(t *testing.T) {
 	if err == nil {
 		t.Fatal("macOS with an empty firmware directory must be refused")
 	}
-	if !strings.Contains(err.Error(), "boot.img") {
+	if !strings.Contains(err.Error(), "macos.rom") {
 		t.Fatalf("the refusal must name the file the shape expects; got %v", err)
 	}
 	_ = rom
@@ -423,13 +416,13 @@ func TestBSDIsAcceptedAndBootsLikeLinux(t *testing.T) {
 		t.Fatal(err)
 	}
 	// THE STORAGE IS ONE VIRTIO DISK AND THE SAME DISCARD RULE AS LINUX.
-	args := strings.Join(installed.StorageArgs(), " ")
+	args := strings.Join(renderedArgs(t, installed), " ")
 	if !strings.Contains(args, "virtio-blk-pci,drive=target") || !strings.Contains(args, "discard=unmap") {
 		t.Fatalf("a booted BSD disk must be one virtio disk with discard on:\n%s", args)
 	}
 	// AND AN INSTALLER ISO TURNS DISCARD OFF, the same rule as every other family.
 	installing := Boot{OS: BSD, Disk: disk, ISO: iso}
-	if strings.Contains(strings.Join(installing.StorageArgs(), " "), "discard=unmap") {
+	if strings.Contains(strings.Join(renderedArgs(t, installing), " "), "discard=unmap") {
 		t.Fatal("an installing BSD boot must not discard")
 	}
 	// AND IT GETS NO APPLE PARTS: its own profile names no SMC device, because a BSD guest has no
@@ -508,66 +501,39 @@ func TestCheckKVMAnswersForThisMachine(t *testing.T) {
 // THIS TEST IS ABOUT THE ORDER AS WELL AS THE PRESENCE: the controller must be added BEFORE the device
 // that names its bus, because qemu resolves `bus=` as it parses.
 func TestTheRecoveryDeviceHasAController(t *testing.T) {
-	disk, _, _, _, recovery, rom, vars, bootImg := fixture(t)
+	// THE CONTROLLER IS FIRST IN THE PROFILE'S OWN LIST, and that ordering is what makes
+	// `bus=xhci.0` exist when qemu parses the disk that names it.
 	sh := realShape(t, "macos")
-	b := Boot{OS: MacOS, Disk: disk, Recovery: recovery, Shape: sh,
-		OpenCoreROM: rom, OpenCoreVars: vars, BootImage: bootImg,
-		// The shape says `{{work}}`, so the boot needs a work directory to render it against.
-		Work: filepath.Dir(disk), FirmwareDir: filepath.Dir(disk)}
-	if err := b.Validate(); err != nil {
-		t.Fatal(err)
-	}
-	args := b.StorageArgs()
-	joined := strings.Join(args, " ")
+	v := RenderValues{"disk": "/w/disk.qcow2", "recovery": "/w/r.dmg", "dir": "/w", "work": "/w"}
 
-	controller := -1
-	for i, a := range args {
-		if strings.HasPrefix(a, "qemu-xhci") {
-			controller = i
+	for _, name := range []string{"install", "disk"} {
+		prof, err := sh.Profile(name)
+		if err != nil {
+			t.Fatal(err)
 		}
-	}
-	if controller < 0 {
-		t.Fatalf("no qemu-xhci device, so `bus=xhci.0` names a bus that does not exist and qemu "+
-			"refuses to start:\n%s", joined)
-	}
-	// THE CONTROLLER MUST BE DECLARED BEFORE THE DEVICE THAT USES IT.
-	usb := strings.Index(joined, "usb-storage")
-	if usb < 0 {
-		t.Fatalf("the recovery image is not attached as usb-storage:\n%s", joined)
-	}
-	// Compare positions in the joined string, which is where qemu parses them.
-	if at := strings.Index(joined, "qemu-xhci"); at > usb {
-		t.Fatalf("`usb-storage,bus=xhci.0` comes before the controller it names:\n%s", joined)
-	}
-
-	// AND WITHOUT A RECOVERY IMAGE THE CONTROLLER AND THE POINTER ARE STILL THERE - THE RECOVERY IMAGE
-	// IS THE ONLY THING THAT GOES AWAY.
-	//
-	// THIS TEST USED TO REQUIRE THE OPPOSITE, and that requirement was the bug: `usb-tablet` lived
-	// inside `if b.Recovery != ""`, so a macOS guest booted from an INSTALLED disk had no pointer at
-	// all. MEASURED on the disk this repository publishes as `macos15`, pulled back and driven:
-	//
-	//	click (965, 981): pointer to (965, 981): Input handler not found for event type abs
-	//
-	// on a machine that had booted to its Setup Assistant with a perfectly good screen. A MAC HAS NO
-	// PS/2, so a pointer that is not on USB is a pointer that does not exist.
-	installed := Boot{OS: MacOS, Disk: disk, OpenCoreROM: rom, OpenCoreVars: vars, BootImage: bootImg}
-	body := strings.Join(installed.StorageArgs(), " ")
-	if strings.Contains(body, "usb-storage") {
-		t.Fatalf("a macOS boot with no recovery image attached the recovery image anyway:\n%s", body)
-	}
-	if !strings.Contains(body, "qemu-xhci") {
-		t.Fatalf("a macOS boot from an installed disk has no qemu-xhci, and `bus=xhci.0` below names "+
-			"a bus that does not exist:\n%s", body)
-	}
-	if !strings.Contains(body, "usb-tablet,bus=xhci.0") {
-		t.Fatalf("a macOS boot from an installed disk has NO POINTER. A mac has no PS/2, so nothing "+
-			"can click it - measured as `Input handler not found for event type abs` on the first "+
-			"click of the ssh walkthrough:\n%s", body)
-	}
-	// AND THE CONTROLLER STILL COMES FIRST, which is the ordering that makes `bus=xhci.0` exist.
-	if at := strings.Index(body, "qemu-xhci"); at > strings.Index(body, "usb-tablet") {
-		t.Fatalf("`usb-tablet,bus=xhci.0` comes before the controller it names:\n%s", body)
+		args := RenderArgs(prof.Args, v)
+		joined := strings.Join(args, " ")
+		controller := strings.Index(joined, "qemu-xhci")
+		if controller < 0 {
+			t.Fatalf("the %q profile has no qemu-xhci, so `bus=xhci.0` names a bus that does not "+
+				"exist and qemu refuses to start:\n%s", name, joined)
+		}
+		// THE POINTER AND THE KEYBOARD ARE ON EVERY BOOT: a mac has no PS/2, so a pointer that is
+		// not on USB is a pointer that does not exist.
+		for _, dev := range []string{"usb-tablet,bus=xhci.0", "usb-kbd,bus=xhci.0"} {
+			at := strings.Index(joined, dev)
+			if at < 0 {
+				t.Fatalf("the %q profile has no %s:\n%s", name, dev, joined)
+			}
+			if at < controller {
+				t.Fatalf("the %q profile names %s before the controller it uses:\n%s", name, dev, joined)
+			}
+		}
+		// AND THE RECOVERY IMAGE IS ONLY IN THE PROFILE THAT INSTALLS.
+		if got := strings.Contains(joined, "usb-storage"); got != (name == "install") {
+			t.Fatalf("the %q profile's usb-storage = %v; only an install attaches the recovery "+
+				"image:\n%s", name, got, joined)
+		}
 	}
 }
 
@@ -663,7 +629,7 @@ func TestEveryMediumThatCanBootIsInTheBootOrder(t *testing.T) {
 		if err := b.Validate(); err != nil {
 			t.Fatalf("%s: %v", tc.name, err)
 		}
-		args := strings.Join(b.StorageArgs(), " ")
+		args := strings.Join(renderedArgs(t, b), " ")
 
 		// THE INSTALLER IS bootindex=0, because it is what has to run.
 		if !strings.Contains(args, "bootindex=0") {
@@ -702,7 +668,7 @@ func TestBootindexIsOnADeviceNotADrive(t *testing.T) {
 		{OS: Windows, ISO: iso, Disk: disk, AnswerCD: answer, DriverCD: driver},
 		{OS: BSD, Disk: disk},
 	} {
-		args := b.StorageArgs()
+		args := renderedArgs(t, b)
 		for i, a := range args {
 			// THE VALUE OF `-drive` IS THE ARGUMENT AFTER THE FLAG.
 			if a == "-drive" && i+1 < len(args) && strings.Contains(args[i+1], "bootindex") {
@@ -741,7 +707,7 @@ func TestAtMostOneMediumIsOnTheIDEBus(t *testing.T) {
 	if err := b.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	args := b.StorageArgs()
+	args := renderedArgs(t, b)
 	joined := strings.Join(args, " ")
 
 	ide := strings.Count(joined, "ide-cd")
@@ -861,7 +827,7 @@ func TestTheUSBControllerIsNamedOnce(t *testing.T) {
 		{"bsd from a usb cd", Boot{OS: BSD, Disk: "/d.qcow2", ISO: "/g.iso"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			args := tc.b.StorageArgs()
+			args := renderedArgs(t, tc.b)
 			n := 0
 			for i, a := range args {
 				if a == "-device" && i+1 < len(args) && strings.HasPrefix(args[i+1], "qemu-xhci,id=xhci") {
@@ -1235,4 +1201,24 @@ func profileText(t *testing.T, shape string) []string {
 		out = append(out, pair...)
 	}
 	return out
+}
+
+// renderedArgs is what a boot gives qemu, for a test that asserts on the text.
+//
+// IT IS THE SHAPE'S PROFILE, RENDERED - which is the same list the daemon builds. A test that wants "is
+// bootindex on a device" or "is the controller named once" is asking about that list, and reading it
+// through the same function keeps the assertion honest.
+func renderedArgs(t *testing.T, b Boot) []string {
+	t.Helper()
+	prof, err := b.shape().Profile(b.ProfileName())
+	if err != nil {
+		t.Fatalf("%s: %v", b.OS, err)
+	}
+	v := RenderValues{
+		"disk": b.Disk, "iso": b.ISO, "recovery": b.Recovery,
+		"answer": b.AnswerCD, "driver": b.DriverCD,
+		"dir": b.firmwareDir(), "work": b.Work,
+		"discard": b.DiscardFragment(),
+	}
+	return RenderArgs(prof.Args, v)
 }

@@ -1791,7 +1791,8 @@ func TestEveryCreatedDiskIs128GiB(t *testing.T) {
 		// make the smallest machine in the repository pay for a rule about the largest.
 		microvm := false
 		for _, s := range doc.Steps {
-			if v, ok := s.Spec["microvm"].(bool); ok && v {
+			// THE MACHINE TYPE IS IN THE BOOT'S OWN `machine:` NOW - there is no `microvm:` flag.
+			if strings.Contains(s.Get("machine"), "microvm") {
 				microvm = true
 			}
 		}

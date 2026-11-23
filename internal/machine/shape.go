@@ -332,10 +332,11 @@ func (f ShapeFile) Validate() (Shape, error) {
 			return s, fmt.Errorf("shape %q: `firmware.kind: folder` needs `dir:` - the directory "+
 				"`fetch:` writes, relative to the work directory", f.Name)
 		}
-		if len(f.Firmware.Args) == 0 {
-			return s, fmt.Errorf("shape %q: `firmware.kind: folder` needs `args:` - the qemu "+
-				"arguments that attach it. An empty list is a firmware nothing boots", f.Name)
-		}
+		// `args:` AND `disks:` ARE OPTIONAL NOW: a firmware's files can be attached from the shape's
+		// `qemu.args` instead, which is where macOS's went when the two were merged. What is required
+		// is that SOMETHING attaches the directory - and `firmware.dir` is what the `{{dir}}`
+		// placeholder in either list resolves against.
+		_ = f.Firmware.Args
 		for i, pair := range f.Firmware.Args {
 			if len(pair) != 2 {
 				return s, fmt.Errorf("shape %q: `firmware.args[%d]` has %d element(s). Each entry is "+
