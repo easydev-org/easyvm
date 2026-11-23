@@ -29,16 +29,22 @@ step "boot the installer"
 
 
 step "wait for the live desktop"
-  desktop linux/gnome
-  poll 5
-  range [0.9, 1]
-  # THE BAND IS TOP-RIGHT WALLPAPER: the clock is at the top centre and the search bar
-  # sits under it, and an installer window covers the middle from y=295 down. Measured on this
-  # medium's own recording: the boot splash scores 0.0000 here and every desktop frame 1.0000.
-  rect [1500, 120, 1900, 280]
-  rect_at [1920, 1080]
-  reference reference/desktop.png
-  timeout 5400
+  repeat
+    do
+      item
+        read
+          name screen
+    until
+      check
+        source screen
+        mode like
+        reference reference/desktop.png
+        range [0.9, 1]
+        rect [1500, 120, 1900, 280]
+        rect_at [1920, 1080]
+        must true
+    max 1080
+    pause 5
 
 
 step "open the installer"

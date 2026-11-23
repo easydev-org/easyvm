@@ -29,31 +29,22 @@ step "boot the installer"
 
 
 step "wait for the live desktop"
-  desktop linux/gnome
-  poll 5
-  range [0.9, 1]
-  # THE REFERENCE IS THIS BOOT'S OWN DESKTOP, AND THE BAND IS THE BOTTOM OF THE SCREEN.
-  #
-  # MEASURED ON RUN 44519496307, WHICH NEVER SATISFIED THE GATE WHILE ITS DESKTOP WAS UP:
-  #
-  #	t=300   a complete GNOME session - the welcome dialog, the Dock, the top bar
-  #	t>=350  black, because the guest blanks its own display
-  #
-  # and every frame scored 0.0000 against the old reference, whose wall paper is a DIFFERENT PIECE
-  # OF ART (the shipped one is the gold-gears splash art; this boot draws a pale gradient behind an
-  # Overview that is scaling the wall paper down and blurring it). Two different pictures, so no
-  # band could have matched both.
-  #
-  # THE REFERENCE IS NOW THAT FRAME. THE BAND IS ROWS 820..1020, the wall paper below the Overview's
-  # app grid and above the Dock: 1.0000 on every desktop frame from 60 s, 0.0002 on the boot and
-  # splash frames before it.
-  #
-  # AND THE SCREEN BLANKS AT ABOUT 350 s, which is why the gate has to open early: `poll: 5` is what
-  # gives it that chance, and it is already there.
-  rect [0, 820, 1920, 1020]
-  rect_at [1920, 1080]
-  reference reference/desktop.png
-  timeout 5400
+  repeat
+    do
+      item
+        read
+          name screen
+    until
+      check
+        source screen
+        mode like
+        reference reference/desktop.png
+        range [0.9, 1]
+        rect [0, 820, 1920, 1020]
+        rect_at [1920, 1080]
+        must true
+    max 1080
+    pause 5
 
 
 step "a pointer nudge on the wallpaper, so the idle timer starts again"

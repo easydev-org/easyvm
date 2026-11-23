@@ -34,19 +34,22 @@ step "boot the installer"
   # desktop on this very recording.
 
 step "wait for the live desktop"
-  desktop linux/gnome
-  range [0.9, 1]
-  rect [0, 0, 1920, 120]
-  rect_at [1920, 1080]
-  reference reference/desktop.png
-  timeout 5400
-
-  # THE LIVE SESSION'S RIGHT-CLICK MENU IS OPEN MORE OFTEN THAN NOT, because the installer puts it
-  # there and the walk's own clicks leave it behind. MEASURED on run 44361392014, where the captured
-  # frame had the menu open over the wallpaper and the reference did not: 0.6664 similar.
-  #
-  # AND THE REFERENCE IS THE INSTALLER'S OWN WINDOW, which is what the next step waits for - so the
-  # comparison is about "the live session got this far", not "the desktop is empty".
+  repeat
+    do
+      item
+        read
+          name screen
+    until
+      check
+        source screen
+        mode like
+        reference reference/desktop.png
+        range [0.9, 1]
+        rect [0, 0, 1920, 120]
+        rect_at [1920, 1080]
+        must true
+    max 1080
+    pause 5
 
 step "close the right-click menu the live session leaves open"
   input esc

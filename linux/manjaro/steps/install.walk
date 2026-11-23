@@ -29,15 +29,22 @@ step "boot the installer"
 
 
 step "wait for the live desktop"
-  desktop linux/kde
-  range [0.9, 1]
-  # THE TOP 120 ROWS ARE WALLPAPER AND A MENU BAR: a boot splash scores 0.0002
-  # there and every desktop frame 1.0000, including the ones with an installer
-  # window over the middle. The clock sits below this band, which is why 120.
-  rect [0, 0, 1920, 120]
-  rect_at [1920, 1080]
-  reference reference/desktop.png
-  timeout 5400
+  repeat
+    do
+      item
+        read
+          name screen
+    until
+      check
+        source screen
+        mode like
+        reference reference/desktop.png
+        range [0.9, 1]
+        rect [0, 0, 1920, 120]
+        rect_at [1920, 1080]
+        must true
+    max 1080
+    pause 5
 
 
 step "let the desktop settle"

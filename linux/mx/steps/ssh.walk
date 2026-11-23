@@ -165,16 +165,22 @@ step "greeter - submit"
   # GAP GOES TO THE GREETER. This is the same gate the same medium's install walk uses.
 
 step "wait for the desktop"
-  desktop linux/xfce
-  timeout 900
-
-  # THE WELCOME WINDOW HOLDS FOCUS, SO IT IS CLOSED BEFORE THE CHORD IS PRESSED.
-  #
-  # MEASURED ON RUN 44583759370, whose recording at 150 s is 'MX Welcome' - its eight cards, the
-  # 'Show this dialog at start up' checkbox - and NO TERMINAL. The chord was pressed; XFCE gave it to
-  # the focused window, and the terminal never opened, so every run: after it typed into nothing.
-  #
-  # The window's own X is at 1305,163. Escape after it covers a window that is already gone.
+  repeat
+    do
+      item
+        read
+          name screen
+    until
+      check
+        source screen
+        mode like
+        reference reference/desktop.png
+        rect [0, 0, 1920, 120]
+        rect_at [1920, 1080]
+        range [0.9, 1]
+        must true
+    max 180
+    pause 5
 
 step "close the welcome window, which holds focus"
   input 1305 163

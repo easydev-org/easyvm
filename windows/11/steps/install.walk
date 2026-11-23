@@ -207,33 +207,22 @@ step "answer it again, if it came back"
   # in the repository rather than two that could drift apart.
 
 step "wait for the desktop"
-  desktop windows
-  range [0.9, 1]
-  rect [0, 0, 1920, 120]
-  rect_at [1920, 1080]
-  reference reference/desktop.png
-  timeout 7200
-
-  # THE DESKTOP IS THE PICTURE, NOT ONLY THE NUMBERS. `desktop:` decides on seven measurements -
-  # brightness drop, variance ratio, saturation - and several panes can share all seven. This step
-  # says the screen is THE ONE THIS FILE WAS MEASURED ON, by comparing pixels to a frame taken from
-  # this repository's own recording of this leg.
-  #
-  # 3% IS THE CEILING AND THE MEASUREMENT IS WHY: the same screen a second later differs by 0.5-0.9%,
-  # and two different screens by 98-100%, so the gap is three orders of magnitude wide.
-  # A FIRST LOGIN LEAVES THINGS OPEN THAT A DESKTOP DOES NOT HAVE LATER.
-  #
-  # MEASURED ON RUN 44341011692, which failed here at 0.7092 similar with the reference at 0.9700:
-  # the frame the walk captured had the START MENU open and a "Screen resolution" notification in the
-  # corner, and the reference - taken from this same leg's own recording - was the clean desktop.
-  # `desktop: windows` had passed because it decides on brightness, variance and saturation, and a
-  # menu over a wallpaper moves none of them past its thresholds.
-  #
-  # SO THE SCREEN IS SETTLED BEFORE IT IS COMPARED, which is the same reason every later step in this
-  # file starts with an Escape: the desktop is the state, the menu is the leftover.
-  # A CLICK ON THE WALLPAPER, NOT ONLY AN ESCAPE. Escape closes the START PANEL; the notification
-  # in the corner is a separate window and the click is what dismisses it - measured on the frame
-  # this comparison rejected, where both were up at once.
+  repeat
+    do
+      item
+        read
+          name screen
+    until
+      check
+        source screen
+        mode like
+        reference reference/desktop.png
+        range [0.9, 1]
+        rect [0, 0, 1920, 120]
+        rect_at [1920, 1080]
+        must true
+    max 1440
+    pause 5
 
 step "click the empty desktop"
   input 960 540
@@ -294,8 +283,20 @@ step "reboot into the installed system"
 
 
 step "the installed system reaches a desktop"
-  desktop windows
-  timeout 1800
+  repeat
+    do
+      item
+        read
+          name screen
+    until
+      check
+        source screen
+        mode like
+        reference reference/desktop.png
+        range [0.9, 1]
+        must true
+    max 360
+    pause 5
 
 
 step "shut the installed system down"

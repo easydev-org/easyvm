@@ -41,8 +41,22 @@ step "boot the disk"
 
 
 step "wait for the desktop"
-  desktop windows
-  timeout 900
+  repeat
+    do
+      item
+        read
+          name screen
+    until
+      check
+        source screen
+        mode like
+        reference reference/desktop.png
+        rect [0, 0, 1920, 120]
+        rect_at [1920, 1080]
+        range [0.9, 1]
+        must true
+    max 180
+    pause 5
 
 
 step "wait for sshd"

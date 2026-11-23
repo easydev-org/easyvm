@@ -93,32 +93,22 @@ step "greeter - submit"
   # panel along the bottom, and of the clock in the bottom-right corner.
 
 step "wait for the desktop"
-  desktop linux/kde
-  poll 5
-  range [0.9, 1]
-  rect [1350, 740, 1700, 990]
-  rect_at [1920, 1080]
-  reference reference/desktop-ssh.png
-  timeout 900
-
-  # THE SCREEN GOES BLACK BEFORE THE FIRST COMMAND, AND A BLACK SCREEN TAKES NO KEYS.
-  #
-  # MEASURED ON RUN 44509536049, whose ssh recording ends on a PURE BLACK last frame and whose
-  # daemon log shows every command after `open the terminal` doing nothing at all:
-  #
-  #	=== open the terminal      key ctrl+alt+t
-  #	=== install openssh        (no output)
-  #	=== prove sshd is active   (no output)
-  #	=== wait for sshd          10 minutes of "connection refused"
-  #
-  # THIS GUEST BLANKS ITS OWN DISPLAY, which is the same DPMS behaviour mint showed as a uniform
-  # 0.29-of-brightness dim. The install walk turns it off; the ssh walk never did.
-  #
-  # ubuntu's ssh walk is the ONE that turns it off - `xset s off; xset -dpms; xset s noblank` - and
-  # it is the one that passes. Every other Linux ssh walk, this one included, was missing the step.
-  #
-  # IT IS RUN FIRST, BEFORE THE TERMINAL IS NEEDED FOR ANYTHING, so the commands below have a live
-  # screen to be typed into.
+  repeat
+    do
+      item
+        read
+          name screen
+    until
+      check
+        source screen
+        mode like
+        reference reference/desktop-ssh.png
+        range [0.9, 1]
+        rect [1350, 740, 1700, 990]
+        rect_at [1920, 1080]
+        must true
+    max 180
+    pause 5
 
 step "open the terminal"
   input ctrl+alt+t

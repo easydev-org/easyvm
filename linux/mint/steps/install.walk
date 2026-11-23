@@ -72,30 +72,22 @@ step "and once more, then let the kernel start"
 
 
 step "wait for the live desktop"
-  desktop linux/cinnamon
-  poll 5
-  range [0.9, 1]
-  # THE REFERENCE WAS A DESKTOP WITH A TERMINAL WINDOW ON IT, AND THE GATE RUNS BEFORE THAT
-  # TERMINAL IS OPENED. MEASURED ON RUN 44477977288, which spent its whole 1h30m reading 0.0126
-  # and then 0.0166 against a desktop that was plainly up: the reference held a `gnome-terminal`
-  # running the gsettings commands, and `wait for the live desktop` is FOUR STEPS EARLIER than the
-  # step that opens it. No band could have matched both, which is why the top 120 rows were not
-  # the whole story.
-  #
-  # THE REFERENCE IS NOW THIS MEDIUM'S OWN DESKTOP at 400 s, before the terminal.
-  #
-  # THE BAND IS TOP-RIGHT WALLPAPER, x 1500..1900 and y 150..350: clear of the installer icon at
-  # the top left, of the logo in the middle, and of the Cinnamon panel at the bottom.
-  # MEASURED on that recording: boot and splash frames 0.0000, and every desktop frame 1.0000.
-  #
-  # THE SCREENSAVER IS WHY THE WINDOW MATTERS. This guest dims its whole display to 0.29 of its
-  # brightness at about 960 s - every pixel, uniformly - so a gate that is still waiting then
-  # cannot match ANY reference. The desktop is up at 45 s and the dimming is 15 minutes later, and
-  # `poll: 5` means the gate has 180 chances in between.
-  rect [1500, 150, 1900, 350]
-  rect_at [1920, 1080]
-  reference reference/desktop.png
-  timeout 5400
+  repeat
+    do
+      item
+        read
+          name screen
+    until
+      check
+        source screen
+        mode like
+        reference reference/desktop.png
+        range [0.9, 1]
+        rect [1500, 150, 1900, 350]
+        rect_at [1920, 1080]
+        must true
+    max 1080
+    pause 5
 
 
 step "disable the screen saver, its lock and the dpms blank"

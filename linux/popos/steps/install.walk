@@ -29,23 +29,22 @@ step "boot the installer"
 
 
 step "wait for the live desktop"
-  desktop linux/gnome
-  poll 5
-  range [0.9, 1]
-  # THE TOP 120 ROWS ARE NOT GOOD ENOUGH ON THIS MEDIUM, AND THAT IS MEASURED RATHER THAN SUSPECTED.
-  #
-  # Scored against this medium's own recording, the top band gives a WORST desktop frame of
-  # 0.8115 - under the 0.90 the gate asks for. Its menu bar carries a clock and a set of status
-  # icons that move, and unlike ubuntu's (0.9816 worst) there is enough of them to lose the gate.
-  # A reference band that depends on a clock is a band that fails whenever the minute differs.
-  #
-  # THE LEFT 300 PIXELS, rows 280..480, are wall paper in every desktop frame: 0.9990 minimum
-  # across 63 samples. The installer window does not reach this far left, so the gate does not
-  # depend on where the installer happens to be. Boot and splash frames score 0.0000 there.
-  rect [0, 280, 300, 480]
-  rect_at [1920, 1080]
-  reference reference/desktop.png
-  timeout 5400
+  repeat
+    do
+      item
+        read
+          name screen
+    until
+      check
+        source screen
+        mode like
+        reference reference/desktop.png
+        range [0.9, 1]
+        rect [0, 280, 300, 480]
+        rect_at [1920, 1080]
+        must true
+    max 1080
+    pause 5
 
 
 step "open the installer from the dock"
