@@ -163,7 +163,7 @@ step "Setup is on screen"
   # stopped, and the quit dialog is up from about 520 s. The dialog is what has to be answered.
 
 step "answer a quit dialog, if one is up"
-  input Escape
+  input esc
   rect [820, 460, 1520, 660]
   rect_at [1920, 1080]
   # SCALE 2, BECAUSE SCALE 1 DOES NOT READ THE WORD THIS GATE NEEDS. Read back from the recording:
@@ -178,7 +178,7 @@ step "answer a quit dialog, if one is up"
   # one appeared only because a stray Return had pressed Cancel, and no Return is sent any more.
 
 step "answer it again, if it came back"
-  input Escape
+  input esc
   rect [820, 460, 1520, 660]
   rect_at [1920, 1080]
   scale 2
