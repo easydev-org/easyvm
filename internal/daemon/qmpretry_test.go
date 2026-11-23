@@ -291,3 +291,42 @@ func TestTheBootPathTakesTheSameLockAsEveryOtherCaller(t *testing.T) {
 		}
 	}
 }
+
+// TestStoppingTheMachineForgetsItsQMPConnection is the invariant a `stop kill` step broke.
+//
+// MEASURED ON THE POD, on the step AFTER a `stop kill`:
+//
+//	boot: this qmp socket is already held by this process (by "easyvm"); pass that connection
+//	instead of opening a second - qemu allows one client per socket
+//
+// The previous walk ended with `stop kill`, which clears `d.proc` when the process is reaped. It did
+// NOT clear `d.qmp` or release the path, so the next `boot` - an ordinary second leg on one daemon -
+// started against a cache that still held the dead machine's connection. The boot path releases the
+// REGISTRY entry itself, which made the two disagree: the cache said "connected", the registry said
+// "free", and the next `qmpSocket` returned the dead `*Conn`.
+//
+// THE FIX IS THAT THE PROCESS AND THE CONNECTION GO TOGETHER, and this checks that `Stop` releases
+// the path rather than trusting the next boot to do it - by source, because the alternative needs a
+// real qemu, a real kill, and a socket to reproduce.
+func TestStoppingTheMachineForgetsItsQMPConnection(t *testing.T) {
+	body, err := os.ReadFile("driver.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	code := dropLineComments(string(body))
+
+	i := strings.Index(code, "func (m machineControl) Stop(method string, grace time.Duration) error {")
+	if i < 0 {
+		t.Fatal("no Stop")
+	}
+	fn := functionBody(code[i:])
+
+	// THE CACHE IS EMPTIED AND THE REGISTRY IS RELEASED, in that order, after the process is reaped.
+	for _, call := range []string{"d.qmp = nil", "d.qmpRegistry().Release("} {
+		if !strings.Contains(fn, call) {
+			t.Fatalf("`Stop` does not contain %q. A stopped machine's QMP connection and its registry "+
+				"entry outlive the process, and the next `boot` on this daemon fails on its own "+
+				"leftovers with `this qmp socket is already held by this process`", call)
+		}
+	}
+}

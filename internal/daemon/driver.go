@@ -1390,11 +1390,39 @@ func (m machineControl) Stop(method string, grace time.Duration) error {
 	// `os.Process` that has already been reaped, and Go's `Wait` does not return an error for that - it
 	// waits on a channel nothing will ever close.
 	//
-	// THE KILL IS ALSO `waitForExit`'S JOB NOW: it returns after reaping, or kills and returns. What
-	// is left here is closing the page and clearing the field.
+	// THE KILL IS ALSO `waitForExit`'S JOB NOW: it returns after reaping, or kills and returns.
+	//
+	// THE QMP CONNECTION GOES WITH THE PROCESS, AND LEAVING IT BEHIND IS A SELF-CONFLICT.
+	//
+	// `Stop` USED TO CLEAR `d.proc` AND NOTHING ELSE. That left the dead machine's `*qmp.Conn` in the
+	// cache and its path in the registry, and the next `boot` - which is the ordinary shape of a
+	// sandbox that runs one leg after another - then failed on its own leftovers:
+	//
+	//	boot: this qmp socket is already held by this process (by "easyvm"); pass that connection
+	//	instead of opening a second - qemu allows one client per socket
+	//
+	// MEASURED on the pod, twice, on the step after a `stop kill`: `destroy` had been called in
+	// between, and `destroy` reaches `shutdown`, so the leftovers were supposed to be gone - but the
+	// `stop kill` STEP inside the previous walk had already cleared `proc` and left `qmp` behind, and
+	// the boot path's own `Release` then removed the registry entry under a cache that still said a
+	// connection existed. The next `qmpSocket` handed out that dead `*Conn`, and every command on it
+	// reported `the qmp connection is closed` or, when it was re-`Acquire`d, `ErrBusy` from itself.
+	//
+	// SO THE TWO ARE CLEARED TOGETHER, UNDER THE SAME LOCK THAT CLEARS THE PROCESS, for the reason
+	// `qmpRetry` gives: a cache and a registry that disagree is a daemon that refuses its own next
+	// command.
 	d.mu.Lock()
 	d.proc = nil
+	conn := d.qmp
+	d.qmp = nil
 	d.mu.Unlock()
+	if conn != nil {
+		// `Release` CLOSES THE CONNECTION and forgets the path, so a later `Acquire` is a fresh
+		// handshake rather than a second client on a socket qemu has already stopped serving.
+		d.qmpMu.Lock()
+		_ = d.qmpRegistry().Release(filepath.Join(d.work, "drive.sock.qmp"))
+		d.qmpMu.Unlock()
+	}
 	return nil
 }
 
