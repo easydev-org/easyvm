@@ -522,3 +522,32 @@ func TestNoCommentClaimsAVirtioTablet(t *testing.T) {
 			"before landing it")
 	}
 }
+
+// A BOOT WITH NO `os:` IS THE ONLY KIND THERE IS, and it must not be refused.
+//
+// MEASURED on the pod, the first real boot after `os:` left the vocabulary: two steps ran, the third
+// failed, and the machine never started -
+//
+//	boot: "" is not a guest this build has seen; it has windows, linux, macos, bsd, android, microvm
+//
+// - because `machine.ParseOS` was still called on a name nothing writes. THE TEST SUITE DID NOT SEE IT
+// because every fixture named a guest, which is what the vocabulary accepted until this change.
+//
+// SO THIS ASSERTS THE ABSENCE: no call to `ParseOS` on the boot path, read from the source because a
+// boot needs a qemu to observe the difference.
+func TestABootIsNotClassifiedByAGuestName(t *testing.T) {
+	body, err := os.ReadFile("driver.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	code := dropLineComments(string(body))
+	i := strings.Index(code, "func (m machineControl) Boot(spec run.BootSpec) error {")
+	if i < 0 {
+		t.Fatal("no machineControl.Boot")
+	}
+	fn := functionBody(code[i:])
+	if strings.Contains(fn, "machine.ParseOS(") {
+		t.Fatal("`Boot` still calls `machine.ParseOS`, and a boot step writes no `os:` - so every " +
+			"boot is refused with a message about a guest name that is empty")
+	}
+}
