@@ -1,0 +1,66 @@
+# A SMALL GUEST THAT PROVES THE ENGINE DRIVES A MACHINE, AND NOTHING ELSE.
+#
+# THIS FILE IS THE ENGINE'S OWN, NOT A STAGE. Every distribution's walkthrough lives in the
+# sub-repository that runs it - `easyvm-linux`, `easyvm-windows`, `easyvm-macos` - and this tree keeps
+# no copy of any of them. What it keeps is this: the smallest file that exercises the path a stage
+# takes, so a build of the engine can be checked without cloning five other repositories.
+#
+# IT IS A MICROVM ON PURPOSE. A microvm is handed a kernel and an initramfs by the host and boots in
+# seconds, needs no firmware, no installer and no disk image to download - so this runs on any machine
+# with /dev/kvm and two small files, which is what makes it usable as a smoke test.
+#
+# WHAT IT EXERCISES, and each step is here because it is a thing that has broken before:
+#
+#	`needs:`      every medium named before the guest starts, so a missing file fails in the first
+#	              second instead of twenty minutes in
+#	`boot` + `microvm` + `kernel` + `initrd`
+#	              a console guest with no PCIe and no USB, which is the smallest machine shape
+#	`until`       the serial console saying something it only says when it is up
+#	`read`        a frame, through `screendump`, which is where the format change lives
+#	`check`       one question about that frame
+#	`stop kill`   the machine really goes away, which is what a stop has to do on every shape
+#
+# THE SCREEN HALF IS NOT DECORATION. `read:` takes a frame and `check:` measures it, so a frame that
+# cannot be written, decoded or measured fails here rather than inside a stage.
+walkthrough "the engine drives a microvm, and reads its screen"
+# A CONSOLE HAS NO RESOLUTION OF ITS OWN, so qemu's own default for this adapter is the truth.
+resolution 720x400
+recording_resolution 720x400
+
+step "the kernel and its initramfs are on disk"
+  needs [alpine-vmlinuz, alpine-initramfs]
+
+step "an empty disk to boot from"
+  disk alpine.qcow2
+  disk_gb 1
+
+step "boot as a microvm, waiting up to 300s"
+  boot
+  initrd alpine-initramfs
+  kernel alpine-vmlinuz
+  microvm
+  os microvm
+  timeout 300
+
+step "the console comes up, waiting up to 180s"
+  until "Welcome to Alpine"
+  from console
+  timeout 180
+
+# AND NOW THE SCREEN. One capture, then one question about it: the same two primitives a stage uses to
+# decide whether an installer has drawn.
+step "read the screen"
+  read
+    name page
+
+step "the screen is not blank"
+  check
+    source page
+    mode mean_between
+    range [0, 255]
+    rect [0, 0, 720, 400]
+    rect_at [720, 400]
+
+step "stop the machine"
+  stop kill
+  timeout 60

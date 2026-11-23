@@ -1,0 +1,66 @@
+# A LINUX GUEST FROM AN INSTALLER MEDIUM, AS SMALL AS THE SHAPE ALLOWS.
+#
+# THIS FILE IS THE ENGINE'S OWN, NOT A STAGE. Every distribution's walkthrough lives in the
+# sub-repository that runs it - `easyvm-linux`, where ubuntu and its twelve siblings keep theirs - and
+# this tree keeps no copy of any of them. What it keeps is the smallest file that boots the OTHER
+# machine shape: firmware, an installer ISO, and a disk the installer writes.
+#
+# WHY BOTH SHAPES ARE HERE. A microvm is handed a kernel by the host; a `linux` guest goes through
+# OVMF, finds a boot sector and runs an installer. Those are different code paths in `machine.Boot` -
+# different firmware, different media rules, different adapters - and a smoke test that only ran the
+# microvm would never touch the half that most stages use.
+#
+# IT STOPS AT THE INSTALLER. The point is that the engine can start a firmware-booted guest from a
+# medium and read its screen; installing would add forty minutes and test the distributor's installer
+# rather than this program. A stage that needs the whole install is the stage's own file, in its own
+# repository.
+#
+# WHAT IT EXERCISES:
+#
+#	`needs:`      the ISO is on disk before the guest starts
+#	`boot` + `iso` + `os linux`
+#	              the firmware path: OVMF, a boot sector, a medium, a disk
+#	`settle`      the boot really draws something rather than returning at the first frame
+#	`read`        a frame through `screendump`
+#	`check`       a measurement on it, in a rect that exists at this resolution
+#	`stop kill`   the machine goes away, which is what a stop has to do on every shape
+walkthrough "the engine boots a firmware guest from an installer medium"
+resolution 1920x1080
+recording_resolution 1920x1080
+
+step "the installer medium is on disk"
+  needs [ubuntu.iso]
+
+step "an empty disk for the installer to write"
+  disk disk.qcow2
+  disk_gb 32
+
+step "boot the installer, waiting up to 1800s"
+  boot
+  iso ubuntu.iso
+  # A FIXED SIZE, because the installer's own minimum is above what a smaller guest would get and a
+  # machine that dies of low memory reads as a broken medium.
+  memory_mb 4096
+  os linux
+  timeout 1800
+
+step "let the medium get as far as drawing something"
+  # THE BOOT MENU IS NOT THE INTENT: this waits past it, because a frame of a menu proves the firmware
+  # ran and says nothing about whether the medium can be read.
+  settle 120
+
+step "read the screen"
+  read
+    name page
+
+step "the screen is not blank"
+  check
+    source page
+    mode mean_between
+    range [0, 255]
+    rect [0, 0, 1920, 1080]
+    rect_at [1920, 1080]
+
+step "stop the machine"
+  stop kill
+  timeout 120
