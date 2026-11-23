@@ -1,6 +1,7 @@
 package run
 
 import (
+	"errors"
 	"fmt"
 	"image"
 	"os"
@@ -999,6 +1000,21 @@ func rectOfCheck(raw map[string]any) (screen.Rect, error) {
 //
 // THE REGION IS CROPPED FROM BOTH, so a reference may be a full screen and the question about a band
 // of it - which is the case a single `rect:` could not express before.
+// errFrameSize is "the frame and the reference are different sizes", which is a WAIT rather than a
+// failure.
+//
+// MEASURED, and it is the whole reason `desktop:` used to carry a resolution gate: a live medium
+// draws at 800x600 before its session switches to 1920x1080, and a walk whose coordinates were
+// measured at 1920x1080 clicks into the wallpaper at the smaller size. The old gate waited two
+// minutes for the switch and then SAID SO and continued, because a guest that has drawn a panel and
+// stayed small has no other mode to offer.
+//
+// SO A `repeat` TREATS THIS AS "NOT YET" - it re-photographs and asks again - while a one-shot
+// `check:` reports it with the same sentence `Compare` produced. Neither is a silent pass, which is
+// the property that matters: zorin-install once PASSED ITS GATE and published a 0 MiB disk because
+// nothing named the size.
+var errFrameSize = errors.New("the frame and the reference are different sizes")
+
 func (e *Executor) similarityInRect(step, ref string, frame image.Image, rect screen.Rect) (float64, error) {
 	path := ref
 	if !filepath.IsAbs(path) {
@@ -1021,6 +1037,13 @@ func (e *Executor) similarityInRect(step, ref string, frame image.Image, rect sc
 	}
 	diff, err := screen.Compare(fc, rc, 8)
 	if err != nil {
+		// THE SIZE MISMATCH IS ITS OWN THING, and it is the only comparison error a later frame can
+		// fix. Every other one - a reference that will not decode, a rect outside the picture - is a
+		// fact about the file and must fail.
+		if strings.Contains(err.Error(), "different sizes") ||
+			strings.Contains(err.Error(), "the frame is") {
+			return 0, fmt.Errorf("%w: %v", errFrameSize, err)
+		}
 		return 0, fail(step, "%v", err)
 	}
 	return 1 - diff.Changed, nil

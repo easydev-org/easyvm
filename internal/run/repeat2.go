@@ -1,6 +1,7 @@
 package run
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -166,10 +167,32 @@ func (e *Executor) doRepeat(s walk.Step) error {
 			e.Driver.Log(fmt.Sprintf("  repeat: satisfied after %d attempt(s)", attempt))
 			return nil
 		}
-		if attempt == int(max) {
+		// A FRAME AT THE WRONG SIZE IS "NOT YET", NOT "NEVER".
+		//
+		// MEASURED, and it is the failure this replaces: a live medium draws at 800x600 before its
+		// session switches to 1920x1080. A comparison against a 1920x1080 reference fails on the
+		// SIZE, and a loop that treated that as a verdict gave up on a guest that was about to
+		// switch - while the old `desktop:` gate waited for exactly this.
+		//
+		// THE BUDGET IS NOT THE LOOP'S CEILING. A medium that takes ninety minutes to unpack its ISO
+		// may need all of it to draw at all; the switch happens once the panel is up and takes tens
+		// of seconds. So a wrong size in the last two minutes of a long loop is still worth waiting
+		// for, and the ceiling stays the file's own `max:`.
+		if errors.Is(err, errFrameSize) {
+			e.Driver.Log(fmt.Sprintf("  repeat: %v - waiting for the guest to switch modes", err))
+		} else if attempt == int(max) {
 			return fail(s.Name, "the repeat ran %.0f attempt(s) and the condition never held: %v",
 				max, err)
 		}
+		// THE LOOP DOES NOT CLICK THE SCREEN. A LOOP THAT NUDGED WOULD CHANGE THE THING IT IS
+		// MEASURING, and most of them are asking a question whose answer is "nothing has changed yet":
+		// a menu that has not drawn, a pane that has not closed, an installer that is still extracting.
+		//
+		// THE GUEST THAT BLANKS ITS OWN SCREEN IS THE EXCEPTION, and it says so in its own file: a
+		// step with `input` in the loop's `do:` is a step that types anyway, and one that needs a
+		// nudge writes it. `wakeTheScreen` is still the function for it - see `publish.go`, whose
+		// `disk_settle` uses it - but attaching it to every loop made 22 loops click a screen they
+		// were waiting to stay still.
 		if pause > 0 {
 			time.Sleep(time.Duration(pause * float64(time.Second)))
 		}
