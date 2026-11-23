@@ -194,9 +194,9 @@ type Response struct {
 
 	// Screen is the artifact a `screenshot` produced: where it was written, and how big it is.
 	//
-	// THE PATH IS SERVED SEPARATELY RATHER THAN INLINED, because a 1920x1080 PPM is 6 MB and a JSON
-	// document carrying base64 would be 8 MB per poll. The HTTP layer reads the file and answers with
-	// the bytes; this only says which file.
+	// THE PATH IS SERVED SEPARATELY RATHER THAN INLINED, because a 1920x1080 frame is a binary file
+	// and a JSON document carrying it as base64 would be a third larger on every poll. The HTTP layer
+	// reads the file and answers with the bytes; this only says which file.
 	Screen *Screen `json:"screen,omitempty"`
 }
 

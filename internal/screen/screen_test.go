@@ -2,7 +2,6 @@ package screen
 
 import (
 	"bytes"
-	"fmt"
 	"image"
 	"image/color"
 	"image/png"
@@ -11,27 +10,29 @@ import (
 	"testing"
 )
 
-// A REAL FRAME IS THE ONLY HONEST FIXTURE, and these five are on this machine from earlier runs of
-// the Python implementation. None of them is a Windows desktop, so they test the half of the
-// question that matters most: a test that says "desktop" over a black screen or an installer pane
-// fails a healthy guest, and the reader sees "NO DESKTOP" above a screenshot of a desktop.
-var realFrames = []string{
-	"/tmp/_matrix.ppm",       // an installer pane
-	"/tmp/_u.ppm",            // a wizard page at a different resolution
-	"/tmp/d3.ppm",            // a dark screen
-	"/tmp/black.ppm",         // nothing lit at all
-	"/tmp/blissshot/hw1.ppm", // an Android live image at 1280x800
-}
 
+// A TRUNCATED FRAME MUST BE REFUSED. `screendump` replies before the write finishes, so this is a
+// race the reader meets rather than a hypothetical.
+//
+// THE OLD FORM OF THIS TEST COULD CHECK THE LENGTH, because an uncompressed frame's size is
+// arithmetic from its header. A PNG has no such rule - the data is compressed - so the test is "it
+// does not decode", which is the same verdict `image.Decode` reaches when it looks for the last
+// chunk.
 func TestTruncatedFrameIsRefused(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "short.ppm")
-	// A correct header and half the pixels.
-	w, h := 64, 48
+	path := filepath.Join(dir, "short.png")
+	img := image.NewRGBA(image.Rect(0, 0, 64, 48))
+	for y := 0; y < 48; y++ {
+		for x := 0; x < 64; x++ {
+			img.Set(x, y, color.RGBA{0x30, 0x60, 0x90, 0xff})
+		}
+	}
 	var buf bytes.Buffer
-	fmt.Fprintf(&buf, "P6\n%d %d\n255\n", w, h)
-	buf.Write(make([]byte, w*h*3/2))
-	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatal(err)
+	}
+	half := buf.Bytes()[:buf.Len()/2]
+	if err := os.WriteFile(path, half, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := Load(path); err == nil {
@@ -39,23 +40,22 @@ func TestTruncatedFrameIsRefused(t *testing.T) {
 	}
 }
 
-func TestNonPPMIsRefused(t *testing.T) {
+// AND A FILE THAT IS NOT A PICTURE AT ALL IS REFUSED BY NAME.
+func TestSomethingThatIsNotAPictureIsRefused(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "x.ppm")
+	path := filepath.Join(dir, "x.png")
 	if err := os.WriteFile(path, []byte("GIF89a not really"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := Load(path); err == nil {
-		t.Fatal("a file that is not a binary PPM must be refused")
+		t.Fatal("a file that is not an image must be refused")
 	}
 }
-
 // THE DIMENSIONS COME FROM THE FILE, not from a constant. A guest booted at another resolution must
 // still be measured correctly, which is why the Android frame above is 1280x800 and still parses.
 func TestDimensionsComeFromTheHeader(t *testing.T) {
 	dir := t.TempDir()
-	// PNG, because that is the only frame format `Screendump` writes now - the PPM decoder this test
-	// used to exercise is gone with the format.
+	// PNG, because that is the only frame format `Screendump` writes.
 	path := filepath.Join(dir, "odd.png")
 	w, h := 1280, 800
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
@@ -97,7 +97,7 @@ func TestCropAcceptsEveryDecodedImageKind(t *testing.T) {
 	}
 
 	for name, img := range map[string]image.Image{
-		"*image.RGBA (a PPM screendump)": rgba,
+		"*image.RGBA (a decoded frame)": rgba,
 		"*image.NRGBA (a PNG or JPEG)":   nrgba,
 		"*image.Gray (a single-channel)": image.NewGray(rgba.Bounds()),
 	} {

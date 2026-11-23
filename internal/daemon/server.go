@@ -948,9 +948,9 @@ func (d *Daemon) interactiveConn() (*qmp.Conn, error) {
 
 // screenshot writes one frame and answers where it is.
 //
-// THE FILE IS A PPM AND THE HTTP LAYER CONVERTS IT. qemu's `screendump` writes P6 and that is the
-// only format it produces; a browser needs PNG, and the conversion belongs where the bytes are
-// served rather than in the daemon that also has to keep the raw frame for a post-mortem.
+// THE FILE IS ALREADY PNG, so the path is handed on and nothing is converted: qemu's `screendump`
+// writes the same format a browser draws, and the daemon keeps the frame it captured for a
+// post-mortem instead of a re-encoding of it.
 func (d *Daemon) screenshot() Response {
 	conn, err := d.interactiveConn()
 	if err != nil {

@@ -7,7 +7,6 @@
 *.qcow2
 *.qcow2.part
 *.mp4
-*.ppm
 *.sock
 
 # Editors.

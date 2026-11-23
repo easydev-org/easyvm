@@ -138,11 +138,10 @@ func TestNamedKeysParse(t *testing.T) {
 //
 // The check required `w*h*3 + 16`, assuming a sixteen-byte header. A P6 header is
 //
-//	P6\n640 480\n255\n
+// A HEADER WHOSE LENGTH IS ASSUMED RATHER THAN READ makes the arithmetic off by that much, and the
+// frame is rejected for being a byte short:
 //
-// which is FIFTEEN bytes, so a perfect frame of 921615 bytes was rejected:
-//
-//	frame-000001.ppm: 921615 bytes for a 640x480 frame (needs about 921616);
+//	frame-000001: 921615 bytes for a 640x480 frame (needs about 921616);
 //	the write has not finished
 //
 // MEASURED ON THE FIRST macOS RUN WHOSE GUEST ACTUALLY BOOTED, on the step after it. The frame was
@@ -354,7 +353,7 @@ func TestEveryCommandOnAConnectionIsSerialised(t *testing.T) {
 // A FRAME IS FINISHED WHEN IT DECODES, AND A PNG DECODES ONLY AT ITS IEND CHUNK.
 //
 // MEASURED ON windows, AND THE FAILURE WAS SILENT: every frame was written as PNG and `screen.Load`
-// only had the PPM decoder registered, so `IsWindowsDesktop` was never handed an image -
+// had no PNG decoder registered, so the desktop readers were never handed an image -
 //
 //	image: unknown format (is the write still in progress? format "")
 //

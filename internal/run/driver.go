@@ -38,7 +38,7 @@ type Driver interface {
 
 // Frame is a captured screen.
 type Frame interface {
-	// Path is where the PPM is, for a post-mortem.
+	// Path is where the PNG is, for a post-mortem.
 	Path() string
 	// Size is the frame's own dimensions, never a constant.
 	Size() (int, int)

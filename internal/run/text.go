@@ -240,12 +240,11 @@ func (e *Executor) readScreen(s walk.Step, label string) ([]string, error) {
 // as required. One tesseract call, one enlargement, one saved PNG - so a gate and a loop cannot
 // disagree about what the screen said.
 //
-// IT WAS A PPM, AND THE FORMAT WAS THE ONLY PLACE ONE SURVIVED. tesseract reads through leptonica,
-// which decodes PNG as readily as P6 - MEASURED on the image this build pins: a 1920x1080 crop as
-// PPM is 6.2 MB and as PNG is ~100 KB, and the six-megabyte write per read is what made the reader
-// race the recorder on the frames the engine had already stopped writing as PPM. Keeping one format
-// for the frame and for the crop means one decoder, one writer and one thing to look at when a read
-// is wrong.
+// IT IS PNG, THE SAME FORMAT THE FRAME ARRIVES IN. tesseract reads through leptonica, which decodes
+// PNG - MEASURED on the image this build pins: an uncompressed 1920x1080 crop is 6.2 MB and the same
+// crop as PNG is ~100 KB, and a six-megabyte write per read is what made the reader race the recorder
+// on the same disk. Keeping one format for the frame and for the crop means one decoder, one writer
+// and one thing to look at when a read is wrong.
 func (e *Executor) readCrop(crop image.Image, label string) ([]string, error) {
 	path := filepath.Join(e.Work, "read-"+sanitise(label)+".png")
 	if err := os.MkdirAll(e.Work, 0o755); err != nil {

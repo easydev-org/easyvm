@@ -32,7 +32,7 @@ func main() {
 	key := flag.String("key", "", "one qcombo to send, e.g. `meta_l` or `ctrl+alt+t`")
 	text := flag.String("type", "", "text to type")
 	click := flag.String("click", "", "an x,y pixel pair to click")
-	shot := flag.String("shot", "", "where to write a PNG-ready PPM frame")
+	shot := flag.String("shot", "", "where to write a PNG frame")
 	wait := flag.Duration("wait", 30*time.Second, "how long to wait for the socket")
 	flag.Parse()
 

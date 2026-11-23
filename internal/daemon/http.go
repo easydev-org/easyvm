@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"image"
-	"image/png"
 	"io"
 	"net"
 	"net/http"
@@ -13,7 +12,6 @@ import (
 	"time"
 
 	"github.com/easydev-org/easyvm/internal/protocol"
-	"github.com/easydev-org/easyvm/internal/screen"
 )
 
 // THE HTTP SURFACE IS ONE PROCESS WITH THE DAEMON, NOT A SECOND SERVICE.
@@ -33,12 +31,13 @@ import (
 //	POST /api/double          {x, y}          double-click
 //	POST /api/key             {key: "ret"}    one qcode or combo, e.g. ctrl+alt+t
 //	POST /api/type            {text: "..."}   typed at the file's own pace
-//	GET  /screen.png          the newest frame, converted from qemu's PPM
+//	GET  /screen.png          the newest frame, served as qemu wrote it
 //	GET  /api/screen          the same, as a JSON envelope with the size
 //
-// WHY PNG AT A PATH AND NOT BASE64 IN JSON. A 1920x1080 frame is 6 MB as a PPM and about 8 MB as
-// base64; at one frame a second that is 8 MB/s of JSON through a browser's parser. The image endpoint
-// is a plain GET a browser caches and streams, and the JSON calls stay small.
+// WHY PNG AT A PATH AND NOT BASE64 IN JSON. A 1920x1080 frame is a binary file, and base64 makes it
+// a third larger again on every poll; at one frame a second that is megabytes a second through a
+// browser's JSON parser. The image endpoint is a plain GET a browser streams, and the JSON calls stay
+// small.
 
 // HTTPServeOptions configures ServeHTTP.
 type HTTPServeOptions struct {
@@ -210,22 +209,26 @@ func (d *Daemon) handleScreenPNG(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, resp.Error, http.StatusConflict)
 		return
 	}
-	img, err := screen.Load(resp.Screen.Path)
+	// THE FRAME IS ALREADY PNG, SO IT IS SERVED AS IT SITS.
+	//
+	// THIS USED TO DECODE THE FRAME AND RE-ENCODE IT, back when qemu wrote a raw format and the
+	// browser needed a compressed one. MEASURED, that was a full decode and a full encode of a
+	// 1920x1080 picture on every poll of a page that polls once a second, to produce a file
+	// byte-for-byte identical to the one on disk.
+	//
+	// AND THE FILE IS NOT MUTATED UNDER THE READER: `screendump` names every frame with its own
+	// sequence number and a nanosecond stamp, so the path handed out by `screenshot` is a file no
+	// later capture will overwrite - which is what makes serving it directly safe rather than a
+	// race.
+	f, err := os.Open(resp.Screen.Path)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("reading the frame: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("opening the frame: %v", err), http.StatusInternalServerError)
 		return
 	}
-	// THE PPM IS THE DAEMON'S, THE PNG IS THE BROWSER'S, and the conversion is one line because both
-	// are registered decoders in the standard library.
-	var buf writerOnly
-	enc := png.Encoder{CompressionLevel: png.BestSpeed}
-	if err := enc.Encode(&buf, img); err != nil {
-		http.Error(w, fmt.Sprintf("encoding: %v", err), http.StatusInternalServerError)
-		return
-	}
+	defer f.Close()
 	w.Header().Set("Content-Type", "image/png")
 	w.Header().Set("Cache-Control", "no-store")
-	_, _ = w.Write(buf.bytes)
+	_, _ = io.Copy(w, f)
 }
 
 // THE FOUR BESPOKE ROUTES DECODE STRICTLY AND THEN RUN THE REQUEST AS IT ARRIVED.

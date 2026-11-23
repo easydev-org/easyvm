@@ -151,7 +151,7 @@ func (e *Executor) doRepeat(s walk.Step) error {
 		}
 
 		// 2. THE CONDITION. A reading that fails is a frame that was not finished, not a loop that
-		// should end: qemu's screendump replies before the PPM write completes, so a capture can
+		// should end: qemu's screendump replies before the write completes, so a capture can
 		// land on a half-written file and the next attempt reads it.
 		var err error
 		if isName {

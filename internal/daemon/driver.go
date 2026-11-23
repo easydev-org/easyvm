@@ -238,14 +238,14 @@ func (d *Driver) Log(msg string) { fmt.Println(msg) }
 //	an `ocr:` step             every 10 s, for the condition a walk is waiting on
 //	the browser page           once a second, while somebody is looking
 //
-// EACH WRITE IS A 6.2 MB PPM, and they all landed in the same directory on the same qmp connection.
+// EACH WRITE IS A WHOLE FRAME, and they all landed in the same directory on the same qmp connection.
 // A frame that was still being written by one caller was opened by another, which is exactly the
 // `unexpected EOF` that made macos-setup's recovery gate read nothing for forty-five attempts:
 //
-//	screendump: frame-000294.ppm was not readable within 30s: unexpected EOF
+//	screendump: frame-000294: unexpected EOF
 //
-// - on a file of 6,220,817 bytes with a correct P6 header. The file was complete; another screendump
-// was writing into the same directory at the time.
+// - on a file that was complete by any measure taken afterwards. The file was fine; another
+// screendump was writing into the same directory at the time.
 //
 // SO THERE IS ONE FRAME IN FLIGHT. A caller that arrives while one is being written WAITS for it and
 // takes the same result. That is not a cache with a timeout - it is the observation that three readers

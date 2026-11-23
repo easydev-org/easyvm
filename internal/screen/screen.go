@@ -15,9 +15,8 @@ import (
 
 	// PNG IS THE ONLY FRAME FORMAT, AND THIS IMPORT IS THE WHOLE OF THAT.
 	//
-	// IT WAS MISSING ONCE, AND THE CONSEQUENCE WAS SILENT AND TOTAL. Frames moved from PPM to PNG
-	// (6.2 MB per 1920x1080 frame became 8 KB), the PPM decoder was still registered and PNG was not,
-	// so EVERY `screen.Load` CALL FAILED WITH
+	// IT WAS MISSING ONCE, AND THE CONSEQUENCE WAS SILENT AND TOTAL. The frame format changed and
+	// the matching decoder was not registered, so EVERY `screen.Load` CALL FAILED WITH
 	//
 	//	image: unknown format (is the write still in progress? format "")
 	//
@@ -25,9 +24,9 @@ import (
 	// windows: the desktop was fully drawn, `vmuser` signed in, and `wait for the desktop` sat on
 	// `desktop: windows` for an hour because `IsWindowsDesktop` was never handed an image.
 	//
-	// THE PPM DECODER THAT USED TO SIT HERE IS GONE: `Screendump` writes PNG and has no fallback, because
-	// this image pins qemu (see `qmp.PinnedQEMU`). One format in, one decoder registered, and a frame
-	// that does not decode is a broken frame rather than a format this build forgot to register.
+	// ONE FORMAT IN, ONE DECODER REGISTERED. `Screendump` writes PNG and has no fallback, because this
+	// image pins qemu (see `qmp.PinnedQEMU`), so a frame that does not decode is a broken frame rather
+	// than a format this build forgot to register.
 	"image/png"
 )
 
@@ -76,9 +75,9 @@ type Stats struct {
 
 // Load reads a frame qemu wrote.
 //
-// THE FORMAT IS NOT THIS PACKAGE'S BUSINESS. qemu's `screendump` writes binary PPM (P6), and a
-// recording is JPEG; both are registered decoders, so this is the standard library's image.Decode
-// and a caller never branches on which kind of frame it was handed.
+// THE FORMAT IS NOT THIS PACKAGE'S BUSINESS. qemu's `screendump` writes PNG, a recording is mp4, and
+// a reference picture is whatever was checked in; all are registered decoders, so this is the
+// standard library's image.Decode and a caller never branches on which kind of picture it was handed.
 //
 // THE FAILURE THAT MATTERS WAS CHECKED RATHER THAN ASSUMED. `screendump` replies BEFORE the write
 // finishes, so a half-written frame is a real state and not a hypothetical - and a frame that is
@@ -183,8 +182,8 @@ func bandStats(img image.Image, w, h int, top, bottom float64) ([3]float64, floa
 }
 
 func rgb8(c color.Color) (uint8, uint8, uint8) {
-	// AT() RETURNS 16-BIT CHANNELS. Dividing by 257 maps 65535 to 255 exactly, so a PPM's own
-	// bytes round-trip unchanged - which matters because every threshold above was measured on
+	// AT() RETURNS 16-BIT CHANNELS. Dividing by 257 maps 65535 to 255 exactly, so a decoded
+	// 8-bit channel round-trips unchanged - which matters because every threshold was measured on
 	// 8-bit values.
 	r, g, b, _ := c.RGBA()
 	return uint8(r / 257), uint8(g / 257), uint8(b / 257)
@@ -301,10 +300,9 @@ func Crop(img image.Image, rect [4]int, scale int) (image.Image, error) {
 			// NEAREST NEIGHBOUR, because this is for OCR and an interpolated edge invents grey that
 			// tesseract then has to decide about.
 			//
-			// `color.RGBAModel`, NOT A TYPE ASSERTION. The frames this crops come from two decoders -
-			// qemu's PPM, which is `*image.RGBA`, and the PNG that `qmpkey` and the recording write,
-			// which decodes to `*image.NRGBA`. A hard `.(color.RGBA)` therefore PANICS on the second
-			// kind, and it did, in the middle of a working ubuntu install:
+			// `color.RGBAModel`, NOT A TYPE ASSERTION. A picture decoded by this package can be
+			// `*image.RGBA` or `*image.NRGBA` depending on its encoder, so a hard `.(color.RGBA)`
+			// PANICS on the second kind - and it did, in the middle of a working ubuntu install:
 			//
 			//	panic: interface conversion: color.Color is nrgb.Color, not color.RGBA
 			//	goroutine 18: internal/screen.Crop(...)

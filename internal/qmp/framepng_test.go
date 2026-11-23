@@ -2,9 +2,9 @@ package qmp
 
 // A TRUNCATED PNG IS AN ERROR, AND THE DECODER IS WHAT KNOWS.
 //
-// THIS TEST REPLACED THE PPM VERSION OF ITSELF, which was written when a frame was P6 and the size
-// was arithmetic from the header: `header + width*height*3` is decided before the first pixel, so a
-// file of that exact length was complete by the format's own rule.
+// AN EARLIER VERSION OF THIS TEST ASSERTED ON LENGTH, which worked while a frame's size was
+// arithmetic from its header: `header + width*height*3` is decided before the first pixel, so a file
+// of that exact length was complete by that format's own rule.
 //
 // PNG HAS NO SUCH RULE. Its length is not predictable from the header - the whole point is that the
 // data is compressed - so `waitForStable` decides by DECODING: `image.Decode` reads to the IEND chunk,
@@ -78,10 +78,10 @@ func TestATruncatedPNGIsRefused(t *testing.T) {
 
 // AND SOMETHING THAT IS NOT AN IMAGE AT ALL IS REFUSED BY NAME.
 //
-// The PPM version of this test caught the mistake that produced
-// `frames/frame-000007.png: not a binary PPM (starts "\x89PNG\r")` - the reader was still checking
-// for a P6 header after the writer had moved to PNG. That class of bug is gone with the header check,
-// so what is left to assert is that a bogus file does not decode into a frame.
+// The header-checking version of this test caught the mistake that produced
+// `frames/frame-000007.png: not the format this reader expects` - the reader was still validating one
+// format's magic bytes after the writer had moved to another. That class of bug is gone with the
+// header check, so what is left to assert is that a bogus file does not decode into a frame.
 func TestSomethingThatIsNotAPictureIsRefused(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "frame.png")

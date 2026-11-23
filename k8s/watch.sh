@@ -10,11 +10,11 @@
 # THE PICTURES COME FROM `screendump`, WHICH IS WHAT CI'S `record:` STEP USES. There is no VNC
 # decoder in this image (`ffmpeg -formats` has no `vnc` demuxer - measured) and no python3, socat or
 # nc to speak QMP by hand. `easyvm` itself already does the only thing needed here: a `record:` step
-# writes numbered PPM frames into the work directory and encodes them at the end.
+# writes numbered PNG frames into the work directory and encodes them at the end.
 #
-# SO THIS STARTS THE DAEMON, RUNS THE FILE, AND CONVERTS THE FRAMES AS THEY ARRIVE. The daemon's own
-# `frames/frame-*.ppm` sequence is the source, and `-vf scale` is only there because a PPM of 1920x1080
-# is 6 MB and a PNG of it is 300 KB.
+# SO THIS STARTS THE DAEMON, RUNS THE FILE, AND SCALES THE FRAMES AS THEY ARRIVE. The daemon's own
+# `frames/frame-*.png` sequence is the source, and `-vf scale` is only there because a full-size
+# frame is 1920 pixels wide and these are for looking at, not for measuring.
 set -eu
 
 FILE=${1:-/work/zorin-install.yaml}
@@ -54,10 +54,11 @@ while :; do
     *"status: failed"*|*"status: finished"*) break ;;
   esac
   kill -0 "$DPID" 2>/dev/null || break
-  for f in "$WORK"/frames/frame-*.ppm; do
+  for f in "$WORK"/frames/frame-*.png; do
     [ -e "$f" ] || continue
-    # THE DAEMON NAMES THEM `frame-%06d.ppm`, so stripping non-digits gives a sortable integer.
-    n=$(basename "$f" .ppm | tr -dc '0-9')
+    # THE DAEMON NAMES THEM `frame-%06d-<nanos>.png`, so the FIRST run of digits is the sortable
+    # integer and the stamp after it is not part of it.
+    n=$(basename "$f" .png | cut -d- -f2 | tr -dc '0-9')
     [ -n "$n" ] || continue
     [ "$n" -le "$seen" ] 2>/dev/null && continue
     ffmpeg -hide_banner -loglevel error -nostdin -y -i "$f" \
