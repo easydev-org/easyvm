@@ -692,7 +692,24 @@ func (e *Executor) doType(s walk.Step) error {
 	if v, err := s.Float("type_gap", 0); err == nil && v > 0 {
 		perChar = time.Duration(v * float64(time.Second))
 	}
-	unsupported, err := e.Driver.Type(s.Get("type"), perChar)
+	// `text:` IS WHAT 2.0 WRITES AND `type:` IS THE 1.0 NAME. Reading only `type:` made every
+	// `input text "..."` TYPE NOTHING - which the log said plainly and nothing treated as a failure:
+	//
+	//	=== create your account - full name - type the value
+	//	  typed 0 character(s)
+	//
+	// MEASURED on ubuntu install, run 45089339918: the installer's account form was never filled,
+	// the Continue button did nothing, the walk photographed "your account" twenty-four times, and
+	// the stage died at step 52 of 59 - on a form whose every other step (the click, the select-all,
+	// the delete) had worked.
+	//
+	// THE SAME FOLD EXISTS IN `doInput`, WHICH ACCEPTS `s.Has("text") || s.Has("type")` AND THEN
+	// CALLS THIS FUNCTION. The dispatcher knew both names; the typing did not.
+	value := s.Get("text")
+	if value == "" {
+		value = s.Get("type")
+	}
+	unsupported, err := e.Driver.Type(value, perChar)
 	if err != nil {
 		return fail(s.Name, "typing: %v", err)
 	}
@@ -703,7 +720,7 @@ func (e *Executor) doType(s walk.Step) error {
 		e.Driver.Log(fmt.Sprintf("  COULD NOT TYPE %q - no qcode for those characters",
 			string(unsupported)))
 	}
-	e.Driver.Log(fmt.Sprintf("  typed %d character(s)", len([]rune(s.Get("type")))))
+	e.Driver.Log(fmt.Sprintf("  typed %d character(s)", len([]rune(value))))
 	return e.settle(s)
 }
 
