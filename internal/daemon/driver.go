@@ -508,73 +508,6 @@ func (d *Driver) sendStrokes(strokes []keys.Stroke, perChar time.Duration) error
 // four frames of headroom.
 const DefaultVideoDevice = "VGA,xres=1920,yres=1080,vgamem_mb=32"
 
-// machineType is the qemu machine this boot asks for.
-//
-// `q35` IS THE FULL MACHINE and the default: PCIe, an IDE controller for the CD-ROM, a USB
-// controller for the tablet, a VGA adapter. Every distribution installer here needs all of it.
-//
-// `microvm` IS THE SMALL ONE: virtio-mmio devices and a serial line, no PCIe, no IDE, no USB, no
-// VGA. A `microvm:` boot says so on its step, because a file may install a distribution and then
-// verify the result in the same run, and only the verification wants the small machine.
-func machineType(boot machine.Boot) string {
-	if boot.MicroVM {
-		// `acpi=on` IS NOT A DISPLAY OPTION AND IT IS NOT OPTIONAL FOR SOME DISTRIBUTIONS.
-		//
-		// A microvm with `pcie=off` has to deliver its disks as virtio-over-MMIO, and qemu can name
-		// those devices in ONE OF TWO WAYS: on the kernel command line (`virtio_mmio.device=...`,
-		// which qemu injects itself), or in an ACPI table.
-		//
-		// A KERNEL ONLY HONOURS THE FIRST FORM IF IT WAS BUILT WITH
-		// CONFIG_VIRTIO_MMIO_CMDLINE_DEVICES, and the distributions disagree about it. MEASURED, from
-		// each one's own `boot/config-*`:
-		//
-		//	Alpine 3.21   CONFIG_VIRTIO_MMIO=y   CMDLINE_DEVICES=y     boots, finds /dev/vda
-		//	NixOS 6.18    CONFIG_VIRTIO_MMIO=m   CMDLINE_DEVICES=y     boots, finds /dev/vda
-		//	Debian 6.12   CONFIG_VIRTIO_MMIO=m   # CMDLINE_DEVICES is not set   NO /dev/vda
-		//
-		// On Debian the failure is not silent, which is how it was pinned down:
-		//
-		//	virtio_mmio: unknown parameter 'device' ignored
-		//	ALERT!  /dev/vda does not exist.  Dropping to a shell!
-		//
-		// - the module IS loaded and simply refuses the argument. `acpi=on` makes qemu describe the
-		// same MMIO devices in a DSDT instead, which every one of those kernels can read, so one
-		// machine option covers all four without a per-distribution flag.
-		//
-		// IT COSTS NOTHING AND IT STILL IS NOT PCIe: `pcie=off` stays, no PCI bus is created, and
-		// the ACPI tables describe only the MMIO transports and the ISA VGA adapter that
-		// `graphics=on` adds.
-		//
-		// `pic=on` and `rtc=on` CAME WITH IT because a machine with no ACPI had none of its own
-		// timer: the earlier option string let qemu pick defaults, and a guest that reaches userspace
-		// with no working timer logs a clock that never advances.
-		//
-		// `graphics=on` IS ONLY FOR A TEXT CONSOLE NOW. A DESKTOP draws on a virtio-gpu device and
-		// wants `graphics=off`, because an ISA VGA beside it would be a second, unused display that
-		// `see:` might photograph instead.
-		graphics := "off"
-		if boot.MicroVMDisplay == "terminal" {
-			graphics = "on"
-		}
-		// PCIe IS ON FOR A DESKTOP, AND ONLY FOR A DESKTOP. MEASURED: `virtio-gpu-device` on the
-		// virtio-MMIO bus attaches but its driver never binds (status 0x83, NEEDS_RESET, no
-		// /dev/dri/card0), while `pcie=on` with `virtio-gpu-pci` produces
-		//
-		//	[drm] Initialized virtio_gpu 0.1.0 for 0000:00:01.0 on minor 0
-		//	/sys/class/drm: card0 card0-Virtual-1 renderD128
-		//
-		// - a KMS output and a render node on one device, which a compositor needs. A serial or
-		// terminal microvm keeps `pcie=off`: its disk and network are virtio-MMIO and it has no use
-		// for a PCI bus, which is the small machine this type exists to be.
-		pcie := "off"
-		if boot.MicroVMDisplay == "desktop" {
-			pcie = "on"
-		}
-		return "microvm,accel=kvm,acpi=on,pic=on,rtc=on,pcie=" + pcie + ",graphics=" + graphics
-	}
-	return "q35,accel=kvm,vmport=off"
-}
-
 // --- the guest ------------------------------------------------------------------------
 
 // Guest is the connection a step addresses the guest through, or nil when none could be made.
@@ -744,13 +677,6 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 	if err != nil {
 		return err
 	}
-	// THE NAME BECOMES A MACHINE HERE, ONCE. Every qemu argument this boot produces reads a field of
-	// this shape - firmware, CPU flags, adapter, sound card, media rules - so a walkthrough's `os:`
-	// is the whole of what decides how its guest is started.
-	shape, err := machine.Resolve(spec.OS)
-	if err != nil {
-		return err
-	}
 	d.mu.Lock()
 	d.guestOS = spec.OS
 	d.mu.Unlock()
@@ -774,64 +700,26 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 	// THE BOOT DESCRIPTION GOES THROUGH Validate BEFORE ANY PATH IS USED. A stage that never ran
 	// its `fetch:` gets a sentence naming what is missing, not qemu's message about a drive.
 	boot := machine.Boot{
-		OS:             guestOS,
-		Shape:          shape,
-		Disk:           spec.Disk,
-		ISO:            spec.ISO,
-		AnswerCD:       spec.AnswerCD,
-		DriverCD:       spec.DriverCD,
-		MicroVM:        spec.MicroVM,
-		MicroVMDisplay: spec.MicroVMDisplay,
-		KernelAppend:   spec.KernelAppend,
-		Kernel:         spec.Kernel,
-		Initrd:         spec.Initrd,
-		Recovery:       spec.Recovery,
-		FreshDisk:      spec.FreshDisk,
-		OpenCoreROM:    spec.OpenCoreROM,
-		OpenCoreVars:   spec.OpenCoreVars,
-		BootImage:      spec.BootImage,
-		Incoming:       spec.Incoming,
-		// THE WORK DIRECTORY, which a `kind: folder` shape's `{{work}}` and its relative paths are
-		// rendered against. It is passed on every boot because the shape may be any of them - this
-		// build cannot tell which need it without reading the file, and a field left empty would be
-		// a firmware path resolved against the process's own directory.
-		Work:        d.work,
-		FirmwareDir: spec.FirmwareDir,
-		// THE FILE'S OWN ARGUMENTS. When it wrote none, the shape's profile fills them - that is the
-		// transition: a stage gains `args:` and the shape stops mattering for it.
-		Machine: spec.Machine,
-		Dir:     spec.Dir,
+		OS:           guestOS,
+		Disk:         spec.Disk,
+		ISO:          spec.ISO,
+		AnswerCD:     spec.AnswerCD,
+		DriverCD:     spec.DriverCD,
+		Recovery:     spec.Recovery,
+		Kernel:       spec.Kernel,
+		Initrd:       spec.Initrd,
+		KernelAppend: spec.KernelAppend,
+		FreshDisk:    spec.FreshDisk,
+		Incoming:     spec.Incoming,
+		Machine:      spec.Machine,
+		Args:         spec.Args,
+		Dir:          spec.Dir,
+		Work:         d.work,
 	}
 	if err := boot.Validate(); err != nil {
 		return err
 	}
 
-
-	// THE PROFILE THIS BOOT RUNS, WHICH IS THE SHAPE'S ANSWER TO "HOW IS THIS MACHINE STARTED".
-	//
-	// A SHAPE MAY HOLD MORE THAN ONE, because one machine can be started in more than one
-	// configuration and the difference is not a placeholder: a microvm draws on nothing, an ISA VGA or
-	// a virtio-gpu depending on whether its session is serial, a text console or a desktop - and each
-	// changes the `-machine` options, the adapter AND whether PCIe exists. Writing that as three
-	// placeholders put three conditionals back in the file in a different spelling.
-	//
-	// THE PROFILE NAME IS THE DISPLAY MODE for a microvm, and empty everywhere else - so a shape with
-	// one configuration needs no selection and no name.
-	prof, err := boot.Shape.Profile(boot.ProfileName())
-	if err != nil {
-		return err
-	}
-	// A STEP THAT WROTE ITS OWN ARGUMENTS OVERRIDES THE SHAPE ENTIRELY.
-	if boot.Machine == "" {
-		boot.Machine = prof.Machine
-	}
-	if len(spec.Args) > 0 {
-		boot.Args = spec.Args
-	} else {
-		for _, pair := range prof.Args {
-			boot.Args = append(boot.Args, pair...)
-		}
-	}
 
 	// THE DIFF IS MADE BEFORE qemu SEES THE DISK, because what qemu is given IS the diff.
 	//
@@ -1886,21 +1774,6 @@ func (d *Driver) vncNumber() int {
 // afternoon spent confirming it.
 var ErrMachineGone = errors.New("the guest is no longer running")
 
-// netDevice builds the network device this machine can attach.
-//
-// THE PCI FORM TAKES `romfile=` AND `host_mtu=`, and both are load-bearing there: the empty `romfile`
-// keeps qemu from looking for a PXE ROM that is not installed in this image, and `host_mtu` matches
-// the tap. The mmio form a microvm needs has NEITHER property, so the two cannot share a format
-// string - MEASURED, live:
-//
-//	-device virtio-net-device,netdev=net0,...,romfile=,host_mtu=1450:
-//	Property 'virtio-net-device.romfile' not found
-func netDevice(boot machine.Boot, mac string, mtu int) string {
-	if boot.MicroVM {
-		return fmt.Sprintf("virtio-net-device,netdev=net0,mac=%s", mac)
-	}
-	return fmt.Sprintf("virtio-net-pci,netdev=net0,mac=%s,romfile=,host_mtu=%d", mac, mtu)
-}
 
 // SSHTarget is where this machine's sshd listens, for a caller that has to ask whether it answers.
 func (d *Driver) SSHTarget() guest.Target {
@@ -1952,31 +1825,12 @@ func qemuValues(boot machine.Boot, work string, opts machine.CommonOptions) mach
 		"recovery": boot.Recovery,
 		"answer":   boot.AnswerCD,
 		"driver":   boot.DriverCD,
-		"dir":      boot.FirmwareDir,
+		"dir":      boot.Dir,
 		"work":     work,
 		"discard":  boot.DiscardFragment(),
 	}
 }
 
-// videoFor is the adapter the step asked for, as the qemu device string a shape's `aggregate.video`
-// placeholder expects.
-//
-// IT READS THE SHAPE'S `video.kind`, NOT THE GUEST'S NAME. A requested adapter still has to be
-// honoured - a walk may say `--vga cirrus` for a diagnosis - but the three shapes this build knows
-// (`none`, `virtio`, `vga`) are answered from the file.
-func videoFor(boot machine.Boot, requested string) string {
-	switch boot.Shape.Video {
-	case "none":
-		// ANOTHER DEVICE SUPPLIES THE ADAPTER - macOS's `vmware-svga` in `qemu.args`. A second one
-		// would give the guest two displays and `see:` could photograph the empty one.
-		return ""
-	case "virtio":
-		// ANDROID'S HWC OPENS `/dev/dri/card0`, and a std VGA has no DRM node.
-		return "virtio-vga,xres=1920,yres=1080"
-	}
-	_ = requested
-	return DefaultVideoDevice
-}
 
 // bootValues are the substitutions a boot step's `args:` may use.
 //

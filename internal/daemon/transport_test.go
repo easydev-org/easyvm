@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -445,38 +446,48 @@ func TestQmpSocketHasNoRaceToHandleBecauseItIsExclusive(t *testing.T) {
 //	QEMU HID Tablet   current=False  abs=True
 //	vmmouse           current=True   abs=True     <- every absolute event lands here
 //
-// `vmport=off` disables the competing handler; the `usb-tablet` the walkthroughs were measured
-// against stays attached.
+// `vmport=off` DISABLES THE COMPETING HANDLER, and it is in every q35 machine string a boot writes -
+// which is what this checks now that a boot names its own `machine:`.
+//
+// THE ALTERNATIVE WOULD BE AN ENGINE THAT REWRITES THE STRING, and that is the coupling this build
+// just removed: q35's default `vmport=on` binds `vmmouse`, which takes the absolute pointer, and
+// a file that forgets it has a guest whose first click is
+// `Input handler not found for event type abs`.
 func TestTheMachineDisablesTheVMwareBackdoorPort(t *testing.T) {
-	body, err := os.ReadFile("driver.go")
+	root := filepath.Join("..", "..")
+	files, err := filepath.Glob(filepath.Join(root, "sd-*", "*", "steps", "*.walk"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	code := dropLineComments(string(body))
-
-	// THE MACHINE TYPE IS BUILT BY `machineType` NOW, because a `microvm:` boot asks qemu for a
-	// different machine and a literal in the argument list could not say two things. So the check
-	// follows it there - and it must still keep the accelerator, and still disable vmport.
-	i := strings.Index(code, "func machineType(")
-	if i < 0 {
-		t.Fatal("no `machineType`, so the machine's options have moved again")
+	checked := 0
+	for _, f := range files {
+		body, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, line := range strings.Split(string(body), "\n") {
+			// ONLY A `machine:` LINE THAT NAMES q35 IS THIS TEST'S BUSINESS: a microvm string has
+			// no `vmport` and no VMware backdoor to disable.
+			if !strings.Contains(line, "q35") {
+				continue
+			}
+			checked++
+			if !strings.Contains(line, "vmport=off") {
+				t.Errorf("%s: %q starts q35 without `vmport=off`, so its guest binds `vmmouse` and "+
+					"every absolute pointer event lands on a handler that refuses it",
+					filepath.Base(f), strings.TrimSpace(line))
+			}
+			if !strings.Contains(line, "accel=kvm") {
+				t.Errorf("%s: %q drops `accel=kvm`, so the guest runs on TCG at a fiftieth of the "+
+					"speed and macOS deadlocks at HANDOFF TO XNU", filepath.Base(f),
+					strings.TrimSpace(line))
+			}
+		}
 	}
-	line := code[i:]
-	if end := strings.Index(line, "\n}\n"); end > 0 {
-		line = line[:end]
+	if checked == 0 {
+		t.Skip("no stage repositories here, so there is no machine string to read")
 	}
-	if !strings.Contains(line, `"q35,accel=kvm`) {
-		t.Fatalf("`machineType` no longer names q35 with its accelerator: %s", line)
-	}
-	if !strings.Contains(line, "vmport=off") {
-		t.Fatalf("the machine is started with %s, and q35's default `vmport=on` binds `vmmouse`, "+
-			"which takes the absolute pointer: `Input handler not found for event type abs` on the "+
-			"first click of a walk", strings.TrimSpace(line))
-	}
-	if !strings.Contains(line, "accel=kvm") {
-		t.Fatalf("the machine is started with %s - adding vmport must not drop the accelerator, "+
-			"or every guest silently runs on TCG", strings.TrimSpace(line))
-	}
+	t.Logf("checked %d q35 machine string(s)", checked)
 }
 
 // AND THE COMMENT THAT DESCRIBED A DEVICE WHICH IS NOT IN THE ARGUMENT VECTOR.
