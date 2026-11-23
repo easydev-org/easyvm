@@ -32,8 +32,10 @@ func fixture(t *testing.T) (disk, iso, answer, driver, recovery, rom, vars, boot
 		mk("answer.iso", 4096),
 		mk("drivers.iso", 4096),
 		mk("recovery.dmg", 4096),
-		mk("opencore.rom", 4096),
-		mk("vars.fd", 4096),
+		// THE NAMES macOS's SHAPE NAMES. `kind: folder` means this build learns the file names from
+		// the shape rather than knowing them, so the fixture has to use the ones the shape says.
+		mk("macos.rom", 4096),
+		mk("macos.vars", 4096),
 		mk("boot.img", 4096)
 }
 
@@ -135,8 +137,11 @@ func TestWindowsISOBoot(t *testing.T) {
 // is what 'failed to load Boot0001' meant for six runs."
 func TestMacOSBootAlwaysHasOpenCore(t *testing.T) {
 	disk, _, _, _, recovery, rom, vars, bootImg := fixture(t)
-	b := Boot{OS: MacOS, Disk: disk, Recovery: recovery,
-		OpenCoreROM: rom, OpenCoreVars: vars, BootImage: bootImg}
+	sh := realShape(t, "macos")
+	b := Boot{OS: MacOS, Disk: disk, Recovery: recovery, Shape: sh,
+		OpenCoreROM: rom, OpenCoreVars: vars, BootImage: bootImg,
+		// The shape says `{{work}}`, so the boot needs a work directory to render it against.
+		Work: filepath.Dir(disk), FirmwareDir: filepath.Dir(disk)}
 	if err := b.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -170,8 +175,9 @@ func TestMacOSBootAlwaysHasOpenCore(t *testing.T) {
 	// later stage boots a system that is already installed. An extra USB disk is one more row the
 	// guest can pick in Disk Utility, where `choose the target disk by capacity` reads the
 	// sidebar; and discard is then exactly what keeps the published disk small.
-	installed := Boot{OS: MacOS, Disk: disk, OpenCoreROM: rom, OpenCoreVars: vars,
-		BootImage: bootImg}
+	installed := Boot{OS: MacOS, Disk: disk, Shape: sh,
+		OpenCoreROM: rom, OpenCoreVars: vars, BootImage: bootImg,
+		Work: filepath.Dir(disk), FirmwareDir: filepath.Dir(disk)}
 	if err := installed.Validate(); err != nil {
 		t.Fatalf("a macOS boot without a recovery image must be allowed - only an INSTALL needs "+
 			"the recovery device: %v", err)
@@ -189,9 +195,16 @@ func TestMacOSBootAlwaysHasOpenCore(t *testing.T) {
 		t.Fatal("macOS needs isa-applesmc; without the key the kernel stops before it draws")
 	}
 	// THE FIRMWARE IS OPENCORE'S, NOT OVMF'S.
+	// THE FIRMWARE'S OWN ARGUMENTS, RENDERED FROM THE SHAPE. macOS's shape is `kind: folder`, so
+	// these are the file's `firmware.args:` with `{{dir}}` substituted - this build does not know
+	// that `macos.rom` is a ROM or that `macos.vars` is a variable store.
 	fw := strings.Join(b.FirmwareArgs("/usr/share/OVMF/OVMF_CODE_4M.fd", "/tmp/OVMF_VARS.fd"), " ")
-	if !strings.Contains(fw, filepath.Base(rom)) {
-		t.Fatalf("macOS must boot OpenCore's ROM, not OVMF's:\n%s", fw)
+	if !strings.Contains(fw, "macos.rom") || !strings.Contains(fw, filepath.Dir(disk)) {
+		t.Fatalf("macOS must boot its own firmware, rendered into the work directory - not OVMF's:"+
+			"\n%s", fw)
+	}
+	if strings.Contains(fw, "OVMF") {
+		t.Fatalf("macOS was given OVMF's pflash files:\n%s", fw)
 	}
 }
 
@@ -245,14 +258,20 @@ func TestTheWrongMediumForTheOSIsRefused(t *testing.T) {
 	if err := (Boot{OS: Windows, Disk: disk, Recovery: recovery}).Validate(); err == nil {
 		t.Fatal("windows with a `recovery:` must be refused: that is macOS's medium")
 	}
-	// AND A MACOS BOOT WITHOUT OPENCORE'S FILES IS REFUSED, because the firmware would find no
-	// loader and sit in the UEFI shell.
-	err := (Boot{OS: MacOS, Disk: disk, Recovery: recovery}).Validate()
+	// AND A MACOS BOOT WHOSE FIRMWARE FILES ARE NOT THERE IS REFUSED, because qemu would start,
+	// find no loader and sit in the UEFI shell.
+	//
+	// THE REFUSAL NAMES THE FILE, NOT "OpenCore": this build does not know that `macos.rom` is a ROM
+	// - that is what `kind: folder` means - so what it can report is the path the shape named.
+	sh := realShape(t, "macos")
+	empty := t.TempDir()
+	err := (Boot{OS: MacOS, Disk: disk, Recovery: recovery, Shape: sh,
+		Work: empty, FirmwareDir: empty}).Validate()
 	if err == nil {
-		t.Fatal("macOS without OpenCore's files must be refused")
+		t.Fatal("macOS with an empty firmware directory must be refused")
 	}
-	if !strings.Contains(err.Error(), "OpenCore") {
-		t.Fatalf("the refusal must name OpenCore; got %v", err)
+	if !strings.Contains(err.Error(), "boot.img") {
+		t.Fatalf("the refusal must name the file the shape expects; got %v", err)
 	}
 	_ = rom
 	_ = vars
@@ -506,8 +525,11 @@ func TestCheckKVMAnswersForThisMachine(t *testing.T) {
 // that names its bus, because qemu resolves `bus=` as it parses.
 func TestTheRecoveryDeviceHasAController(t *testing.T) {
 	disk, _, _, _, recovery, rom, vars, bootImg := fixture(t)
-	b := Boot{OS: MacOS, Disk: disk, Recovery: recovery,
-		OpenCoreROM: rom, OpenCoreVars: vars, BootImage: bootImg}
+	sh := realShape(t, "macos")
+	b := Boot{OS: MacOS, Disk: disk, Recovery: recovery, Shape: sh,
+		OpenCoreROM: rom, OpenCoreVars: vars, BootImage: bootImg,
+		// The shape says `{{work}}`, so the boot needs a work directory to render it against.
+		Work: filepath.Dir(disk), FirmwareDir: filepath.Dir(disk)}
 	if err := b.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -1147,4 +1169,19 @@ func macOSShapeFile(t *testing.T) string {
 	t.Skip("no macOS shape here: it lives in easyvm-macos/shapes/macos.yaml, and this build embeds " +
 		"only the two machines that need no repository")
 	return ""
+}
+
+// realShape returns a shape the sub-repositories own, or skips when they are not checked out.
+//
+// THE MACHINES THIS BUILD DOES NOT EMBED ARE STILL LOADED BY `TestMain` WHEN THEY ARE BESIDE IT, so
+// a test about macOS can use the machine that will actually run - the file `easyvm-macos` ships -
+// rather than a hand-written stand-in that could agree with the code and disagree with the guest.
+func realShape(t *testing.T, name string) Shape {
+	t.Helper()
+	if sh, ok := Shapes().Lookup(name); ok {
+		return sh
+	}
+	t.Skipf("no %q shape here: it lives in easyvm-%s/shapes, and this checkout does not have it",
+		name, name)
+	return Shape{}
 }

@@ -124,26 +124,14 @@ func (e *Executor) doBoot(s walk.Step) error {
 			spec.MemMB = 512
 		}
 	}
-	// THE OPENCORE FILES ARE NEEDED BY EVERY MACOS BOOT, AND ONLY SOME OF THEM ATTACH THE
-	// RECOVERY IMAGE. They are built from it - Apple's APFS driver comes out of that image - but
-	// that is HOST work done by an earlier step, and the guest is not given the image on an
-	// installed disk. Tying these three paths to `recovery:` conflated the two, so an installed
-	// macOS disk would have booted with an empty pflash path.
-	if osName == "macos" {
-		// THE THREE PATHS COME FROM THE `fetch: opencore` STEP WHEN ONE RAN, and from the work
-		// directory's layout otherwise. A build that produced them somewhere else must be able to
-		// say where: guessing a path is how a stage boots a boot.img from a previous run.
-		if boot, ok := e.assets[string(asset.OpenCore)]; ok {
-			spec.BootImage = boot
-			if extras, ok := e.assetExtras[string(asset.OpenCore)]; ok && len(extras) >= 2 {
-				spec.OpenCoreROM, spec.OpenCoreVars = extras[0], extras[1]
-			}
-		} else {
-			spec.BootImage = filepath.Join(e.Work, "boot.img")
-			spec.OpenCoreROM = filepath.Join(e.Work, "macos.rom")
-			spec.OpenCoreVars = filepath.Join(e.Work, "macos.vars")
-		}
-	}
+	// WHERE A `kind: folder` FIRMWARE LIVES IS THE SHAPE'S ANSWER, NOT THIS FUNCTION'S.
+	//
+	// THIS USED TO BE `if osName == "macos"`, which is the hard-coding this whole change removes: it
+	// named three files - `boot.img`, `macos.rom`, `macos.vars` - and three fields on the boot spec,
+	// so the only firmware this build could lay out was OpenCore's. The shape's `firmware.dir:` says
+	// where the directory is, and its `args:`/`disks:` say which files in it matter; `{{work}}` there
+	// is this directory.
+	spec.FirmwareDir = e.Work
 
 	e.Driver.Log(fmt.Sprintf("  booting %s from %s%s", spec.OS, bootSourceName(spec),
 		mediaNote(spec)))

@@ -24,11 +24,37 @@ import (
 func TestEveryFetchedTagIsPublishedAndEveryPublishedTagIsFetched(t *testing.T) {
 	fetched := tagsTheBuildAsksFor(t)
 
-	body, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "artifacts-publish.yml"))
+	// EVERY PUBLISHER, NOT ONLY THIS REPOSITORY'S. A sub-repository publishes what its own stages
+	// need - `easyvm-macos` writes `macos-firmware-15` and `-26`, `easyvm-windows` writes the answer
+	// CD - and a fetcher here asks for them. Reading only this repository's file would report every
+	// one of those as a 404 that cannot happen.
+	var bodies []string
+	own, err := os.ReadFile(filepath.Join("..", "..", ".github", "workflows", "artifacts-publish.yml"))
 	if err != nil {
 		t.Fatalf("cannot read artifacts-publish.yml: %v", err)
 	}
-	published, mirrored := tagsThePublisherWrites(t, string(body))
+	bodies = append(bodies, string(own))
+	body := string(own)
+	for _, f := range stageWorkflowFiles() {
+		if filepath.Base(f) != "artifacts-publish.yml" {
+			continue
+		}
+		b, err := os.ReadFile(f)
+		if err != nil {
+			continue
+		}
+		bodies = append(bodies, string(b))
+	}
+	published, mirrored := map[string]bool{}, map[string]bool{}
+	for _, b := range bodies {
+		p, m := tagsThePublisherWrites(t, b)
+		for k := range p {
+			published[k] = true
+		}
+		for k := range m {
+			mirrored[k] = true
+		}
+	}
 
 	for tag := range fetched {
 		if published[tag] || mirrored[tag] {
@@ -240,6 +266,20 @@ func tagsThePublisherWrites(t *testing.T, src string) (catalogue, mirrored map[s
 			suffixes = append(suffixes, s[1])
 		}
 	}
+	// AND A `matrix.release` TEMPLATE, WHICH IS A DIFFERENT AXIS. `easyvm-macos` publishes
+	// `macos-firmware-${{ matrix.release }}`, one tag per release, rather than one tag per suffix -
+	// so the values come from that job's own `release:` rows.
+	//
+	// A TEMPLATE THAT EXPANDS TO NOTHING IS THE FAILURE THIS PREVENTS, and it is silent in the
+	// direction that matters: the tag never appears, so nothing is published under the name the
+	// stages read, and the stage fails with a 404 after its download budget is already spent.
+	releases := []string{""}
+	if m := regexp.MustCompile(`(?m)^\s*[- ]\s*release:\s*"([^"]+)"\s*$`).FindAllStringSubmatch(src, -1); m != nil {
+		releases = releases[:0]
+		for _, r := range m {
+			releases = append(releases, r[1])
+		}
+	}
 
 	// THE WHOLE VALUE, BECAUSE A TEMPLATE CONTAINS SPACES: `macos-asset-boot${{ matrix.suffix }}` is
 	// one tag expression and a character class that excluded spaces matched only `macos-asset-boot${`.
@@ -252,6 +292,18 @@ func tagsThePublisherWrites(t *testing.T, src string) (catalogue, mirrored map[s
 		}
 		for _, suffix := range suffixes {
 			expanded := strings.ReplaceAll(m[1], "${{ matrix.suffix }}", suffix)
+			// `matrix.release` IS THE OTHER AXIS, and both are expanded so a job with either shape is
+			// read correctly. A tag that uses one of them is one tag PER VALUE; a tag that uses
+			// neither expands to itself.
+			if strings.Contains(expanded, "${{ matrix.release }}") {
+				for _, rel := range releases {
+					one := strings.ReplaceAll(expanded, "${{ matrix.release }}", rel)
+					if !strings.Contains(one, "${{") {
+						mirrored[one] = true
+					}
+				}
+				continue
+			}
 			// ANY TEMPLATE LEFT OVER IS NOT A TAG. `${{ matrix.tag }}` on the recovery mirror is
 			// covered by the `macos-recovery-` read above; anything else here means a place the
 			// test cannot expand, and guessing at it would be worse than saying so.

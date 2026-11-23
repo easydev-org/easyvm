@@ -793,6 +793,12 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 		OpenCoreVars:   spec.OpenCoreVars,
 		BootImage:      spec.BootImage,
 		Incoming:       spec.Incoming,
+		// THE WORK DIRECTORY, which a `kind: folder` shape's `{{work}}` and its relative paths are
+		// rendered against. It is passed on every boot because the shape may be any of them - this
+		// build cannot tell which need it without reading the file, and a field left empty would be
+		// a firmware path resolved against the process's own directory.
+		Work:        d.work,
+		FirmwareDir: spec.FirmwareDir,
 	}
 	if err := boot.Validate(); err != nil {
 		return err
@@ -1122,7 +1128,15 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 	//
 	// for a guest that boots a kernel handed to it by the host and could not use the file if it were
 	// there. The two decisions belong together, so the condition is the same one `FirmwareArgs` uses.
-	if !boot.MicroVM && !guestOS.IsMacOS() {
+	// THE VARIABLES FILE IS COPIED ONLY WHEN THE FIRMWARE IS OVMF'S, and the SHAPE is what says so -
+	// not the operating system's name. `guestOS.IsMacOS()` here was a hard-coded exception:
+	//
+	//	if !boot.MicroVM && !guestOS.IsMacOS() {
+	//
+	// - correct, because macOS is the one guest that does not use OVMF, and wrong in the way that
+	// matters: a `kind: folder` firmware for any other guest would still have had OVMF's variable
+	// store copied into its work directory, and a macOS boot through a DIFFERENT firmware would not.
+	if !boot.MicroVM && boot.Shape.Firmware == machine.FirmwareOVMF {
 		if err := machine.TouchOvmfVars(tmpl, ovmfVars); err != nil {
 			return err
 		}

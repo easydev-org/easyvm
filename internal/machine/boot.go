@@ -173,6 +173,15 @@ type Boot struct {
 	OpenCoreVars string
 	// BootImage is OpenCore's own disk image, the one the firmware boots first.
 	BootImage string
+	// Work is the run's working directory, which is what `{{work}}` in a shape's `firmware.dir:`
+	// stands for and the base a relative one is joined onto.
+	Work string
+	// FirmwareDir is the directory a `kind: folder` firmware lives in.
+	//
+	// THE ENGINE ONLY EVER PASSES THIS THROUGH. `{{dir}}` in the shape's `firmware.args` and
+	// `firmware.disks` is replaced with it, and what the files inside are called is the shape's
+	// business - which is what lets a firmware this build has never heard of boot.
+	FirmwareDir string
 	// MicroVM asks for the smallest machine that boots a modern Linux kernel: qemu's `microvm`
 	// machine type, no PCIe, no IDE, no USB, no VGA.
 	//
@@ -317,6 +326,29 @@ func (b Boot) Validate() error {
 		return fmt.Errorf("`recovery:` is macOS's install medium; this guest is %s", b.OS)
 	}
 
+	// A `kind: folder` FIRMWARE IS CHECKED BY WHAT ITS OWN ARGUMENTS NAME.
+	//
+	// THIS BUILD DOES NOT KNOW WHICH FILE IS A ROM OR A VARIABLE STORE - that is the point - so it
+	// cannot name them. What it can do is render the shape's arguments and confirm that every
+	// `file=` they mention exists, which catches the failure this check exists for: a stage that
+	// never ran its `fetch:`, so the firmware directory is empty and qemu would start, find no
+	// loader, and sit in the UEFI shell.
+	if b.shape().Firmware == FirmwareFolder {
+		if b.Recovery != "" {
+			if err := requireFile(b.Recovery, "the recovery image"); err != nil {
+				return err
+			}
+		}
+		for _, pair := range b.shape().FirmwareDisks {
+			if err := requireFirmwareFiles(pair, b.firmwareDir(), "firmware.disks"); err != nil {
+				return err
+			}
+		}
+		if err := requireFirmwareFiles(b.shape().FirmwareArgs, b.firmwareDir(), "firmware.args"); err != nil {
+			return err
+		}
+	}
+
 	if b.shape().Firmware == FirmwareOpenCore {
 		// OPENCORE IS NOT OPTIONAL FOR macOS, EVEN FROM AN INSTALLED DISK. Those three files are
 		// what the firmware boots: without them qemu starts, the firmware finds no loader, and the
@@ -396,6 +428,34 @@ func requireFile(path, why string) error {
 // "attached" means and for why it is read from the media rather than guessed from the file.
 func (b Boot) StorageArgs() []string {
 	args := []string{}
+
+	if b.shape().Firmware == FirmwareFolder {
+		// THE FIRMWARE'S OWN BOOT DISKS COME FIRST, before the guest's target. A loader that boots
+		// from a disk of its own has to be `bootindex=0`, or the firmware reports it cannot load
+		// Boot0001 and the guest never starts.
+		for _, pair := range b.shape().FirmwareDisks {
+			args = append(args, renderFirmwareArgs(pair, b.firmwareDir())...)
+		}
+		// THE BUS AND THE POINTER COME BEFORE ANY DISK THAT NAMES THEM. qemu resolves `bus=` as it
+		// parses, so a `usb-storage,bus=xhci.0` written before the controller is
+		// `Bus 'xhci.0' not found` and qemu exits - which reads as a qmp socket error, not a device.
+		args = append(args, b.shape().DeviceArgs...)
+		args = append(args, b.targetDiskArgs()...)
+		// AND THE RECOVERY IMAGE, IF ONE IS ATTACHED, in the order the shape wrote.
+		//
+		// THE CONTROLLER IS IN `media.recovery_args` - every pair of the list, not just the ones that
+		// name the image - because a `usb-storage,bus=xhci.0` device needs its bus created first.
+		if b.Recovery != "" {
+			for _, pair := range b.shape().FirmwareRecoveryPairs() {
+				for _, a := range pair {
+					args = append(args, strings.ReplaceAll(
+						strings.ReplaceAll(a, "{{dir}}", b.firmwareDir()),
+						"{{recovery}}", b.Recovery))
+				}
+			}
+		}
+		return args
+	}
 
 	if b.shape().Firmware == FirmwareOpenCore {
 		// OPENCORE'S OWN DISK, FIRST AND WITH bootindex=0. "A disk with no bootindex is not in the
@@ -831,6 +891,11 @@ func (b Boot) FirmwareArgs(ovmfCode, ovmfVars string) []string {
 			"-drive", "if=pflash,format=raw,readonly=on,file=" + b.OpenCoreROM,
 			"-drive", "if=pflash,format=raw,file=" + b.OpenCoreVars,
 		}
+	case FirmwareFolder:
+		// THE SHAPE WROTE THESE ARGUMENTS. `{{dir}}` is the directory `fetch:` wrote, and it is the
+		// only thing this function substitutes - it does not know what files are in there, which is
+		// the property `FirmwareFolder` exists for.
+		return renderFirmwareArgs(b.shape().FirmwareArgs, b.firmwareDir())
 	}
 	return []string{
 		"-drive", "if=pflash,format=raw,readonly=on,file=" + ovmfCode,
@@ -1167,4 +1232,86 @@ func (b Boot) VirtioNet() string {
 		return "virtio-net-device"
 	}
 	return "virtio-net-pci"
+}
+
+// renderFirmwareArgs replaces `{{dir}}` with the firmware directory.
+//
+// IT IS THE WHOLE OF WHAT THIS BUILD KNOWS ABOUT A `kind: folder` FIRMWARE: a placeholder and a
+// path. Everything else - which files, how many, which is read-only - is in the shape file.
+func renderFirmwareArgs(pair []string, dir string) []string {
+	out := make([]string, len(pair))
+	for i, a := range pair {
+		out[i] = strings.ReplaceAll(a, "{{dir}}", dir)
+	}
+	return out
+}
+
+// targetDiskArgs is the guest's own disk, in the form this build uses for every guest.
+//
+// IT IS SPLIT OUT SO THE TWO FIRMWARE PATHS SHARE ONE SPELLING. `FirmwareOpenCore` and
+// `FirmwareFolder` both attach a target after their own disks, and two copies of this argument pair
+// would be two chances to spell `discard` differently - which is the argument that cost three
+// quarters of a macOS recording when it was on during an install.
+func (b Boot) targetDiskArgs() []string {
+	target := "file=" + b.Disk + ",if=none,format=qcow2,id=target"
+	if b.Discardable() {
+		target = "file=" + b.Disk + ",if=none,format=qcow2,discard=unmap,id=target"
+	}
+	index := 1
+	if b.shape().Firmware == FirmwareFolder {
+		// THE SHAPE WRITES ITS OWN `bootindex` VALUES, so the target is the number AFTER the highest
+		// one it declared. Counting the PAIRS was wrong: an OpenCore disk is one drive plus one
+		// device, and both pairs together are one index. MEASURED: counting them produced
+		// `bootindex=2` where the firmware's own disk is 0, and the guest then reported it could not
+		// load Boot0001.
+		index = 1 + b.shape().highestFirmwareBootIndex()
+	}
+	return []string{
+		"-drive", target,
+		"-device", fmt.Sprintf("virtio-blk-pci,drive=target,bootindex=%d", index),
+	}
+}
+
+// firmwareDir is where a `kind: folder` firmware lives.
+//
+// `{{work}}` IN A SHAPE'S `firmware.dir:` IS THE WORK DIRECTORY, and it is the only placeholder this
+// level substitutes - the argument lists below use `{{dir}}`, which is the same directory spelled
+// inside the arguments. A shape that names a subdirectory instead (`firmware/opencore`) gets that
+// joined onto the work directory, so a firmware can live somewhere specific without the shape having
+// to know an absolute path it cannot see.
+func (b Boot) firmwareDir() string {
+	dir := b.shape().FirmwareDir
+	if strings.Contains(dir, "{{work}}") {
+		return strings.ReplaceAll(dir, "{{work}}", b.Work)
+	}
+	if dir == "" || filepath.IsAbs(dir) {
+		return dir
+	}
+	return filepath.Join(b.Work, dir)
+}
+
+// requireFirmwareFiles checks that every `file=` an argument names is on disk.
+//
+// IT IS THE ONLY CHECK THIS BUILD CAN MAKE ABOUT A FIRMWARE IT DOES NOT KNOW: the paths come from the
+// shape, so a missing one is either a stage that never fetched or a shape that names the wrong file -
+// and both are better as a sentence here than as qemu starting and finding no loader.
+//
+// ONLY `-drive`-SHAPED ARGUMENTS ARE CHECKED, which is what `file=` appears in. A `-device` that
+// mentions a path (none does) would be this build guessing, and guessing is what this whole mechanism
+// exists to avoid.
+func requireFirmwareFiles(pair []string, dir, where string) error {
+	for _, a := range pair {
+		for _, part := range strings.Split(a, ",") {
+			if !strings.HasPrefix(part, "file=") {
+				continue
+			}
+			path := strings.ReplaceAll(strings.TrimPrefix(part, "file="), "{{dir}}", dir)
+			if err := requireFile(path, "the firmware file `"+filepath.Base(path)+"` named by "+
+				where); err != nil {
+				return fmt.Errorf("%w. A shape's `firmware.dir:` is where the `fetch:` step writes, so "+
+					"an empty directory means that step did not run", err)
+			}
+		}
+	}
+	return nil
 }

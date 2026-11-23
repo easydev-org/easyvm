@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -37,7 +38,23 @@ const (
 	//
 	// OPENCORE IS NOT OPTIONAL FOR macOS, EVEN FROM AN INSTALLED DISK: without it qemu starts, the
 	// firmware finds no loader, and the guest sits in the UEFI shell.
+	//
+	// IT IS KEPT AS A NAME BUT NOT AS A SPECIAL CASE. A shape may still write `kind: opencore` and
+	// get the layout below, which is what every existing file does; the same machine can be written
+	// as `kind: folder` with its own `args:` and `disks:`, and that form is what a firmware this
+	// build has never heard of uses.
 	FirmwareOpenCore FirmwareKind = "opencore"
+	// FirmwareFolder is FIRMWARE THE ENGINE DOES NOT KNOW.
+	//
+	// `fetch:` writes a DIRECTORY, and the shape says which files in it are the pflash pair and which
+	// disk the firmware boots - as qemu arguments with `{{dir}}` standing for that directory. The
+	// engine never learns what the files are called, what they mean, or how many of them there are.
+	//
+	// THE PROPERTY THIS BUYS IS THE POINT: a new firmware is a shape file and a `fetch:`, not a Go
+	// branch. MEASURED by the one it was written for - OpenCore was `FirmwareOpenCore`, three fields
+	// on the boot spec, two special cases in `StorageArgs` and one in `FirmwareArgs`, all of it
+	// knowledge about macOS living in a package that is supposed to know only what a shape tells it.
+	FirmwareFolder FirmwareKind = "folder"
 	// FirmwareNone is a microvm. It has no firmware at all - the host hands qemu a kernel - which is
 	// the whole point of the machine type: no pflash, no boot order, no UEFI, and one fewer thing
 	// that can fail before the guest is up.
@@ -104,6 +121,23 @@ type FirmwareSpec struct {
 	// the DAEMON chooses: `{{.Code}}` and `{{.Vars}}` are filled from the caller's environment.
 	Code string `yaml:"code"`
 	Vars string `yaml:"vars"`
+
+	// Dir is the DIRECTORY `fetch:` writes, for `kind: folder`. It is a path relative to the work
+	// directory, and `{{dir}}` in `Args`/`Disks` stands for its absolute form.
+	Dir string `yaml:"dir"`
+	// Args are the qemu arguments that attach the firmware, one array per argument pair.
+	//
+	// THESE ARE THE `-drive if=pflash` LINES AND NOTHING ELSE the engine has to understand: whether a
+	// firmware is two pflash slots, one, or none at all is the shape's business. A `{{dir}}` in any
+	// argument is replaced with the directory's absolute path.
+	Args [][]string `yaml:"args"`
+	// Disks are qemu arguments for disks the FIRMWARE itself boots from, placed before the guest's
+	// own target disk.
+	//
+	// OPENCORE IS THE REASON THIS EXISTS: it boots from a raw image of its own (`boot.img`) that has
+	// to be `bootindex=0`, so the guest's target disk is second. A firmware that boots a partition
+	// inside the target, or a CD, needs nothing here.
+	Disks [][]string `yaml:"disks"`
 }
 
 // CPUSpec is what is appended to the resolved CPU model.
@@ -127,7 +161,26 @@ type VideoSpec struct {
 // MediaSpec is which of the optional media a guest may be given.
 type MediaSpec struct {
 	// Recovery says macOS's recovery image is legal for this guest. Nothing else may attach one.
-	Recovery bool `yaml:"recovery"`
+	Recovery bool
+	// RecoveryArgs attach the recovery image, and are used only when one is given.
+	//
+	// `{{recovery}}` IS THE IMAGE'S PATH and `{{dir}}` the firmware directory. THE CONTROLLER IS
+	// PART OF THE LIST because a `usb-storage,bus=xhci.0` device names a bus that does not exist
+	// unless something creates it - qemu refuses at startup with
+	//
+	//	-device usb-storage,bus=xhci.0,drive=rec: Bus 'xhci.0' not found
+	//
+	// and exits, so the QMP socket never appears and the boot step reports a socket error rather
+	// than the missing device.
+	RecoveryArgs [][]string `yaml:"recovery_args"`
+	// DeviceArgs are attached on EVERY boot of this guest, before its disks.
+	//
+	// THE BUS AND THE POINTER BELONG HERE RATHER THAN IN `recovery_args`: a macOS guest has no PS/2,
+	// so its tablet must exist whether or not a recovery image is attached - and the controller must
+	// exist before the device that names `bus=xhci.0`. MEASURED: with the tablet inside the
+	// recovery-only list, a macOS guest booted from an installed disk had no pointer at all and its
+	// first click died in qemu.
+	DeviceArgs [][]string `yaml:"device_args"`
 	// ISO false means an install ISO is refused with the reason from ISOReason.
 	ISO       bool   `yaml:"iso"`
 	ISOReason string `yaml:"iso_reason"`
@@ -147,6 +200,17 @@ type Shape struct {
 	Firmware      FirmwareKind
 	FirmwareCode  string
 	FirmwareVars  string
+	// RecoveryArgs is `media.recovery_args`, flattened - each pair is two qemu arguments.
+	RecoveryArgs []string
+	// DeviceArgs is `media.device_args`, flattened.
+	DeviceArgs []string
+	// FirmwareDir, FirmwareArgs and FirmwareDisks are `kind: folder`'s compiled form: a directory
+	// the `fetch:` step wrote, the arguments that attach it, and the firmware's own boot disks.
+	FirmwareDir  string
+	FirmwareArgs []string
+	// FirmwareDisks keeps its pair structure, because each entry becomes two qemu arguments and a
+	// flattening would let an odd count through.
+	FirmwareDisks [][]string
 	CPUSuffix     string
 	SMPFormat     SMPFormat
 	Video         string
@@ -182,7 +246,42 @@ func (f ShapeFile) Validate() (Shape, error) {
 			return s, fmt.Errorf("shape %q: `firmware.kind: opencore` must not name `code:`/`vars:`; "+
 				"they are built from the recovery image on each run", f.Name)
 		}
+		if f.Firmware.Dir != "" || len(f.Firmware.Args) > 0 || len(f.Firmware.Disks) > 0 {
+			return s, fmt.Errorf("shape %q: `firmware.kind: opencore` does not take `dir:`, `args:` or "+
+				"`disks:` - they are the layout this build already knows. Write `kind: folder` to "+
+				"state that layout in the file instead", f.Name)
+		}
 		s.Firmware = FirmwareOpenCore
+	case FirmwareFolder:
+		// A DIRECTORY AND THE ARGUMENTS THAT ATTACH IT. Nothing about the files is checked here
+		// beyond the shape of what the file says, because what they are called is exactly what this
+		// build does not know.
+		if f.Firmware.Dir == "" {
+			return s, fmt.Errorf("shape %q: `firmware.kind: folder` needs `dir:` - the directory "+
+				"`fetch:` writes, relative to the work directory", f.Name)
+		}
+		if len(f.Firmware.Args) == 0 {
+			return s, fmt.Errorf("shape %q: `firmware.kind: folder` needs `args:` - the qemu "+
+				"arguments that attach it. An empty list is a firmware nothing boots", f.Name)
+		}
+		for i, pair := range f.Firmware.Args {
+			if len(pair) != 2 {
+				return s, fmt.Errorf("shape %q: `firmware.args[%d]` has %d element(s). Each entry is "+
+					"ONE argument pair, because a qemu flag without its value is an error naming the "+
+					"flag rather than what was meant", f.Name, i, len(pair))
+			}
+		}
+		for i, pair := range f.Firmware.Disks {
+			if len(pair) != 2 {
+				return s, fmt.Errorf("shape %q: `firmware.disks[%d]` has %d element(s); each entry is "+
+					"one argument pair", f.Name, i, len(pair))
+			}
+		}
+		s.Firmware, s.FirmwareDir = FirmwareFolder, f.Firmware.Dir
+		for _, pair := range f.Firmware.Args {
+			s.FirmwareArgs = append(s.FirmwareArgs, pair...)
+		}
+		s.FirmwareDisks = f.Firmware.Disks
 	case FirmwareNone:
 		if f.Firmware.Code != "" || f.Firmware.Vars != "" {
 			return s, fmt.Errorf("shape %q: `firmware.kind: none` must not name `code:`/`vars:`; a "+
@@ -190,11 +289,27 @@ func (f ShapeFile) Validate() (Shape, error) {
 		}
 		s.Firmware = FirmwareNone
 	case "":
-		return s, fmt.Errorf("shape %q: `firmware.kind:` is required; one of %q, %q or %q",
-			f.Name, FirmwareOVMF, FirmwareOpenCore, FirmwareNone)
+		return s, fmt.Errorf("shape %q: `firmware.kind:` is required; one of %q, %q, %q or %q",
+			f.Name, FirmwareOVMF, FirmwareOpenCore, FirmwareNone, FirmwareFolder)
 	default:
 		return s, fmt.Errorf("shape %q: `firmware.kind: %s` is not a firmware this build knows; one of "+
-			"%q, %q or %q", f.Name, f.Firmware.Kind, FirmwareOVMF, FirmwareOpenCore, FirmwareNone)
+			"%q, %q, %q or %q", f.Name, f.Firmware.Kind, FirmwareOVMF, FirmwareOpenCore,
+			FirmwareNone, FirmwareFolder)
+	}
+
+	for i, pair := range f.Media.DeviceArgs {
+		if len(pair) != 2 {
+			return s, fmt.Errorf("shape %q: `media.device_args[%d]` has %d element(s); each entry "+
+				"is one argument pair", f.Name, i, len(pair))
+		}
+		s.DeviceArgs = append(s.DeviceArgs, pair...)
+	}
+	for i, pair := range f.Media.RecoveryArgs {
+		if len(pair) != 2 {
+			return s, fmt.Errorf("shape %q: `media.recovery_args[%d]` has %d element(s); each entry "+
+				"is one argument pair", f.Name, i, len(pair))
+		}
+		s.RecoveryArgs = append(s.RecoveryArgs, pair...)
 	}
 
 	s.CPUSuffix = f.CPU.Suffix
@@ -386,4 +501,40 @@ func (r *Registry) LoadFile(path string) error {
 		return fmt.Errorf("shape file %s: %w", path, err)
 	}
 	return nil
+}
+// FirmwareRecoveryPairs is `media.recovery_args` as the pairs it was written as.
+//
+// THE STORED FIELD IS FLAT so the argument builder can append it in one line, and this reconstructs
+// the pairs for the caller that needs them separately - each pair's `{{recovery}}` is substituted
+// before use, so a flat list would have to be substituted with two different values.
+func (s Shape) FirmwareRecoveryPairs() [][]string {
+	var out [][]string
+	for i := 0; i+1 < len(s.RecoveryArgs); i += 2 {
+		out = append(out, s.RecoveryArgs[i:i+2])
+	}
+	return out
+}
+
+// highestFirmwareBootIndex is the largest `bootindex=` the shape's `firmware.disks:` declare, or -1.
+//
+// IT IS PARSED RATHER THAN ASSUMED so a firmware with two boot disks gets 0 and 1 and the guest's
+// target gets 2, without the shape having to write the target's number itself.
+func (s Shape) highestFirmwareBootIndex() int {
+	best := -1
+	for _, pair := range s.FirmwareDisks {
+		for _, a := range pair {
+			i := strings.Index(a, "bootindex=")
+			if i < 0 {
+				continue
+			}
+			n, err := strconv.Atoi(a[i+len("bootindex="):])
+			if err != nil {
+				continue
+			}
+			if n > best {
+				best = n
+			}
+		}
+	}
+	return best
 }

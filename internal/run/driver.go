@@ -176,9 +176,15 @@ type BootSpec struct {
 	// from somewhere does not.
 	FreshDisk bool
 	// OpenCoreROM, OpenCoreVars and BootImage are the macOS loader, built from the recovery image.
+	//
+	// THEY ARE DEAD FOR A `kind: folder` SHAPE, which names its own files in the shape rather than
+	// three fields here. They stay for `kind: opencore`, the older spelling that a file may still
+	// use, and FirmwareDir is the generic answer: the directory the firmware's files are in.
 	OpenCoreROM  string
 	OpenCoreVars string
 	BootImage    string
+	// FirmwareDir is the directory a `kind: folder` firmware's files are in.
+	FirmwareDir string
 	// CPUs and MemMB are the machine's size.
 	CPUs  int
 	MemMB int
