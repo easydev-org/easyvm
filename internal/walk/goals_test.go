@@ -1800,11 +1800,17 @@ func TestEveryCreatedDiskIs128GiB(t *testing.T) {
 			continue
 		}
 		for _, s := range doc.Steps {
-			if !s.Has("disk_gb") {
+			// THE SIZE IS A FIELD OF `disk:` NOW - `disk: {file, size, gpt, esp_mib}` - because the
+			// four `disk_*` verbs were keys of one operation written as siblings.
+			raw, ok := s.Spec["disk"].(map[string]any)
+			if !ok {
+				continue
+			}
+			gb, ok := toFloat(raw["size"])
+			if !ok {
 				continue
 			}
 			checked++
-			gb, _ := s.Float("disk_gb", 0)
 			if gb != 128 {
 				t.Errorf("%s: %q creates a %.0f GiB disk. Every disk in this repository is 128 GiB - "+
 					"measured: twelve Linux walkthroughs said 64 while Windows said 128, and nothing "+

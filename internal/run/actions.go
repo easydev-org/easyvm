@@ -217,7 +217,54 @@ func (e *Executor) doShutdown(s walk.Step) error {
 	if err := m.Stop(method, grace); err != nil {
 		return fail(s.Name, "%v", err)
 	}
+	// AND THE DISK IS GIVEN A MOMENT TO SETTLE, BECAUSE A STOPPED PROCESS IS NOT A FLUSHED FILE.
+	//
+	// qemu is gone and the file is still moving: the kernel writes back pages it has not committed,
+	// and a qcow2 whose metadata is half on disk is a disk `qemu-img convert` refuses. THE WAIT IS
+	// HERE RATHER THAN A STEP because every stage needs it and none of them has an opinion about how
+	// long it takes - a `disk_settle 300` step in a walkthrough used to ask, which put a duration in
+	// a place that could not know one.
+	//
+	// IT IS BOUNDED AND SHORT. A disk that has not stopped growing in ten seconds after its writer
+	// died is not settling; it is being written by something else, and the step should fail rather
+	// than block a leg for an hour.
+	if disk := e.bootDisk(); disk != "" {
+		if err := waitForFileToSettle(disk, 10*time.Second); err != nil {
+			e.Driver.Log("  " + err.Error())
+		}
+	}
 	return nil
+}
+
+// waitForFileToSettle blocks until a file's size stops changing, or the window expires.
+//
+// IT IS NOT A CORRECTNESS CHECK, it is a courtesy: a caller that reads the file immediately after this
+// returns will see what the writer left. A file that keeps growing is REPORTED and not fatal, because
+// the step that called this has done its work - `save:` will fail with its own message if the disk is
+// really unusable.
+func waitForFileToSettle(path string, window time.Duration) error {
+	deadline := time.Now().Add(window)
+	var last int64 = -1
+	var quietFrom time.Time
+	for time.Now().Before(deadline) {
+		fi, err := os.Stat(path)
+		if err != nil {
+			return fmt.Errorf("%s: %w", path, err)
+		}
+		if fi.Size() != last {
+			last, quietFrom = fi.Size(), time.Time{}
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+		if quietFrom.IsZero() {
+			quietFrom = time.Now()
+		} else if time.Since(quietFrom) >= time.Second {
+			return nil
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	return fmt.Errorf("%s is still growing after %s; something other than the guest is writing it",
+		filepath.Base(path), window)
 }
 
 // translateDisk turns the mapping form of `disk:` into the step that carries the old keys.

@@ -316,14 +316,6 @@ var Actions = map[string]Verb{
 			"disk_esp_mib": {Name: "disk_esp_mib", Kind: KindTemplated,
 				Summary: "the EFI system partition's size, in MiB"},
 		}},
-	"disk_settle": {Name: "disk_settle", Kind: KindFloat,
-		Summary: "wait until the disk file stops growing, and check it is big enough",
-		Fields: map[string]Key{
-			"disk_min_mb": {Name: "disk_min_mb", Kind: KindInt,
-				Summary: "the smallest a finished disk may be, in MiB"},
-			"poll": {Name: "poll", Kind: KindFloat,
-				Summary: "seconds between looks"},
-		}},
 	"esp_fallback": {Name: "esp_fallback", Kind: KindAny,
 		Summary: "edit a FAT filesystem inside a stopped disk, at byte offsets",
 		Fields: map[string]Key{
@@ -434,7 +426,7 @@ var dispatchOrder = []string{
 	"repeat",
 	"when", "when_not", "when_not_any", "do", "until", "until_any",
 	"needs", "require",
-	"disk", "disk_settle",
+	"disk",
 	"write", "esp_fallback",
 	"at_color", "at_bottom", "at_button",
 	"wait", "settle",

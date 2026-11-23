@@ -444,6 +444,24 @@ jobs:
                   fi
                 fi
                 rm -f "$before"
+
+                # A `.template` MEMBER IS COPIED TO THE NAME THE WALK ASKS FOR, BECAUSE qemu WRITES
+                # TO THE RESULT.
+                #
+                # AN ARTIFACT THAT IS READ IS PUBLISHED ONCE AND SHARED; a file a guest MODIFIES
+                # cannot be, or the second guest inherits the first one's NVRAM. So the publisher
+                # ships the untouched bytes under `X.template` and every leg copies it to `X`.
+                #
+                # THE COPY LIVES HERE RATHER THAN IN THE ENGINE because it used to live in
+                # `internal/asset`, beside the `fetch:` step that pulled the tar - and deleting
+                # `fetch:` deleted it. MEASURED on macos-setup run 45156593695: the leg stopped at
+                # step 1/33 with "macos.vars is not in .../work", because the tar had delivered
+                # `macos.vars.template` and nothing copied it.
+                for t in "$GITHUB_WORKSPACE/work"/*.template; do
+                  [ -e "$t" ] || continue
+                  cp -f "$t" "${t%.template}"
+                  echo "copied $(basename "$t") -> $(basename "${t%.template}")"
+                done
                 ;;
               *)
                 echo "::error::$dest is not a tar. Every published asset is one, because a stage's"

@@ -17,7 +17,7 @@ func ExecutableKeys() []string {
 		"ssh", "adb", "adb_connect", "adb_privileged",
 		"write",
 		// THE MACHINE.
-		"disk", "disk_settle",
+		"disk",
 		"acpi", "qga", "wait_until", "esp_fallback",
 		// THE ENDING: `save` is `stop`'s publishing half as a step of its own, which every walk in
 		// every repository uses as its last step.
