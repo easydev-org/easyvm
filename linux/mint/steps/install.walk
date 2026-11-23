@@ -78,14 +78,13 @@ step "wait for the live desktop"
         read
           name screen
     until
-      check
-        source screen
-        mode like
-        reference reference/desktop.png
-        range [0.9, 1]
-        rect [1500, 150, 1900, 350]
-        rect_at [1920, 1080]
-        must true
+      source screen
+      mode like
+      reference reference/desktop.png
+      range [0.9, 1]
+      rect [1500, 150, 1900, 350]
+      rect_at [1920, 1080]
+      must true
     max 1080
     pause 5
 

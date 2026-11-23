@@ -99,14 +99,13 @@ step "wait for the desktop"
         read
           name screen
     until
-      check
-        source screen
-        mode like
-        reference reference/desktop-ssh.png
-        range [0.9, 1]
-        rect [1350, 740, 1700, 990]
-        rect_at [1920, 1080]
-        must true
+      source screen
+      mode like
+      reference reference/desktop-ssh.png
+      range [0.9, 1]
+      rect [1350, 740, 1700, 990]
+      rect_at [1920, 1080]
+      must true
     max 180
     pause 5
 
