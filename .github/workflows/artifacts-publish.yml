@@ -391,10 +391,20 @@ jobs:
             "${{ matrix.tag }}" "$RUNNER_TEMP/recovery/${{ matrix.tag }}"
           ls -l "$RUNNER_TEMP/recovery/${{ matrix.tag }}"
 
+      - name: pack it into the tar a leg unpacks
+        # THE CONSUMER PULLS ONE TAR AND UNPACKS IT. That is the one shape a stage's work directory
+        # has, so a bare `.dmg` would arrive and the leg's `tar -xf` would fail on it.
+        run: |
+          set -eu
+          cd "${{ runner.temp }}/recovery"
+          tar -cf "${{ matrix.tag }}.tar" "${{ matrix.tag }}"
+          rm -f "${{ matrix.tag }}"
+          ls -l "${{ matrix.tag }}.tar"
+
       - name: push it here
         uses: easydev-org/easyactions/oci-push@main
         with:
-          path: ${{ runner.temp }}/recovery/${{ matrix.tag }}
+          path: ${{ runner.temp }}/recovery/${{ matrix.tag }}.tar
           tag: ${{ matrix.tag }}
           repository: ${{ inputs.disks_repository || github.repository }}
           token: ${{ github.token }}
