@@ -419,7 +419,16 @@ func buildRoles() map[string]Role {
 
 // DispatchOrder is the order `runOne` tests the keys, and it matters because the FIRST matching
 // branch wins: a step that carries two of them runs the earlier one and drops the later.
+//
+// THE GATE KEYS COME FIRST, AND THAT IS THE POINT OF THE ORDER.
+//
+// `runOne` used to reach `input` before `when`, so a step written as an action with a gate ran the
+// action and NEVER READ THE GATE. MEASURED on fedora-workstation install, run 45397314773: the step
+// that closes GNOME Settings pressed `alt+f4` while the frame in front was the INSTALLER - the screen
+// the gate existed to protect - and closed anaconda. The gate is now tested before any action branch,
+// so the order starts with it.
 var dispatchOrder = []string{
+	"when", "when_not", "when_not_any",
 	"boot",
 	"input",
 	"run", "ssh", "adb", "adb_connect", "adb_privileged",
@@ -430,7 +439,7 @@ var dispatchOrder = []string{
 	"if",
 	"stop",
 	"repeat",
-	"when", "when_not", "when_not_any", "do", "until", "until_any",
+	"do", "until", "until_any",
 	"needs", "require",
 	"disk",
 	"write",

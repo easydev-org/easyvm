@@ -360,8 +360,75 @@ func hasKey(s walk.Step, key string) bool {
 	return ok
 }
 
+// gateKeys are the three spellings of "only do this if the screen says so".
+//
+// ONE NEGATIVE FORM AND ONE POSITIVE ONE, and the negative has a folded name as well, so a walk can
+// write any of the three and all of them arrive at `doWhen`/`doUnless`.
+func hasGate(s walk.Step) bool {
+	return s.Has("when") || s.Has("when_not") || s.Has("when_not_any")
+}
+
+// actionKeys are the keys that MAKE THE STEP DO SOMETHING. A key that is a modifier - `rect`,
+// `scale`, `settle`, `optional`, `timeout`, `after` - is not one, so `settle` beside a gate is not
+// mistaken for an action with no gate.
+func hasAction(s walk.Step) bool {
+	for _, k := range []string{
+		"boot", "input", "run", "copy", "read", "check", "control", "if", "stop", "repeat",
+		"ssh", "adb", "adb_connect", "adb_privileged", "write", "disk",
+		"acpi", "qga", "wait_until", "save", "screenshot",
+		"at_color", "at_bottom", "at_button", "wait",
+	} {
+		if s.Has(k) {
+			return true
+		}
+	}
+	return false
+}
+
 func (e *Executor) runOne(s walk.Step) error {
+	// A GATE IS READ BEFORE THE ACTION IT GUARDS, AND THE ORDER OF THE CASES BELOW DID NOT SAY SO.
+	//
+	// `runOne` dispatches on the FIRST key it recognises, and `input` was case 2 while `when` was
+	// case 9. A step written as an action with a gate therefore reached `doInput` - which sends the
+	// keystroke and returns - and `doWhen` was NEVER CALLED. The gate was dropped and the action ran
+	// on every frame.
+	//
+	// MEASURED on fedora-workstation install, run 45397314773, at the step that closes the GNOME
+	// Settings window anaconda's `Next` raises:
+	//
+	//	=== close the settings window that Next raises
+	//	  key alt+f4
+	//	  see: 51 word(s): () Fedora Linux 45 (Workstation Edition) installation : 1 Welcome Destination
+	//
+	// NO `applies:` LINE, NO `skipped:` LINE, AND THE FRAME IT READ WAS THE INSTALLER - the very
+	// screen the gate existed to protect. `alt+f4` closed anaconda; the desktop was bare from t=294
+	// and `the editor is up` read "" for ten minutes and failed the leg.
+	//
+	// THE SAME SHAPE IS IN THE WINDOWS WALKS, where the consequence is worse: `input click [1035,620]`
+	// gated on `when [sure]` is the guard against CANCELLING an install in progress, and ungated it
+	// lands on whatever the page has under that point.
+	//
+	// THE GATE BRANCHES BELOW STILL EXIST for a step that carries a gate and NO action - a gate is
+	// then the whole statement. The guard here is the pairing: a gate AND an action, in one step,
+	// asks whether to do the action, and that question comes first.
+	//
+	// `dispatchRest` DROPS the gate keys from the copy it re-dispatches, so this cannot recurse.
+	gateGovernsAction := hasGate(s) && hasAction(s)
+
 	switch {
+	// ---- 0. the gate on an action, which comes before the action -------------------------
+	case gateGovernsAction && s.Has("when"):
+		return e.doWhen(s)
+	case gateGovernsAction && (s.Has("when_not") || s.Has("when_not_any")):
+		if err := e.doUnless(s); err != nil {
+			if errors.Is(err, errUnlessAlready) {
+				e.skipped = true
+				return nil
+			}
+			return err
+		}
+		return e.dispatchRest(s)
+
 	// ---- 1. `boot` ---------------------------------------------------------------------
 	case s.Has("boot"):
 		if err := e.doBoot(s); err != nil {
