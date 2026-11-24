@@ -939,3 +939,26 @@ func (c *Conn) MigrationStatus() (status string, transferred int64, err error) {
 	}
 	return info.Status.String(), info.RAM.Transferred, nil
 }
+
+// ValidateStroke reports whether a chord like `ctrl+alt+t` names only qemu keys.
+//
+// IT EXISTS SO A WALKTHROUGH CAN BE REFUSED BEFORE IT RUNS, not after. MEASURED on fedora-workstation's
+// settings-window dismissal: the step said `input alt+F4`, the qcode table carries `f4` and not `F4`,
+// and the only thing that noticed was the NEXT step's screen reading six runs later - because the
+// action was `optional` and a rejected key is a step that fails quietly.
+//
+// `easyvm check` accepted the file. That is the gap this closes: the table is already here (it is
+// qemu's own schema, generated), so asking it costs nothing and answers before any guest is started.
+func ValidateStroke(chord string) error {
+	parts := strings.Split(chord, "+")
+	for _, p := range parts {
+		if p == "" {
+			return fmt.Errorf("%q has an empty key between its plus signs", chord)
+		}
+		if _, err := qcodeByName(p); err != nil {
+			return fmt.Errorf("%q: %q is not a qemu key name - the table is lower case (`f4`, `ret`, "+
+				"`esc`), and this is the name qemu will be sent", chord, p)
+		}
+	}
+	return nil
+}

@@ -38,6 +38,7 @@ import (
 	"github.com/easydev-org/easyvm/internal/daemon"
 	"github.com/easydev-org/easyvm/internal/machine"
 	"github.com/easydev-org/easyvm/internal/protocol"
+	"github.com/easydev-org/easyvm/internal/qmp"
 	"github.com/easydev-org/easyvm/internal/walk"
 )
 
@@ -129,6 +130,16 @@ func cmdInspect(mode string, args []string) int {
 		fmt.Fprintf(os.Stderr, "FAILED: %v\n", err)
 		return 1
 	}
+	// A KEY NAME IS CHECKED HERE, BEFORE ANY GUEST EXISTS.
+	//
+	// MEASURED on fedora-workstation's settings-window dismissal: the step said `input alt+F4`, and
+	// qemu's qcode table carries `f4` and not `F4`. `check` accepted the file, the action was
+	// `optional`, and the rejection only surfaced six runs later as the NEXT step reading a screen it
+	// could not see. A name that qemu will refuse is a fact about the file, so it belongs here.
+	if err := checkKeyNames(f); err != nil {
+		fmt.Fprintf(os.Stderr, "FAILED: %v\n", err)
+		return 1
+	}
 
 	fmt.Printf("%s: %s, %d step(s)\n", path, f.Name, len(f.Steps))
 	fmt.Printf("  guest: %dx%d, ssh %s@%d\n",
@@ -162,6 +173,30 @@ func cmdInspect(mode string, args []string) int {
 		fmt.Printf("%d\t%s\t%s\n", s.Index, s.Name, strings.Join(keys, ","))
 	}
 	return 0
+}
+
+// checkKeyNames refuses a walkthrough whose `key:` names are not qemu qcodes.
+//
+// IT WALKS EVERY STEP'S `key:` AND NOTHING ELSE. `click:`/`text:` carry no key names, and a chord is
+// the only place a name is written - `alt+f4`, `ctrl+alt+t`, `ret`.
+func checkKeyNames(f *walk.File) error {
+	for _, s := range f.Steps {
+		v, ok := s.Spec["key"]
+		if !ok {
+			continue
+		}
+		chord, ok := v.(string)
+		if !ok {
+			return fmt.Errorf("step %q: `key:` is %T, not a name", s.Name, v)
+		}
+		if chord == "" {
+			continue
+		}
+		if err := qmp.ValidateStroke(chord); err != nil {
+			return fmt.Errorf("step %q: %w", s.Name, err)
+		}
+	}
+	return nil
 }
 
 func cmdVersions() int {
