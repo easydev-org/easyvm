@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"os"
+	"os/exec"
 	"strings"
 	"sync"
 	"testing"
@@ -37,14 +38,28 @@ func TestANilOrStoppedMachineIsNotAlive(t *testing.T) {
 		t.Fatal("a nil machine must not report itself alive")
 	}
 
-	p := &qemuProcess{done: make(chan struct{})}
+	// A LIVE CHILD, so `Alive` has something to probe. `sleep` is a real process; the earlier version
+	// of this test used a bare struct and passed only because `Alive` was a channel test - which is
+	// exactly the assumption CI disproved (a machine that had exited still read as running).
+	cmd := exec.Command("sleep", "30")
+	if err := cmd.Start(); err != nil {
+		t.Skipf("cannot start a child process here: %v", err)
+	}
+	p := &qemuProcess{cmd: cmd, done: make(chan struct{})}
 	if !p.Alive() {
-		t.Fatal("a machine whose `done` is open must report alive")
+		t.Fatal("a running child must report alive")
+	}
+	_ = cmd.Process.Kill()
+	_ = cmd.Wait()
+	// THE PROCESS IS GONE BUT `done` IS STILL OPEN, which is the state CI measured: `watch` had not
+	// closed it yet and every reader saw a live machine.
+	if p.Alive() {
+		t.Fatal("a killed, reaped child must not report alive even before `done` closes - the kernel " +
+			"probe is what makes `wait_until: stopped` answer in seconds rather than out its budget")
 	}
 	close(p.done)
 	if p.Alive() {
-		t.Fatal("a machine whose `done` is closed must not report alive - that channel IS the answer, " +
-			"and reading it instead of a stale field is the whole point of this type")
+		t.Fatal("a machine whose `done` is closed must not report alive")
 	}
 }
 

@@ -116,16 +116,31 @@ func (p *qemuProcess) watch() {
 	conn := p.conn
 	p.conn = nil
 	p.mu.Unlock()
+	// `done` CLOSES BEFORE THE CONNECTION IS CLOSED, AND THE ORDER IS THE POINT.
+	//
+	// `Close` is a transport operation and a transport can block - it is the same socket whose peer
+	// has just gone away. With the close first, a `Close` that waited would keep `done` open, and
+	// `Alive` would report a dead machine as running for as long as that wait lasted. Everything that
+	// asks "is it up" keys on `done`, so `done` is closed first and the connection is tidied after.
+	close(p.done)
 	if conn != nil {
 		_ = conn.Close()
 	}
-	close(p.done)
 }
 
 // Alive reports whether qemu is still running.
 //
-// IT IS A CHANNEL TEST AND NOT A FIELD, so there is no window in which a stale pointer says "running"
-// about a process that has been reaped.
+// IT ASKS TWO THINGS, AND THE SECOND ONE IS WHY. `done` is the authoritative answer - it closes when
+// `watch` has reaped the process - but `watch` itself can be slow to get there, and nothing may
+// believe a dead process is alive while it waits.
+//
+// MEASURED ON CI, windows11-install: `acpi power` was pressed, the guest shut down, and
+// `wait_until: stopped` sat out its whole 300-second budget. The same walk on the previous engine
+// answered `stopped (22s)`. The old check asked the kernel - `Signal(0)` plus a `/proc/<pid>/stat`
+// zombie test - and this one trusted a channel that `watch` had not closed yet.
+//
+// SO THE CHANNEL IS BELT AND THE KERNEL IS BRACES: `done` for the normal path, and a signal probe for
+// the window in which `Wait` is still returning.
 func (p *qemuProcess) Alive() bool {
 	if p == nil {
 		return false
@@ -134,8 +149,18 @@ func (p *qemuProcess) Alive() bool {
 	case <-p.done:
 		return false
 	default:
-		return true
 	}
+	if p.cmd == nil || p.cmd.Process == nil {
+		return false
+	}
+	// `Signal(0)` ASKS "DOES THIS PROCESS EXIST", which is the fact. A process that exited and was
+	// reaped gives `os.ErrProcessDone`; one that exited and has not been reaped is a zombie, and
+	// `Signal` refuses that too - which in this container is the normal state, because PID 1 is this
+	// daemon and `watch` may not have run yet.
+	if err := p.cmd.Process.Signal(syscall.Signal(0)); err != nil {
+		return false
+	}
+	return true
 }
 
 // Done is the channel to select on, for a caller that wants to wait for the exit.
