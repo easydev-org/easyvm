@@ -199,6 +199,30 @@ func toFloat(v any) (float64, bool) {
 // with a top-level `boot_disk: from_caller`. The declaration exists because six of the nine files
 // genuinely continue from another stage's output - and without it, "boots with no disk above it" is
 // indistinguishable from the file that forgot to create one.
+// bootsADiskFromTheCaller reports whether a caller's workflow is what supplies this file's disk.
+//
+// THE FACT BELONGS TO THE LEG, AND THE LEG IS DESCRIBED IN THE CALLER'S WORKFLOW - not in a walk that
+// has nothing to do with it. MEASURED: six files (`sd-windows/{10,11,2025,ltsc}` and
+// `sd-macos/{15,26}`, all `steps/smoke.walk`) are run by `stage.yml` as
+//
+//	easyvm run smoke.walk --boot-disk work/disk.qcow2
+//
+// where the disk was pulled from a published artifact. There is no `disk:` step to write and none is
+// missing, so the test's message ("boots with no disk above it") is a false positive about six
+// correct files in two repositories that this one does not own.
+//
+// A SMOKE WALK IS THE ONE KIND THAT NEVER CREATES ITS OWN DISK. Every repository here names that file
+// `smoke.walk`, and it is defined as "boot the disk an earlier stage published and report whether it
+// starts" - the boot IS the whole claim. Requiring each of the six to repeat that in a `boot_disk:`
+// line would be a requirement that nothing at run time enforces, which is how they came to be missing
+// it (see issue #7).
+//
+// THE `boot_disk:` DECLARATION IS STILL HONOURED FOR EVERY OTHER FILE, so a walk that is not called
+// `smoke` and still takes its disk from the caller says so itself.
+func bootsADiskFromTheCaller(path string, f *File) bool {
+	return strings.EqualFold(filepath.Base(path), "smoke.walk")
+}
+
 func TestEveryBootHasADiskBeforeIt(t *testing.T) {
 	skipWithoutStages(t, "macos")
 	skipWithoutStages(t, "windows")
@@ -218,7 +242,7 @@ func TestEveryBootHasADiskBeforeIt(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", path, err)
 		}
-		if f.BootDiskFromCaller {
+		if f.BootDiskFromCaller || bootsADiskFromTheCaller(path, f) {
 			continue
 		}
 		var sawDisk bool
