@@ -486,6 +486,27 @@ func (r *Registry) Acquire(path, owner string, wait time.Duration) (*Conn, error
 	return c, nil
 }
 
+// Hold records a path as held, for tests that need the bookkeeping without a real socket.
+//
+// IT IS NOT A PRODUCTION ENTRY POINT: `Acquire` is the only thing that may take a path, because
+// taking one is what qemu's single client slot means. A test cannot open a socket, so it needs a way
+// to put the registry in the state a live connection leaves it in - and that state is exactly what
+// the daemon's orphan failure is about.
+func (r *Registry) Hold(path, owner string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.held[path] = &Conn{Path: path}
+	r.owner[path] = owner
+}
+
+// Held reports whether a path is currently held, for the same tests.
+func (r *Registry) Held(path string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	_, ok := r.held[path]
+	return ok
+}
+
 // Release closes and forgets a connection.
 func (r *Registry) Release(path string) error {
 	r.mu.Lock()

@@ -1116,13 +1116,16 @@ func (m machineControl) Stop(method string, grace time.Duration) error {
 	conn := d.qmp
 	d.qmp = nil
 	d.mu.Unlock()
-	if conn != nil {
-		// `Release` CLOSES THE CONNECTION and forgets the path, so a later `Acquire` is a fresh
-		// handshake rather than a second client on a socket qemu has already stopped serving.
-		d.qmpMu.Lock()
-		_ = d.qmpRegistry().Release(filepath.Join(d.work, "drive.sock.qmp"))
-		d.qmpMu.Unlock()
-	}
+	// UNCONDITIONALLY, for the reason `shutdown` gives: `conn` is the CACHE and can be nil while the
+	// REGISTRY still holds the path - a capture tick that `Acquire`d just as the guest died leaves
+	// exactly that state, and `if conn != nil` then skips the release and parks the entry for the
+	// life of the process. The next machine on this `--work` is refused by its own daemon.
+	//
+	// `Release` on an unheld path is a no-op, so this costs nothing.
+	d.qmpMu.Lock()
+	_ = d.qmpRegistry().Release(filepath.Join(d.work, "drive.sock.qmp"))
+	d.qmpMu.Unlock()
+	_ = conn
 	return nil
 }
 
@@ -1611,9 +1614,41 @@ func (d *Driver) shutdown() {
 	if sess != nil {
 		sess.Drop()
 	}
-	if conn != nil {
-		_ = d.qmpRegistry().Release(filepath.Join(d.work, "drive.sock.qmp"))
+	// THE RELEASE IS UNCONDITIONAL, AND IT TAKES `qmpMu`. Both halves are fixes for the same
+	// orphaned-socket failure, and both were missing.
+	//
+	// `if conn != nil` LOOKS LIKE A SAFETY CHECK AND IS THE BUG. `conn` is the CACHE, and the cache
+	// can be nil while the REGISTRY still holds the path:
+	//
+	//	a capture tick calls `qmpSocket()` -> `Acquire(path)` succeeds -> registry held
+	//	the guest is killed, qemu's socket goes away
+	//	`qmpRetry` on some other command sees ErrClosed and clears the cache (`d.qmp = nil`)
+	//	  ... but the registry entry is dropped only if `d.qmp == conn` at that instant
+	//
+	// From then on `conn` is nil and this function skips the release entirely, so the path stays in
+	// the registry for the life of the process. The NEXT machine on the same `--work` asks for that
+	// path and is refused by its own daemon:
+	//
+	//	this qmp socket is already held by this process (by "easyvm")
+	//
+	// MEASURED as a pattern on the pod: a daemon that runs several create/destroy cycles in one pod
+	// ALWAYS ends up with this, and a fresh pod always succeeds. That is the signature of state that
+	// survives a machine, which is exactly what a registry entry is.
+	//
+	// `Release` on a path that is not held is a no-op (`c == nil` returns nil), so calling it
+	// unconditionally costs nothing and closes the hole.
+	//
+	// AND WITHOUT `qmpMu` THE RELEASE RACES THE SAMPLER: the sampler takes `qmpMu`, calls
+	// `qmpSocket`, and can `Acquire` between this function's read of `d.qmp` and its `Release`.
+	// The two then disagree about who owns the socket - the same self-conflict, arriving through
+	// the one path that had never been brought under the lock.
+	d.qmpMu.Lock()
+	relErr := d.qmpRegistry().Release(filepath.Join(d.work, "drive.sock.qmp"))
+	d.qmpMu.Unlock()
+	if relErr != nil {
+		d.logf(fmt.Sprintf("  releasing the qmp socket: %v", relErr))
 	}
+	_ = conn
 	if proc != nil {
 		_ = proc.Process.Kill()
 		_ = proc.Wait()

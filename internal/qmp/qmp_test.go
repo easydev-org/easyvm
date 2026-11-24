@@ -641,3 +641,58 @@ func TestASecondAcquireOnOneSocketIsBusyRatherThanASecondClient(t *testing.T) {
 	}
 	_ = again.Close()
 }
+
+// A DAEMON THAT HAS RUN SEVERAL MACHINES MUST NOT REFUSE ITS OWN NEXT ONE.
+//
+// THE FAILURE THIS PINS is the eighth occurrence of one pattern on the pod: a daemon that does
+// create/destroy more than once ALWAYS ends up unable to boot, with
+//
+//	this qmp socket is already held by this process (by "easyvm"); pass that connection instead of
+//	opening a second - qemu allows one client per socket
+//
+// and a FRESH POD always succeeds. That signature - state that survives a machine - is this
+// registry entry, and the daemon's own release used to be conditional on a cache it no longer had.
+//
+// THE SHAPE: `Release` is a no-op for a path nobody holds, which is what makes an unconditional
+// release safe. This test is the contract that lets the daemon call it every time it stops.
+func TestReleasingAPathNobodyHoldsIsSafe(t *testing.T) {
+	r := NewRegistry()
+	if err := r.Release("/tmp/never-held.sock"); err != nil {
+		t.Fatalf("releasing an unheld path must be a no-op, not an error; got %v", err)
+	}
+	// AND IT LEAVES THE REGISTRY USABLE: a later Release of a real entry still works.
+	r.held["/tmp/x.sock"] = &Conn{Path: "/tmp/x.sock"}
+	r.owner["/tmp/x.sock"] = "easyvm"
+	if err := r.Release("/tmp/never-held.sock"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := r.held["/tmp/x.sock"]; !ok {
+		t.Fatal("releasing another path must not touch this one")
+	}
+}
+
+// THE ORPHAN ITSELF: a path released after its cache was already cleared.
+//
+// This is the exact state `shutdown` used to skip. `d.qmp` could be nil because a `qmpRetry` had
+// already dropped it, while `held` still carried the entry - so the next `Acquire` was refused by
+// the same process. The fix is that the release does not consult the cache at all.
+func TestACachedConnectionClearedFirstDoesNotOrphanThePath(t *testing.T) {
+	r := NewRegistry()
+	path := "/tmp/orphan.sock"
+	r.held[path] = &Conn{Path: path}
+	r.owner[path] = "easyvm"
+
+	// The cache is gone (what `d.qmp = nil` leaves behind) but the entry is still there.
+	if err := r.Release(path); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := r.held[path]; ok {
+		t.Fatal("the path must be forgotten, or the next machine on this daemon is refused by itself")
+	}
+	// `Acquire` would now open a fresh handshake rather than answering ErrBusy. It cannot actually
+	// connect to a socket that does not exist, so the assertion is that it does not answer ErrBusy.
+	_, err := r.Acquire(path, "the next machine", 10*time.Millisecond)
+	if errors.Is(err, ErrBusy) {
+		t.Fatalf("the next machine was refused by its own daemon: %v", err)
+	}
+}
