@@ -817,11 +817,14 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 	}
 
 	args := []string{
-		"-machine", renderArgs1(boot.Machine, boot),
+		"-machine", boot.Machine,
 		"-display", "none",
 		"-serial", "file:" + filepath.Join(d.work, "console.log"),
 	}
-	args = append(args, machine.RenderList(boot.Args, bootValues(boot, d.work))...)
+	// THE FILE'S ARGUMENTS ARE PASSED THROUGH EXACTLY AS IT WROTE THEM. There is no
+	// substitution: a path is a path, and qemu runs in the work directory, so a walk that
+	// names `disk.qcow2` is naming the file it made.
+	args = append(args, boot.Args...)
 	args = append(args,
 		"-qmp", "unix:"+qmpPath+",server=on,wait=off",
 		"-vnc", fmt.Sprintf("127.0.0.1:%d", d.vncNumber()),
@@ -1833,87 +1836,6 @@ func mustKeyFile(path string) []byte {
 		return nil
 	}
 	return key
-}
-
-// qemuValues is every substitution a shape's `qemu:` section may use.
-//
-// THE KEYS ARE THE CONTRACT: `machine.CheckPlaceholders` refuses a shape that names one this
-// function does not fill, so a typo is a load-time error rather than a device that quietly never
-// appears. Adding a placeholder means adding it here and to the documented list.
-func qemuValues(boot machine.Boot, work string, opts machine.CommonOptions) machine.RenderValues {
-	// THE SCREEN IS 1920x1080 FOR EVERY GUEST, because every coordinate in every walkthrough was
-	// measured there - `-vga std` cannot carry a resolution and a guest given it comes up at qemu's
-	// own 1280x800, which reads as a `region_at` mismatch twenty steps later.
-	// ONLY WHAT THE RUN DECIDES. Everything a shape can write literally IS written literally: the tap
-	// name, the MAC, the screen size and every device name are constants of this build, and a
-	// placeholder for one of them is a substitution that can only ever produce the same answer.
-	return machine.RenderValues{
-		"disk":     boot.Disk,
-		"iso":      boot.ISO,
-		"recovery": boot.Recovery,
-		"answer":   boot.AnswerCD,
-		"driver":   boot.DriverCD,
-		"dir":      boot.Dir,
-		"work":     work,
-		"discard":  boot.DiscardFragment(),
-	}
-}
-
-
-// bootValues are the substitutions a boot step's `args:` may use.
-//
-// THERE IS ONE, AND IT EXISTS FOR A BOOT THAT WAS HANDED A DISK FROM SOMEWHERE ELSE. Everything a
-// walk names is a file in the work directory, which is where qemu runs (`cmd.Dir`), so a path needs
-// no prefix at all. `--boot-disk` is the exception: CI names an absolute path outside the run's own
-// naming, and `{{disk}}` is how the target is referenced without the file having to know where the
-// caller put it.
-func bootValues(boot machine.Boot, work string) machine.RenderValues {
-	return machine.RenderValues{"disk": relativeTo(boot.Disk, work)}
-}
-
-// relativeTo spells a path the way qemu sees it, because qemu runs IN the work directory.
-//
-// A DISK IS THE ONE PATH THAT MAY COME FROM OUTSIDE: `--boot-disk` names a published artifact a leg
-// pulled, and CI passes it as an absolute path. Inside the work directory that is `disk.qcow2` to
-// qemu; anywhere else it stays absolute, because a file genuinely elsewhere has to be spelled out.
-func relativeTo(path, work string) string {
-	if path == "" || work == "" {
-		return path
-	}
-	dir := strings.TrimSuffix(work, "/")
-	if strings.HasPrefix(path, dir+"/") {
-		return strings.TrimPrefix(path, dir+"/")
-	}
-	return path
-}
-
-// renderArgs1 is one argument string with its placeholders filled, for `-machine`.
-func renderArgs1(s string, boot machine.Boot) string {
-	got, _ := renderOne(s, boot)
-	return got
-}
-
-// renderOne substitutes a single string and says whether anything was missing.
-func renderOne(s string, boot machine.Boot) (string, bool) {
-	v := bootValues(boot, boot.Work)
-	out := s
-	for {
-		i := strings.Index(out, "{{")
-		if i < 0 {
-			break
-		}
-		j := strings.Index(out[i:], "}}")
-		if j < 0 {
-			break
-		}
-		name := out[i+2 : i+j]
-		val, ok := v[name]
-		if !ok {
-			break
-		}
-		out = out[:i] + val + out[i+j+2:]
-	}
-	return out, true
 }
 
 // RunningTheSame reports whether the machine that is up was started from these arguments.

@@ -59,20 +59,21 @@ type Boot struct {
 	OS OS
 	// Disk is the target, and for a disk boot it is also what boots.
 	Disk string
-	// ISO is an installer medium, attached by whatever argument names `{{iso}}`.
+	// ISO is an installer medium, if the run was told about one. The argument that attaches it
+	// names its path literally.
 	ISO string
-	// Recovery is macOS's recovery image, attached by whatever argument names `{{recovery}}`.
+	// Recovery is macOS's recovery image, if the run was told about one.
 	Recovery string
 	// AnswerCD and DriverCD are Windows Setup's two extra media.
 	AnswerCD string
 	DriverCD string
-	// Machine is the `-machine` value, with `{{name}}` placeholders the run fills.
+	// Machine is the `-machine` value, verbatim.
 	Machine string
 	// Args are the qemu arguments the step wrote, in order, as `-flag value` pairs.
 	Args []string
-	// Dir is the step's `dir:`, which `{{dir}}` names.
+	// Dir is the step's `dir:`.
 	Dir string
-	// Work is the run's working directory, which is what `{{work}}` names.
+	// Work is the run's working directory.
 	Work string
 	// Incoming is a migration stream to restore instead of booting.
 	Incoming string

@@ -223,12 +223,11 @@ type BootSpec struct {
 	// firmware kind, no adapter type: the file that wants a VGA at 1920x1080 writes the argument, and
 	// a machine this build has never heard of boots without a line of Go changing.
 	//
-	// `{{name}}` INSIDE AN ARGUMENT IS FILLED FROM THE STEP'S OWN FACTS - `{{disk}}`, `{{iso}}`,
-	// `{{work}}` - and a pair whose placeholder is empty is DROPPED, which is how an optional medium
-	// disappears without a conditional anywhere.
+	// THERE IS NO SUBSTITUTION. An argument is handed to qemu exactly as the file wrote it, because
+	// qemu runs in the work directory and a path there is already the path qemu will open.
 	Args []string
 	// Machine is the `-machine` value, with the same placeholders.
 	Machine string
-	// Dir is the step's `dir:`, which `{{dir}}` names.
+	// Dir is the step's `dir:`.
 	Dir string
 }

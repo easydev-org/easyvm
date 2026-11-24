@@ -106,13 +106,12 @@ var Verbs = map[string]Verb{
 			// flags, its disk order, its adapter, its sound card - is a qemu argument, and the file
 			// that knows what machine it wants writes them.
 			"args": {Name: "args", Kind: KindList,
-				Summary: "the qemu argument pairs, in order. `{{work}}`, `{{disk}}`, `{{dir}}` and " +
-					"`{{discard}}` are filled from the run; a pair whose placeholder is empty is " +
-					"dropped, which is how an optional device disappears"},
+				Summary: "the qemu argument pairs, in order, written out in full - a path is the " +
+					"path qemu will see, because qemu runs in the work directory"},
 			"dir": {Name: "dir", Kind: KindString,
-				Summary: "the working directory the arguments' `{{dir}}` names"},
+				Summary: "the working directory qemu runs in, when it is not the run's own"},
 			"machine": {Name: "machine", Kind: KindString,
-				Summary: "the `-machine` value, with the same placeholders"},
+				Summary: "the `-machine` value"},
 			"incoming": {Name: "incoming", Kind: KindString,
 				Summary: "a `snapshot:` file to load instead of booting"},
 		}},
