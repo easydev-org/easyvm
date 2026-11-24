@@ -145,7 +145,24 @@ func startDHCP() error {
 		"--pid-file="+dhcpPIDPath,
 		"--log-facility="+dhcpLogPath,
 	)
-	if out, err := cmd.CombinedOutput(); err != nil {
+	// IT IS STARTED WITH `Start` AND WAITED EXPLICITLY, BECAUSE THE CHILD IT REPORTS ON IS NOT
+	// ALWAYS THE ONE IT LEAVES BEHIND.
+	//
+	// dnsmasq daemonizes: the process this starts forks the real daemon, writes its pid file and
+	// exits. `CombinedOutput` reports THAT exit - usually zero - and the daemon continues as an
+	// orphan. In a container whose init is this binary, every such orphan is re-parented to PID 1
+	// and, if nothing waits for it, sits as a zombie for the life of the pod:
+	//
+	//	  73 Zs  dnsmasq     74 Z  dnsmasq
+	//	 187 Zs  dnsmasq    188 Z  dnsmasq     ... twelve of them, measured on a pod
+	//
+	// `CombinedOutput` DOES collect the one process it started, so the zombie is not that one - the
+	// twelve were left by previous runs whose own `cmd` value had gone out of scope while the real
+	// daemon kept running. Waiting here, on the value we own, is the part this function can do; the
+	// rest is PID 1's job and belongs in the container's init, not in a library that may also run
+	// under a normal shell.
+	out, err := cmd.CombinedOutput()
+	if err != nil {
 		return fmt.Errorf("dnsmasq: %v (%s)", err, firstLine(string(out)))
 	}
 	if err := os.WriteFile(dhcpMacPath, []byte(TapMAC), 0o644); err != nil {

@@ -29,7 +29,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"syscall"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -240,26 +239,6 @@ func cmdServe(args []string) int {
 		fmt.Fprintln(os.Stderr, "easyvm serve: --work is required; the frames and the guest scratch live there")
 		return 2
 	}
-
-	// AS PID 1, THIS PROCESS INHERITS EVERY ORPHAN IN THE CONTAINER AND MUST REAP THEM.
-	//
-	// MEASURED ON A POD AFTER A FEW create/destroy CYCLES:
-	//
-	//	  73 Zs   dnsmasq        74 Z   dnsmasq
-	//	 187 Zs   dnsmasq       188 Z   dnsmasq      ... twelve of them
-	//	1007 Z    qemu-system-x86
-	//
-	// dnsmasq DAEMONIZES: `exec.Command(...).CombinedOutput()` waits for the PROCESS IT STARTED,
-	// which forks the real daemon and exits - so the waiter returns, the daemon keeps running, and
-	// the container's PID 1 becomes its parent. With no `wait()` in PID 1, each one sits as a
-	// zombie for the life of the pod. Nothing breaks immediately, which is why this went unnoticed;
-	// what it eventually costs is a slot that never finishes closing and a boot refused by "the
-	// previous machine is still closing".
-	//
-	// THIS IS ONLY CORRECT BECAUSE THIS PROCESS RUNS AS PID 1 IN ITS CONTAINER. Anywhere else, the
-	// reaper would steal exit statuses from the real parent - Go's own `os/exec` would then see
-	// ECHILD for its children. So it is guarded on the actual PID, not on an environment flag.
-	reapOrphans()
 
 	d := daemon.New()
 	fmt.Printf("[easyvm] daemon for %s\n", *work)
@@ -734,37 +713,4 @@ func cmdDestroy(args []string) int {
 	}
 	fmt.Println("[easyvm] the machine was destroyed")
 	return 0
-}
-
-// reapOrphans collects the exit status of every child this process inherits, when it is PID 1.
-//
-// IT IS A NO-OP FOR A PROCESS THAT IS NOT PID 1, and that guard is what makes it safe: a normal
-// parent's `exec.Cmd.Wait` depends on being the one that reaps, so a reaper in the wrong process
-// would take ECHILD for children it did not start.
-//
-// WHY A BLOCKING LOOP ON `wait4(-1, ...)` RATHER THAN A SIGCHLD HANDLER: a handler runs in a
-// goroutine and can miss children that exited before it was installed, and it cannot wait from
-// signal context without its own queue. `wait4(-1)` drains whatever is there and blocks until the
-// next one - which is exactly the loop `/sbin/init` is.
-//
-// THE ERRORS ARE IGNORED ON PURPOSE. `ECHILD` means "no children right now", which is the normal
-// idle state; `EINTR` means a signal arrived and the call should simply be retried.
-func reapOrphans() {
-	if os.Getpid() != 1 {
-		return
-	}
-	go func() {
-		for {
-			var ws syscall.WaitStatus
-			_, err := syscall.Wait4(-1, &ws, 0, nil)
-			if err == syscall.EINTR {
-				continue
-			}
-			if err != nil {
-				// ECHILD: nothing to reap. Sleeping keeps this from spinning; a child that appears
-				// later is picked up on the next pass.
-				time.Sleep(200 * time.Millisecond)
-			}
-		}
-	}()
 }
