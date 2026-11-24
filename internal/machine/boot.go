@@ -223,3 +223,76 @@ func (b Boot) KernelAppendline(machineString string) string {
 	}
 	return "pci=off " + cmdline
 }
+
+// ReplaceTargetDisk returns args with every `file=` that names the target replaced by `running`.
+//
+// IT IS A FUNCTION ABOUT PATHS, NOT ABOUT SPELLING. A walk writes the disk it was handed, and that
+// path arrives in three forms: `disk.qcow2` (the work directory's own name), an absolute path from
+// `--boot-disk`, and either of those as qemu sees them from `cmd.Dir`. The overlay is the fourth, and
+// it is the one the file cannot write - which is why the substitution lives here rather than in the
+// file's arguments.
+//
+// A PAIR IS TOUCHED ONLY WHEN ITS `file=` VALUE NAMES THE TARGET. Media carry their own paths
+// (`media=cdrom`, `readonly=on`) and the answer/driver CDs are different files; rewriting those
+// would point an installer at a disk instead of its medium.
+//
+// MEASURED AS A REGRESSION WHEN THE PLACEHOLDER RENDERER WAS DELETED: the overlay was created, closed
+// empty (196672 bytes = a bare qcow2 header), and the base grew by 1 MB because qemu was handed it
+// directly. Every smoke walk published a disk it had written to. This is the same guarantee, spelled
+// as a path comparison instead of a `{{disk}}` template.
+func ReplaceTargetDisk(args []string, target, running, work string) []string {
+	if target == "" || running == "" || target == running {
+		return args
+	}
+	want := map[string]bool{}
+	for _, p := range []string{target, running} {
+		want[p] = true
+		if rel := RelativeTo(p, work); rel != p {
+			want[rel] = true
+		}
+	}
+	// THE TARGET'S OWN SPELLINGS, so a walk that wrote `file=disk.qcow2` and one that wrote the
+	// absolute path are the same case.
+	tnames := map[string]bool{target: true}
+	if rel := RelativeTo(target, work); rel != target {
+		tnames[rel] = true
+	}
+	out := append([]string(nil), args...)
+	for i := 0; i+1 < len(out); i++ {
+		if !strings.HasPrefix(out[i], "-drive") && !strings.HasPrefix(out[i], "-device") {
+			continue
+		}
+		field := out[i+1]
+		j := strings.Index(field, "file=")
+		if j < 0 {
+			continue
+		}
+		start := j + len("file=")
+		end := strings.IndexByte(field[start:], ',')
+		if end < 0 {
+			end = len(field) - start
+		}
+		got := field[start : start+end]
+		if !tnames[got] {
+			continue
+		}
+		out[i+1] = field[:start] + RelativeTo(running, work) + field[start+end:]
+	}
+	return out
+}
+
+// RelativeTo spells a path the way qemu sees it, because qemu runs IN the work directory.
+//
+// A DISK IS THE ONE PATH THAT MAY COME FROM OUTSIDE: `--boot-disk` names a published artifact a leg
+// pulled, and CI passes it as an absolute path. Inside the work directory that is `disk.qcow2` to
+// qemu; anywhere else it stays absolute, because a file genuinely elsewhere has to be spelled out.
+func RelativeTo(path, work string) string {
+	if path == "" || work == "" {
+		return path
+	}
+	dir := strings.TrimSuffix(work, "/")
+	if strings.HasPrefix(path, dir+"/") {
+		return strings.TrimPrefix(path, dir+"/")
+	}
+	return path
+}

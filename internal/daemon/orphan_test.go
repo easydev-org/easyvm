@@ -1,7 +1,9 @@
 package daemon
 
 import (
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/easydev-org/easyvm/internal/qmp"
@@ -53,3 +55,48 @@ func TestShutdownReleasesTheQmpPathWithNoCachedConnection(t *testing.T) {
 // because a real socket cannot be made in a unit test and the entry is what the bug is about.
 func hold(r *qmp.Registry, path string) { r.Hold(path, "easyvm") }
 func held(r *qmp.Registry, path string) bool { return r.Held(path) }
+
+// A QEMU THAT THIS FUNCTION STARTED BELONGS TO IT, EVEN WHEN THE BOOT FAILS.
+//
+// MEASURED ON THE POD, WITH A LIVE qemu TO PROVE IT:
+//
+//	easyvm destroy  ->  [easyvm] the machine was destroyed    (exit 0)
+//	ps              ->  383 Sl  qemu-system-x86               (still running)
+//	next boot       ->  this qmp socket is already held by this process
+//
+// The chain was: `cmd.Start()` succeeded, `qmpSocket` failed (the daemon's own sampler had taken the
+// path), and this function returned WITHOUT setting `d.proc`. `shutdown` guards on `proc != nil`,
+// `Stop` answers "not running", and `destroy` reports success on a machine it cannot see. The orphan
+// then owns the socket, and every later boot in that pod is refused - which is why the workaround was
+// `kill -9` by hand, and why a fresh pod always worked.
+//
+// THE CONTRACT: from `cmd.Start()` onward the process is registered before anything else can fail.
+func TestBootRegistersTheProcessBeforeItCanFail(t *testing.T) {
+	src, err := os.ReadFile("driver.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(src)
+
+	start := strings.Index(text, "if err := cmd.Start(); err != nil {")
+	if start < 0 {
+		t.Fatal("cmd.Start() not found")
+	}
+	after := text[start:]
+
+	register := strings.Index(after, "d.proc = cmd")
+	// the next statement that can return, after Start
+	guard := strings.Index(after, "bootFailed := true")
+	if register < 0 {
+		t.Fatal("nothing assigns `d.proc` after `cmd.Start()`. A qemu that is started and then not " +
+			"registered is a process `destroy` cannot kill, and the next boot is refused by its own " +
+			"daemon - see the measured orphan above")
+	}
+	if guard < 0 || guard < register {
+		t.Fatal("`d.proc` is assigned but the failure guard is missing or precedes it; an error " +
+			"returned between the two leaves a live qemu nobody owns")
+	}
+	if !strings.Contains(after, "cmd.Process.Kill()") {
+		t.Fatal("the failure path does not kill the process it started")
+	}
+}

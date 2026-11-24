@@ -742,7 +742,34 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 		d.logf(fmt.Sprintf("  running on a diff over %s (read-only); %s",
 			filepath.Base(o.Base), o.Path))
 	}
+	// THE ARGUMENTS ARE REWRITTEN HERE, AND THIS IS THE ONLY PLACE THE DIFF REACHES QEMU.
+	//
+	// `args` IS NOW THE FILE'S OWN WORDS, WITH NO SUBSTITUTION - that was the point of deleting the
+	// placeholder language. But the diff is a fact the RUN decides, not the file: a smoke walk names
+	// the disk it was handed (`file=disk.qcow2`, or an absolute path from `--boot-disk`) and the
+	// engine is what puts a throwaway layer in front of it. Nothing in the file can spell that,
+	// because the file does not know an overlay exists.
+	//
+	// MEASURED AS A REGRESSION WHEN THE RENDERER WAS DELETED, and it is worse than a broken feature:
+	//
+	//	before=570161664   after=571211776     the BASE grew by 1 MB
+	//	run-overlay.qcow2 = 196672 bytes       the diff stayed an empty header
+	//
+	// qemu was handed the base, wrote to it, and the overlay was created and closed having never been
+	// opened by anything. Every `smoke.walk` was affected - including the ones that had passed - and
+	// the failure is silent: the run succeeds and the PUBLISHED ARTIFACT IS THE ONE IT WROTE.
+	//
+	// SO EACH `file=` VALUE THAT NAMES THE TARGET DISK IS REPLACED WITH THE PATH QEMU MUST OPEN.
+	// The comparison is on the FILE, not on a string the file was expected to write: `spec.Disk` is
+	// what was resolved (`disk.qcow2` in the work directory, or the absolute path a leg pulled), and
+	// any `-drive` whose `file=` names that path is the target. Media (`media=cdrom`,
+	// `readonly=on`) name OTHER paths and are left alone.
+	// `boot.Disk` IS WHAT THE RUN WILL OPEN, and `spec.Disk` is what the file named. They differ
+	// exactly when there is a diff, and that difference is what the arguments have to be told about.
 	boot.Disk = running
+	if running != spec.Disk {
+		boot.Args = machine.ReplaceTargetDisk(boot.Args, spec.Disk, running, d.work)
+	}
 
 	qmpPath := filepath.Join(d.work, "drive.sock.qmp")
 
@@ -899,6 +926,32 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("starting qemu: %w", err)
 	}
+	// FROM THIS LINE ON, QEMU IS RUNNING AND THIS FUNCTION OWNS IT - SO EVERY RETURN BELOW MUST
+	// HAND IT TO SOMETHING OR KILL IT.
+	//
+	// MEASURED, AND IT IS THE ROOT OF THE ORPHAN THAT REFUSED EVERY LATER BOOT:
+	//
+	//	qemu 383 started, and a leftover registry entry made `qmpSocket` answer ErrBusy
+	//	this function returned that error WITHOUT setting `d.proc`
+	//	so `shutdown` (`if proc != nil`) skipped the kill, `Stop` (`if !running { return nil }`)
+	//	  reported success, and `easyvm destroy` said "the machine was destroyed" with qemu alive
+	//
+	// The next boot then met its own predecessor's qemu on the socket, and the daemon refused itself
+	// - the "several create/destroy cycles in one pod always fail" pattern, whose manual workaround
+	// was `kill -9` by hand.
+	//
+	// A STARTED PROCESS IS NOT OPTIONAL STATE. It is registered before anything can fail, and the
+	// deferred cleanup is what an error path relies on rather than remembering to kill.
+	d.mu.Lock()
+	d.proc = cmd
+	d.mu.Unlock()
+	bootFailed := true
+	defer func() {
+		if bootFailed {
+			_ = cmd.Process.Kill()
+			_, _ = cmd.Process.Wait()
+		}
+	}()
 
 	// THE REGISTRY IS NOT REPLACED, AND THAT IS THE WHOLE FIX FOR A SEVEN-MINUTE HANG.
 	//
@@ -955,7 +1008,23 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 	// THE CONNECTION IS TAKEN UNDER THE SAME LOCK EVERY OTHER CALLER USES, because this function
 	// `Acquire`s the registry entry the socket belongs to - and `Acquire` is what refuses a second
 	// client. Outside `qmpMu` it races the sampler for that entry.
+	// THIS BOOT OWNS THE SOCKET WHILE IT WAITS FOR IT, AND IT SAYS SO.
+	//
+	// MEASURED, AND IT IS THE SECOND HALF OF THE ORPHAN BUG. The recorder's sampler ticks every
+	// second from `record:` onward, and it calls `qmpSocket` -> `Acquire` on this very path. Between
+	// the Release above (which makes the path free for the new machine) and this call, THE SAMPLER
+	// CAN WIN THE RACE. It then holds a socket qemu has not created yet, its `Open` fails, and the
+	// entry it took is what this boot meets:
+	//
+	//	boot: this qmp socket is already held by this process (by "easyvm")
+	//
+	// - the daemon refusing itself, on the one path that is supposed to be the machine's own.
+	//
+	// THE RELEASE IS REPEATED HERE, UNDER THE LOCK, so the sampler cannot slip in between: whatever
+	// is held for this path at this instant belongs to a machine that is already gone (the Release
+	// above closed it), and this boot is about to make the only client that matters.
 	d.qmpMu.Lock()
+	_ = d.qmpRegistry().Release(qmpPath)
 	conn, err := d.qmpSocket()
 	d.qmpMu.Unlock()
 	if err != nil {
@@ -975,8 +1044,8 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 	// QMP connection, and a disk. NOTHING ELSE IN THIS PROCESS CAN SEE A HALF-BUILT MACHINE, because
 	// `proc` and `qmp` are set together under the lock and `booting` is what every other accessor
 	// checked while this ran.
+	bootFailed = false
 	d.mu.Lock()
-	d.proc = cmd
 	d.qmp = conn
 	d.booting = false
 	// THE IDENTITY OF THIS MACHINE, so a second boot in the same file can tell "this machine again"
