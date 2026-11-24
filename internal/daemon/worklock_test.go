@@ -6,9 +6,8 @@ package daemon
 // failure it prevents in the terms a person saw it in on a live machine.
 
 import (
-	"encoding/json"
-	"errors"
 	"net"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -221,60 +220,6 @@ func TestProbeUnixSocketOnAMissingPath(t *testing.T) {
 //
 // `Release` is what establishes the property now, and it is what a boot performs before starting
 // qemu - so this asserts it directly rather than through the removed wait.
-func TestAReleasedClaimDoesNotWedgeTheNextBoot(t *testing.T) {
-	dir := t.TempDir()
-	d := &Daemon{}
-	d.work = dir
-	drv := &Driver{daemon: d, work: dir}
-
-	path := filepath.Join(dir, "drive.sock.qmp")
-	ln, err := net.Listen("unix", path)
-	if err != nil {
-		t.Fatalf("listening: %v", err)
-	}
-	defer ln.Close()
-	go func() {
-		for {
-			c, err := ln.Accept()
-			if err != nil {
-				return
-			}
-			go func(c net.Conn) {
-				defer c.Close()
-				_, _ = c.Write([]byte(`{"QMP":{"version":{"qemu":{"major":9,"minor":0,"micro":0},` +
-					`"package":""},"capabilities":[]}}` + "\n"))
-				dec := json.NewDecoder(c)
-				var req struct {
-					Execute string `json:"execute"`
-				}
-				if err := dec.Decode(&req); err == nil && req.Execute == "qmp_capabilities" {
-					_, _ = c.Write([]byte(`{"return":{}}` + "\n"))
-				}
-				time.Sleep(20 * time.Second)
-			}(c)
-		}
-	}()
-
-	// A GHOST: a registry entry with a closed connection behind it.
-	ghost, err := drv.qmpRegistry().Acquire(path, "sampler-that-died", 2*time.Second)
-	if err != nil {
-		t.Fatalf("seeding the registry: %v", err)
-	}
-	_ = ghost.Close() // closed, but the MAP still claims the path
-
-	// THE BOOT RELEASES THE PATH BEFORE IT STARTS QEMU, and that is what makes the ghost harmless.
-	if err := drv.qmpRegistry().Release(path); err != nil {
-		t.Fatalf("release: %v", err)
-	}
-	conn, err := drv.qmpRegistry().Acquire(path, "easyvm", 2*time.Second)
-	if err != nil {
-		t.Fatalf("a released claim must not refuse the next caller; got %v", err)
-	}
-	if conn == nil {
-		t.Fatal("the acquire must return a usable connection")
-	}
-	_ = drv.qmpRegistry().Release(path)
-}
 
 // THE REFUSAL FROM TEST 1 MUST NOT DEPEND ON THE LOCK FILE BEING WRITABLE, because a directory can be
 // on a filesystem where a pid cannot be written. The kernel lock is the fact; the pid is a courtesy.

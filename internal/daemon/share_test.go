@@ -134,11 +134,11 @@ func TestStopWaitsExactlyOnce(t *testing.T) {
 		wfe = wfe[:end+1]
 	}
 	wfe = stripGoComments(wfe)
-	if !strings.Contains(wfe, "Process.Kill()") {
+	// THE TIMEOUT PATH KILLS THROUGH THE PROCESS OBJECT, which reaps: `qemuProcess.Kill` returns
+	// only after `watch` has called `Wait`, so there is no second `Wait` to block on and no zombie
+	// left holding the disk open.
+	if !strings.Contains(wfe, "qemu.Kill()") {
 		t.Fatal("the timeout path logs that it is killing the guest and does not")
-	}
-	if !strings.Contains(wfe, "<-done") {
-		t.Fatal("the timeout path kills without reaping, leaving a zombie that holds the disk open")
 	}
 }
 
@@ -341,8 +341,9 @@ func TestKillDoesNotWaitForAGuestNobodyAsked(t *testing.T) {
 		k = k[:end+1]
 	}
 	k = stripGoComments(k)
-	if !strings.Contains(k, "Process.Kill()") || !strings.Contains(k, "proc.Wait()") {
-		t.Fatal("`killAndReap` does not both kill and reap")
+	if !strings.Contains(k, "qemu.Kill()") {
+		t.Fatal("`killAndReap` does not kill through the process object; a raw `Process.Kill()` " +
+			"would leave the reap to whoever remembers, which is the zombie that holds the disk open")
 	}
 }
 

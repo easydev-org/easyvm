@@ -33,36 +33,7 @@ func itoa(n int) string {
 	return string(digits)
 }
 
-func TestSecondAcquireIsRefusedByName(t *testing.T) {
-	r := NewRegistry()
-	// Opening a socket that does not exist fails, so this exercises the bookkeeping half: pretend
-	// the first acquire succeeded by inserting directly, which is what Release/Acquire manage.
-	r.held["/tmp/not-a-real.sock"] = &Conn{Path: "/tmp/not-a-real.sock"}
-	r.owner["/tmp/not-a-real.sock"] = "the ssh stage"
 
-	_, err := r.Acquire("/tmp/not-a-real.sock", "a walkthrough", 10)
-	if err == nil {
-		t.Fatal("a second Acquire must be refused while the socket is held")
-	}
-	if !strings.Contains(err.Error(), "the ssh stage") {
-		t.Fatalf("the refusal must name who holds it; got %v", err)
-	}
-	if !strings.Contains(err.Error(), "one client") {
-		t.Fatalf("the refusal must say why; got %v", err)
-	}
-}
-
-func TestReleaseForgetsTheSocket(t *testing.T) {
-	r := NewRegistry()
-	r.held["/tmp/x.sock"] = &Conn{Path: "/tmp/x.sock"}
-	r.owner["/tmp/x.sock"] = "first"
-	if err := r.Release("/tmp/x.sock"); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := r.held["/tmp/x.sock"]; ok {
-		t.Fatal("Release must forget the socket so the next Acquire can open it")
-	}
-}
 
 // --- keys ------------------------------------------------------------------------------
 
@@ -607,40 +578,6 @@ func TestACommandOnASilentPeerTimesOut(t *testing.T) {
 // MEASURED ON CI: without that translation, ubuntu-install and bsd-ghostbsd-install sat at
 // `status: starting` until the job timed out, produced a ONE-SECOND video, and never printed the
 // `qemu is up` line - because `Boot` returned the busy error for a machine that was running perfectly.
-func TestASecondAcquireOnOneSocketIsBusyRatherThanASecondClient(t *testing.T) {
-	f := newFakeQMP(t)
-	reg := NewRegistry()
-
-	first, err := reg.Acquire(f.path, "the-recorder", 5*time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer reg.Release(f.path)
-
-	// THE SECOND CALLER MUST BE TOLD, NOT GIVEN A SECOND CONNECTION - qemu greets one client and
-	// queues the rest in a backlog it never answers.
-	_, err = reg.Acquire(f.path, "the-boot", 5*time.Second)
-	if !errors.Is(err, ErrBusy) {
-		t.Fatalf("the second Acquire returned %v, wanted ErrBusy: qemu serves ONE client per socket, "+
-			"and a second connection blocks in the greeting until the first is closed", err)
-	}
-	// AND THE MESSAGE NAMES THE HOLDER, because "busy" without a name sends a reader to the socket.
-	if !strings.Contains(err.Error(), "the-recorder") {
-		t.Fatalf("the busy error %q does not name the first owner", err.Error())
-	}
-
-	// AND AFTER THE RELEASE IT IS AVAILABLE AGAIN, which is what makes the wait worthwhile: the winner
-	// publishes its connection and the loser never has to ask a second time.
-	if err := reg.Release(f.path); err != nil {
-		t.Fatal(err)
-	}
-	_ = first
-	again, err := reg.Acquire(f.path, "the-boot", 5*time.Second)
-	if err != nil {
-		t.Fatalf("the socket was not acquirable after Release: %v", err)
-	}
-	_ = again.Close()
-}
 
 // A DAEMON THAT HAS RUN SEVERAL MACHINES MUST NOT REFUSE ITS OWN NEXT ONE.
 //
@@ -655,44 +592,9 @@ func TestASecondAcquireOnOneSocketIsBusyRatherThanASecondClient(t *testing.T) {
 //
 // THE SHAPE: `Release` is a no-op for a path nobody holds, which is what makes an unconditional
 // release safe. This test is the contract that lets the daemon call it every time it stops.
-func TestReleasingAPathNobodyHoldsIsSafe(t *testing.T) {
-	r := NewRegistry()
-	if err := r.Release("/tmp/never-held.sock"); err != nil {
-		t.Fatalf("releasing an unheld path must be a no-op, not an error; got %v", err)
-	}
-	// AND IT LEAVES THE REGISTRY USABLE: a later Release of a real entry still works.
-	r.held["/tmp/x.sock"] = &Conn{Path: "/tmp/x.sock"}
-	r.owner["/tmp/x.sock"] = "easyvm"
-	if err := r.Release("/tmp/never-held.sock"); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := r.held["/tmp/x.sock"]; !ok {
-		t.Fatal("releasing another path must not touch this one")
-	}
-}
 
 // THE ORPHAN ITSELF: a path released after its cache was already cleared.
 //
 // This is the exact state `shutdown` used to skip. `d.qmp` could be nil because a `qmpRetry` had
 // already dropped it, while `held` still carried the entry - so the next `Acquire` was refused by
 // the same process. The fix is that the release does not consult the cache at all.
-func TestACachedConnectionClearedFirstDoesNotOrphanThePath(t *testing.T) {
-	r := NewRegistry()
-	path := "/tmp/orphan.sock"
-	r.held[path] = &Conn{Path: path}
-	r.owner[path] = "easyvm"
-
-	// The cache is gone (what `d.qmp = nil` leaves behind) but the entry is still there.
-	if err := r.Release(path); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := r.held[path]; ok {
-		t.Fatal("the path must be forgotten, or the next machine on this daemon is refused by itself")
-	}
-	// `Acquire` would now open a fresh handshake rather than answering ErrBusy. It cannot actually
-	// connect to a socket that does not exist, so the assertion is that it does not answer ErrBusy.
-	_, err := r.Acquire(path, "the next machine", 10*time.Millisecond)
-	if errors.Is(err, ErrBusy) {
-		t.Fatalf("the next machine was refused by its own daemon: %v", err)
-	}
-}

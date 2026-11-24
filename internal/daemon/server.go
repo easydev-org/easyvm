@@ -109,8 +109,7 @@ type Daemon struct {
 	//	goroutine 27 [IO wait]:             the sampler's successful listen
 	//
 	// A single owner for the life of the process is the only shape in which `Acquire`'s refusal
-	// means anything.
-	qmpRegAll *qmp.Registry
+
 }
 
 // machineSlot is the one machine a daemon may hold: ITS OWNER, ITS PHASE, AND THE TWO THINGS THAT

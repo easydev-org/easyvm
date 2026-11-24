@@ -2,101 +2,161 @@ package daemon
 
 import (
 	"os"
-	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/easydev-org/easyvm/internal/qmp"
 )
 
-// A DAEMON THAT HAS STOPPED A MACHINE MUST LEAVE NO QMP ENTRY BEHIND, EVEN WITH NO CACHED CONNECTION.
+// A MACHINE THAT HAS STOPPED MUST LEAVE NOTHING BEHIND.
 //
-// THIS IS THE EIGHTH OCCURRENCE OF ONE PATTERN, and it is the first time it could be pinned here: a
-// pod that runs create/destroy more than once ends up with
-//
-//	this qmp socket is already held by this process (by "easyvm")
-//
-// on the next boot, while A FRESH POD ALWAYS SUCCEEDS. State that survives a machine, on a daemon
-// whose registry lives for the life of the process - that is this map.
-//
-// THE STATE THE BUG NEEDS IS TWO LINES AND A RACE:
-//
-//	a capture tick is inside `qmpSocket()` and `Acquire`d the path
-//	the guest dies; a `qmpRetry` elsewhere sees ErrClosed, sets `d.qmp = nil`, and drops the entry
-//	  ONLY IF `d.qmp == conn` at that instant - which it may not be, if a boot replaced it
-//
-// and then `shutdown` looked at `conn != nil`, found nil, and skipped the release. The cache and the
-// registry disagreed, and only the registry is what `Acquire` consults.
-//
-// SO THE CONTRACT IS: release happens on every stop, whatever the cache says.
-func TestShutdownReleasesTheQmpPathWithNoCachedConnection(t *testing.T) {
-	d := &Driver{daemon: &Daemon{}}
-	d.work = t.TempDir()
-	path := filepath.Join(d.work, "drive.sock.qmp")
-
-	// The registry holds the path - as it does after a capture tick - and the cache is EMPTY, which
-	// is what a `qmpRetry` leaves when it drops a dead connection whose identity had changed.
-	hold(d.qmpRegistry(), path)
-
-	if d.qmp != nil {
-		t.Fatal("this test is about the no-cached-connection case")
-	}
-
-	d.shutdown()
-
-	if held(d.qmpRegistry(), path) {
-		t.Fatal("shutdown left the qmp path in the registry with no cached connection. " +
-			"The next machine on this daemon is refused by its own process: " +
-			"`this qmp socket is already held by this process`")
-	}
-}
-
-// hold and held reach the registry's bookkeeping the way `TestSecondAcquireIsRefusedByName` does,
-// because a real socket cannot be made in a unit test and the entry is what the bug is about.
-func hold(r *qmp.Registry, path string) { r.Hold(path, "easyvm") }
-func held(r *qmp.Registry, path string) bool { return r.Held(path) }
-
-// A QEMU THAT THIS FUNCTION STARTED BELONGS TO IT, EVEN WHEN THE BOOT FAILS.
-//
-// MEASURED ON THE POD, WITH A LIVE qemu TO PROVE IT:
+// EIGHT OCCURRENCES OF ONE PATTERN ON THE POD, and every one was the same fact stored twice:
 //
 //	easyvm destroy  ->  [easyvm] the machine was destroyed    (exit 0)
 //	ps              ->  383 Sl  qemu-system-x86               (still running)
 //	next boot       ->  this qmp socket is already held by this process
 //
-// The chain was: `cmd.Start()` succeeded, `qmpSocket` failed (the daemon's own sampler had taken the
-// path), and this function returned WITHOUT setting `d.proc`. `shutdown` guards on `proc != nil`,
-// `Stop` answers "not running", and `destroy` reports success on a machine it cannot see. The orphan
-// then owns the socket, and every later boot in that pod is refused - which is why the workaround was
-// `kill -9` by hand, and why a fresh pod always worked.
+// The daemon kept a process field, a connection cache AND a process-wide registry of socket paths,
+// and a boot could leave any one of them claiming a machine that was gone. The workaround was
+// `kill -9` by hand, and a fresh pod always worked because its registry was empty.
 //
-// THE CONTRACT: from `cmd.Start()` onward the process is registered before anything else can fail.
-func TestBootRegistersTheProcessBeforeItCanFail(t *testing.T) {
-	src, err := os.ReadFile("driver.go")
+// THE MODEL NOW IS ONE OBJECT: `qemuProcess` owns the process, the socket path and the connection,
+// and `Alive()` is the only answer to "is this machine up". `watch` closes the connection when it
+// reaps the process, so there is no map to clear and no cache to keep in step.
+//
+// These tests cannot start a real qemu, so they drive the parts that do not need one: the liveness
+// answer, the request queue's behaviour after an exit, and the guarantee that a dead machine is
+// reported as gone rather than as busy.
+
+// A qemuProcess with no process is not alive, and every call on it is safe.
+func TestANilOrStoppedMachineIsNotAlive(t *testing.T) {
+	var none *qemuProcess
+	if none.Alive() {
+		t.Fatal("a nil machine must not report itself alive")
+	}
+
+	p := &qemuProcess{done: make(chan struct{})}
+	if !p.Alive() {
+		t.Fatal("a machine whose `done` is open must report alive")
+	}
+	close(p.done)
+	if p.Alive() {
+		t.Fatal("a machine whose `done` is closed must not report alive - that channel IS the answer, " +
+			"and reading it instead of a stale field is the whole point of this type")
+	}
+}
+
+// ASKING A STOPPED MACHINE IS `errMachineGone`, NOT A SOCKET CONFLICT.
+//
+// The message matters: `this qmp socket is already held by this process (by "easyvm")` sent every
+// reader looking for a second client, on a machine that had simply exited.
+func TestAskingAStoppedMachineSaysItIsGone(t *testing.T) {
+	p := &qemuProcess{done: make(chan struct{})}
+	close(p.done)
+
+	err := p.Run(func(*qmp.Conn) error { return nil })
+	if err == nil {
+		t.Fatal("a command against a stopped machine must fail")
+	}
+	if err != errMachineGone {
+		t.Fatalf("got %v, want errMachineGone - a stopped machine is GONE, not busy", err)
+	}
+}
+
+// THE OWNER GOROUTINE ANSWERS EVERY QUEUED REQUEST, INCLUDING ON THE WAY OUT.
+//
+// A caller that queued a command just as the machine exited must not block for ever: `serve` drains
+// what arrived and answers `errMachineGone`, which is why `Run`'s second select exists.
+func TestQueuedRequestsAreAnsweredWhenTheMachineExits(t *testing.T) {
+	p := &qemuProcess{
+		done: make(chan struct{}),
+		reqs: make(chan qmpRequest),
+	}
+	go p.serve(func() (*qmp.Conn, error) { return nil, errMachineGone })
+
+	var wg sync.WaitGroup
+	results := make([]error, 8)
+	for i := range results {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			results[i] = p.Run(func(*qmp.Conn) error { return nil })
+		}(i)
+	}
+	// Let the callers queue, then end the machine underneath them.
+	time.Sleep(50 * time.Millisecond)
+	close(p.done)
+
+	finished := make(chan struct{})
+	go func() { wg.Wait(); close(finished) }()
+	select {
+	case <-finished:
+	case <-time.After(5 * time.Second):
+		t.Fatal("callers blocked after the machine exited; `serve` must drain its queue and answer")
+	}
+	for _, err := range results {
+		if err == nil {
+			t.Fatal("a command against a machine that exited must not report success")
+		}
+	}
+}
+
+// A STARTED PROCESS IS REGISTERED BEFORE ANYTHING ELSE CAN FAIL.
+//
+// This is the orphan that `destroy` could not kill: `cmd.Start()` succeeded, the handshake then
+// failed, and the function returned without the process being owned by anything. It is asserted on
+// the source because the alternative is starting a real qemu in a unit test.
+func TestBootOwnsTheProcessBeforeItCanFail(t *testing.T) {
+	src, err := readFileString("driver.go")
 	if err != nil {
 		t.Fatal(err)
 	}
-	text := string(src)
-
-	start := strings.Index(text, "if err := cmd.Start(); err != nil {")
+	start := indexOf(src, "qemu, err := startQemu(cmd")
 	if start < 0 {
-		t.Fatal("cmd.Start() not found")
+		t.Fatal("`Boot` no longer starts the process through `startQemu`; the ownership this whole " +
+			"type exists for has been lost")
 	}
-	after := text[start:]
-
-	register := strings.Index(after, "d.proc = cmd")
-	// the next statement that can return, after Start
-	guard := strings.Index(after, "bootFailed := true")
-	if register < 0 {
-		t.Fatal("nothing assigns `d.proc` after `cmd.Start()`. A qemu that is started and then not " +
-			"registered is a process `destroy` cannot kill, and the next boot is refused by its own " +
-			"daemon - see the measured orphan above")
+	after := src[start:]
+	guard := indexOf(after, "bootFailed := true")
+	if guard < 0 {
+		t.Fatal("the failure guard is gone: an error returned after `startQemu` would leave a live " +
+			"qemu that nothing owns, which is exactly the orphan `destroy` reported success over")
 	}
-	if guard < 0 || guard < register {
-		t.Fatal("`d.proc` is assigned but the failure guard is missing or precedes it; an error " +
-			"returned between the two leaves a live qemu nobody owns")
-	}
-	if !strings.Contains(after, "cmd.Process.Kill()") {
+	if indexOf(after, "qemu.Kill()") < 0 {
 		t.Fatal("the failure path does not kill the process it started")
 	}
+	// AND THE OLD SHAPE MUST NOT COME BACK.
+	if indexOf(src, "d.proc = cmd") >= 0 {
+		t.Fatal("`d.proc` is assigned again; the process is owned by `qemuProcess` and a second field " +
+			"would be a second answer to the same question")
+	}
+}
+
+// WHICH CONNECTION TO USE, WHEN, AND WHETHER IT NEEDS REPAIRING, belongs to the machine - not to a
+// daemon-wide map. This pins that the registry is gone rather than merely unused.
+func TestThereIsNoProcessWideSocketRegistry(t *testing.T) {
+	src, err := readFileString("driver.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, dead := range []string{"qmpRegistry", "qmpRegistryLocked", "qmpRegAll"} {
+		if indexOf(src, dead) >= 0 {
+			t.Fatalf("%q is back; a map that outlives every machine is a fact stored in a second "+
+				"place, which is what produced eight orphaned-socket failures", dead)
+		}
+	}
+}
+
+func readFileString(name string) (string, error) {
+	b, err := os.ReadFile(name)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+func indexOf(hay, needle string) int {
+	return strings.Index(hay, needle)
 }

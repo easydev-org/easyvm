@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/easydev-org/easyvm/internal/artifact"
@@ -67,7 +66,8 @@ const (
 // waited seven minutes for a greeting qemu never sends. A `qmpConn` that `shutdown` closed while the
 // sampler was mid-`Screendump` dereferenced a nil monitor and took the daemon down as PID 1.
 //
-// SO THIS TYPE NOW HOLDS ONLY WHAT A MACHINE OWNS, and `qmpRegistry` moved to the Daemon because
+// SO THIS TYPE NOW HOLDS ONLY WHAT A MACHINE OWNS. The process, its socket path and its connection
+// live in ONE object (`qemuProcess`), because they are one fact - see `qemuproc.go`.
 // "this process has exactly one QMP client" is a fact about the PROCESS.
 //
 // IT LAZILY OPENS EACH CHANNEL, and that is not laziness. A walkthrough's first step may be `record:`
@@ -100,7 +100,10 @@ type Driver struct {
 	// has failed. IT IS WHAT MAKES "ONE MACHINE" TRUE, because it closes the gap between "is there a
 	// machine" and "start one" - a gap in which two boots could both see nil and both start qemu.
 	booting bool
-	proc    *exec.Cmd
+	// qemu IS THE PROCESS AND ITS ONLY OWNER. `Alive()` answers "is the machine up", and there is no
+	// other answer anywhere in this file - see `qemuproc.go` for the six defects that came from
+	// `d.proc != nil` disagreeing with reality.
+	qemu *qemuProcess
 	// qmp is the ONE connection to this machine, and the registry that owns it lives on the Daemon.
 	qmp *qmp.Conn
 	// disk is what this machine was started on, or will start on. It IS state: a `disk:` step
@@ -121,25 +124,6 @@ type Driver struct {
 	// frameMu serialises screen capture. ONE FRAME AT A TIME, because three readers of one screen do
 	// not need three screendumps and interleaved writes produce unreadable files.
 	frameMu sync.Mutex
-	// qmpMu SERIALISES "take the connection, use it, and repair it if it is dead" AS ONE UNIT.
-	//
-	// THE TRANSPORT ALREADY SERIALISES ONE COMMAND - `line.Run` holds its own mutex - AND THAT IS NOT
-	// ENOUGH, BECAUSE THE REPAIR IS NOT A COMMAND. MEASURED ON THE POD, on opensuse's console login:
-	//
-	//	login [2.3]: typing: input-send-event []+7: the qmp connection is closed
-	//
-	// The first character of the password landed and the second did not, on a guest whose qemu was
-	// running and whose socket was listening. The recorder's sampler captures a frame every second and
-	// a `type:` sends one `input-send-event` per character; when a capture failed, the sampler took
-	// the repair path - drop the shared connection, open another - and the typing caller's next
-	// character went into the socket that had just been closed underneath it.
-	//
-	// SO THE UNIT OF EXCLUSION IS THE WHOLE TRANSACTION, NOT THE COMMAND. Two callers can no longer
-	// both decide "this connection is dead" and both act on it; the second waits and finds a working
-	// connection that the first already repaired. The cost is nothing that was not already paid:
-	// `line.Run` serialises every command anyway, so this lock does not reduce throughput, it only
-	// stops the DECISIONS from interleaving.
-	qmpMu sync.Mutex
 	// frames is the one-a-second capture every reader shares. See framecache.go for the measurement
 	// that made it: the sampler and a gate fought over one QMP socket and the gate lost 166 of 180
 	// attempts in silence.
@@ -321,17 +305,27 @@ func (d *Driver) frameCache() *frameCache {
 			// not privileged over a keystroke. What makes this safe is that the capture does NOT
 			// repair: a failed tick is a lost frame, and the connection stays as it is for whoever is
 			// actually sending something.
-			d.qmpMu.Lock()
-			defer d.qmpMu.Unlock()
-			conn, err := d.qmpSocket()
+			// THE SAMPLER QUEUES LIKE EVERYBODY ELSE. It used to take `qmpMu`, fetch the shared
+			// connection and screendump on it - a second path that had to respect the same
+			// exclusion the commands did, and the one place where "who may close this connection"
+			// was answered twice. Now it is a request to the owner goroutine, and a capture is
+			// scheduled between two keystrokes rather than racing them.
+			//
+			// A CAPTURE IS STILL WORTH LESS THAN A KEYSTROKE: `Run` repairs a closed connection
+			// because it must, but a failed dump here is a lost frame and the recording says so.
+			var shot qmp.Frame
+			err := d.qmpRun(func(conn *qmp.Conn) error {
+				f, err := conn.Screendump(filepath.Join(d.work, "frames"))
+				if err != nil {
+					return err
+				}
+				shot = f
+				return nil
+			})
 			if err != nil {
 				return cachedFrame{}, err
 			}
-			f, err := conn.Screendump(filepath.Join(d.work, "frames"))
-			if err != nil {
-				return cachedFrame{}, err
-			}
-			return cachedFrame{path: f.Path, w: f.Width, h: f.Height, at: time.Now()}, nil
+			return cachedFrame{path: shot.Path, w: shot.Width, h: shot.Height, at: time.Now()}, nil
 		})
 	}
 	return d.frames
@@ -653,11 +647,12 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 	// `booting` is taken HERE, under the lock, and released on every path out of this function. It is
 	// a claim on the slot, not a description of a process: the difference is exactly the window.
 	d.mu.Lock()
-	if d.booting || d.proc != nil {
-		running := d.proc != nil
-		d.mu.Unlock()
-		return &MachineBusy{OS: d.guestOS, Running: running}
+	qemu, booting := d.qemu, d.booting
+	d.mu.Unlock()
+	if booting || qemu.Alive() {
+		return &MachineBusy{OS: d.guestOS, Running: qemu.Alive()}
 	}
+	d.mu.Lock()
 	d.booting = true
 	d.mu.Unlock()
 
@@ -890,23 +885,15 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 	// published as 512 bytes because nothing had ever driven the installer. A `Release` AFTER the socket
 	// is connected is not a cleanup, it is a self-mutilation.
 	//
-	// SO IT HAPPENS HERE, while `d.qmp` is nil and the previous machine's client is the only thing the
-	// registry can be holding.
+	// THE PREVIOUS MACHINE'S SOCKET IS NOT "RELEASED" ANY MORE - THERE IS NOTHING TO RELEASE.
 	//
-	// `qmpMu` IS TAKEN EVEN THOUGH `Release` DOES ITS OWN LOCKING, and that is about the REGISTRY
-	// rather than the map's own mutex. The recorder's sampler captures a frame every second and takes
-	// `qmpMu` to do it; a `Release` outside that lock can land between the sampler's look at the
-	// cache and its `Acquire`, and the two then disagree about who owns the socket. MEASURED on the
-	// pod, at `boot the disk`:
+	// This used to be a `Release` on the daemon's registry, plus a second one after the handshake,
+	// because the registry was a map that outlived every machine and had to be told when a path
+	// became free. The connection now belongs to the `qemuProcess` that made it and is closed by that
+	// object's `watch`, so a path is free exactly when its process is gone.
 	//
-	//	boot: this qmp socket is already held by this process (by "easyvm"); pass that connection
-	//	instead of opening a second - qemu allows one client per socket
-	//
-	// - the same self-conflict the earlier fixes were about, arriving through the one path that had
-	// not been brought under the lock.
-	d.qmpMu.Lock()
-	_ = d.qmpRegistry().Release(qmpPath)
-	d.qmpMu.Unlock()
+	// THE ONLY QUESTION LEFT IS WHETHER SOMETHING ELSE IS LISTENING, and that is a fact about the
+	// filesystem rather than about this process's bookkeeping - answered by `probeUnixSocket` above.
 
 	cmd := exec.Command("qemu-system-x86_64", args...)
 	// QEMU RUNS IN THE WORK DIRECTORY, so a file a walk names needs no path at all.
@@ -923,135 +910,52 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	d.logf("qemu " + strings.Join(args, " "))
-	if err := cmd.Start(); err != nil {
+
+	// THE PROCESS IS STARTED AND OWNED IN ONE STEP, WHICH IS THE WHOLE POINT OF `qemuProcess`.
+	//
+	// `startQemu` takes the `Wait`, so from here there is exactly ONE owner of this process and the
+	// failure path below is a `Kill` on an object that cannot be lost. The shape it replaces
+	// registered `d.proc` by hand after `cmd.Start()` and needed a `defer` to remember to kill it:
+	//
+	//	qemu 383 started, a failure then returned WITHOUT setting `d.proc` - so `shutdown`
+	//	(`if proc != nil`) skipped the kill, `Stop` (`if !running`) reported success, and
+	//	`easyvm destroy` printed "the machine was destroyed" over a live qemu that then owned the
+	//	work directory for ever.
+	pointerAbsolute := machine.PointerIsAbsolute(boot.Args)
+	qemu, err := startQemu(cmd, qmpPath, pointerAbsolute, d.dialQMP)
+	if err != nil {
 		return fmt.Errorf("starting qemu: %w", err)
 	}
-	// FROM THIS LINE ON, QEMU IS RUNNING AND THIS FUNCTION OWNS IT - SO EVERY RETURN BELOW MUST
-	// HAND IT TO SOMETHING OR KILL IT.
-	//
-	// MEASURED, AND IT IS THE ROOT OF THE ORPHAN THAT REFUSED EVERY LATER BOOT:
-	//
-	//	qemu 383 started, and a leftover registry entry made `qmpSocket` answer ErrBusy
-	//	this function returned that error WITHOUT setting `d.proc`
-	//	so `shutdown` (`if proc != nil`) skipped the kill, `Stop` (`if !running { return nil }`)
-	//	  reported success, and `easyvm destroy` said "the machine was destroyed" with qemu alive
-	//
-	// The next boot then met its own predecessor's qemu on the socket, and the daemon refused itself
-	// - the "several create/destroy cycles in one pod always fail" pattern, whose manual workaround
-	// was `kill -9` by hand.
-	//
-	// A STARTED PROCESS IS NOT OPTIONAL STATE. It is registered before anything can fail, and the
-	// deferred cleanup is what an error path relies on rather than remembering to kill.
-	d.mu.Lock()
-	d.proc = cmd
-	d.mu.Unlock()
 	bootFailed := true
 	defer func() {
 		if bootFailed {
-			_ = cmd.Process.Kill()
-			_, _ = cmd.Process.Wait()
+			qemu.Kill()
 		}
 	}()
 
-	// THE REGISTRY IS NOT REPLACED, AND THAT IS THE WHOLE FIX FOR A SEVEN-MINUTE HANG.
-	//
-	// A REGISTRY IS WHAT MAKES "QEMU TAKES ONE CLIENT" TRUE: `Acquire` holds its map across the
-	// handshake, so a second caller gets `ErrBusy` naming the first owner. That guarantee is only as
-	// wide as the map - and this function used to throw the map away:
-	//
-	//	d.qmpReg = qmp.NewRegistry()
-	//
-	// TWO MAPS MEAN TWO CLIENTS. The recorder's sampler starts at `record:` and ticks across every
-	// `boot:`, so it takes the registry pointer that existed BEFORE the boot; the boot then made a
-	// fresh one, and each asked qemu for the socket with its own empty `held`. qemu accepts the first
-	// and queues the second in its listen backlog WITHOUT EVER GREETING IT:
-	//
-	//	goroutine 21 [IO wait, 7 minutes]:
-	//	qmp.(*SocketMonitor).Connect()  socket.go:128   <- dec.Decode(&ban)
-	//	machineControl.Boot()           driver.go:680
-	//	doBoot -> runOne -> Run
-	//
-	// The guest had already drawn its recovery menu; the walk believed it was still booting, for seven
-	// minutes, past its own `timeout:`.
-	//
-	// THE REGISTRY NOW LIVES ON THE DAEMON, because "this process is one QMP client" is a fact about
-	// the process and not about a machine. What this function does is RELEASE the previous machine's
-	// path from it: `Release` closes the connection and drops the path, which is exactly "this socket
-	// has no client now" - the state a new qemu needs - while the map itself survives.
-
-	// NO CONSOLE IS STARTED HERE ANY MORE, AND THAT IS THE POINT.
-	//
-	// The page, its assets and the WebSocket to the guest are served by the DAEMON'S OWN LISTENER on
-	// :8080 - one port, bound once, alive as long as the daemon. It used to be a second HTTP server on
-	// :6080 that had to be started per boot, which produced
-	//
-	//	boot: port 6080 is already in use, so the noVNC page cannot be served
-	//
-	// on the SECOND leg of a daemon that had been running the first one. See `Daemon.handleBridge`.
-
-	// WAIT FOR THE SOCKET BEFORE RETURNING, so the next step can act on the machine rather than
-	// racing its creation.
-	//
-	// AND WHEN IT DOES NOT APPEAR, THE QUESTION IS WHY QEMU IS NOT THERE. A QMP socket error is a
-	// SOCKET error - `connect: connection refused`, or a thirty-second wait that says nothing - and the
-	// reason qemu never created the socket is in QEMU'S OWN OUTPUT, which the caller cannot see:
-	//
-	//	-device usb-storage,bus=xhci.0,drive=rec: Bus 'xhci.0' not found
-	//
-	// Measured on the first macos-setup run that got past OpenCore. qemu printed that and exited, and
-	// the step reported `qmp .../drive.sock.qmp: connect: connection refused (waited 30s; is another
-	// process already holding this socket?)` - a hypothesis about the socket, pointing a reader at
-	// qmp.Registry, while the machine had never started.
-	//
-	// SO THE PROCESS IS CHECKED FIRST. If it is gone, that is the answer and it is reported as such,
-	// with qemu's exit status attached.
-	// THE CONNECTION IS TAKEN UNDER THE SAME LOCK EVERY OTHER CALLER USES, because this function
-	// `Acquire`s the registry entry the socket belongs to - and `Acquire` is what refuses a second
-	// client. Outside `qmpMu` it races the sampler for that entry.
-	// THIS BOOT OWNS THE SOCKET WHILE IT WAITS FOR IT, AND IT SAYS SO.
-	//
-	// MEASURED, AND IT IS THE SECOND HALF OF THE ORPHAN BUG. The recorder's sampler ticks every
-	// second from `record:` onward, and it calls `qmpSocket` -> `Acquire` on this very path. Between
-	// the Release above (which makes the path free for the new machine) and this call, THE SAMPLER
-	// CAN WIN THE RACE. It then holds a socket qemu has not created yet, its `Open` fails, and the
-	// entry it took is what this boot meets:
-	//
-	//	boot: this qmp socket is already held by this process (by "easyvm")
-	//
-	// - the daemon refusing itself, on the one path that is supposed to be the machine's own.
-	//
-	// THE RELEASE IS REPEATED HERE, UNDER THE LOCK, so the sampler cannot slip in between: whatever
-	// is held for this path at this instant belongs to a machine that is already gone (the Release
-	// above closed it), and this boot is about to make the only client that matters.
-	d.qmpMu.Lock()
-	_ = d.qmpRegistry().Release(qmpPath)
-	conn, err := d.qmpSocket()
-	d.qmpMu.Unlock()
+	// THE HANDSHAKE IS THIS FUNCTION'S JOB, because a failure here is a boot failure and this is the
+	// only place that can attach qemu's own output to the message.
+	conn, err := d.dialQMP()
 	if err != nil {
-		if waitErr := cmd.Process.Signal(syscall.Signal(0)); waitErr != nil {
-			exit := "unknown"
-			if cmd.ProcessState != nil {
-				exit = cmd.ProcessState.String()
-			}
-			return fmt.Errorf("qemu exited before its QMP socket appeared (%s): %w. "+
-				"qemu's own output is above - a missing -device, a bad -machine option or an "+
-				"accelerator it cannot use all say so there and then exit", exit, err)
+		// QEMU'S OWN OUTPUT IS THE ANSWER when it never came up: a missing -device, a bad -machine
+		// option or an accelerator it cannot use all say so on stderr and then exit.
+		if !qemu.Alive() {
+			at, waitErr := qemu.Exit()
+			return fmt.Errorf("qemu exited before its QMP socket appeared (%v, %v): %w. qemu's own "+
+				"output is above - a missing -device, a bad -machine option or an accelerator it "+
+				"cannot use all say so there and then exit", at.Format(time.TimeOnly), waitErr, err)
 		}
 		return err
 	}
 
 	// THE MACHINE IS PUBLISHED ONLY NOW, WITH EVERY PART OF IT IN PLACE: a started process, an open
 	// QMP connection, and a disk. NOTHING ELSE IN THIS PROCESS CAN SEE A HALF-BUILT MACHINE, because
-	// `proc` and `qmp` are set together under the lock and `booting` is what every other accessor
-	// checked while this ran.
+	// `qemu` and `booting` are set together under the lock and the process object answers `Alive()`
+	// for everybody afterwards.
+	qemu.SetConnection(conn)
 	bootFailed = false
-	// THE POINTER KIND IS A FACT ABOUT THE ARGUMENTS, AND IT IS SET BEFORE THE CONNECTION IS
-	// PUBLISHED so no click can reach one that has not been told. See `machine.PointerIsAbsolute`:
-	// a tablet takes coordinates, a PS/2 mouse takes displacements, and `moveTo` sends one or the
-	// other - sending absolute events to a PS/2 guest is a click that lands nowhere.
-	conn.SetAbsolutePointer(machine.PointerIsAbsolute(boot.Args))
 	d.mu.Lock()
-	d.qmp = conn
+	d.qemu = qemu
 	d.booting = false
 	// THE IDENTITY OF THIS MACHINE, so a second boot in the same file can tell "this machine again"
 	// from "a different one". A boot names arguments now, so the arguments are the identity.
@@ -1113,9 +1017,9 @@ func (m machineControl) Stop(method string, grace time.Duration) error {
 	// on a guest, and every other caller of this driver - `status`, `Frame`, the console - would be
 	// blocked behind it for up to five minutes.
 	d.mu.Lock()
-	running := d.proc != nil
+	qemu := d.qemu
 	d.mu.Unlock()
-	if !running {
+	if !qemu.Alive() {
 		return nil
 	}
 	killNow := false
@@ -1182,24 +1086,15 @@ func (m machineControl) Stop(method string, grace time.Duration) error {
 	// connection existed. The next `qmpSocket` handed out that dead `*Conn`, and every command on it
 	// reported `the qmp connection is closed` or, when it was re-`Acquire`d, `ErrBusy` from itself.
 	//
-	// SO THE TWO ARE CLEARED TOGETHER, UNDER THE SAME LOCK THAT CLEARS THE PROCESS, for the reason
-	// `qmpRetry` gives: a cache and a registry that disagree is a daemon that refuses its own next
-	// command.
-	d.mu.Lock()
-	d.proc = nil
-	conn := d.qmp
-	d.qmp = nil
-	d.mu.Unlock()
-	// UNCONDITIONALLY, for the reason `shutdown` gives: `conn` is the CACHE and can be nil while the
-	// REGISTRY still holds the path - a capture tick that `Acquire`d just as the guest died leaves
-	// exactly that state, and `if conn != nil` then skips the release and parks the entry for the
-	// life of the process. The next machine on this `--work` is refused by its own daemon.
+	// THE MACHINE IS FORGOTTEN, AND ITS CONNECTION GOES WITH IT.
 	//
-	// `Release` on an unheld path is a no-op, so this costs nothing.
-	d.qmpMu.Lock()
-	_ = d.qmpRegistry().Release(filepath.Join(d.work, "drive.sock.qmp"))
-	d.qmpMu.Unlock()
-	_ = conn
+	// This used to have to clear `d.proc`, `d.qmp` AND a registry entry, in that order, under the
+	// right lock - because three objects described one machine. Now the process object owns the
+	// connection and `watch` closes it when the process is reaped, so forgetting the process forgets
+	// everything. A path is free exactly when its qemu is gone.
+	d.mu.Lock()
+	d.qemu = nil
+	d.mu.Unlock()
 	return nil
 }
 
@@ -1275,71 +1170,48 @@ func (d *Driver) shutdownOverACPI() error {
 // is no longer the first thing that happens.
 func (d *Driver) killAndReap() error {
 	d.mu.Lock()
-	proc := d.proc
+	qemu := d.qemu
 	d.mu.Unlock()
-	if proc == nil {
+	if !qemu.Alive() {
 		return nil
 	}
 
 	// GRACEFUL FIRST. Ten seconds is generous: qemu's flush is bounded by the disk, and the whole
 	// point is that this machine is not busy when it is asked to stop.
-	if err := proc.Process.Signal(syscall.SIGTERM); err == nil {
-		done := make(chan struct{})
-		go func() {
-			_ = proc.Wait()
-			close(done)
-		}()
-		select {
-		case <-done:
-			d.logf("  the guest stopped on SIGTERM, and qemu flushed the disk as it went")
-			return nil
-		case <-time.After(10 * time.Second):
-			d.logf("  qemu ignored SIGTERM for 10s; killing it - the disk will need a journal replay")
-		}
+	//
+	// THE `Wait` BELONGS TO `qemuProcess`. This function used to start its own `proc.Wait` in a
+	// goroutine and then wait on that channel - which worked, and was the third copy of the same
+	// idea in this file. `Terminate` is that idea in one place: SIGTERM, then the one `Wait` the
+	// process has, with a deadline.
+	if qemu.Terminate(10 * time.Second) {
+		d.logf("  the guest stopped on SIGTERM, and qemu flushed the disk as it went")
+		return nil
 	}
+	d.logf("  qemu ignored SIGTERM for 10s; killing it - the disk will need a journal replay")
 
-	if err := proc.Process.Kill(); err != nil {
-		return fmt.Errorf("kill: %w", err)
-	}
-	_ = proc.Wait()
+	qemu.Kill()
 	d.logf("  the guest was killed")
 	return nil
 }
 
 // waitForExit waits for qemu to leave, and kills it if it does not.
 func (d *Driver) waitForExit(limit time.Duration) error {
-	// THE PROCESS IS TAKEN ONCE, UNDER THE LOCK, AND THE WAIT RUNS ON THAT VALUE.
-	//
-	// `Stop` clears `d.proc` when it is done, and `status` reads it - so a wait that dereferenced the
-	// field from a goroutine would race with both. One local pointer means this function owns what it
-	// is waiting for, whatever else happens to the field.
 	d.mu.Lock()
-	proc := d.proc
+	qemu := d.qemu
 	d.mu.Unlock()
-	if proc == nil {
+	if !qemu.Alive() {
 		return nil
 	}
-	done := make(chan struct{})
-	go func() {
-		_ = proc.Wait()
-		close(done)
-	}()
-	select {
-	case <-done:
+	if qemu.Wait(limit) {
 		d.logf("  the guest powered off")
 		return nil
-	case <-time.After(limit):
-		// THE EXPIRY IS REPORTED, NOT HIDDEN. A guest that did not power off in five minutes is a
-		// guest whose disk will need a journal replay, and the next stage's "slow boot" is this line.
-		d.logf(fmt.Sprintf("  the guest did not power off within %s; killing it - the disk will need "+
-			"a journal replay on its next boot", limit))
-		// AND IT IS KILLED AND REAPED HERE, because the goroutine above is still blocked on `Wait`
-		// and this function is the only place that knows the guest missed its deadline. A kill with
-		// no reap is a zombie holding the disk open.
-		_ = proc.Process.Kill()
-		<-done
-		return nil
 	}
+	// THE EXPIRY IS REPORTED, NOT HIDDEN. A guest that did not power off in five minutes is a guest
+	// whose disk will need a journal replay, and the next stage's "slow boot" is this line.
+	d.logf(fmt.Sprintf("  the guest did not power off within %s; killing it - the disk will need "+
+		"a journal replay on its next boot", limit))
+	qemu.Kill()
+	return nil
 }
 
 // Reboot resets the machine and waits for it to answer again.
@@ -1387,21 +1259,6 @@ func (m machineControl) OS() string {
 }
 
 // IsRunning reports whether the guest's qemu process is alive - NOT whether a `*exec.Cmd` is non-nil.
-//
-// THE DIFFERENCE COST THIRTY MINUTES, TWICE. `d.proc != nil` stays true after qemu has exited, so every
-// caller that asks "is there a machine" got YES for a machine that was gone:
-//
-//	status            `running step 7/31`      <- nothing was running
-//	screen.png        409 from a dead socket
-//	screendump        `write: broken pipe`     <- retried to the loop's ceiling
-//
-// and the walk's `wait for the recovery menu` spent its full `max: 180` on captures that could not
-// succeed. THE STATE WAS WRONG; the retry loops were merely the symptom.
-//
-// `Signal(0)` ASKS THE KERNEL WHETHER THE PROCESS EXISTS, which is the fact. A process that has exited
-// and been reaped gives `os.ErrProcessDone`; one that exited and has not been reaped is a zombie, which
-// `Signal` also refuses - and in this container that is the normal state, because PID 1 is the daemon
-// and it reaps only when it gets round to it.
 // ResetMachine is the QMP reset, which is what `acpi: reset` sends.
 func (m machineControl) ResetMachine() error {
 	m.d.logf("  resetting the machine")
@@ -1488,25 +1345,9 @@ func floatOf(v any, fallback float64) float64 {
 func (m machineControl) IsRunning() bool {
 	d := m.d
 	d.mu.Lock()
-	proc := d.proc
+	qemu := d.qemu
 	d.mu.Unlock()
-	if proc == nil || proc.Process == nil {
-		return false
-	}
-	if err := proc.Process.Signal(syscall.Signal(0)); err != nil {
-		return false
-	}
-	// A ZOMBIE IS NOT RUNNING. `/proc/<pid>/stat` reports `Z` for one, and on Linux that file is the
-	// only place the difference between "exited" and "exited and waiting to be reaped" is visible.
-	if state, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", proc.Process.Pid)); err == nil {
-		// the state is the first field after the parenthesised command name
-		if i := strings.LastIndexByte(string(state), ')'); i >= 0 && i+2 < len(state) {
-			if state[i+2] == 'Z' {
-				return false
-			}
-		}
-	}
-	return true
+	return qemu.Alive()
 }
 
 // qmpSocket opens the connection, once - WITHOUT HOLDING THE LOCK WHILE IT WAITS.
@@ -1528,7 +1369,6 @@ func (m machineControl) IsRunning() bool {
 // SO THE I/O HAPPENS OUTSIDE: the fast path takes the lock, finds a connection and returns; a slow
 // path that has to connect does so with the lock RELEASED, then re-checks in case two callers raced
 // and keeps the one that got there first.
-// qmpRegistryLocked returns the daemon's ONE registry, creating it on first use.
 //
 // THERE IS EXACTLY ONE FOR THE LIFE OF THE PROCESS, and that is the property that makes `Acquire`
 // able to refuse a second client: `Release` drops a path and `CloseAll` drops everything, but the MAP
@@ -1538,110 +1378,73 @@ func (m machineControl) IsRunning() bool {
 // this process and qemu's sockets - not about one machine. A driver comes and goes; the registry
 // outlives every boot, which is what lets `Release` mean "this socket has no client" instead of "a
 // whole new map that happens to be empty".
-func (d *Driver) qmpRegistry() *qmp.Registry {
-	d.daemon.mu.Lock()
-	defer d.daemon.mu.Unlock()
-	if d.daemon.qmpRegAll == nil {
-		d.daemon.qmpRegAll = qmp.NewRegistry()
-	}
-	return d.daemon.qmpRegAll
-}
-
-func (d *Driver) qmpSocket() (*qmp.Conn, error) {
-	// THE CACHED CONNECTION IS HANDED OUT AS IT IS, AND THE REPAIR HAPPENS ON USE.
-	//
-	// THIS FUNCTION IS ONLY EVER CALLED WITH `qmpMu` HELD (from `qmpRetry` and from the capture
-	// path), so "one connection" is not something it has to enforce - there is exactly one caller at
-	// a time, and the connection it returns cannot be closed by anybody else while it is being used.
-	//
-	// THAT IS WHY THERE IS NO PROBE HERE ANY MORE. A probe that failed used to CLOSE the shared
-	// connection, and the caller that had just been handed it sent its next command into a closed
-	// socket. MEASURED, through the daemon's own HTTP endpoint:
-	//
-	//	POST /api/command {"command":"key","key":"shift"}   20/20 ok   one command per request
-	//	POST /api/command {"command":"type","text":"a"}      0/15 ok   stroke + release-modifiers
-	//	    "type: release modifiers: the qmp connection is closed"
-	//
-	// - the FIRST command of a request never failed and the SECOND repeatedly did, which is the
-	// shape of a close performed by a third party in between. A dead connection is discovered by
-	// USING it, in `qmpRetry`, where the failure is real.
+// dialQMP opens one connection to this daemon's QMP socket, waiting for qemu to create it.
+//
+// IT IS THE ONLY PLACE A CONNECTION IS MADE. The connection belongs to the `qemuProcess` that called
+// this - either through `startQemu`'s actor or through `SetConnection` at boot - so there is no
+// registry to consult and no cache to keep in step with one.
+func (d *Driver) dialQMP() (*qmp.Conn, error) {
 	d.mu.Lock()
-	if d.qmp != nil {
-		conn := d.qmp
-		d.mu.Unlock()
-		return conn, nil
-	}
+	args := append([]string(nil), d.bootArgs...)
 	d.mu.Unlock()
-
-	path := filepath.Join(d.work, "drive.sock.qmp")
-	// THE HANDSHAKE IS OUTSIDE `d.mu` AND INSIDE `qmpMu`: it can wait for a socket qemu has not
-	// created yet, and nothing else may touch the connection while that wait happens.
-	conn, err := d.qmpRegistry().Acquire(path, "easyvm", 30*time.Second)
+	conn, err := qmp.Open(filepath.Join(d.work, "drive.sock.qmp"), 30*time.Second)
 	if err != nil {
 		return nil, err
 	}
-	// THE AQMP SOCKET THAT A LATER RUN FINDS belongs to the machine whose arguments are remembered
-	// here, so a reconnect learns the same pointer kind the boot published.
-	d.mu.Lock()
-	haveArgs := append([]string(nil), d.bootArgs...)
-	d.mu.Unlock()
-	conn.SetAbsolutePointer(machine.PointerIsAbsolute(haveArgs))
-	d.mu.Lock()
-	d.qmp = conn
-	d.mu.Unlock()
+	conn.SetAbsolutePointer(machine.PointerIsAbsolute(args))
 	return conn, nil
 }
 
-// qmpRetry runs one QMP command, and reconnects ONCE if the connection reported itself closed.
+// qmpRun executes one QMP command on the running machine's owner goroutine.
 //
-// THIS IS WHERE A DEAD CONNECTION IS NOW DISCOVERED - not by a probe before use, but by the command
-// that needed it. `ErrClosed` is the transport saying the socket is gone, and it is trustworthy in a
-// way a `query-status` failure was not: it comes from the command the caller actually wanted.
+// THE CALLER NEVER TOUCHES A CONNECTION. It says what it wants; the machine decides when, on which
+// connection, and whether that connection needs replacing - which is what makes "two callers shared
+// one socket" a scheduling question rather than a correctness one.
+func (d *Driver) qmpRun(fn qmpCommand) error {
+	d.mu.Lock()
+	qemu := d.qemu
+	d.mu.Unlock()
+	if !qemu.Alive() {
+		return errMachineGone
+	}
+	return qemu.Run(fn)
+}
+
+// qmpCommand is one command against the monitor.
 //
-// ONLY `ErrClosed` IS RETRIED. A QMP error reply ("the device does not exist") is the machine's
-// answer and is returned as-is; retrying it would send the same keystroke twice.
+// IT IS A FUNCTION RATHER THAN AN INTERFACE, because the callers are one-liners that close over what
+// they want to send - `func(c *qmp.Conn) error { return c.Click(x, y) }` - and an interface would put
+// a type in front of every one of them.
 type qmpCommand func(*qmp.Conn) error
 
-func (d *Driver) qmpRetry(fn qmpCommand) error {
-	// ONE TRANSACTION AT A TIME: take the connection, use it, repair it, retry - and let nobody else
-	// in until that is finished. See the note on `qmpMu` for the measured failure this prevents.
-	d.qmpMu.Lock()
-	defer d.qmpMu.Unlock()
+// qmpRetry runs one QMP command, repairing a dead connection once.
+//
+// IT IS NOW A NAME FOR `qmpRun`, kept because thirty call sites say it and the intent they express -
+// "run this command, survive a closed connection" - has not changed. The repair moved from a shared
+// cache-and-registry dance into the owner goroutine, where the connection is a field of the object
+// doing the reading rather than something a third party could close underneath it.
+func (d *Driver) qmpRetry(fn qmpCommand) error { return d.qmpRun(fn) }
 
-	conn, err := d.qmpSocket()
-	if err != nil {
-		return err
-	}
-	err = fn(conn)
-	if !errors.Is(err, qmp.ErrClosed) {
-		return err
-	}
-
-	// THE FAILED CONNECTION IS DROPPED AND THE PATH RELEASED IN THE SAME CRITICAL SECTION, so no
-	// caller can observe "cache empty, registry held" - and since this whole function is now
-	// exclusive, nobody can be using the connection this is about to close.
+// qmpSocket is the cached connection, for the callers that must look at it rather than command it.
+//
+// IT IS A NARROW SURFACE: the boot's own wait and `QMP()`. Everything else goes through `qmpRun`, so
+// that no caller can hold a connection across another caller's turn.
+func (d *Driver) qmpSocket() (*qmp.Conn, error) {
 	d.mu.Lock()
-	if d.qmp == conn {
-		d.qmp = nil
-		_ = d.qmpRegistry().Release(filepath.Join(d.work, "drive.sock.qmp"))
-	}
-	other := d.qmp
+	qemu := d.qemu
 	d.mu.Unlock()
-
-	if other != nil {
-		// somebody published a replacement while this command was in flight (the boot path does this)
-		return fn(other)
+	if !qemu.Alive() {
+		return nil, errMachineGone
 	}
-
-	fresh, err := d.qmpSocket()
+	if c := qemu.Connection(); c != nil {
+		return c, nil
+	}
+	c, err := d.dialQMP()
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if fresh == conn {
-		return fmt.Errorf("the qmp connection reported itself closed and could not be replaced: %w",
-			qmp.ErrClosed)
-	}
-	return fn(fresh)
+	qemu.SetConnection(c)
+	return c, nil
 }
 
 // shutdown releases everything this machine owns, AND IT IS IDEMPOTENT.
@@ -1681,10 +1484,8 @@ func (d *Driver) shutdown() {
 	d.mu.Lock()
 	sess := d.ssh
 	d.ssh = nil
-	conn := d.qmp
-	d.qmp = nil
-	proc := d.proc
-	d.proc = nil
+	qemu := d.qemu
+	d.qemu = nil
 	d.booting = false
 	d.mu.Unlock()
 
@@ -1694,45 +1495,14 @@ func (d *Driver) shutdown() {
 	if sess != nil {
 		sess.Drop()
 	}
-	// THE RELEASE IS UNCONDITIONAL, AND IT TAKES `qmpMu`. Both halves are fixes for the same
-	// orphaned-socket failure, and both were missing.
+	// NOTHING TO RELEASE AND NOTHING TO CLOSE BY HAND: the connection belongs to the process object
+	// and its `watch` closed it when qemu was reaped. There used to be a registry entry to clear and a
+	// cache to empty here, in an order that mattered; both are gone with the map.
 	//
-	// `if conn != nil` LOOKS LIKE A SAFETY CHECK AND IS THE BUG. `conn` is the CACHE, and the cache
-	// can be nil while the REGISTRY still holds the path:
-	//
-	//	a capture tick calls `qmpSocket()` -> `Acquire(path)` succeeds -> registry held
-	//	the guest is killed, qemu's socket goes away
-	//	`qmpRetry` on some other command sees ErrClosed and clears the cache (`d.qmp = nil`)
-	//	  ... but the registry entry is dropped only if `d.qmp == conn` at that instant
-	//
-	// From then on `conn` is nil and this function skips the release entirely, so the path stays in
-	// the registry for the life of the process. The NEXT machine on the same `--work` asks for that
-	// path and is refused by its own daemon:
-	//
-	//	this qmp socket is already held by this process (by "easyvm")
-	//
-	// MEASURED as a pattern on the pod: a daemon that runs several create/destroy cycles in one pod
-	// ALWAYS ends up with this, and a fresh pod always succeeds. That is the signature of state that
-	// survives a machine, which is exactly what a registry entry is.
-	//
-	// `Release` on a path that is not held is a no-op (`c == nil` returns nil), so calling it
-	// unconditionally costs nothing and closes the hole.
-	//
-	// AND WITHOUT `qmpMu` THE RELEASE RACES THE SAMPLER: the sampler takes `qmpMu`, calls
-	// `qmpSocket`, and can `Acquire` between this function's read of `d.qmp` and its `Release`.
-	// The two then disagree about who owns the socket - the same self-conflict, arriving through
-	// the one path that had never been brought under the lock.
-	d.qmpMu.Lock()
-	relErr := d.qmpRegistry().Release(filepath.Join(d.work, "drive.sock.qmp"))
-	d.qmpMu.Unlock()
-	if relErr != nil {
-		d.logf(fmt.Sprintf("  releasing the qmp socket: %v", relErr))
-	}
-	_ = conn
-	if proc != nil {
-		_ = proc.Process.Kill()
-		_ = proc.Wait()
-	}
+	// THE PROCESS GOES WITH ITS OWN OWNER. `Kill` returns only after `watch` has reaped it, so the
+	// disk's write lock is released before this function returns - which is what a caller that is
+	// about to start another machine on the same work directory depends on.
+	qemu.Kill()
 	// THE TAP IS A HOST DEVICE, NOT A PROCESS'S. `Down` is a list of `iptables -D` and `ip link del`
 	// calls that each tolerate "not there", so it is safe to run when nothing was ever brought up -
 	// which is why this needs no `netUp` flag to decide.
@@ -1791,9 +1561,9 @@ var _ = screen.MinBrightnessDrop
 // so rather than given an empty file.
 func (d *Driver) Snapshot(path string) error {
 	d.mu.Lock()
-	running := d.proc != nil
+	qemu := d.qemu
 	d.mu.Unlock()
-	if !running {
+	if !qemu.Alive() {
 		return fmt.Errorf("no machine is running; a `snapshot:` step needs a `boot:` before it")
 	}
 	conn, err := d.qmpSocket()
@@ -1879,9 +1649,9 @@ func (d *Driver) QMPCommand(fn func(*qmp.Conn) error) error { return d.qmpRetry(
 // therefore "is there a guest to look at", which is what a page needs to know before it tries.
 func (d *Driver) VNCPort() int {
 	d.mu.Lock()
-	running := d.proc != nil
+	qemu := d.qemu
 	d.mu.Unlock()
-	if !running {
+	if !qemu.Alive() {
 		// NO MACHINE, NO PORT. The port itself is not a variable: see `vncDisplay`.
 		return 0
 	}
