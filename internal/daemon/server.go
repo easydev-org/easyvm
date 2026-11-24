@@ -225,6 +225,13 @@ func newMachineSlot(driver run.Driver, close func(), owner machineOwner) *machin
 // IT SETS `slotStarting`, SO THE CLAIM IS VISIBLE BEFORE ANY WORK BEGINS. The gap between "is there a
 // machine" and "start one" is where two boots used to both see `nil`, which is the whole reason this
 // method exists as one operation rather than as a check followed by a store.
+// stoppingLimit is how long a teardown may hold the slot before it is released anyway.
+//
+// IT IS NOT A TIMEOUT ON THE TEARDOWN - the closer keeps running. It is the point after which the
+// NEXT machine stops being refused on behalf of work that has already taken longer than any honest
+// teardown does.
+const stoppingLimit = 2 * time.Minute
+
 func (d *Daemon) reserve(owner machineOwner) (*machineSlot, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -243,6 +250,26 @@ func (d *Daemon) reserveLocked(owner machineOwner) error {
 	case slot.phase == slotStopping:
 		// THE PREVIOUS MACHINE IS STILL CLOSING ITS DISK. This is a retry, not a refusal: the caller
 		// asked too early, and a second attempt a moment later will succeed.
+		//
+		// BUT A TEARDOWN THAT NEVER FINISHES MUST NOT HOLD THE SLOT FOR EVER. MEASURED on a pod:
+		//
+		//	FAILED: the previous machine is still closing; retry in a moment
+		//
+		// answered for minutes, across every later create, with no qemu left to wait for. The cause
+		// was a closer that blocked on a child this process never reaped (see `reapOrphans`), and a
+		// second cause is any closer that returns only on a signal that never comes.
+		//
+		// A CLOSER HAS NO TIMEOUT OF ITS OWN, so the slot needs one. Two minutes is longer than any
+		// honest teardown - a kill plus a disk flush - and short enough that a wedged one is a
+		// nuisance rather than a dead daemon. When it expires the slot is released with a loud line:
+		// whatever was closing is now this process's leak, not the next machine's refusal.
+		if time.Since(slot.started) > stoppingLimit {
+			fmt.Printf("[easyvm]   a teardown has been running for %s; releasing the slot so the "+
+				"next machine can start. Whatever it was closing is now leaked\n",
+				time.Since(slot.started))
+			d.machine = &machineSlot{phase: slotStarting, owner: owner, started: time.Now()}
+			return nil
+		}
 		return ErrMachineClosing
 	case slot.phase == slotStarting:
 		return ErrMachineStarting
