@@ -191,6 +191,30 @@ func (b Boot) WantsOverlay() bool { return !b.FreshDisk }
 // already freed and `qemu-img convert -c` cannot remove.
 func (b Boot) Discardable() bool { return !b.installing() }
 
+// PointerIsAbsolute reports whether the arguments attach a tablet, which is the only kind of pointer
+// qemu lets this engine place at a COORDINATE.
+//
+// A PS/2 MOUSE TAKES DISPLACEMENTS, NOT POSITIONS. `input-send-event` carries two families of move:
+//
+//	InputEventAbs   a position, 0..32767 per axis - what usb-tablet and virtio-tablet report
+//	InputEventRel   a displacement - all a PS/2 or usb-mouse pointer can be told
+//
+// MEASURED on ToaruOS 2.3.2 and Debian GNU/Hurd, both q35: neither guest has a driver for a tablet,
+// so every `click:` was an absolute move a guest could not read plus a press wherever the pointer
+// already was. The wizard rectangle was byte-identical before and after `click 1219 752`.
+//
+// THE FACT IS IN THE ARGUMENT LIST, WHICH THIS ENGINE WRITES ITSELF. Asking qemu is not possible -
+// the QMP socket has exactly one client and it is the daemon - so `query-input` is out. What is in
+// hand is the list of `-device` values a boot was started with, and a tablet is one of them.
+func PointerIsAbsolute(args []string) bool {
+	for _, a := range args {
+		if strings.Contains(a, "usb-tablet") || strings.Contains(a, "virtio-tablet") {
+			return true
+		}
+	}
+	return false
+}
+
 // DiscardFragment is `,discard=unmap` when a trim may reach the disk, and empty otherwise.
 func (b Boot) DiscardFragment() string {
 	if b.Discardable() {

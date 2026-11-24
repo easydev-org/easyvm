@@ -62,6 +62,33 @@ type Conn struct {
 	frame int
 	lastW int
 	lastH int
+
+	// absolutePointer says this guest has a tablet, so `moveTo` may name a coordinate instead of
+	// walking a displacement. IT DEFAULTS TO TRUE BECAUSE THAT IS WHAT ALMOST EVERY WALK ATTACHES -
+	// `usb-tablet` is in every one of them - and a guest that has none is the exception the daemon
+	// has to say so for. See `SetAbsolutePointer`.
+	absolutePointer bool
+	pointerSet      bool
+}
+
+// SetAbsolutePointer tells this connection which kind of pointer the guest was given.
+//
+// IT IS SET ON THE CONNECTION AT PUBLISH TIME, BEFORE ANY CLICK CAN REACH IT, because the fact comes
+// from the argument list the boot was started with and the daemon is the only thing that has it. See
+// `machine.PointerIsAbsolute`.
+func (c *Conn) SetAbsolutePointer(absolute bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.absolutePointer = absolute
+	c.pointerSet = true
+}
+
+// HasAbsolutePointer is the same fact for a reader, and it answers TRUE until told otherwise so a
+// connection that was never told still behaves the way every walk expects.
+func (c *Conn) HasAbsolutePointer() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.absolutePointer || !c.pointerSet
 }
 
 // handshakeTimeout bounds the QMP greeting, which qemu never sends to a second client.
@@ -648,14 +675,37 @@ func (c *Conn) moveTo(x, y int) error {
 			"and clamping it would move the pointer somewhere nobody asked for",
 			x, y, w, h)
 	}
-	events := []raw.InputEvent{
-		// A CORNER FIRST, because a pointer that has never moved may not be where the device says.
-		// The guest's first absolute report can be ignored, so the position is ESTABLISHED before it
-		// is used - and the second move is the one the guest acts on.
-		raw.InputEventAbs(raw.InputMoveEvent{Axis: raw.InputAxisX, Value: 0}),
-		raw.InputEventAbs(raw.InputMoveEvent{Axis: raw.InputAxisY, Value: 0}),
-		raw.InputEventAbs(raw.InputMoveEvent{Axis: raw.InputAxisX, Value: toAxis(x, w)}),
-		raw.InputEventAbs(raw.InputMoveEvent{Axis: raw.InputAxisY, Value: toAxis(y, h)}),
+	// AN ABSOLUTE POINTER GOES STRAIGHT THERE; A RELATIVE ONE IS WALKED FROM A CORNER.
+	//
+	// TWO DEFECTS, ONE SHAPE, AND BOTH WERE MEASURED ON GUESTS THIS ENGINE COULD NOT CLICK.
+	//
+	// 1  THE CORNER IS HARMFUL TO A TABLET. It was there because "a pointer that has never moved may
+	//    not be where the device says" - true for a device that only reports DISPLACEMENTS, and not
+	//    for a tablet, which reports its position with every move. And the detour is VISIBLE: MEASURED
+	//    on Haiku R1beta5, which dismisses a menu the moment the pointer leaves it, so the trip
+	//    through the top-left corner closed the very menu the click was aimed at. `Install Haiku`,
+	//    the DriveSetup `Disk` menu and every dropdown were dead while `Continue` worked.
+	//
+	// 2  AN ABSOLUTE EVENT IS INAPPLICABLE TO A PS/2 MOUSE. MEASURED on ToaruOS 2.3.2 and Debian
+	//    GNU/Hurd, both q35 with no tablet driver: `click 1219 752` left the wizard's rectangle
+	//    byte-identical. A relative device cannot be told a coordinate, only a displacement, so the
+	//    only way to place an unknown pointer is to run it into a corner and measure from there:
+	//
+	//	rel(-32767, -32767)   larger than any screen, so the pointer is pinned at 0,0
+	//	rel(x, y)             then walked to the target from that corner
+	var events []raw.InputEvent
+	if c.HasAbsolutePointer() {
+		events = []raw.InputEvent{
+			raw.InputEventAbs(raw.InputMoveEvent{Axis: raw.InputAxisX, Value: toAxis(x, w)}),
+			raw.InputEventAbs(raw.InputMoveEvent{Axis: raw.InputAxisY, Value: toAxis(y, h)}),
+		}
+	} else {
+		events = []raw.InputEvent{
+			raw.InputEventRel(raw.InputMoveEvent{Axis: raw.InputAxisX, Value: -32767}),
+			raw.InputEventRel(raw.InputMoveEvent{Axis: raw.InputAxisY, Value: -32767}),
+			raw.InputEventRel(raw.InputMoveEvent{Axis: raw.InputAxisX, Value: int64(x)}),
+			raw.InputEventRel(raw.InputMoveEvent{Axis: raw.InputAxisY, Value: int64(y)}),
+		}
 	}
 	if err := c.withRaw(func(m *raw.Monitor) error {
 		return m.InputSendEvent(nil, nil, events)

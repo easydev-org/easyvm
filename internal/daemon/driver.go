@@ -1045,6 +1045,11 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 	// `proc` and `qmp` are set together under the lock and `booting` is what every other accessor
 	// checked while this ran.
 	bootFailed = false
+	// THE POINTER KIND IS A FACT ABOUT THE ARGUMENTS, AND IT IS SET BEFORE THE CONNECTION IS
+	// PUBLISHED so no click can reach one that has not been told. See `machine.PointerIsAbsolute`:
+	// a tablet takes coordinates, a PS/2 mouse takes displacements, and `moveTo` sends one or the
+	// other - sending absolute events to a PS/2 guest is a click that lands nowhere.
+	conn.SetAbsolutePointer(machine.PointerIsAbsolute(boot.Args))
 	d.mu.Lock()
 	d.qmp = conn
 	d.booting = false
@@ -1575,6 +1580,12 @@ func (d *Driver) qmpSocket() (*qmp.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
+	// THE AQMP SOCKET THAT A LATER RUN FINDS belongs to the machine whose arguments are remembered
+	// here, so a reconnect learns the same pointer kind the boot published.
+	d.mu.Lock()
+	haveArgs := append([]string(nil), d.bootArgs...)
+	d.mu.Unlock()
+	conn.SetAbsolutePointer(machine.PointerIsAbsolute(haveArgs))
 	d.mu.Lock()
 	d.qmp = conn
 	d.mu.Unlock()
