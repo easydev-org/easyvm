@@ -160,3 +160,57 @@ func readFileString(name string) (string, error) {
 func indexOf(hay, needle string) int {
 	return strings.Index(hay, needle)
 }
+// A BOOTED MACHINE'S CONNECTION KNOWS WHICH KIND OF POINTER THE GUEST HAS.
+//
+// MEASURED ON THE POD, 2026-11-24, straight after the registry was deleted: `click` returned
+// `{"ok":true}` and the pointer did not move on a Windows Server Setup page whose list moved for the
+// ARROW KEYS - so the keyboard was fine and only the pointer was wrong.
+//
+// THE CAUSE WAS OWNERSHIP, NOT PROTOCOL. The boot publishes its connection through `SetConnection`,
+// and only `connection()` - the lazy path - was setting the flag. A booted machine therefore answered
+// `HasAbsolutePointer() == false` and every `moveTo` sent RELATIVE events to a tablet, which ignores
+// them: a click that lands nowhere, reported as success.
+func TestAConnectionPublishedByBootKeepsItsPointerKind(t *testing.T) {
+	// A CONNECTION NOBODY TOLD BEHAVES LIKE A TABLET, which is the safe default - so the test asks
+	// the OTHER question: a machine that says it has NO tablet must produce a connection that also
+	// says so. That is the direction the boot was getting wrong.
+	p := &qemuProcess{done: make(chan struct{}), reqs: make(chan qmpRequest), pointer: false}
+	c := &qmp.Conn{}
+	p.SetConnection(c)
+	if c.HasAbsolutePointer() {
+		t.Fatal("a machine booted with NO tablet produced a connection that thinks it has one; every " +
+			"`click:` would then send absolute events to a PS/2 pointer and land nowhere - the " +
+			"ToaruOS/Hurd defect with the sides swapped")
+	}
+	// AND THE OTHER DIRECTION, which is the one that was measured broken.
+	p2 := &qemuProcess{done: make(chan struct{}), reqs: make(chan qmpRequest), pointer: true}
+	c2 := &qmp.Conn{}
+	p2.SetConnection(c2)
+	if !c2.HasAbsolutePointer() {
+		t.Fatal("a booted machine's connection does not know the guest has a tablet, so every " +
+			"`click:` sends relative events to an absolute device and lands nowhere")
+	}
+	close(p.done)
+}
+
+// AND THE FACT REACHES `dialQMP` BEFORE IT DIALS.
+//
+// `dialQMP` reads `bootArgs` to decide the pointer kind. MEASURED: with that assignment AFTER the
+// handshake, the dial saw an empty argument list, concluded there was no tablet, and mislabelled the
+// connection. The order is the fix, so the order is what is asserted.
+func TestBootRecordsItsArgumentsBeforeTheHandshake(t *testing.T) {
+	src, err := readFileString("driver.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assign := indexOf(src, "d.bootArgs = append([]string{spec.Machine}, spec.Args...)")
+	dial := indexOf(src, "conn, err := d.dialQMP()")
+	if assign < 0 || dial < 0 {
+		t.Fatal("`Boot` no longer records its arguments or no longer dials")
+	}
+	if assign > dial {
+		t.Fatal("`Boot` records `bootArgs` AFTER it dials. `dialQMP` reads them to decide how to move " +
+			"the pointer, so the connection is labelled from an empty list and every click is sent as " +
+			"a relative event to a tablet")
+	}
+}

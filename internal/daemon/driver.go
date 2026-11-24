@@ -921,7 +921,15 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 	//	(`if proc != nil`) skipped the kill, `Stop` (`if !running`) reported success, and
 	//	`easyvm destroy` printed "the machine was destroyed" over a live qemu that then owned the
 	//	work directory for ever.
+	// THE IDENTITY AND THE POINTER KIND ARE SET BEFORE THE PROCESS STARTS, because `dialQMP` reads
+	// `bootArgs` to decide how to move the pointer - and it runs before the publish block below.
+	// MEASURED: with the assignment after the handshake, `dialQMP` saw an empty `bootArgs`, decided
+	// the guest had no tablet, and every `click` on a Windows Server Setup page did nothing while the
+	// arrow keys worked.
 	pointerAbsolute := machine.PointerIsAbsolute(boot.Args)
+	d.mu.Lock()
+	d.bootArgs = append([]string{spec.Machine}, spec.Args...)
+	d.mu.Unlock()
 	qemu, err := startQemu(cmd, qmpPath, pointerAbsolute, d.dialQMP)
 	if err != nil {
 		return fmt.Errorf("starting qemu: %w", err)
@@ -957,9 +965,6 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 	d.mu.Lock()
 	d.qemu = qemu
 	d.booting = false
-	// THE IDENTITY OF THIS MACHINE, so a second boot in the same file can tell "this machine again"
-	// from "a different one". A boot names arguments now, so the arguments are the identity.
-	d.bootArgs = append([]string{spec.Machine}, spec.Args...)
 	d.mu.Unlock()
 	ok = true
 

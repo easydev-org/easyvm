@@ -290,6 +290,17 @@ func (p *qemuProcess) drop() {
 // connection to the owner goroutine rather than opening a second one - which is what the registry
 // used to enforce, at the cost of a global map.
 func (p *qemuProcess) SetConnection(c *qmp.Conn) {
+	// THE POINTER KIND TRAVELS WITH THE CONNECTION, and this is where it used to be lost.
+	//
+	// MEASURED ON THE POD, 2026-11-24, after the registry was deleted: `click` returned `{"ok":true}`
+	// and the pointer did not move, on a Windows Server Setup page whose list responded to the ARROW
+	// KEYS - so the keyboard was fine and only the pointer was wrong. The boot publishes its
+	// connection through THIS method, and `connection()` was the only place that set the flag, so a
+	// booted machine's connection answered `HasAbsolutePointer() == false` and every `moveTo` sent
+	// RELATIVE events to a tablet, which ignores them.
+	if c != nil {
+		c.SetAbsolutePointer(p.pointer)
+	}
 	p.mu.Lock()
 	old := p.conn
 	p.conn = c
