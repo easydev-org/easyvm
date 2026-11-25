@@ -643,26 +643,78 @@ func (e *Executor) doClick(s walk.Step) error {
 	// SIZE LANDS SOMEWHERE ELSE - SILENTLY.
 	//
 	// The `ocr:` steps already report this and scale, because a reading can be rescaled and still be
-	// the right reading. A CLICK CANNOT: (510, 557) is the middle of Android's home-app chooser at
-	// 1920x1080 and is past the bottom edge at 1280x800, where the same dialog sits at (510, 557) of
-	// a SMALLER frame - so the click lands on whatever is there. Nothing reports it; the walk just
-	// fails a step later with "did not advance".
+	// the right reading. A CLICK AT A SIZE NOBODY DECLARED CANNOT: (510, 557) is the middle of
+	// Android's home-app chooser at 1920x1080 and is past the bottom edge at 1280x800, where the same
+	// dialog sits at (510, 557) of a SMALLER frame - so the click lands on whatever is there. Nothing
+	// reports it; the walk just fails a step later with "did not advance".
 	//
 	// MEASURED, on the first attempt at driving this guest: a hand-started qemu with
 	// `virtio-vga,xres=1280,yres=800` photographed the chooser correctly and the click did nothing,
 	// and the frame size was the reason.
-	if f, ferr := e.Driver.Frame(); ferr == nil {
-		if w, h := f.Size(); w != 0 && h != 0 && (w != 1920 || h != 1080) {
-			return fail(s.Name, "click (%d, %d) is a coordinate measured at 1920x1080 but the "+
-				"framebuffer is %dx%d. A click cannot be rescaled the way a reading can - set the "+
-				"machine's resolution to 1920x1080 rather than moving this coordinate", x, y, w, h)
-		}
+	//
+	// `click_at:` IS THE DECLARATION THAT MAKES RESCALING HONEST, and it is the same treatment
+	// `rect_at:` already gives a reading. SOME GUESTS FIX THEIR OWN MODE AND CANNOT BE TOLD
+	// OTHERWISE, which is why "set the machine to 1920x1080" is not an answer:
+	//
+	//	ReactOS 0.4.16  says `VESA Display (800x600x32)` whatever the card is told
+	//	9front (Plan 9) `aux/vga` picks 1024x768 from the VESA table and announces it
+	//
+	// MEASURED with `-device VGA,xres=1920,yres=1080`: both still drew their own size. For 9front the
+	// consequence was a desktop that demonstrably came up and a walk that could never finish driving
+	// it, because the only way to make its terminal the current window is a click.
+	x, y, rescaled, ferr := e.rescalePoint(s, x, y)
+	if ferr != nil {
+		return fail(s.Name, "%v", ferr)
 	}
 	if err := e.Driver.Click(x, y); err != nil {
 		return fail(s.Name, "click (%d, %d): %v", x, y, err)
 	}
+	_ = rescaled
 	e.Driver.Log(fmt.Sprintf("  clicked (%d, %d)", x, y))
 	return e.settle(s)
+}
+
+// rescalePoint turns a coordinate the file measured into the coordinate this frame needs.
+//
+// THREE CASES, AND THE THIRD IS THE ONE THAT KEEPS TODAY'S SAFETY:
+//
+//	`click_at:` present, frame matches it        the point as written
+//	`click_at:` present, frame differs           scaled by the frame's own ratio
+//	`click_at:` absent, frame is not 1920x1080    REFUSED - a coordinate nobody declared
+//
+// `click_at:` absent AND a 1920x1080 frame is the shape every existing walk uses, and it stays
+// exactly as it was: no declaration, no scaling, no change.
+func (e *Executor) rescalePoint(s walk.Step, x, y int) (int, int, bool, error) {
+	f, err := e.Driver.Frame()
+	if err != nil {
+		return x, y, false, nil
+	}
+	w, h := f.Size()
+	if w == 0 || h == 0 {
+		return x, y, false, nil
+	}
+	at, declared := pairAt(s)
+	if !declared {
+		if w != 1920 || h != 1080 {
+			return 0, 0, false, fmt.Errorf(
+				"click (%d, %d) is a coordinate measured at 1920x1080 but the framebuffer is "+
+					"%dx%d. Either set the machine's resolution to 1920x1080, or say "+
+					"`click_at: [%d, %d]` when the guest draws its own size", x, y, w, h, w, h)
+		}
+		return x, y, false, nil
+	}
+	if at[0] == w && at[1] == h {
+		return x, y, false, nil
+	}
+	if at[0] <= 0 || at[1] <= 0 {
+		return 0, 0, false, fmt.Errorf("`click_at:` must be a size, and [%d, %d] is not",
+			at[0], at[1])
+	}
+	nx := x * w / at[0]
+	ny := y * h / at[1]
+	e.Driver.Log(fmt.Sprintf("  click_at %dx%d: (%d, %d) -> (%d, %d) on a %dx%d frame",
+		at[0], at[1], x, y, nx, ny, w, h))
+	return nx, ny, true, nil
 }
 
 // translateClick turns the mapping form of `click:` into the step that carries the old key.
@@ -722,17 +774,17 @@ func (e *Executor) doDoubleClick(s walk.Step) error {
 	if err != nil {
 		return err
 	}
-	// THE SAME GUARD AS `click:`, FOR THE SAME REASON.
-	if f, ferr := e.Driver.Frame(); ferr == nil {
-		if w, h := f.Size(); w != 0 && h != 0 && (w != 1920 || h != 1080) {
-			return fail(s.Name, "double-click (%d, %d) is a coordinate measured at 1920x1080 but "+
-				"the framebuffer is %dx%d", x, y, w, h)
-		}
+	// THE SAME GUARD AS `click:`, AND THE SAME DECLARATION GETS PAST IT. `click_at:` is one key for
+	// one question - "this point was measured on a frame of THIS size" - so a double-click carries it
+	// too rather than growing a second spelling.
+	nx, ny, _, ferr := e.rescalePoint(s, x, y)
+	if ferr != nil {
+		return fail(s.Name, "%v", ferr)
 	}
-	if err := e.Driver.DoubleClick(x, y); err != nil {
-		return fail(s.Name, "double-click (%d, %d): %v", x, y, err)
+	if err := e.Driver.DoubleClick(nx, ny); err != nil {
+		return fail(s.Name, "double-click (%d, %d): %v", nx, ny, err)
 	}
-	e.Driver.Log(fmt.Sprintf("  double-clicked (%d, %d)", x, y))
+	e.Driver.Log(fmt.Sprintf("  double-clicked (%d, %d)", nx, ny))
 	return e.settle(s)
 }
 
@@ -761,7 +813,14 @@ func (e *Executor) doType(s walk.Step) error {
 		if err != nil {
 			return err
 		}
-		if err := e.Driver.Click(x, y); err != nil {
+		// THE POINT BEFORE TYPING IS A CLICK, so it takes the same declaration and the same
+		// rescaling - a form field at (960, 628) of a 1024x768 guest is at (512, 448) of its own
+		// frame, and typing into the wrong place is the failure this file exists to avoid.
+		nx, ny, _, ferr := e.rescalePoint(s, x, y)
+		if ferr != nil {
+			return fail(s.Name, "%v", ferr)
+		}
+		if err := e.Driver.Click(nx, ny); err != nil {
 			return fail(s.Name, "click before typing: %v", err)
 		}
 

@@ -608,9 +608,15 @@ func firstLineOf(s string) string {
 	return s
 }
 
-// pairAt reads the size a pixel rect was measured at, under `rect_at:` or its old name
-// `region_at:`. One region, one meaning: a rectangle is pixels on ONE screen.
+// pairAt reads the size a pixel coordinate was measured at.
+//
+// ONE NAME PER THING, AND THEY ARE THE SAME THING: `rect_at:`/`region_at:` for a rectangle that is
+// read, `click_at:` for a point that is pressed. A file says which frame its numbers belong to, and
+// the engine scales against the frame that arrived.
 func pairAt(s walk.Step) ([2]int, bool) {
+	if v, ok := pairOf(s, "click_at"); ok {
+		return v, true
+	}
 	if v, ok := pairOf(s, "rect_at"); ok {
 		return v, true
 	}

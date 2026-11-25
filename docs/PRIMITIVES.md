@@ -114,6 +114,7 @@ IS DROPPED - which is how an optional medium disappears without a conditional an
 | `button` | click the control found by this label |
 | `clear` | select-all and delete before typing |
 | `click` | the point to click, as [x, y] or `{button: [x, y], fallback: [x, y]}` |
+| `click_at` | with a coordinate: [width, height] it was measured at, so a guest that draws another size can still be clicked |
 | `color_region` | where to look for that colour |
 | `color_tolerance` | how far from the colour still counts |
 | `colour` | click the largest blob of this [r, g, b] |

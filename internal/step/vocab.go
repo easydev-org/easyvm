@@ -122,6 +122,9 @@ var Verbs = map[string]Verb{
 		Fields: map[string]Key{
 			"click": {Name: "click", Kind: KindPairOrMapping,
 				Summary: "the point to click, as [x, y] or `{button: [x, y], fallback: [x, y]}`"},
+			"click_at": {Name: "click_at", Kind: KindPair,
+				Summary: "with a `click:`/`double:`/`at:` coordinate: [width, height] it was " +
+					"measured at, so a guest that draws another size can still be clicked"},
 			"text": {Name: "text", Kind: KindString,
 				Summary: "the string to type"},
 			"key": {Name: "key", Kind: KindString,
