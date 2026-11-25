@@ -91,6 +91,11 @@ func (e *Executor) doBoot(s walk.Step) error {
 		// the answer twice: a fresh disk runs on itself (no throwaway diff that `ReleaseDiff` deletes),
 		// and a disk that came from somewhere keeps its writes.
 		FreshDisk: e.madeDisk,
+		// AND THE FILE MAY ASK FOR THE SAME THING EXPLICITLY, with `overlay: false`. That is for a
+		// stage whose diff does not fit beside the disk it starts from - see
+		// `machine.Boot.WantsOverlay`. `Bool` is what reads it, because the default is ON: an absent
+		// key and `overlay: true` both mean "a diff", and only an explicit `false` turns it off.
+		NoOverlay: noOverlayFor(s),
 	}
 	e.Driver.Log(fmt.Sprintf("  booting with %d qemu argument(s)", len(spec.Args)))
 	if err := m.Boot(spec); err != nil {
@@ -540,6 +545,23 @@ func (e *Executor) doSCP(s walk.Step) error {
 	}
 	e.Driver.Log(fmt.Sprintf("  scp: %s -> %s", filepath.Base(local), remote))
 	return nil
+}
+
+// noOverlayFor answers "does this boot skip the throwaway diff?", and only an explicit
+// `overlay: false` says yes.
+//
+// IT IS A TOP-LEVEL KEY BY THE TIME THE ENGINE SEES IT. `boot` in a 2.0 file is a MARKER that the
+// reader flattens: its children are lifted to sit beside it (`v2NormaliseList` in walkv2.go does the
+// move), so `machine`, `args` and `overlay` all arrive in the step's own map. A reader that looked
+// inside a nested `boot:` map would find nothing at all.
+//
+// THE DEFAULT IS A DIFF. Every stage that boots a published disk reads through a read-only base, and
+// that is what makes a failed run harmless and a guest's TRIM safe. A file opts out by name.
+func noOverlayFor(s walk.Step) bool {
+	if on, present := s.Bool("overlay"); present {
+		return !on
+	}
+	return false
 }
 
 // --- the share ------------------------------------------------------------------------// --- recording and publishing ---------------------------------------------------------

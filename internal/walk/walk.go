@@ -116,6 +116,32 @@ func (s Step) Has(key string) bool {
 	return true
 }
 
+// Bool reads a boolean, and reports whether the key was THERE at all.
+//
+// `Has` CANNOT ANSWER THIS QUESTION: it folds "absent" and "false" into the same `false`, which is
+// right for a flag whose default is off and wrong for one whose default is on. `overlay` has the
+// default ON - the throwaway diff is what every stage gets - so a file that turns it off needs a
+// reader that can tell `overlay false` from no `overlay` line at all.
+func (s Step) Bool(key string) (value, present bool) {
+	v, ok := s.Spec[key]
+	if !ok || v == nil {
+		return false, false
+	}
+	switch t := v.(type) {
+	case bool:
+		return t, true
+	case string:
+		b, err := strconv.ParseBool(strings.TrimSpace(t))
+		if err != nil {
+			return false, false
+		}
+		return b, true
+	case int:
+		return t != 0, true
+	}
+	return false, false
+}
+
 // Float reads a number of seconds, accepting an int or a float and nothing else.
 func (s Step) Float(key string, fallback float64) (float64, error) {
 	v, ok := s.Spec[key]

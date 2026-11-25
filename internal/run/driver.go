@@ -175,6 +175,13 @@ type BootSpec struct {
 	// that conflating them produced. A `disk_gb:` step sets this; a `disk:` step that names a file
 	// from somewhere does not.
 	FreshDisk bool
+	// NoOverlay says the guest writes STRAIGHT TO THE DISK with no throwaway diff in front of it,
+	// set by `overlay: false` on the file's `boot:` step.
+	//
+	// IT EXISTS FOR THE STAGES WHOSE DIFF DOES NOT FIT BESIDE THE DISK THEY START FROM: `publish`
+	// reads the base AND the diff and writes a third file, so the peak is the sum of three. See
+	// `machine.Boot.WantsOverlay` for the macOS measurement that added this.
+	NoOverlay bool
 	// OpenCoreROM, OpenCoreVars and BootImage are the macOS loader, built from the recovery image.
 	//
 	// THEY ARE DEAD FOR A `kind: folder` SHAPE, which names its own files in the shape rather than

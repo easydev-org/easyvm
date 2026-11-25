@@ -705,6 +705,7 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 		Initrd:       spec.Initrd,
 		KernelAppend: spec.KernelAppend,
 		FreshDisk:    spec.FreshDisk,
+		NoOverlay:    spec.NoOverlay,
 		Incoming:     spec.Incoming,
 		Machine:      spec.Machine,
 		Args:         spec.Args,

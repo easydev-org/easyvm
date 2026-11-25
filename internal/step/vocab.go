@@ -114,6 +114,11 @@ var Verbs = map[string]Verb{
 				Summary: "the `-machine` value"},
 			"incoming": {Name: "incoming", Kind: KindString,
 				Summary: "a `snapshot:` file to load instead of booting"},
+			"overlay": {Name: "overlay", Kind: KindBool,
+				Summary: "whether the guest's writes go to a throwaway diff (the default) or " +
+					"STRAIGHT TO THE DISK. `overlay: false` is for a stage whose diff does not " +
+					"fit beside the disk it starts from: `publish` reads the disk AND the diff " +
+					"and writes a third file, so the peak is the sum of three"},
 		}},
 
 	// ---- 2. `input` ------------------------------------------------------------------------

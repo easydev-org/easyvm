@@ -58,6 +58,7 @@ A step is one of nine verbs, or one of the actions the engine dispatches on, plu
 | `disk_gpt` | write a GPT partition table |
 | `incoming` | a `snapshot:` file to load instead of booting |
 | `machine` | the `-machine` value |
+| `overlay` | whether writes go to a throwaway diff (default) or straight to the disk |
 
 A BOOT NAMES QEMU ARGUMENTS, NOT A GUEST FAMILY. There is no `os:`, no `iso:` and no `microvm:`: the
 file that wants a VGA at 1920x1080 writes `["-device", "VGA,xres=1920,yres=1080,vgamem_mb=32"]`, and a

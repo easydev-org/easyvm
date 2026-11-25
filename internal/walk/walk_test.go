@@ -193,6 +193,60 @@ func TestUnnamedStepIsRefused(t *testing.T) {
 	}
 }
 
+// `overlay false` IS A FLAG WHOSE DEFAULT IS ON, AND THE 2.0 READER HAS TO KEEP IT.
+//
+// TWO THINGS WENT WRONG BEFORE THIS TEST EXISTED, and both are what it now holds:
+//
+//  1. `.walk` IS NOT YAML. `v2Cut` splits a line on whitespace, so `overlay: false` - the YAML habit -
+//     arrives as the KEY `overlay:` with an empty value, and validation answers `unknown key
+//     "overlay:"`. The line is `overlay false`.
+//
+//  2. `boot` IS A MARKER: its children are LIFTED to sit beside it, so by the time the engine looks,
+//     `overlay` is a top-level key and a reader that searched a nested `boot:` map found nothing -
+//     the flag would have been silently ignored and the diff kept.
+//
+// `Has` cannot read it either: it folds "absent" and "false" together, and this flag's default is ON.
+func TestOverlayIsAFlagWhoseDefaultIsOn(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "x.walk")
+	body := `walkthrough "overlay flag"
+resolution 1920x1080
+recording_resolution 1920x1080
+step "boot with no key"
+  boot
+    machine "q35"
+    args [["-drive", "file=disk.qcow2"]]
+step "boot with the flag off"
+  boot
+    machine "q35"
+    overlay false
+    args [["-drive", "file=disk.qcow2"]]
+step "boot with the flag on"
+  boot
+    machine "q35"
+    overlay true
+    args [["-drive", "file=disk.qcow2"]]
+`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f, err := Load(path, nil)
+	if err != nil {
+		t.Fatalf("a `boot` with `overlay` was refused: %v", err)
+	}
+
+	if _, present := f.Steps[0].Bool("overlay"); present {
+		t.Fatal("a boot with no `overlay` line reported the key as present; the default is a diff " +
+			"and it must come from the ABSENCE of the line, not from its value")
+	}
+	if on, present := f.Steps[1].Bool("overlay"); !present || on {
+		t.Fatalf("`overlay false` must arrive as present-and-false; got present=%v value=%v", present, on)
+	}
+	if on, present := f.Steps[2].Bool("overlay"); !present || !on {
+		t.Fatalf("`overlay true` must arrive as present-and-true; got present=%v value=%v", present, on)
+	}
+}
+
 // A MISSING VAR IS AN ERROR AND NAMES WHAT WAS DEFINED.
 //
 // A blank substituted into a timeout was one number in one step and a different number in another

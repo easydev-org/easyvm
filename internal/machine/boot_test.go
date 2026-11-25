@@ -82,6 +82,31 @@ func TestAFreshDiskNeedsNoOverlay(t *testing.T) {
 	}
 }
 
+// A FILE MAY TURN THE DIFF OFF BY NAME, and only by name.
+//
+// THE DEFAULT STAYS THE DIFF: `overlay:` absent and `overlay: true` must both keep it, because the
+// diff is what makes a failed run harmless. Only the explicit `false` - which a stage writes when its
+// diff does not fit beside the disk it starts from - turns it off.
+func TestAFileMayWriteStraightToTheDisk(t *testing.T) {
+	published := Boot{Disk: "/d.qcow2"}
+
+	if published.WantsOverlay() != true {
+		t.Fatal("a published disk with no `overlay:` key got no diff; the default must stay the diff")
+	}
+	if (Boot{Disk: "/d.qcow2", NoOverlay: false}).WantsOverlay() != true {
+		t.Fatal("`overlay: true` turned the diff off")
+	}
+	if (Boot{Disk: "/d.qcow2", NoOverlay: true}).WantsOverlay() {
+		t.Fatal("`overlay: false` still opened a diff, so the guest's writes never reach the disk " +
+			"this stage is meant to publish - and the third copy publish would need is still there")
+	}
+
+	// A FRESH DISK NEEDS NO DIFF EITHER WAY, so the flag cannot resurrect one.
+	if (Boot{Disk: "/d.qcow2", FreshDisk: true, NoOverlay: true}).WantsOverlay() {
+		t.Fatal("a fresh disk with `overlay: false` opened a diff")
+	}
+}
+
 // A BOOT WITH NO ARGUMENTS IS REFUSED, because it asks qemu for a machine with no disk.
 func TestABootMustNameItsMachineAndArguments(t *testing.T) {
 	dir := t.TempDir()

@@ -88,6 +88,13 @@ type Boot struct {
 	// creates its own disk writes to the disk itself; a step that opens a disk from somewhere - a
 	// published artifact, another stage's output - must NOT lose its writes.
 	FreshDisk bool
+	// NoOverlay says the guest's writes go STRAIGHT TO THE DISK, with no throwaway diff in front.
+	//
+	// A FILE ASKS FOR IT WITH `overlay: false` ON ITS `boot:`, and it is for the stage whose diff
+	// does not fit beside the disk it starts from - see WantsOverlay for the measurement. It trades
+	// the diff's two guarantees for that room: a failed run leaves its writes in the disk, and a TRIM
+	// from the guest reaches the published artifact.
+	NoOverlay bool
 }
 
 // Validate refuses a boot that cannot work, before qemu is started.
@@ -180,7 +187,32 @@ func (b Boot) installing() bool {
 // A DISK THIS RUN CREATED NEEDS NONE: there is nothing behind it to protect, and a diff would be one
 // more file to flatten. Every other boot reads through a read-only base, which is what makes it safe
 // for the guest to TRIM.
-func (b Boot) WantsOverlay() bool { return !b.FreshDisk }
+//
+// A FILE MAY ALSO ASK FOR THE WRITES TO GO STRAIGHT TO THE DISK with `overlay: false` on its `boot:`.
+// THAT IS FOR THE STAGES WHOSE DIFF DOES NOT FIT BESIDE THE DISK THEY START FROM, and the arithmetic
+// is the same for all of them: `publish` reads the base AND the diff and writes a THIRD file, so the
+// peak is the sum of three. MEASURED on macos 15 ssh (run 45611579655):
+//
+//	disk.qcow2          27.95 GiB   the pulled system, read-only
+//	run-overlay.qcow2   26.29 GiB   what the guest wrote
+//	qemu-img convert    42.2 GiB    where the compressed flatten ran out of room
+//	                    ---------
+//	                    ~96 GiB     on an 84 GiB runner
+//
+// and the guest's own `df` in that same run said the whole filesystem held 22 GiB. THE 26 GiB DIFF
+// WAS ALMOST ENTIRELY BLOCKS THE GUEST HAD ALREADY FREED: APFS does not hand deletes back to
+// `discard=unmap` while it runs, so nothing could shrink it and the third copy had nowhere to go.
+//
+// With no diff there is no second copy, and the peak is the disk plus its output.
+//
+// IT IS NOT THE DEFAULT, AND IT IS NOT FREE. A diff is what lets a failed run leave the published
+// disk untouched, and what makes `discard=unmap` safe - a TRIM from a guest writing straight to a
+// published artifact frees blocks the next stage expects to read. So a file that says
+// `overlay: false` is saying "this stage's writes ARE the product, and nothing after it needs the
+// bytes it frees".
+func (b Boot) WantsOverlay() bool {
+	return !b.FreshDisk && !b.NoOverlay
+}
 
 // Discardable reports whether a TRIM may reach the disk.
 //
