@@ -64,6 +64,13 @@ A BOOT NAMES QEMU ARGUMENTS, NOT A GUEST FAMILY. There is no `os:`, no `iso:` an
 file that wants a VGA at 1920x1080 writes `["-device", "VGA,xres=1920,yres=1080,vgamem_mb=32"]`, and a
 machine this build has never heard of boots without a line of Go changing.
 
+`overlay false` IS FOR THE STAGE WHOSE DIFF DOES NOT FIT BESIDE THE DISK IT STARTS FROM. By default a
+boot of a published disk reads through a throwaway qcow2 diff, which is what lets a failed run leave
+the disk untouched and keeps a guest's TRIM away from it. But `publish` reads the disk AND the diff
+and writes a THIRD file, so the peak is the sum of three - MEASURED on the macOS 15 ssh stage, 96 GiB
+on an 84 GiB runner. With no diff there is no second copy. The flag gives up the two guarantees the
+diff carries, so it belongs to a stage whose writes ARE its product.
+
 `{{disk}}`, `{{iso}}`, `{{recovery}}`, `{{answer}}`, `{{driver}}`, `{{kernel}}`, `{{initrd}}`,
 `{{append}}`, `{{work}}` and `{{dir}}` are filled from the step, and A PAIR WHOSE PLACEHOLDER IS EMPTY
 IS DROPPED - which is how an optional medium disappears without a conditional anywhere.
