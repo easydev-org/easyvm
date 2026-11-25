@@ -826,6 +826,37 @@ func (e *Executor) doType(s walk.Step) error {
 
 	}
 
+	// `clear: true` SELECTS ALL AND DELETES BEFORE TYPING, AND IT WAS DECLARED AND NEVER IMPLEMENTED.
+	//
+	// MEASURED on AnduinOS' account form: the username box arrives holding a `vm`, `input text "vmuser"
+	// at ...` appended, and the disk was built with the account `vmvmuser`. Every later `ssh:` then
+	// failed with `unable to authenticate, attempted methods [none password]` against a machine whose
+	// sshd was active and whose `PasswordAuthentication yes` was in place - a message that names
+	// nothing and sent three runs into the wrong file.
+	//
+	// THE VOCABULARY HAS ADVERTISED THIS KEYWORD the whole time (vocab.go: `clear:` "select-all and
+	// delete before typing"), which is why the walk was written with it. Nothing read it, so the flag
+	// was a comment: a typo would have been refused as an unknown key, and a supported-but-ignored one
+	// is the worse of the two.
+	//
+	// `modifier:` SAYS WHICH SELECT-ALL, ctrl by default. The delete is `backspace`: a selection replaced
+	// by a delete leaves an empty field, which is what the caller asked for.
+	if s.Get("clear") != "" {
+		if clear, present := s.Bool("clear"); present && clear {
+			modifier := s.Get("modifier")
+			if modifier == "" {
+				modifier = "ctrl"
+			}
+			if err := e.Driver.Stroke([]string{modifier}, "a"); err != nil {
+				return fail(s.Name, "clear: select all with %s+a: %v", modifier, err)
+			}
+			if err := e.Driver.Key("backspace"); err != nil {
+				return fail(s.Name, "clear: delete the selection: %v", err)
+			}
+			e.Driver.Log(fmt.Sprintf("  cleared the field (%s+a, backspace)", modifier))
+		}
+	}
+
 	perChar := 150 * time.Millisecond
 	if v, err := s.Float("type_gap", 0); err == nil && v > 0 {
 		perChar = time.Duration(v * float64(time.Second))

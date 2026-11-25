@@ -300,3 +300,50 @@ func TestTheDeadPaneStateMachineKeysAreGone(t *testing.T) {
 			"alternatives form is refused while the executor implements it")
 	}
 }
+
+// `clear:` MUST ACTUALLY CLEAR, BECAUSE THE VOCABULARY HAS ADVERTISED IT SINCE IT WAS WRITTEN.
+//
+// MEASURED on AnduinOS' account form: the username box arrives holding a `vm`, the walk says
+// `input text "vmuser" at ... clear true`, and the disk was built with `vmvmuser`. Nothing cleared it,
+// because `doType` never read the key - it only clicked and typed. Every later `ssh:` then failed with
+// `unable to authenticate, attempted methods [none password]` on a machine whose sshd was active, and
+// that message names nothing.
+//
+// THE CHECK IS ON THE CODE because the failure is silent: a step that ignores `clear:` still types, still
+// reports the right character count, and still passes. Only the account on the disk is wrong.
+func TestATypeStepClearsBeforeTyping(t *testing.T) {
+	body, err := os.ReadFile("executor.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(body)
+	i := strings.Index(src, "func (e *Executor) doType(")
+	if i < 0 {
+		t.Fatal("no doType")
+	}
+	rest := src[i:]
+	if end := strings.Index(rest[1:], "\nfunc "); end > 0 {
+		rest = rest[:end+1]
+	}
+
+	clearAt := strings.Index(rest, `s.Bool("clear")`)
+	if clearAt < 0 {
+		t.Fatal("`doType` does not read `clear:`, so a pre-filled field is appended to - which is how " +
+			"an AnduinOS install produced the account `vmvmuser` while the walk asked for `vmuser`")
+	}
+	// The select-all and the delete are both required: a select with no delete replaces nothing.
+	if !strings.Contains(rest, `"a"`) {
+		t.Fatal("`clear:` does not select all")
+	}
+	if !strings.Contains(rest, `"backspace"`) {
+		t.Fatal("`clear:` selects but does not delete, so the old text is still there")
+	}
+	// AND IT RUNS BEFORE THE TYPING, or it clears the value that was just written.
+	typeAt := strings.Index(rest, "e.Driver.Type(")
+	if typeAt < 0 {
+		t.Fatal("`doType` no longer types")
+	}
+	if clearAt > typeAt {
+		t.Fatal("`clear:` runs after the typing")
+	}
+}
