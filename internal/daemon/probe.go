@@ -188,7 +188,9 @@ func (d *Daemon) logHostSSHDiagnosis(host string, port int) {
 		logf(fmt.Sprintf("  host diag [%s]: %s", label, strings.Join(keep, " | ")))
 	}
 	logf(fmt.Sprintf("=== HOST-SIDE DIAGNOSIS for %s:%d, once per run ===", host, port))
-	log("nat 2222", "sh", "-c", fmt.Sprintf("iptables -t nat -S 2>/dev/null | grep -E '2222|%s' ", "172.30.0.2"))
+	log("nat full", "sh", "-c", "iptables -t nat -S 2>/dev/null | head -40")
+	log("nat jump OUTPUT", "sh", "-c", "iptables -t nat -S OUTPUT 2>/dev/null; iptables -t nat -S PREROUTING 2>/dev/null")
+	log("policy FORWARD", "sh", "-c", "iptables -S FORWARD 2>/dev/null | head -10")
 	log("conntrack", "sh", "-c", "conntrack -L 2>/dev/null | grep 172.30.0.2 | head -10")
 	log("ip neigh", "sh", "-c", "ip neigh show 2>/dev/null | grep 172.30")
 	log("ip route", "sh", "-c", "ip route get 172.30.0.2 2>&1")
