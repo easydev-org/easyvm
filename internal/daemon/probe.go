@@ -208,7 +208,7 @@ func (d *Daemon) logHostSSHDiagnosis(host string, port int) {
 	// is unreachable through rules that are visibly present. `ss -tn` shows a SYN stuck in SYN_SENT
 	// (sent, no reply) versus absent (never sent) - the two look identical from a dial timeout.
 	log("iptables version", "sh", "-c", "iptables --version 2>&1; readlink -f $(command -v iptables) 2>&1; nft list tables 2>&1 | head -10")
-	log("ss 22", "sh", "-c", "ss -tn state syn-sent '( dport = :22 or sport = :22 )' 2>&1 | head -10")
+	log("ss 22", "sh", "-c", "ss -tn 2>&1 | grep -E ':22|syn-sent|SYN-SENT' | head -10; echo ---conn---; ss -tn state syn-sent 2>&1 | head -6")
 	// HOST -> GUEST AT L3, NOT TCP. ICMP crosses the same tap/bridge/ARP as the SYN but no port and
 	// no tcp rule, so it separates "the path is dead" from "tcp/22 specifically is blocked". This
 	// image has python3 and no ping binary, so the echo is built by hand in a one-liner.
