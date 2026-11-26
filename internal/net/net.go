@@ -252,6 +252,30 @@ func Up(sshPort int, forwards []int) error {
 	}
 	_, _ = run("sysctl", "-w", "net.ipv6.conf."+TapName+".disable_ipv6=1")
 
+	// A PERMANENT ARP ENTRY FOR THE GUEST, BECAUSE DYNAMIC ARP FLAPS ON THIS RUNNER.
+	//
+	// MEASURED on run 45828251788, whose four host-diag shots read, at four different seconds while
+	// the guest was up and listening on 0.0.0.0:22:
+	//
+	//	ip neigh: 172.30.0.2 ... DELAY       <- arp was mid-probe
+	//	ip neigh: 172.30.0.2 ... REACHABLE
+	//	ip neigh: 172.30.0.2 ... DELAY
+	//	ip neigh: 172.30.0.2 ... REACHABLE
+	//
+	// and every probe - even after the engine was changed to dial the guest's own 22, no DNAT - was
+	// `dial tcp 172.30.0.2:22: connect: no route to host`. `no route to host` is EHOSTUNREACH, which
+	// on a directly-connected /24 means ARP failed AT THE MOMENT OF THE SEND: the neighbour entry
+	// had flipped to a state that required a fresh resolution, the SYN went out before the reply came
+	// back, and the kernel returned host-unreachable rather than waiting. A guest that answers ARP
+	// only sometimes is enough to make every probe fail while `ping` a second later says 0% loss.
+	//
+	// THE MAC IS FIXED AND KNOWN (TapMAC, leased to GuestIP by dnsmasq), so there is nothing to
+	// discover. A permanent neighbour entry removes the resolution entirely: the host already knows
+	// the MAC, and no SYN can race a probe it does not need to do. This is the same reason the guest
+	// side is not touched - the guest is correct in every frame; it is the HOST's belief about where
+	// the guest is that flickers.
+	_, _ = run("ip", "neigh", "replace", GuestIP, "lladdr", TapMAC, "dev", BridgeName, "nud", "permanent")
+
 	if err := startDHCP(); err != nil {
 		return err
 	}
