@@ -299,7 +299,22 @@ func Up(sshPort int, forwards []int) error {
 	// the MAC, and no SYN can race a probe it does not need to do. This is the same reason the guest
 	// side is not touched - the guest is correct in every frame; it is the HOST's belief about where
 	// the guest is that flickers.
-	_, _ = run("ip", "neigh", "replace", GuestIP, "lladdr", TapMAC, "dev", BridgeName, "nud", "permanent")
+	// THE STATIC ARP ENTRY IS OFF BY DEFAULT, BECAUSE IT MAY BE THE BUG.
+	//
+	// fork (which PASSES ssh on endeavour/manjaro/zorin/mx/nixos - easyvm-fork has linux-*-ssh tags
+	// from 2026-11-19/20) has NO static ARP: it lets the guest answer ARP normally. This entry was
+	// added here to stop a DELAY<->REACHABLE flap, and after it every host->guest SYN reaches the
+	// tap with the right destination MAC (52:54:00:56:4d:01, per the -e capture) and the guest STILL
+	// does not answer, with nstat InHdrErrors/InAddrErrors/ListenDrops all zero - a frame the guest's
+	// IP stack never counted, i.e. dropped at the virtio layer. A pinned neighbour whose MAC is not
+	// the one the guest's virtio device actually uses would deliver every frame to a MAC the guest
+	// discards in hardware, and it would look exactly like this.
+	//
+	// `EASYVM_STATIC_ARP=1` re-enables it for a host that genuinely needs it. Default is dynamic
+	// ARP, which is what the passing fork runs.
+	if os.Getenv("EASYVM_STATIC_ARP") == "1" {
+		_, _ = run("ip", "neigh", "replace", GuestIP, "lladdr", TapMAC, "dev", BridgeName, "nud", "permanent")
+	}
 
 	if err := startDHCP(); err != nil {
 		return err
