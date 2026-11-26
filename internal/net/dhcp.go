@@ -373,19 +373,34 @@ func applyNAT() error {
 		}
 	}
 
-	// FORWARDING FOR THIS PAIR ONLY. The container's default FORWARD policy is usually DROP, so a
-	// guest with a lease and a route still cannot be reached - and the symptom is "timed out",
-	// which reads as a dead guest rather than a filter.
+	// FORWARDING FOR THIS PAIR, INSERTED AT THE HEAD OF FORWARD, NOT APPENDED.
+	//
+	// MEASURED on run 45837295529: the guest's own screen showed LISTEN 0.0.0.0:22, sshd active,
+	// `ip neigh 172.30.0.1 REACHABLE`, `ping 172.30.0.1` at 0% loss - the guest fully correct - and
+	// the host probe was `dial tcp 172.30.0.2:22: i/o timeout`. ARP resolves (ARP does not traverse
+	// iptables) but the TCP SYN never reaches the guest, and a timeout rather than a refusal means
+	// the packet was DROPPED in the host, not answered.
+	//
+	// THE DROPPER IS DOCKER. On a Docker runner the FORWARD chain is
+	// `FORWARD -j DOCKER-USER; -j DOCKER-FORWARD; -j DOCKER; ...` and those chains DROP traffic that
+	// is not a published container port. This code used to append its ACCEPT with `-A FORWARD`, so it
+	// landed AFTER Docker's DROP and was never reached - the guest was unreachable through a policy
+	// that "clearly" allowed it (`-A FORWARD -d 172.30.0.2/32 -j ACCEPT` was in the table and never
+	// hit). The lab pod is not Docker, so there the appended rule worked and the bug hid.
+	//
+	// `-I FORWARD 1` puts the pair's ACCEPT BEFORE Docker's chains, which is the only position where
+	// it can apply. `-C` still guards idempotency; the insert is what makes it effective.
 	for _, rule := range [][]string{
 		{"-s", spec, "-j", "ACCEPT"},
 		{"-d", GuestIP + "/32", "-j", "ACCEPT"},
 	} {
 		args := append([]string{"-C", "FORWARD"}, rule...)
-		if _, err := run("iptables", args...); err != nil {
-			add := append([]string{"-A", "FORWARD"}, rule...)
-			if _, err := run("iptables", add...); err != nil {
-				return fmt.Errorf("FORWARD ACCEPT for %v: %w", rule, err)
-			}
+		if _, err := run("iptables", args...); err == nil {
+			continue
+		}
+		ins := append([]string{"-I", "FORWARD", "1"}, rule...)
+		if _, err := run("iptables", ins...); err != nil {
+			return fmt.Errorf("FORWARD ACCEPT for %v: %w", rule, err)
 		}
 	}
 	return nil
