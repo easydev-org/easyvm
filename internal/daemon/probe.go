@@ -230,9 +230,15 @@ func (d *Daemon) logHostSSHDiagnosis(host string, port int) {
 	// device showed "listening ... 0 packets" even for traffic that did reach the bridge. `any` sees
 	// whichever device the packet actually leaves by.
 	capture := "rm -f /tmp/c22.txt /tmp/c22.pcap; " +
-		"(tcpdump -nn -i any -c 12 -w /tmp/c22.pcap 'tcp port 22' >/tmp/c22.txt 2>&1 &); sleep 1; " +
-		"python3 /tmp/dial22.py; sleep 4; echo ---PCAP---; " +
-		"tcpdump -nn -r /tmp/c22.pcap 2>&1 | head -16; echo ---TCPDUMPMSG---; cat /tmp/c22.txt | head -4"
+		// `-U` IS THE WHOLE FIX FOR AN EMPTY PCAP: without it tcpdump buffers and a file read while
+		// it is still writing has no header at all ("truncated dump file; ... only got 0"), which
+		// reads as "no packets" when packets may be present. `-U` writes each packet through.
+		// No `-c`: the count would make tcpdump wait for twelve packets that a timed-out SYN never
+		// produces; instead it is started with -U, given time, then killed before the read.
+		"(tcpdump -nn -U -i any -w /tmp/c22.pcap 'tcp port 22' >/tmp/c22.txt 2>&1 &); sleep 1; " +
+		"python3 /tmp/dial22.py; sleep 4; " +
+		"pkill -f 'tcpdump.*c22.pcap' 2>/dev/null; sleep 1; echo ---PCAP---; " +
+		"tcpdump -nn -r /tmp/c22.pcap 2>&1 | head -20; echo ---TCPDUMPMSG---; cat /tmp/c22.txt | head -4"
 	// Write the python first so its indentation is exact and not mangled by shell around it.
 	writeDial := "cat > /tmp/dial22.py <<'PYEOF'\n" +
 		"import socket, sys\n" +
