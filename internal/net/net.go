@@ -269,6 +269,31 @@ func Up(sshPort int, forwards []int) error {
 	// back, and the kernel returned host-unreachable rather than waiting. A guest that answers ARP
 	// only sometimes is enough to make every probe fail while `ping` a second later says 0% loss.
 	//
+	// KEEP THE BRIDGE'S FRAMES OUT OF IPTABLES ENTIRELY, BECAUSE DOCKER'S RULES CANNOT BE SEEN FROM
+	// INSIDE THE CONTAINER.
+	//
+	// MEASURED: on CI (`--cap-add NET_ADMIN`, NOT `--privileged`) every host->guest SYN to
+	// 172.30.0.2:22 is `i/o timeout`, conntrack for it is empty, ARP is REACHABLE, the guest's sshd
+	// listens on 0.0.0.0:22, its firewall is off, FORWARD accepts 172.30.0.2 and the MASQUERADE rule
+	// excludes the guest subnet - and `ping 172.30.0.1` from the guest is 0% loss. The SAME image,
+	// SAME disk, in the lab pod dials 172.30.0.2:22 and reads `SSH-2.0-OpenSSH_10.6`. The pod is not
+	// Docker; CI is.
+	//
+	// When `net.bridge.bridge-nf-call-iptables=1` (the host default, inherited into the container)
+	// every frame crossing qemubr0 is handed to the iptables tables - including the HOST's Docker
+	// chains, which live outside this container's netns and are invisible to `iptables -S` here. A
+	// bridge frame that Docker's host-side rules drop is gone before this container's own FORWARD
+	// ACCEPT or MASQUERADE exclusions ever matter, which is exactly why every rule looks right and
+	// the packet still never arrives.
+	//
+	// Turning it off makes the bridge a plain L2 switch for this guest: frames are forwarded by the
+	// bridge itself, and this container's own iptables still governs what leaves via eth0 to the
+	// internet. It is the closest a NET_ADMIN container can get to the pod's behaviour. A failure is
+	// ignored on purpose - some kernels mount /proc/sys/net/bridge read-only in a container, and on
+	// those the previous layers (FORWARD insert, MASQUERADE exclusion) are still in force.
+	_, _ = run("sysctl", "-w", "net.bridge.bridge-nf-call-iptables=0")
+	_, _ = run("sysctl", "-w", "net.bridge.bridge-nf-call-ip6tables=0")
+
 	// THE MAC IS FIXED AND KNOWN (TapMAC, leased to GuestIP by dnsmasq), so there is nothing to
 	// discover. A permanent neighbour entry removes the resolution entirely: the host already knows
 	// the MAC, and no SYN can race a probe it does not need to do. This is the same reason the guest
