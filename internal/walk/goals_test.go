@@ -2260,7 +2260,11 @@ func workflowAssets(t *testing.T) map[string]bool {
 		}
 		for _, m := range list.FindAllStringSubmatch(string(body), -1) {
 			for _, e := range pair.FindAllStringSubmatch(m[1], -1) {
+				// A TAR ASSET IS UNPACKED BY `stage.yml` BEFORE THE WALK RUNS, so the name a `scp:`
+				// can actually read is the one INSIDE the tar, without the suffix. Every macOS dev
+				// asset is published as `Xcode_...xip.tar` and lands as `Xcode_...xip`.
 				out[e[1]] = true
+				out[strings.TrimSuffix(e[1], ".tar")] = true
 			}
 		}
 	}

@@ -8,11 +8,11 @@ package run
 //
 // THE FIRST GROUP IS THE 2.0 VOCABULARY. The second is the shapes those verbs compile to, which the
 // executor still dispatches on because a shape is what it knows how to run - `press` carries `click`
-// or `text`, `run` carries the command, `copy` carries two paths.
+// or `text`, `run` carries the command, `scp` carries two paths.
 func ExecutableKeys() []string {
 	return []string{
 		// THE VERBS.
-		"boot", "input", "run", "copy", "read", "check", "control", "if", "stop", "repeat",
+		"boot", "input", "run", "scp", "read", "check", "control", "if", "stop", "repeat",
 		// THE TRANSPORTS AND THE PREPARATION A VERB MAY NAME.
 		"ssh", "adb", "adb_connect", "adb_privileged",
 		"write",

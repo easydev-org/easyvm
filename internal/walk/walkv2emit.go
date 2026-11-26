@@ -204,29 +204,42 @@ func v2WriteBody(b *strings.Builder, indent string, m any) error {
 		}
 		return nil
 	}
-	// `copy` IS A MARKER WITH `from`/`to` BESIDE IT: `copy a.sh /tmp/a.sh`.
-	if _, isCopy := mm["copy"]; isCopy {
-		from, _ := mm["from"].(string)
-		to, _ := mm["to"].(string)
+	// `scp:` IS ONE KEY WITH TWO SHAPES, and both are written back exactly as they were read.
+	//
+	//	scp a.sh /tmp/a.sh                 the two-path form, written on one line
+	//	scp                                the rendered form, with `template` and `to` beneath it
+	//	  template launcher
+	//	  to /tmp/bootstrap-launcher.sh
+	//
+	// THE ROUND TRIP IS THE TEST THAT CAUGHT THIS: `scp a b` reads into `["a", "b"]`, and an emitter
+	// that wrote the marker as a bare `scp` gave back `true` - so every walkthrough in sd-macos and
+	// sd-windows changed meaning when it was rendered.
+	if raw, isSCP := mm["scp"]; isSCP {
 		inner := indent + v2Indent
-		if from != "" && to != "" {
-			fmt.Fprintf(b, "%scopy %s %s\n", indent, v2Scalar(from), v2Scalar(to))
-		} else if tpl, ok := mm["template"]; ok {
-			// A RENDERED COPY: `copy` then `template` and `to`. The template is what the engine
-			// renders, so there is no local file to name.
-			fmt.Fprintf(b, "%scopy\n", indent)
-			fmt.Fprintf(b, "%stemplate %s\n", inner, v2Inline(tpl))
-			fmt.Fprintf(b, "%sto %s\n", inner, v2Scalar(to))
-		} else {
-			fmt.Fprintf(b, "%scopy\n", indent)
-			if to != "" {
+		switch v := raw.(type) {
+		case []any:
+			if len(v) == 2 {
+				local, _ := v[0].(string)
+				remote, _ := v[1].(string)
+				fmt.Fprintf(b, "%sscp %s %s\n", indent, v2Scalar(local), v2Scalar(remote))
+			} else {
+				fmt.Fprintf(b, "%sscp\n", indent)
+			}
+		case map[string]any:
+			fmt.Fprintf(b, "%sscp\n", indent)
+			if tpl, ok := v["template"]; ok {
+				fmt.Fprintf(b, "%stemplate %s\n", inner, v2Inline(tpl))
+			}
+			if to, ok := v["to"].(string); ok {
 				fmt.Fprintf(b, "%sto %s\n", inner, v2Scalar(to))
 			}
+		default:
+			fmt.Fprintf(b, "%sscp\n", indent)
 		}
 		rest := map[string]any{}
 		for k, vv := range mm {
 			switch k {
-			case "copy", "from", "to", "template", "name":
+			case "scp", "name":
 				continue
 			}
 			rest[k] = vv
@@ -321,7 +334,7 @@ func v2WriteBody(b *strings.Builder, indent string, m any) error {
 // its conditions rather than as an alphabetical list.
 func v2KeyOrder(k string) string {
 	switch k {
-	case "boot", "press", "run", "copy", "read", "expect", "control", "if", "stop", "repeat":
+	case "boot", "press", "run", "scp", "read", "expect", "control", "if", "stop", "repeat":
 		return "0" + k
 	case "then", "else", "do", "until", "nudge":
 		return "1" + k

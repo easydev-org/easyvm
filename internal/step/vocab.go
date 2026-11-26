@@ -180,18 +180,21 @@ var Verbs = map[string]Verb{
 					"about to die"},
 		}},
 
-	// ---- 4. `copy` -------------------------------------------------------------------------
-	"copy": {Name: "copy",
-		Summary: "copy one file into the guest",
-		Fields: map[string]Key{
-			"from": {Name: "from", Kind: KindString,
-				Summary: "the local file, relative to the walkthrough"},
-			"to": {Name: "to", Kind: KindString,
-				Summary: "the path in the guest"},
-			"template": {Name: "template", Kind: KindString,
-				Summary: "render one of the built-in templates instead of copying a file: launcher, " +
-					"macos_agent_plist, windows_task"},
-		}},
+	// ---- 4. `scp` ---------------------------------------------------------------------------
+	//
+	// ONE NAME FOR ONE OPERATION. `copy a b` was here and is GONE: the parser wrote `from`/`to`, the
+	// executor dispatched `copy` to the scp code, and that code read only `s.Spec["scp"]` - so no
+	// `copy` step could ever run (issue 12; every vm-configure leg in easyvm-macos and easyvm-windows
+	// failed, 15 runs, 0 successes). The fork line had already settled on `scp:` alone, and this
+	// carries that decision back: the 33 call sites in sd-macos and sd-windows are rewritten.
+	//
+	//	scp: [local-file, remote-path]                    copy a file an earlier step made
+	//	scp: {template: launcher, to: /tmp/x}             RENDER one of this build's bootstrap
+	//	                                                  files and copy it, in one step
+	"scp": {Name: "scp", Kind: KindAny,
+		Summary: "copy a file in. [local-file, remote-path], or {template: KIND, to: REMOTE} to " +
+			"render a bootstrap file (launcher, macos_agent_plist, windows_task) and copy it",
+	},
 
 	// ---- 5. `read` -------------------------------------------------------------------------
 	"read": {Name: "read",
@@ -440,7 +443,7 @@ var dispatchOrder = []string{
 	"boot",
 	"input",
 	"run", "ssh", "adb", "adb_connect", "adb_privileged",
-	"copy",
+	"scp",
 	"read", "screenshot",
 	"check",
 	"control", "acpi", "qga", "wait_until",

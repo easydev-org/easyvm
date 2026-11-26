@@ -10,7 +10,7 @@ A step is one of nine verbs, or one of the actions the engine dispatches on, plu
 | `boot` | start the machine this file owns |
 | `check` | ask ONE question about a picture and bind the answer. `source:` names the frame a `read:` captured; `mode:` says how it is compared |
 | `control` | a machine-level message rather than a guest action |
-| `copy` | copy one file into the guest |
+| `scp` | copy one file into the guest |
 | `if` | run `then:` when a boolean is true and `else:` when it is false |
 | `input` | send input to the guest - a click, a keystroke, or text |
 | `read` | capture one frame and bind it to a name. It measures nothing and decides nothing; the region and the question belong to the `check:` that follows |
@@ -95,13 +95,19 @@ IS DROPPED - which is how an optional medium disappears without a conditional an
 | `stopped` | wait until the machine's process has gone |
 | `wait_until` | wait for a condition about the machine: `stopped` |
 
-### `copy`
+### `scp`
+
+Two forms, one operation.
+
+`scp: [local-file, remote-path]` copies a file an earlier step made, or one that lives beside the
+walkthrough. On one line it is \`scp local-file remote-path\`.
+
+`scp: {template: KIND, to: REMOTE}` renders one of the build's bootstrap files and copies it, in a
+single step. `to` is the path in the guest.
 
 | key | what it does |
 |---|---|
-| `from` | the local file, relative to the walkthrough |
 | `template` | render one of the built-in templates instead of copying a file: launcher, macos_agent_plist, windows_task |
-| `to` | the path in the guest |
 
 ### `if`
 

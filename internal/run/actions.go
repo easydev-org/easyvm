@@ -467,6 +467,27 @@ func (e *Executor) createDisk(s walk.Step) error {
 
 // --- host commands --------------------------------------------------------------------
 
+// copyEnds reads the two ends of a file copy from `scp: [local, remote]`.
+//
+// THE `{template:, to:}` FORM IS HANDLED BY THE CALLER, before this runs, because it also names a
+// template to render rather than a file that already exists. This answers only the two-path form.
+//
+// `copy a b` USED TO PRODUCE `from`/`to` AND IS NO LONGER A VERB. It parsed into keys this function
+// never read, so no `copy` step could run - issue 12, fifteen vm-configure legs, zero successes.
+func copyEnds(s walk.Step) (string, string, error) {
+	raw, ok := s.Spec["scp"].([]any)
+	if !ok || len(raw) != 2 {
+		return "", "", fmt.Errorf("`scp:` names the local file and the remote path: " +
+			"`scp: [local-file, remote-path]`, or on one line `scp local remote`")
+	}
+	local, _ := raw[0].(string)
+	remote, _ := raw[1].(string)
+	if local == "" || remote == "" {
+		return "", "", fmt.Errorf("`scp:` must name both ends")
+	}
+	return local, remote, nil
+}
+
 func (e *Executor) doSCP(s walk.Step) error {
 	client := e.Driver.Guest()
 	if client == nil {
@@ -493,14 +514,30 @@ func (e *Executor) doSCP(s walk.Step) error {
 		e.Driver.Log(fmt.Sprintf("  scp: %s (%s) -> %s", local, kind, remote))
 		return nil
 	}
-	raw, ok := s.Spec["scp"].([]any)
-	if !ok || len(raw) != 2 {
-		return fail(s.Name, "`scp:` must be [local-file, remote-path]")
-	}
-	local, _ := raw[0].(string)
-	remote, _ := raw[1].(string)
-	if local == "" || remote == "" {
-		return fail(s.Name, "`scp:` must name both ends")
+	// `copy a b` AND `scp: [a, b]` ARE THE SAME OPERATION, AND ONLY ONE OF THEM USED TO WORK.
+	//
+	// MEASURED (issue 12, run 45666208397 in easyvm-macos, step 5/25 of macos 26 vm-configure):
+	//
+	//	step "copy the agent into the guest"
+	//	  copy mac-guest-agent /tmp/mac-guest-agent
+	//
+	//	error: copy the agent into the guest: `scp:` must be [local-file, remote-path]
+	//
+	// THE THREE PIECES DISAGREED: `vocab.go` declares `copy` with `from`/`to`/`template`,
+	// `walkv2.go` parses `copy a b` into `{copy: true, from: a, to: b}`, `executor.go` dispatches
+	// `Has("copy")` here - and this function then read ONLY `s.Spec["scp"]`. There was no code path in
+	// which a `copy` step could succeed, and the message it produced named a key the walk never wrote.
+	//
+	// WHAT IT COST: every `vm-configure` leg in easyvm-macos (8 runs) and easyvm-windows (7 runs) has
+	// failed, never once succeeded, and the `dev` walks in both repositories are built on `copy`. The
+	// `install` and `ssh` stages do not use it, which is why this survived this long.
+	//
+	// THE FIX IS THE SMALLER OF THE TWO the issue lists: read `from`/`to` FIRST, because that is the
+	// shape the parser produces and the shape 33 call sites are already written in, and fall back to
+	// `scp:` so the one-step `{template:, to:}` form keeps working.
+	local, remote, err := copyEnds(s)
+	if err != nil {
+		return fail(s.Name, "%v", err)
 	}
 	// A RELATIVE LOCAL PATH IS LOOKED FOR WHERE `write:` PUT IT, WHICH IS THE WORK DIRECTORY.
 	//

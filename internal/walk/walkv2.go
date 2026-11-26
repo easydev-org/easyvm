@@ -522,13 +522,6 @@ func v2NormaliseList(steps *[]any) error {
 				step[k] = v
 			}
 		}
-		if m, ok := step["copy"].(map[string]any); ok {
-			delete(step, "copy")
-			step["copy"] = true
-			for k, v := range m {
-				step[k] = v
-			}
-		}
 		if m, ok := step["stop"].(map[string]any); ok {
 			delete(step, "stop")
 			step["stop"] = true
@@ -726,7 +719,7 @@ func v2Size(s string) (int, int, error) {
 // nothing on the line, so they follow the plain rule. These six take both halves.
 func v2IsVerbatim(key string) bool {
 	switch key {
-	case "input", "run", "copy", "stop", "control", "boot":
+	case "input", "run", "scp", "stop", "control", "boot":
 		return true
 	}
 	return false
@@ -758,10 +751,11 @@ func v2VerbArgument(verb, rest string) map[string]any {
 		out["key"] = rest
 	case "run":
 		out["__cmd"] = v2UnquoteInline(rest)
-	case "copy":
-		if from, to, ok := v2TwoPaths(rest); ok {
-			out["from"] = from
-			out["to"] = to
+	case "scp":
+		// `scp a b` IS THE SHORT FORM OF `scp: [a, b]`, and both become the list the executor reads.
+		// The bare `copy` verb is gone: it parsed into `from`/`to` that nothing read (issue 12).
+		if local, remote, ok := v2TwoPaths(rest); ok {
+			out["scp"] = []any{local, remote}
 		}
 	case "stop":
 		out = map[string]any{"stop": true, "method": v2UnquoteInline(rest)}

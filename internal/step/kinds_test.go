@@ -58,8 +58,6 @@ func TestEveryKindAcceptsItsShapesAndRefusesTheOthers(t *testing.T) {
 var kindAnyReasons = map[string]string{
 	"stop": "the STEP-LEVEL MARKER for stopping the machine: `true` on the marker with `method` " +
 		"(and optionally `save`) beside it. The structural forms are the marker and its absence.",
-	"copy": "the STEP-LEVEL MARKER for a copy action: `true` on the marker, with `from`/`to` (or " +
-		"`template`) beside it. The distinct structural forms are the marker and its absence.",
 	"input": "the STEP-LEVEL MARKER for an input action, whose true value says \"this step is an " +
 		"input\" and whose siblings (`click`, `text`, `key`, `colour`) say WHICH. It is `true` on " +
 		"that marker and absent on a step that does not press anything, so the two structural " +

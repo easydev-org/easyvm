@@ -465,7 +465,7 @@ func (e *Executor) runOne(s walk.Step) error {
 		return e.doADBPrivileged(s)
 
 	// ---- 4. `copy` ---------------------------------------------------------------------
-	case s.Has("copy"):
+	case s.Has("scp"):
 		return e.doSCP(s)
 
 	// ---- 5. `read` ---------------------------------------------------------------------
