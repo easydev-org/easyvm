@@ -291,8 +291,13 @@ func Up(sshPort int, forwards []int) error {
 	// internet. It is the closest a NET_ADMIN container can get to the pod's behaviour. A failure is
 	// ignored on purpose - some kernels mount /proc/sys/net/bridge read-only in a container, and on
 	// those the previous layers (FORWARD insert, MASQUERADE exclusion) are still in force.
-	_, _ = run("sysctl", "-w", "net.bridge.bridge-nf-call-iptables=0")
-	_, _ = run("sysctl", "-w", "net.bridge.bridge-nf-call-ip6tables=0")
+	// OPT-IN, LIKE THE STATIC ARP: fork does NOT touch bridge-nf-call and passes ssh on the same
+	// desktops, so changing a kernel-global netfilter behaviour by default is a candidate for the bug
+	// rather than a fix. `EASYVM_BRIDGE_NF0=1` enables it if a host genuinely needs it.
+	if os.Getenv("EASYVM_BRIDGE_NF0") == "1" {
+		_, _ = run("sysctl", "-w", "net.bridge.bridge-nf-call-iptables=0")
+		_, _ = run("sysctl", "-w", "net.bridge.bridge-nf-call-ip6tables=0")
+	}
 
 	// THE MAC IS FIXED AND KNOWN (TapMAC, leased to GuestIP by dnsmasq), so there is nothing to
 	// discover. A permanent neighbour entry removes the resolution entirely: the host already knows
