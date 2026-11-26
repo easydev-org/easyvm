@@ -1032,8 +1032,8 @@ func (e *Executor) target() guest.Target {
 	// DNAT hop to 172.30.0.1:2222 leaves no conntrack entry and the host answers `no route to
 	// host` while the guest listens on 0.0.0.0:22. Dialling the guest directly skips that hop.
 	return guest.Target{
-		Host:     "172.30.0.2",
-		Port:     22,
+		Host:     "172.30.0.1",
+		Port:     e.SSHPort,
 		User:     e.File.SSHUser,
 		Password: e.Password,
 		Key:      mustKey(e),

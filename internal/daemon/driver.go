@@ -222,8 +222,13 @@ func NewDriver(owner *Daemon, f *walk.File, work, bootDisk string, port int,
 	// client simply no longer uses it.
 	_ = port
 	d.sshTarget = guest.Target{
-		Host:     "172.30.0.2",
-		Port:     22,
+		// BACK TO THE DNAT ADDRESS, WHICH IS WHAT THE PASSING FORK USES. fork's `target()` is
+		// Host=172.30.0.1, Port=e.SSHPort (2222, the published port) - and fork passes ssh on
+		// endeavour/manjaro/zorin/mx/nixos/fedora. Dialling the guest directly at 172.30.0.2:22 was
+		// tried here and every CI run failed while ICMP to the same address succeeded; the DNAT hop
+		// is the path that is known to work, so it is restored.
+		Host:     "172.30.0.1",
+		Port:     port,
 		User:     f.SSHUser,
 		Password: password,
 		Key:      mustKeyFile(f.SSHKeyPath),
