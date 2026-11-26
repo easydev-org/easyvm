@@ -179,7 +179,7 @@ func (d *Daemon) logHostSSHDiagnosis(host string, port int) {
 		// exists to remove.
 		full := map[string]bool{
 			"tap": true, "iptables version": true, "ss 22": true, "ip route": true,
-			"nat jump OUTPUT": true, "policy FORWARD": true, "ip neigh": true, "icmp guest": true,
+			"nat jump OUTPUT": true, "policy FORWARD": true, "ip neigh": true, "icmp guest": true, "tap on dial": true,
 		}
 		var keep []string
 		for _, line := range strings.Split(text, "\n") {
@@ -225,6 +225,26 @@ func (d *Daemon) logHostSSHDiagnosis(host string, port int) {
 		" except Exception as e: sys.stdout.write('try%d:%s\\n'%(q,e))\n" +
 		"sys.stdout.write('ICMP_OK %d/2\\n'%ok)\n"
 	log("icmp guest", "python3", "-c", pyscript)
+	// THE ONE MEASUREMENT THAT TELLS HOST-DROP FROM GUEST-SILENT: capture the tap while dialling.
+	// tcpdump writes to a file for 4 s in the background; a connect to 172.30.0.2:22 runs in the
+	// foreground; then the file is read. A SYN with NO SYN-ACK means the guest received it and stayed
+	// silent (guest TCP); NO SYN AT ALL means the host never put it on the tap (dropped before the
+	// tap). This is the evidence the previous rounds could not get without the binary.
+	capture := `rm -f /tmp/c22.txt /tmp/c22.pcap
+	(tcpdump -nn -i qemutap0 -c 8 -w /tmp/c22.pcap 'tcp port 22' >/tmp/c22.txt 2>&1 &)
+	sleep 1
+	python3 -c 'import socket,sys
+	s=socket.socket(); s.settimeout(3)
+	try:
+	 s.connect(("172.30.0.2",22)); sys.stdout.write("CONNECTED\n")
+	except Exception as e:
+	 sys.stdout.write("connect: %s\n"%(e,))'
+	sleep 4
+	echo ---PCAP---
+	tcpdump -nn -r /tmp/c22.pcap 2>&1 | head -12
+	echo ---TCPDUMPMSG---
+	cat /tmp/c22.txt 2>&1 | head -4`
+	log("tap on dial", "sh", "-c", capture)
 }
 
 // runProbes is the ticker, started once by the daemon.

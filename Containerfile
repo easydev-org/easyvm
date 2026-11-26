@@ -125,6 +125,10 @@ ARG DEBIAN_SNAPSHOT="20260819T142328Z"
 #	    iproute2
 #	+ curl iproute2            <- apt never ran; the comment ate the continuation
 #
+# tcpdump IS THE ONE TOOL THE SSH DIAGNOSIS WAS MISSING. When host->guest is a timeout but ICMP
+# reaches the guest, the only question left is whether the SYN ever arrives on the tap (the host
+# dropped it) or arrives and the guest never answers (guest TCP). Nothing in this image could show
+# that, so the two cases were indistinguishable and several engine "fixes" were guesses. 8 MB.
 RUN set -eux; \
     # non-free is where some qemu firmware blobs live; the snapshot below is official Debian.
     echo "deb https://deb.debian.org/debian trixie non-free" > /etc/apt/sources.list.d/non-free.list; \
@@ -134,6 +138,7 @@ RUN set -eux; \
         curl \
         iproute2 \
         iptables \
+        tcpdump \
         dnsmasq \
         procps \
         samba \
