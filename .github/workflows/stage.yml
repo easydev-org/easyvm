@@ -136,7 +136,13 @@ jobs:
       # attached to; `--cap-add NET_ADMIN` creates the tap, the bridge and the iptables rules;
       # `--device /dev/kvm` is the accelerator, without which a macOS guest cannot be given `+invtsc`
       # and deadlocks, and every other guest runs fifty times slower.
-      options: --device /dev/kvm --device /dev/net/tun --cap-add NET_ADMIN
+      # NET_RAW IS FOR THE DIAGNOSIS, NOT THE PRODUCT. tcpdump and the raw-socket ICMP echo both
+      # open AF_PACKET / raw sockets, which need CAP_NET_RAW; with only NET_ADMIN they fail, and the
+      # failure looks like "captured 0 packets", which reads as "the packet never left" when the
+      # truth is "we were not allowed to look". Granting it makes the capture honest. The engine's
+      # actual network path (tap, bridge, iptables) needs only NET_ADMIN; NET_RAW adds nothing it
+      # uses to run a guest.
+      options: --device /dev/kvm --device /dev/net/tun --cap-add NET_ADMIN --cap-add NET_RAW
     # `packages: READ` WAS THE 403. The install leg publishes its disk with `oras push`, and a
     # read-only token cannot create a package version at all:
     #
