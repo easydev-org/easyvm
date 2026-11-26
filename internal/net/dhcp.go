@@ -430,16 +430,27 @@ func applyNAT() error {
 	// sent and never answered - a timeout with empty conntrack.
 	//
 	// So the guest address is accepted on INPUT too, at the head, before Docker's own INPUT rules.
-	for _, rule := range [][]string{
-		{"-s", GuestIP + "/32", "-j", "ACCEPT"},
+	//
+	// AND ON OUTPUT, WHICH IS THE ONE THE CAPTURE FINALLY POINTED AT. MEASURED on run 45875028821:
+	// `tcpdump -i any -c 12 'tcp port 22'` captured ZERO packets while a connect to 172.30.0.2:22
+	// ran (`connect: timed out`), yet `ICMP_OK 2/2` on the same address. A packet that a capture on
+	// `any` never sees did not leave the host's OUTPUT path at all: it was dropped before egress, in
+	// the container's own filter OUTPUT chain. The daemon's ssh client is a LOCAL process, so its SYN
+	// is an OUTPUT packet; ICMP from a raw socket rides a path that Docker's OUTPUT does not filter
+	// the same way. Accept the guest address on OUTPUT, at the head, alongside INPUT and FORWARD.
+	for _, pair := range [][2]string{
+		{"INPUT", "-s"},
+		{"OUTPUT", "-d"},
 	} {
-		args := append([]string{"-C", "INPUT"}, rule...)
+		chain, dir := pair[0], pair[1]
+		rule := []string{dir, GuestIP + "/32", "-j", "ACCEPT"}
+		args := append([]string{"-C", chain}, rule...)
 		if _, err := run("iptables", args...); err == nil {
 			continue
 		}
-		ins := append([]string{"-I", "INPUT", "1"}, rule...)
+		ins := append([]string{"-I", chain, "1"}, rule...)
 		if _, err := run("iptables", ins...); err != nil {
-			return fmt.Errorf("INPUT ACCEPT for %v: %w", rule, err)
+			return fmt.Errorf("%s ACCEPT for %v: %w", chain, rule, err)
 		}
 	}
 
