@@ -235,9 +235,12 @@ func (d *Daemon) logHostSSHDiagnosis(host string, port int) {
 		// reads as "no packets" when packets may be present. `-U` writes each packet through.
 		// No `-c`: the count would make tcpdump wait for twelve packets that a timed-out SYN never
 		// produces; instead it is started with -U, given time, then killed before the read.
-		"(tcpdump -nn -U -i any -w /tmp/c22.pcap 'tcp port 22' >/tmp/c22.txt 2>&1 &); sleep 1; " +
-		"python3 /tmp/dial22.py; sleep 4; " +
-		"pkill -f 'tcpdump.*c22.pcap' 2>/dev/null; sleep 1; echo ---PCAP---; " +
+		// NO `pkill -f`: the pattern 'tcpdump.*c22.pcap' also matches THIS sh command line, so pkill
+		// killed the shell itself before it reached `echo ---PCAP---` - which is exactly the symptom
+		// (a line that stops after "connect: timed out"). Kill by the background PID instead.
+		"tcpdump -nn -U -i any -w /tmp/c22.pcap 'tcp port 22' >/tmp/c22.txt 2>&1 & TPID=$!; " +
+		"sleep 1; python3 /tmp/dial22.py; sleep 4; " +
+		"kill $TPID 2>/dev/null; sleep 1; echo ---PCAP---; " +
 		"tcpdump -nn -r /tmp/c22.pcap 2>&1 | head -20; echo ---TCPDUMPMSG---; cat /tmp/c22.txt | head -4"
 	// Write the python first so its indentation is exact and not mangled by shell around it.
 	writeDial := "cat > /tmp/dial22.py <<'PYEOF'\n" +
