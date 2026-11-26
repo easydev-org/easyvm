@@ -309,13 +309,28 @@ func applyNAT() error {
 	}
 	_, _ = run("iptables", "-t", "nat", "-F", forwardChain)
 
-	// THE MASQUERADE RULE IS CHECKED BEFORE IT IS ADDED. `-C` is the only idempotent way with
-	// iptables, and a second identical rule is not an error - it is a rule that never matches
-	// because the first one did.
-	if _, err := run("iptables", "-t", "nat", "-C", "POSTROUTING", "-s", spec,
-		"-j", "MASQUERADE"); err != nil {
-		if _, err := run("iptables", "-t", "nat", "-A", "POSTROUTING", "-s", spec,
-			"-j", "MASQUERADE"); err != nil {
+	// MASQUERADE THE GUEST'S TRAFFIC TO THE INTERNET - AND ONLY THAT. NOT THE HOST'S TRAFFIC TO THE
+	// GUEST, WHICH IS WHAT "-s spec" ALONE ALSO CAUGHT.
+	//
+	// MEASURED on run 45843288190. With FORWARD accepting 172.30.0.2 and the guest listening on
+	// 0.0.0.0:22, the host probe was `dial tcp 172.30.0.2:22: i/o timeout` - SYN sent, no SYN-ACK.
+	// The nat table held `-A POSTROUTING -s 172.30.0.0/24 -j MASQUERADE`, and the host's own source
+	// address to the guest is 172.30.0.1, which is INSIDE 172.30.0.0/24. So the SYN the host sent to
+	// the guest was source-NATed on its way out to the container's eth0 address (172.18.x.x). The
+	// guest answered a SYN-ACK to 172.18.x.x, which is not on its /24 and has no route from it, and
+	// the reply died - a one-way connection that presents as a timeout, never a refusal.
+	//
+	// `! -d spec` IS THE WHOLE FIX: traffic whose DESTINATION is the guest subnet must be delivered on
+	// the bridge with its original source (172.30.0.1), so the guest can answer back to it. Only
+	// traffic leaving the subnet is masqueraded.
+	masq := []string{"-s", spec, "!", "-d", spec, "-j", "MASQUERADE"}
+	chk := append([]string{"-t", "nat", "-C", "POSTROUTING"}, masq...)
+	if _, err := run("iptables", chk...); err != nil {
+		// DROP ANY OLD RULE THAT LACKED `! -d` before adding the corrected one, or the first-added
+		// (wrong) rule wins and the corrected one never matches.
+		_, _ = run("iptables", "-t", "nat", "-D", "POSTROUTING", "-s", spec, "-j", "MASQUERADE")
+		add := append([]string{"-t", "nat", "-A", "POSTROUTING"}, masq...)
+		if _, err := run("iptables", add...); err != nil {
 			return fmt.Errorf("MASQUERADE for %s: %w", spec, err)
 		}
 	}
