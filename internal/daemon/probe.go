@@ -36,11 +36,11 @@ const probeInterval = 10 * time.Second
 
 // probeState is the last answer from each probe, and when it was taken.
 type probeState struct {
-	mu       sync.Mutex
-	at       time.Time
-	sshAns   *bool
-	qgaAns   *bool
-	hostDiag bool
+	mu            sync.Mutex
+	at            time.Time
+	sshAns        *bool
+	qgaAns        *bool
+	hostDiagCount int
 }
 
 func (p *probeState) set(ssh, qga *bool) {
@@ -51,19 +51,22 @@ func (p *probeState) set(ssh, qga *bool) {
 }
 
 // hostDiagDone guards the one-time host-side diagnosis when the ssh probe first fails.
-func (p *probeState) markHostDiag() (first bool) {
+// markHostDiag returns true while the host-side diagnosis still has budget. It runs on the FIRST
+// few ssh-probe failures and not on all sixty, so a boot-time failure (guest not up yet) and a
+// wait-for-sshd failure (guest up, still no route) are BOTH captured without flooding the log.
+func (p *probeState) markHostDiag() bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.hostDiag {
+	if p.hostDiagCount >= 4 {
 		return false
 	}
-	p.hostDiag = true
+	p.hostDiagCount++
 	return true
 }
 
 func (p *probeState) resetHostDiag() {
 	p.mu.Lock()
-	p.hostDiag = false
+	p.hostDiagCount = 0
 	p.mu.Unlock()
 }
 
