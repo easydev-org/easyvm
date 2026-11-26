@@ -225,25 +225,26 @@ func (d *Daemon) logHostSSHDiagnosis(host string, port int) {
 		" except Exception as e: sys.stdout.write('try%d:%s\\n'%(q,e))\n" +
 		"sys.stdout.write('ICMP_OK %d/2\\n'%ok)\n"
 	log("icmp guest", "python3", "-c", pyscript)
-	// THE ONE MEASUREMENT THAT TELLS HOST-DROP FROM GUEST-SILENT: capture the tap while dialling.
-	// tcpdump writes to a file for 4 s in the background; a connect to 172.30.0.2:22 runs in the
-	// foreground; then the file is read. A SYN with NO SYN-ACK means the guest received it and stayed
-	// silent (guest TCP); NO SYN AT ALL means the host never put it on the tap (dropped before the
-	// tap). This is the evidence the previous rounds could not get without the binary.
-	capture := `rm -f /tmp/c22.txt /tmp/c22.pcap
-	(tcpdump -nn -i qemutap0 -c 8 -w /tmp/c22.pcap 'tcp port 22' >/tmp/c22.txt 2>&1 &)
-	sleep 1
-	python3 -c 'import socket,sys
-	s=socket.socket(); s.settimeout(3)
-	try:
-	 s.connect(("172.30.0.2",22)); sys.stdout.write("CONNECTED\n")
-	except Exception as e:
-	 sys.stdout.write("connect: %s\n"%(e,))'
-	sleep 4
-	echo ---PCAP---
-	tcpdump -nn -r /tmp/c22.pcap 2>&1 | head -12
-	echo ---TCPDUMPMSG---
-	cat /tmp/c22.txt 2>&1 | head -4`
+	// THE ONE MEASUREMENT THAT TELLS HOST-DROP FROM GUEST-SILENT: capture while dialling - ON `any`,
+	// because the SYN goes out `qemubr0` (the bridge), not `qemutap0` (its port); capturing the port
+	// device showed "listening ... 0 packets" even for traffic that did reach the bridge. `any` sees
+	// whichever device the packet actually leaves by.
+	capture := "rm -f /tmp/c22.txt /tmp/c22.pcap; " +
+		"(tcpdump -nn -i any -c 12 -w /tmp/c22.pcap 'tcp port 22' >/tmp/c22.txt 2>&1 &); sleep 1; " +
+		"python3 /tmp/dial22.py; sleep 4; echo ---PCAP---; " +
+		"tcpdump -nn -r /tmp/c22.pcap 2>&1 | head -16; echo ---TCPDUMPMSG---; cat /tmp/c22.txt | head -4"
+	// Write the python first so its indentation is exact and not mangled by shell around it.
+	writeDial := "cat > /tmp/dial22.py <<'PYEOF'\n" +
+		"import socket, sys\n" +
+		"s = socket.socket()\n" +
+		"s.settimeout(3)\n" +
+		"try:\n" +
+		"    s.connect((\"172.30.0.2\", 22))\n" +
+		"    sys.stdout.write(\"CONNECTED\\n\")\n" +
+		"except Exception as e:\n" +
+		"    sys.stdout.write(\"connect: %s\\n\" % (e,))\n" +
+		"PYEOF"
+	_, _ = exec.Command("sh", "-c", writeDial).CombinedOutput()
 	log("tap on dial", "sh", "-c", capture)
 }
 
