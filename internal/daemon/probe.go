@@ -179,7 +179,7 @@ func (d *Daemon) logHostSSHDiagnosis(host string, port int) {
 		// exists to remove.
 		full := map[string]bool{
 			"tap": true, "iptables version": true, "ss 22": true, "ip route": true,
-			"nat jump OUTPUT": true, "policy FORWARD": true, "ip neigh": true,
+			"nat jump OUTPUT": true, "policy FORWARD": true, "ip neigh": true, "icmp guest": true,
 		}
 		var keep []string
 		for _, line := range strings.Split(text, "\n") {
@@ -209,6 +209,22 @@ func (d *Daemon) logHostSSHDiagnosis(host string, port int) {
 	// (sent, no reply) versus absent (never sent) - the two look identical from a dial timeout.
 	log("iptables version", "sh", "-c", "iptables --version 2>&1; readlink -f $(command -v iptables) 2>&1; nft list tables 2>&1 | head -10")
 	log("ss 22", "sh", "-c", "ss -tn state syn-sent '( dport = :22 or sport = :22 )' 2>&1 | head -10")
+	// HOST -> GUEST AT L3, NOT TCP. ICMP crosses the same tap/bridge/ARP as the SYN but no port and
+	// no tcp rule, so it separates "the path is dead" from "tcp/22 specifically is blocked". This
+	// image has python3 and no ping binary, so the echo is built by hand in a one-liner.
+	pyscript := "import socket,struct,sys\n" +
+		"s=socket.socket(socket.AF_INET,socket.SOCK_RAW,socket.IPPROTO_ICMP); s.settimeout(2)\n" +
+		"def ck(b):\n" +
+		" b=(b+b'\\x00') if len(b)%2 else b\n" +
+		" x=sum(struct.unpack('!%dH'%(len(b)//2),b)); x=(x>>16)+(x&0xffff); x+=(x>>16); return (~x)&0xffff\n" +
+		"ok=0\n" +
+		"for q in (1,2):\n" +
+		" pk=struct.pack('!BBHHH',8,0,0,4242,q)+b'vm'; pk=struct.pack('!BBHHH',8,0,ck(pk),4242,q)+b'vm'\n" +
+		" try:\n" +
+		"  s.sendto(pk,('172.30.0.2',0)); s.recvfrom(1024); ok+=1\n" +
+		" except Exception as e: sys.stdout.write('try%d:%s\\n'%(q,e))\n" +
+		"sys.stdout.write('ICMP_OK %d/2\\n'%ok)\n"
+	log("icmp guest", "python3", "-c", pyscript)
 }
 
 // runProbes is the ticker, started once by the daemon.
