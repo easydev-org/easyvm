@@ -18,7 +18,10 @@ package daemon
 
 import (
 	"fmt"
+	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -33,16 +36,34 @@ const probeInterval = 10 * time.Second
 
 // probeState is the last answer from each probe, and when it was taken.
 type probeState struct {
-	mu     sync.Mutex
-	at     time.Time
-	sshAns *bool
-	qgaAns *bool
+	mu       sync.Mutex
+	at       time.Time
+	sshAns   *bool
+	qgaAns   *bool
+	hostDiag bool
 }
 
 func (p *probeState) set(ssh, qga *bool) {
 	p.mu.Lock()
 	p.at = time.Now()
 	p.sshAns, p.qgaAns = ssh, qga
+	p.mu.Unlock()
+}
+
+// hostDiagDone guards the one-time host-side diagnosis when the ssh probe first fails.
+func (p *probeState) markHostDiag() (first bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.hostDiag {
+		return false
+	}
+	p.hostDiag = true
+	return true
+}
+
+func (p *probeState) resetHostDiag() {
+	p.mu.Lock()
+	p.hostDiag = false
 	p.mu.Unlock()
 }
 
@@ -95,14 +116,28 @@ func (d *Daemon) probeOnce() {
 			err := guest.Probe(target, 1, 10*time.Second)
 			if err == nil {
 				sshUp = true
-			} else if prev := d.lastProbe.sshAnswer(); prev == nil || *prev {
-				// A GUEST WHOSE SSH NEVER COMES UP MUST SAY WHY. MEASURED on freebsd ssh, run
-				// 45096500475: the console showed `Starting sshd.` and a DHCP lease, and the walk
-				// still failed with the whole sentence "sshd does not accept a connection" - which
-				// is true and names nothing. The probe HAD the reason (a refused port, a password
-				// rejection, a handshake that timed out) and threw it away, so the next hour went
-				// into reading qemu arguments instead of the one line that mattered.
-				drv.Log(fmt.Sprintf("  ssh probe: %v", err))
+			} else {
+				// THE HOST SIDE IS THE ONLY PLACE THE ANSWER IS NOT, so when the probe fails and
+				// it is the first failure of this run, dump what the host sees: the DNAT rules, the
+				// conntrack entries for the guest, and the ARP entry. MEASURED on cachyos ssh, run
+				// 45810843905: the guest showed `LISTEN 0.0.0.0:22`, the right MAC, `ping
+				// 172.30.0.1` at 0% loss, `ip neigh` REACHABLE, ufw inactive and rp_filter=2 - every
+				// guest fact correct - while every probe was `no route to host`. Nothing inside the
+				// guest can explain that; this prints the half that can.
+				if d.lastProbe.markHostDiag() {
+					d.logHostSSHDiagnosis(target.Host, target.Port)
+				}
+			}
+			if err != nil {
+				if prev := d.lastProbe.sshAnswer(); prev == nil || *prev {
+					// A GUEST WHOSE SSH NEVER COMES UP MUST SAY WHY. MEASURED on freebsd ssh, run
+					// 45096500475: the console showed `Starting sshd.` and a DHCP lease, and the walk
+					// still failed with the whole sentence "sshd does not accept a connection" - which
+					// is true and names nothing. The probe HAD the reason (a refused port, a password
+					// rejection, a handshake that timed out) and threw it away, so the next hour went
+					// into reading qemu arguments instead of the one line that mattered.
+					drv.Log(fmt.Sprintf("  ssh probe: %v", err))
+				}
 			}
 		}
 	}
@@ -114,6 +149,47 @@ func (d *Daemon) probeOnce() {
 		}
 	}
 	d.lastProbe.set(&sshUp, &qgaUp)
+}
+
+// logHostSSHDiagnosis prints what the HOST sees when the ssh probe cannot reach the guest.
+//
+// IT IS THE HALF THE WALK CANNOT SEE. Every guest-side fact can be correct - sshd listening on
+// 0.0.0.0:22, the right MAC, the guest able to ping the host, a resolved ARP entry, no firewall,
+// rp_filter loose - and the probe still answers `no route to host`, because the failure is in the
+// host's DNAT or conntrack or ARP, none of which is visible from inside the guest. These are the
+// three commands that show it, and they run once per run rather than on every tick.
+func (d *Daemon) logHostSSHDiagnosis(host string, port int) {
+	if d == nil || d.machine == nil || d.machine.driver == nil {
+		return
+	}
+	logf := d.machine.driver.Log
+	log := func(label, cmd string, args ...string) {
+		out, err := exec.Command(cmd, args...).CombinedOutput()
+		text := strings.TrimRight(string(out), "\n")
+		if err != nil && text == "" {
+			text = err.Error()
+		}
+		// ONLY THE LINES THAT MATTER: the nat table is long, and 2222 / the guest address are the
+		// two things worth reading. A full dump would bury them.
+		var keep []string
+		for _, line := range strings.Split(text, "\n") {
+			if strings.Contains(line, strconv.Itoa(port)) || strings.Contains(line, "172.30.0.2") ||
+				strings.Contains(line, "DNAT") || strings.Contains(line, "MASQUERADE") ||
+				label == "ip neigh" || label == "ip route" {
+				keep = append(keep, line)
+			}
+		}
+		if len(keep) == 0 {
+			keep = []string{"(nothing matched)"}
+		}
+		logf(fmt.Sprintf("  host diag [%s]: %s", label, strings.Join(keep, " | ")))
+	}
+	logf(fmt.Sprintf("=== HOST-SIDE DIAGNOSIS for %s:%d, once per run ===", host, port))
+	log("nat 2222", "sh", "-c", fmt.Sprintf("iptables -t nat -S 2>/dev/null | grep -E '2222|%s' ", "172.30.0.2"))
+	log("conntrack", "sh", "-c", "conntrack -L 2>/dev/null | grep 172.30.0.2 | head -10")
+	log("ip neigh", "sh", "-c", "ip neigh show 2>/dev/null | grep 172.30")
+	log("ip route", "sh", "-c", "ip route get 172.30.0.2 2>&1")
+	log("tap", "sh", "-c", "ip -br a show qemutap0 2>&1; ip -br a show qemubr0 2>&1")
 }
 
 // runProbes is the ticker, started once by the daemon.
