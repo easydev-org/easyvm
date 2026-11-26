@@ -418,6 +418,48 @@ func applyNAT() error {
 			return fmt.Errorf("FORWARD ACCEPT for %v: %w", rule, err)
 		}
 	}
+
+	// THE GUEST'S REPLY COMES BACK IN ON INPUT, NOT FORWARD - and Docker's INPUT can drop it while
+	// ICMP still gets through, which is exactly the split we measured.
+	//
+	// MEASURED on run 45864768440: a raw-socket ICMP echo from the host to 172.30.0.2 returns
+	// `ICMP_OK 2/2`, while `dial tcp 172.30.0.2:22` is `i/o timeout` and conntrack for the guest is
+	// empty. ICMP and TCP take the same L2/L3 path; the difference is that the guest's TCP SYN-ACK
+	// arrives on the host's INPUT chain and its connection is tracked by conntrack, whereas the ICMP
+	// reply does not need either. A guest->host SYN-ACK dropped on INPUT reads as a SYN that was
+	// sent and never answered - a timeout with empty conntrack.
+	//
+	// So the guest address is accepted on INPUT too, at the head, before Docker's own INPUT rules.
+	for _, rule := range [][]string{
+		{"-s", GuestIP + "/32", "-j", "ACCEPT"},
+	} {
+		args := append([]string{"-C", "INPUT"}, rule...)
+		if _, err := run("iptables", args...); err == nil {
+			continue
+		}
+		ins := append([]string{"-I", "INPUT", "1"}, rule...)
+		if _, err := run("iptables", ins...); err != nil {
+			return fmt.Errorf("INPUT ACCEPT for %v: %w", rule, err)
+		}
+	}
+
+	// AND TAKE THE GUEST'S TCP OUT OF CONNTRACK ENTIRELY, IN THE raw TABLE, AS A SECOND FRONT.
+	//
+	// If the timeout is conntrack - the table shows the flow never establishes - then NOTRACK makes
+	// the host treat the guest's TCP as stateless: the SYN goes out, the SYN-ACK comes back and is
+	// accepted by the INPUT rule above, and no nf_conntrack entry has to be created in a netns where
+	// it may be broken. It is the smallest change that removes conntrack from the path the ICMP test
+	// proved is otherwise fine. A kernel without the raw table or without NOTRACK ignores it.
+	for _, chain := range []string{"PREROUTING", "OUTPUT"} {
+		rule := []string{"-s", spec, "-d", spec}
+		_ = rule
+		args := []string{"-t", "raw", "-C", chain, "-d", GuestIP + "/32", "-p", "tcp", "-j", "NOTRACK"}
+		if _, err := run("iptables", args...); err == nil {
+			continue
+		}
+		ins := []string{"-t", "raw", "-I", chain, "1", "-d", GuestIP + "/32", "-p", "tcp", "-j", "NOTRACK"}
+		_, _ = run("iptables", ins...)
+	}
 	return nil
 }
 
