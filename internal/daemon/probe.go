@@ -172,13 +172,20 @@ func (d *Daemon) logHostSSHDiagnosis(host string, port int) {
 		if err != nil && text == "" {
 			text = err.Error()
 		}
-		// ONLY THE LINES THAT MATTER: the nat table is long, and 2222 / the guest address are the
-		// two things worth reading. A full dump would bury them.
+		// SOME LABELS ARE SHORT AND EVERY LINE OF THEM MATTERS (the tap state, iptables' version,
+		// `ss -tn`); the long tables are filtered to the ports/addresses worth reading. Filtering
+		// the tap line to the guest address turned its own output into "(nothing matched)" and hid
+		// whether the tap was even up - which is exactly the kind of blind spot this diagnosis
+		// exists to remove.
+		full := map[string]bool{
+			"tap": true, "iptables version": true, "ss 22": true, "ip route": true,
+			"nat jump OUTPUT": true, "policy FORWARD": true, "ip neigh": true,
+		}
 		var keep []string
 		for _, line := range strings.Split(text, "\n") {
-			if strings.Contains(line, strconv.Itoa(port)) || strings.Contains(line, "172.30.0.2") ||
-				strings.Contains(line, "DNAT") || strings.Contains(line, "MASQUERADE") ||
-				label == "ip neigh" || label == "ip route" {
+			if full[label] || strings.Contains(line, strconv.Itoa(port)) ||
+				strings.Contains(line, "172.30.0.2") ||
+				strings.Contains(line, "DNAT") || strings.Contains(line, "MASQUERADE") {
 				keep = append(keep, line)
 			}
 		}
@@ -194,7 +201,14 @@ func (d *Daemon) logHostSSHDiagnosis(host string, port int) {
 	log("conntrack", "sh", "-c", "conntrack -L 2>/dev/null | grep 172.30.0.2 | head -10")
 	log("ip neigh", "sh", "-c", "ip neigh show 2>/dev/null | grep 172.30")
 	log("ip route", "sh", "-c", "ip route get 172.30.0.2 2>&1")
-	log("tap", "sh", "-c", "ip -br a show qemutap0 2>&1; ip -br a show qemubr0 2>&1")
+	log("tap", "sh", "-c", "ip -br a show qemutap0 2>&1; ip -br a show qemubr0 2>&1; ip link show qemutap0 2>&1 | head -2")
+	// WHICH IPTABLES IS THE ENGINE EVEN TALKING TO, AND IS ANYTHING LISTENING ON 22 FROM THE HOST.
+	// Docker on a modern kernel programs iptables-NFT; if the `iptables` binary here is the LEGACY
+	// one, every ACCEPT this engine writes lands in a table the kernel never consults, and the guest
+	// is unreachable through rules that are visibly present. `ss -tn` shows a SYN stuck in SYN_SENT
+	// (sent, no reply) versus absent (never sent) - the two look identical from a dial timeout.
+	log("iptables version", "sh", "-c", "iptables --version 2>&1; readlink -f $(command -v iptables) 2>&1; nft list tables 2>&1 | head -10")
+	log("ss 22", "sh", "-c", "ss -tn state syn-sent '( dport = :22 or sport = :22 )' 2>&1 | head -10")
 }
 
 // runProbes is the ticker, started once by the daemon.

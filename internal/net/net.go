@@ -497,6 +497,49 @@ func Down() {
 // --- helpers ---------------------------------------------------------------------------
 
 func run(name string, args ...string) (string, error) {
+	out, err := runOne(name, args...)
+	// IPTABLES IS WRITTEN TO BOTH BACKENDS, BECAUSE DOCKER MAY USE THE OTHER ONE.
+	//
+	// On a modern kernel there are two `iptables` front-ends: the LEGACY one (xtables) and the NFT
+	// one, and their tables are SEPARATE - a rule in legacy is invisible to nft and vice versa.
+	// Docker programs iptables-NFT. If the `iptables` on PATH here is the legacy binary, every
+	// ACCEPT this engine writes lands in a table the kernel never consults for the bridge traffic,
+	// and the guest is unreachable through rules that `iptables -S` here shows as present.
+	//
+	// MEASURED context: on CI (`--cap-add NET_ADMIN`, Docker) the guest listens on 0.0.0.0:22, its
+	// firewall is off, ARP/route are right, and `dial tcp 172.30.0.2:22` is `i/o timeout` with empty
+	// conntrack - while the SAME image and disk in the non-Docker lab pod reads SSH-2.0-OpenSSH_10.6.
+	// Writing the WRITE operations to both binaries removes the "wrong table" possibility outright,
+	// so the next run either passes or the diagnosis (iptables --version, which tables exist) says
+	// plainly that it is not this.
+	//
+	// ONLY WRITES ARE MIRRORED. `-S`, `-L`, `-C` and `-t ... -S` are reads or checks; running a check
+	// against the other backend would change its answer and confuse the callers' idempotency logic.
+	if name == "iptables" && isIPTablesWrite(args) {
+		for _, alt := range []string{"iptables-nft", "iptables-legacy"} {
+			if alt == "iptables" {
+				continue
+			}
+			// A backend that does not exist exits with "executable file not found"; ignore it.
+			_, _ = runOne(alt, args...)
+		}
+	}
+	return out, err
+}
+
+// isIPTablesWrite reports whether an iptables arg list changes a table (as opposed to reading it).
+func isIPTablesWrite(args []string) bool {
+	for _, a := range args {
+		switch a {
+		case "-A", "--append", "-I", "--insert", "-D", "--delete", "-N", "--new-chain",
+			"-F", "--flush", "-X", "--delete-chain", "-P", "--policy":
+			return true
+		}
+	}
+	return false
+}
+
+func runOne(name string, args ...string) (string, error) {
 	cmd := exec.Command(name, args...)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
