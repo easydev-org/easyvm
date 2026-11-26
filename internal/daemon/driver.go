@@ -88,8 +88,8 @@ type Driver struct {
 	// bootArgs is what the running machine was started from, so a second boot can tell "this machine
 	// again" from "a different machine", which a daemon cannot hold.
 	bootArgs []string
-	port    int
-	pass    string
+	port     int
+	pass     string
 
 	// mu guards every field below it. THE LOCK IS NEVER HELD ACROSS I/O - a dial, a migration, a
 	// shutdown request are all network round trips, and holding it across one blocks `status`, the
@@ -195,9 +195,35 @@ func NewDriver(owner *Daemon, f *walk.File, work, bootDisk string, port int,
 	// not pay for a connection the guest cannot accept yet.
 	// THE TARGET IS KEPT, not just captured by the closure, because `/api/state` has to answer
 	// "does sshd accept a connection" and a probe needs the address to ask.
+	// CONNECT TO THE GUEST'S OWN 22, NOT THE HOST'S DNAT PORT.
+	//
+	// MEASURED on run 45823139196, whose four host-side diagnosis shots all showed, at the very
+	// moment the guest reported `sshd active` and `LISTEN 0.0.0.0:22`:
+	//
+	//	host diag [nat 2222]:  -A EASYVM_FWD ... --dport 2222 -j DNAT --to-destination 172.30.0.2:22
+	//	host diag [conntrack]: (nothing matched)          <- the SYN never becomes a tracked flow
+	//	host diag [ip neigh]:  172.30.0.2 ... REACHABLE   <- layer 2 to the guest is fine
+	//	host diag [ip route]:  172.30.0.2 dev qemubr0      <- the route is right
+	//
+	// ARP resolves and the route is correct, so the guest is reachable at layer 2/3 and the ONLY
+	// thing between the host and the guest's sshd is the DNAT hop, which on this runner produces no
+	// conntrack entry - the packet is dropped before the guest sees it, and the kernel answers
+	// `no route to host`. anduinos and pearos happen to pass through that same hop; cachyos, kubuntu
+	// and zorin do not, and nothing about the guest differs.
+	//
+	// SO THE HOP IS REMOVED. The guest is 172.30.0.2 on the bridge the host itself owns; dialling
+	// 172.30.0.2:22 needs no DNAT, no conntrack rewrite and no published port - it is one host on a
+	// bridge talking to another, which ARP already proved it can do.
+	//
+	// THE `port` ARGUMENT IS THE HOST'S PUBLISHED PORT (2222), AND THE GUEST DOES NOT LISTEN ON IT.
+	// The guest's sshd is on 22 - every `sshd -T` in these runs says `port 22` - so the direct dial
+	// is 22. `port` is kept in the signature because the callers pass it and the published DNAT
+	// still exists for anything OUTSIDE the container that wants 172.30.0.1:2222; the engine's own
+	// client simply no longer uses it.
+	_ = port
 	d.sshTarget = guest.Target{
-		Host:     "172.30.0.1",
-		Port:     port,
+		Host:     "172.30.0.2",
+		Port:     22,
 		User:     f.SSHUser,
 		Password: password,
 		Key:      mustKeyFile(f.SSHKeyPath),
@@ -715,7 +741,6 @@ func (m machineControl) Boot(spec run.BootSpec) error {
 	if err := boot.Validate(); err != nil {
 		return err
 	}
-
 
 	// THE DIFF IS MADE BEFORE qemu SEES THE DISK, because what qemu is given IS the diff.
 	//
@@ -1696,7 +1721,6 @@ func (d *Driver) vncNumber() int {
 // afternoon spent confirming it.
 var ErrMachineGone = errors.New("the guest is no longer running")
 
-
 // SSHTarget is where this machine's sshd listens, for a caller that has to ask whether it answers.
 func (d *Driver) SSHTarget() guest.Target {
 	d.mu.Lock()
@@ -1759,4 +1783,3 @@ func ovmfVarsTemplate(d *Driver) string {
 	}
 	return "/usr/share/OVMF/OVMF_VARS_4M.fd"
 }
-

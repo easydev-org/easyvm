@@ -1027,9 +1027,13 @@ func headAndTail(body string, head, tail int) []string {
 }
 
 func (e *Executor) target() guest.Target {
+	// THE GUEST'S OWN SOCKET, NOT THE HOST'S DNAT PORT - the same change as daemon.NewDriver.
+	// Measured on run 45823139196: ARP to 172.30.0.2 is REACHABLE and the route is right, but the
+	// DNAT hop to 172.30.0.1:2222 leaves no conntrack entry and the host answers `no route to
+	// host` while the guest listens on 0.0.0.0:22. Dialling the guest directly skips that hop.
 	return guest.Target{
-		Host:     "172.30.0.1",
-		Port:     e.SSHPort,
+		Host:     "172.30.0.2",
+		Port:     22,
 		User:     e.File.SSHUser,
 		Password: e.Password,
 		Key:      mustKey(e),
