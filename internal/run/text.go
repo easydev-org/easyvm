@@ -1036,7 +1036,25 @@ func (e *Executor) doRun(s walk.Step) error {
 		}
 		time.Sleep(time.Duration(wait * float64(time.Second)))
 	}
-	perChar, _ := s.Float("type_gap", 0.02)
+	// 200 ms, NOT 20 ms, AND THE DIFFERENCE IS DUPLICATED CHARACTERS IN THE GUEST.
+	//
+	// `run:` and `input text` BOTH simulate a keyboard - each character is one `input-send-event`
+	// over QMP. At 20 ms the guest's own keyboard path cannot consume them fast enough on a loaded
+	// KVM guest, and the events are re-consumed or dropped. MEASURED on zorin's ssh leg, five runs:
+	//
+	//	suddo mkdiirr / systeeemctl staart / sshh.sockket   (characters DOUBLED)
+	//	2>>>/dev/null / ;;                                  (a doubled `>` or `;` is a bash SYNTAX ERROR)
+	//	sud -n  ->  sudo -sh                                (a dropped `n` turned an option into one)
+	//	NO_LIISTTENNNER                                     (three letters repeated)
+	//
+	// A doubled `>` or `;` does not fail the step - it fails the COMMAND, in the guest, with a
+	// message about its own syntax, and every later command on that line is lost. That is why a
+	// stage could reach `wait for sshd` having never run its install.
+	//
+	// `doType` already used 150 ms for `input text`; `run:` alone was at 20 ms, which is exactly
+	// the split the measurements show (password fields were fine, commands were mangled). Both are
+	// now 200 ms, and a walk can still override either with `type_gap:`.
+	perChar, _ := s.Float("type_gap", 0.2)
 	lineGap, _ := s.Float("line_gap", 1.0)
 	gap := time.Duration(perChar * float64(time.Second))
 	between := time.Duration(lineGap * float64(time.Second))

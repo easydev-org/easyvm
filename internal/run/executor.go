@@ -857,7 +857,8 @@ func (e *Executor) doType(s walk.Step) error {
 		}
 	}
 
-	perChar := 150 * time.Millisecond
+	// 200 ms, MATCHING `run:` - see the note in text.go for the measured duplication at 20 ms.
+	perChar := 200 * time.Millisecond
 	if v, err := s.Float("type_gap", 0); err == nil && v > 0 {
 		perChar = time.Duration(v * float64(time.Second))
 	}
