@@ -88,10 +88,11 @@ IS DROPPED - which is how an optional medium disappears without a conditional an
 | key | what it does |
 |---|---|
 | `acpi` | one ACPI message: power, reset, sleep |
+| `argv` | with `qga: exec`: the command and its arguments, e.g. `["/bin/sh", "-c", "ss -lnt"]` |
 | `body` | with `qga: file-write`: the bytes to write |
 | `minimum` | with `wait_until:`: the number of seconds that counts as arrived |
 | `path` | with `qga: file-read`/`file-write`: the file in the GUEST |
-| `qga` | one guest-agent command: ping, info, shutdown, file-read, file-write |
+| `qga` | one guest-agent command: ping, info, exec, shutdown, file-read, file-write |
 | `stopped` | wait until the machine's process has gone |
 | `wait_until` | wait for a condition about the machine: `stopped` |
 
@@ -180,7 +181,7 @@ single step. `to` is the path in the guest.
 | `disk` | make one disk, or name the one a machine starts from |
 | `do` | run a list of steps in order under one name |
 | `needs` | the files this stage reads must be on disk before it starts |
-| `qga` | one guest-agent command: ping, info, shutdown, file-read, file-write |
+| `qga` | one guest-agent command: ping, info, exec, shutdown, file-read, file-write |
 | `save` | publish the disk to this path: the second half of `stop:` |
 | `screenshot` | save the screen to this path, for a post-mortem nobody had to ask for |
 | `ssh` | run a command over ssh; the exit status is the verdict |
@@ -210,6 +211,7 @@ and `disk_settle:`, which are no longer verbs of their own.
 
 | key | what it does |
 |---|---|
+| `argv` | with `qga: exec`: the command and its arguments, e.g. `["/bin/sh", "-c", "ss -lnt"]` |
 | `path` | the file in the GUEST |
 
 ### `ssh`

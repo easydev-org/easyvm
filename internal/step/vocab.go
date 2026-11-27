@@ -223,7 +223,7 @@ var Verbs = map[string]Verb{
 			"acpi": {Name: "acpi", Kind: KindString,
 				Summary: "one ACPI message: power, reset, sleep"},
 			"qga": {Name: "qga", Kind: KindString,
-				Summary: "one guest-agent command: ping, info, shutdown, file-read, file-write"},
+				Summary: "one guest-agent command: ping, info, exec, shutdown, file-read, file-write"},
 			"wait_until": {Name: "wait_until", Kind: KindString,
 				Summary: "wait for a condition about the machine: `stopped`"},
 			"stopped": {Name: "stopped", Kind: KindBool,
@@ -308,10 +308,22 @@ var Actions = map[string]Verb{
 		Summary: "send one ACPI message: power, reset, sleep",
 		Fields:  map[string]Key{}},
 	"qga": {Name: "qga", Kind: KindString,
-		Summary: "one guest-agent command: ping, info, shutdown, file-read, file-write",
+		Summary: "one guest-agent command: ping, info, exec, shutdown, file-read, file-write",
 		Fields: map[string]Key{
 			"path": {Name: "path", Kind: KindString,
 				Summary: "the file in the GUEST"},
+			// `argv` IS WHAT MAKES `qga: exec` USABLE FROM A WALK, AND ITS ABSENCE IS WHY IT WAS NOT.
+			//
+			// doQGA has always read `argv:` out of the step, but the vocabulary did not declare it, and
+			// the validator refuses an undeclared key - so `qga: exec` could not be written at all. The
+			// only way to run something in the guest was a `run:`, which TYPES INTO KONSOLE AND HAS NO
+			// EXIT STATUS. MEASURED this session, twice, on real runs: kubuntu's whole ssh stage typed
+			// into a Welcome Center that held the focus (openssh was never installed), and zorin's typed
+			// into a desktop whose session had dropped to the greeter after `restart ssh` - both silently,
+			// both reported as "sshd does not accept a connection" an hour later. `qga: exec` returns the
+			// command's own output and exit status and needs no screen at all.
+			"argv": {Name: "argv", Kind: KindList,
+				Summary: "with `qga: exec`: the command and its arguments, e.g. [\"/bin/sh\", \"-c\", \"...\"]"},
 		}},
 	"wait_until": {Name: "wait_until", Kind: KindString,
 		Summary: "wait for a condition about the machine: `stopped`",
