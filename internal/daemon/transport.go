@@ -198,7 +198,7 @@ func (d *Daemon) runWalkthroughFile(req Request, work string, done chan struct{}
 		File:     file,
 		Work:     work,
 		SSHPort:  file.SSHPort,
-		Password: req.Password,
+		Password: sshPassword(req.Password, file),
 		Journal:  journalWriter(recJD),
 		Library:  artifactStore(lib),
 		OnImage: func(name, sha, kind, step string, index, w, h int, rect []int, note string) {

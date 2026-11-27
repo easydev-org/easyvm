@@ -273,7 +273,26 @@ func cmdRun(args []string) int {
 	work := fs.String("work", "", "the daemon's directory")
 	bootDisk := fs.String("boot-disk", "", "the disk a boot: step starts from")
 	out := fs.String("out", "", "where a compress: step writes")
-	password := fs.String("password", "admin", "the guest account's password")
+	// THE DEFAULT IS EMPTY, NOT "admin", AND THAT IS THE WHOLE ROOT CAUSE OF A WEEK OF ssh FAILURES.
+	//
+	// MEASURED (run 45915469545 and its predecessors, closed in the lab pod with the engine's own
+	// client): every disk in these repositories is built with `password admin1`. This flag used to
+	// default to "admin" and `cmdRun` sends `req.Password` to the daemon UNCONDITIONALLY, so a stage
+	// that did not pass `--password` (all of them but anduinos and pearos) handed the daemon "admin"
+	// while the guest's account was "admin1". The probe and every `ssh:` step then answered
+	//
+	//	ssh: unable to authenticate, attempted methods [none password], no supported methods remain
+	//
+	// on a guest whose sshd was active, listening, and reachable - the sshd log showed one
+	// "Connection closed by authenticating user vmuser [preauth]" per probe tick and ZERO
+	// "Failed password", because the client gives up before submitting a password the server has
+	// not offered a method for. That reads as a broken wire and sent a long investigation into ARP,
+	// MASQUERADE, FORWARD, NOTRACK, MTU and netfilter, none of which was ever at fault.
+	//
+	// AN EMPTY DEFAULT LETS THE VALUE COME FROM WHERE IT BELONGS: a caller's `--password`, or the
+	// walk's own `password:` (which stages pass through as an input). It cannot make a working setup
+	// fail - an empty password was never right for any guest here.
+	password := fs.String("password", "", "the guest account's password")
 	// FLAGS AFTER THE FILE ARE STILL FLAGS. Go's flag package stops at the first non-flag argument,
 	// so `easyvm run f.yaml --work /tmp/x` would leave --work unread and the work directory at its
 	// default - which is the invocation people actually type.

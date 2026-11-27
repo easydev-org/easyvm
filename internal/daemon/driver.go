@@ -177,6 +177,19 @@ func NewDriver(owner *Daemon, f *walk.File, work, bootDisk string, port int,
 	if err := os.MkdirAll(work, 0o755); err != nil {
 		return nil, nil, err
 	}
+	// WHEN THE CALLER HAS NO PASSWORD, USE THE FILE'S OWN `password:`.
+	//
+	// THIS IS THE FIX FOR THE FAILURE THAT LOOKED LIKE A BROKEN NETWORK. `password admin1` in a
+	// walk is a TEMPLATE VARIABLE (it feeds `{{ password }}`), not a field `walk.File` carries - so a
+	// caller that passed no `--password` left the driver with an empty one, and every probe and
+	// `ssh:` step answered "unable to authenticate ... no supported methods remain" on a guest whose
+	// sshd was active and reachable. MEASURED (run 45915469545 closed it; reproduced in the pod with
+	// the engine's own client): the same guest accepted `admin1` and refused `admin`.
+	//
+	// The resolved variable is exactly what `{{ password }}` becomes, so a file that prints it during
+	// its install and a driver that dials with it can no longer disagree. A caller's `--password` still
+	// wins, which is what makes an image with a different account usable.
+	password = sshPassword(password, f)
 	d := &Driver{
 		daemon: owner,
 		file:   f,
@@ -1787,4 +1800,23 @@ func ovmfVarsTemplate(d *Driver) string {
 		return p
 	}
 	return "/usr/share/OVMF/OVMF_VARS_4M.fd"
+}
+
+// sshPassword is the value the ssh client and every `ssh:` step dial with.
+//
+// A CALLER'S PASSWORD WINS; THE FILE'S OWN `password:` IS THE FALLBACK. `password admin1` in a walk
+// is a template variable, not a walk.File field, so a stage that passes no `--password` would
+// otherwise dial with an empty one - and an empty password against a disk whose account is `admin1`
+// is the failure this whole investigation chased: "unable to authenticate ... no supported methods
+// remain" on a guest whose sshd was up, listening and reachable.
+func sshPassword(fromCaller string, f *walk.File) string {
+	if fromCaller != "" {
+		return fromCaller
+	}
+	if f != nil {
+		if v, ok := f.Vars["password"].(string); ok {
+			return v
+		}
+	}
+	return ""
 }

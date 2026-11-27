@@ -116,7 +116,7 @@ func (d *Daemon) bootSandbox(req Request, work string, done chan struct{}) {
 		File:     file,
 		Work:     work,
 		SSHPort:  file.SSHPort,
-		Password: req.Password,
+		Password: sshPassword(req.Password, file),
 		OnStep: func(index int, total int, name string) {
 			d.mu.Lock()
 			d.st.Step = name
