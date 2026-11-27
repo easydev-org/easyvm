@@ -701,38 +701,39 @@ func (c *Conn) Key(name string) error {
 // qcodes, so a name like "ctrl" has to be resolved through the library's own table. That is the
 // dependency earning its place - the table is 200 keys long and is generated from qemu's schema.
 func (c *Conn) Stroke(modifiers []string, key string) error {
-	// DOWN AND UP IN ONE EVENT LIST, AND NO `hold` AT ALL.
+	// THE PRESS AND THE RELEASE ARE TWO REQUESTS, WITH THE KEY HELD FOR 25 ms IN BETWEEN.
 	//
-	// `send-key` TAKES A `hold-time` AND QEMU SENDS THE RELEASE ITSELF, which means the guest's keyboard
-	// driver sees a key that stays DOWN for that long - long enough, on some layouts, to trigger
-	// autorepeat:
+	// THEY USED TO BE ONE `input-send-event`, on the strength of the reference implementation's note
+	// that one request keeps the pair inside a single lock acquisition. THE GUEST IS THE PROBLEM, NOT
+	// THE LOCK: qemu hands both events to the guest inside one main-loop turn, and a guest whose
+	// keyboard is a polled device - USB HID under xhci polls its interrupt endpoint, and the PS/2
+	// queue is 16 bytes - can consume them as ONE state change. The release is then lost, the guest's
+	// X server sees a key that is still down, and it AUTOREPEATS.
 	//
-	//	typed "vmuser"      the field said "vwmuserrrr"
-	//	                      ^       ^^^^
-	//	                      |       three extra `r`s: the last key repeated
-	//	                      an extra `w` between `v` and `m`
+	// MEASURED, on a real zorin disk in the pod, with this repository's daemon and the walk's own
+	// arguments: the audit recorded exactly THREE `minus` strokes for `A---B`, and the terminal
+	// rendered TWELVE:
 	//
-	// MEASURED on ubuntu's installer, on two separate runs, and no amount of per-character pacing helps:
-	// `type_gap` sleeps BETWEEN calls, so it cannot shorten a hold QEMU is already applying.
+	//	$ A------------C---D---E---F        <- twelve, and C/D/E/F correct with three each
 	//
-	// THE REFERENCE IMPLEMENTATION NEVER PASSES A HOLD: `lib/qmp.py` sends
+	// Twelve for three, and the nine extra fill the 600 ms until the next key - the shape of a repeat,
+	// not of a lost character. `-machine q35,...,i8042=off` reproduced ELEVEN on the same disk, so the
+	// PS/2 device is not the cause and no machine string can fix it.
 	//
-	//	input-send-event [ {key: qcode, down: true}, {key: qcode, down: false} ]
+	// 25 ms IS NOT A TYPEMATIC DELAY. The old objection to holding a key was `send-key`'s own
+	// `hold-time`, which left the key down long enough to autorepeat ("vwmuserrrr"). 25 ms is an
+	// order of magnitude below the shortest typematic delay (250 ms), so it cannot repeat - it only
+	// guarantees that the guest's polling loop sees the key DOWN before it sees it UP.
 	//
-	// and its own comment explains the other half of why - ONE REQUEST, so a shared socket cannot
-	// interleave another thread's traffic between the down and the up and leave a modifier stuck:
-	//
-	//	"sending down and up as one events list keeps the pair inside a single lock acquisition"
-	//
-	// A CHORD IS THE SAME SHAPE with more events: modifiers down, the key down and up, modifiers up in
-	// reverse order. That is what makes ctrl+alt+t one keystroke rather than five.
-	events := make([]raw.InputEvent, 0, len(modifiers)*2+2)
+	// A CHORD IS THE SAME SHAPE: modifiers down and the key down in the first request, the key up and
+	// modifiers up (in reverse) in the second, so `ctrl+alt+t` is still one keystroke.
+	down := make([]raw.InputEvent, 0, len(modifiers)+1)
 	for _, m := range modifiers {
 		code, err := qcodeByName(m)
 		if err != nil {
 			return err
 		}
-		events = append(events, raw.InputEventKey(raw.InputKeyEvent{
+		down = append(down, raw.InputEventKey(raw.InputKeyEvent{
 			Down: true, Key: raw.KeyValueQcode(code),
 		}))
 	}
@@ -740,23 +741,29 @@ func (c *Conn) Stroke(modifiers []string, key string) error {
 	if err != nil {
 		return err
 	}
-	events = append(events,
-		raw.InputEventKey(raw.InputKeyEvent{Down: true, Key: raw.KeyValueQcode(code)}),
+	down = append(down, raw.InputEventKey(raw.InputKeyEvent{Down: true, Key: raw.KeyValueQcode(code)}))
+	if err := c.withRaw(func(m *raw.Monitor) error {
+		return m.InputSendEvent(nil, nil, down)
+	}); err != nil {
+		return fmt.Errorf("press %v+%s: %w", modifiers, key, err)
+	}
+	time.Sleep(25 * time.Millisecond)
+	up := []raw.InputEvent{
 		raw.InputEventKey(raw.InputKeyEvent{Down: false, Key: raw.KeyValueQcode(code)}),
-	)
+	}
 	for i := len(modifiers) - 1; i >= 0; i-- {
 		code, err := qcodeByName(modifiers[i])
 		if err != nil {
 			return err
 		}
-		events = append(events, raw.InputEventKey(raw.InputKeyEvent{
+		up = append(up, raw.InputEventKey(raw.InputKeyEvent{
 			Down: false, Key: raw.KeyValueQcode(code),
 		}))
 	}
 	if err := c.withRaw(func(m *raw.Monitor) error {
-		return m.InputSendEvent(nil, nil, events)
+		return m.InputSendEvent(nil, nil, up)
 	}); err != nil {
-		return fmt.Errorf("input-send-event %v+%s: %w", modifiers, key, err)
+		return fmt.Errorf("release %v+%s: %w", modifiers, key, err)
 	}
 	return nil
 }
