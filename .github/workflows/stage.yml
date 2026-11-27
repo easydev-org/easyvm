@@ -89,6 +89,26 @@ on:
           guests before it merges, without publishing over `:latest`.
         type: string
         default: "latest"
+      # THE SMALLEST DISK THIS STAGE WILL PUBLISH, IN MiB. A leg may override it with `floor_mb` in its
+      # own matrix entry, and that is why it is an input rather than a constant.
+      #
+      # THE CHECK ITSELF MUST STAY. `qemu-img create` writes a 197,632-byte qcow2 - a header and
+      # nothing else - so a walk whose every click missed still produces a file that `-s` accepts, and
+      # MEASURED ON linux-zorin that disk was published and the next stage pulled a machine with no
+      # system on it. 512 MiB catches that because a bare header is three orders of magnitude below it.
+      #
+      # BUT ONE NUMBER FOR EVERY GUEST IS AS WRONG HERE AS IT WAS FOR `disk_gb`. A BSD install is not a
+      # desktop Linux: MEASURED, a complete NetBSD 11.1 with every set compresses to 535,887,872 bytes
+      # - 511.0 MiB - and a floor of 512 refused it. The answer on that side was to write 1.1 GiB of
+      # /dev/urandom into swap, which passed the check while making the published size say nothing
+      # about the contents. This input is the other answer: the leg that knows its disk is small says
+      # so, and the check keeps doing the job it was written for.
+      disk_floor_mb:
+        description: >-
+          the smallest compressed disk, in MiB, that this stage will publish. Below this the leg fails
+          rather than publishing a qcow2 header. A matrix leg overrides it with `floor_mb`.
+        type: string
+        default: "512"
       # WHICH REPOSITORY'S PACKAGE HOLDS THE IMAGE, AND IT IS NOT ALWAYS THE CALLER'S.
       #
       # `ghcr.io/${{ github.repository }}` WAS RIGHT WHILE EVERY CALLER LIVED IN easydev-org/easyvm.
@@ -913,6 +933,8 @@ jobs:
         if: always()
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          # THE LEG'S OWN FLOOR, OR THE INPUT'S DEFAULT WHEN IT DECLARES NONE.
+          disk_floor_mb: ${{ matrix.floor_mb || inputs.disk_floor_mb }}
         run: |
           set -u
           # AN EMPTY `out:` IS A STAGE THAT PUBLISHES NO DISK, and it is its own case rather than a
@@ -941,11 +963,19 @@ jobs:
           # sat beside a 0 MiB file in the package. The next stage then pulled a disk with no system on
           # it and failed somewhere unrelated.
           #
-          # THE FLOOR IS 512 MiB: the smallest real install here - ghostbsd at 2.7 GiB, popos at 2.5 -
-          # is several times that, and a bare qcow2 header is three orders of magnitude below it.
+          # THE FLOOR IS AN INPUT (`disk_floor_mb`, overridable per leg with `floor_mb`) AND ITS DEFAULT
+          # IS STILL 512 MiB. A bare qcow2 header is 0.19 MiB, so any floor anywhere near 512 catches
+          # it; what the floor must NOT do is refuse a real system. MEASURED, that is exactly what it
+          # did: a complete NetBSD 11.1 - every set, a tree that boots to `login:` - compresses to
+          # 535,887,872 bytes, 511.0 MiB, and this check refused it. The workaround at the time was to
+          # write 1.1 GiB of /dev/urandom into swap, which satisfied the check and made the published
+          # size a lie about the contents. So the leg that knows its system is small declares its own
+          # floor, and the check keeps catching the case it was written for.
+          floor="${disk_floor_mb}"
+          case "$floor" in ''|*[!0-9]*) floor=512 ;; esac
           size=$(stat -c %s "$out")
-          if [ "$size" -lt $((512 * 1024 * 1024)) ]; then
-            echo "::error::$out is $size bytes, below the 512 MiB floor for an installed system."
+          if [ "$size" -lt $((floor * 1024 * 1024)) ]; then
+            echo "::error::$out is $size bytes, below the ${floor} MiB floor for an installed system."
             echo "::error::This is a qcow2 header with nothing written to it - the walk's clicks did"
             echo "::error::not reach the installer's disk. Publishing it would put a disk with no"
             echo "::error::system behind a tag the next stage pulls."
