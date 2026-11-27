@@ -215,7 +215,7 @@ qemu qcodes, and `+` joins a chord. `ret` is Return, `esc` Escape, `space` Space
   clear: true               # optional: select-all and clear before typing
   modifier: ctrl            # which is `ctrl` on Linux, `meta_l` on macOS
   type: '{{ password }}'
-  type_gap: 0.02            # seconds between keys; 0.15 for a Windows shell
+  type_gap: 0.2             # seconds between keys; omit for the 200ms default
 ```
 
 **Three behaviours from one key**, which is the one place this vocabulary is
@@ -248,7 +248,6 @@ launcher install exited 1"* and named neither the file nor the action.
     export DEBIAN_FRONTEND=noninteractive
     apt-get update && apt-get install -y openssh-server
   terminal_wait: 8          # open a terminal first and wait this long
-  type_gap: 0.02
   line_gap: 1.0             # between lines
 ```
 
@@ -553,7 +552,7 @@ because 200 × 10 s is thirty-three minutes and an install is longer.
 | `optional` | any step | may fail without failing the walk |
 | `requires` | any step | capabilities that must answer: `ssh`, `qga`, `share`, `network`, `overlay` |
 | `keep_alive` | waits | keep the screen awake while waiting |
-| `type_gap` | `type`/`run` | seconds between keys |
+| `type_gap` | `type`/`run` | seconds between keys; defaults to **0.2** (200 ms), because at 20 ms a loaded guest duplicates or drops characters |
 | `terminal_wait` | `run` | open a terminal first, and wait this long |
 | `clear` | `type` | select-all and clear before typing |
 | `modifier` | `type` | which select-all chord: `ctrl` or `meta_l` |

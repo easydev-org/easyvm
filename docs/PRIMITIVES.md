@@ -37,7 +37,7 @@ A step is one of nine verbs, or one of the actions the engine dispatches on, plu
 | `settle_before` | seconds to wait before the step acts |
 | `source` | WHERE the question is asked - the name of a frame a `read:` captured, or `console` for the serial line |
 | `timeout` | how long this step may take, in seconds |
-| `type_gap` | seconds between characters when text or a command is typed |
+| `type_gap` | seconds between characters when text or a command is typed; **defaults to 0.2** (200 ms), because at 20 ms a loaded guest duplicates or drops characters |
 | `when` | run this step only when the screen says these words (`{none: ...}` for the negative form) |
 | `when_not` | run this step only when the screen does NOT say these words |
 | `when_not_any` | run this step only when NONE of these word-sets is on screen |
