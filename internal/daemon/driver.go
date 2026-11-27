@@ -517,6 +517,32 @@ func (d *Driver) sendStrokes(strokes []keys.Stroke, perChar time.Duration) error
 		if err != nil {
 			return err
 		}
+		// THE KEY IS RELEASED A SECOND TIME, ON ITS OWN REQUEST, AND THAT IS WHAT STOPS THE REPEAT.
+		//
+		// MEASURED on a REAL zorin disk, in the pod, with this repository's own daemon and the walk's
+		// own arguments. The audit recorded exactly THREE `minus` strokes for `A---B`, and the
+		// guest's terminal rendered TWELVE:
+		//
+		//	$ A------------C---D---E---F        <- and C/D/E/F were correct, three each
+		//	    ^^^^^^^^^^^^  twelve
+		//
+		// Three sent, twelve shown, and the extra nine fill the 600 ms until the next key - a
+		// 25 Hz AUTOREPEAT. So the guest's key-up was LOST and its kernel held the key down. It is
+		// not a pacing problem: the gap was 200 ms and the repeat simply ran longer. It is not the
+		// PS/2 device either - `-machine q35,...,i8042=off` reproduced the same eleven dashes,
+		// measured the same way, which is why this fix is here rather than in a walk.
+		//
+		// A BARE UP-EVENT SETS A KEY TO A STATE IT IS ALREADY IN, so sending it twice is harmless
+		// when the first one arrived - and when it did not, the second one is the release. This is
+		// the SAME LEVER `ReleaseModifiers` already pulls for shift at the end of a string (see its
+		// note in qmp.go: "the only lever this side has over a guest's own driver"); the defect was
+		// that it was pulled only at the SEAM BETWEEN LINES, so a dropped release inside a line
+		// still repeated for as long as the line lasted.
+		if err := d.qmpRetry(func(conn *qmp.Conn) error {
+			return conn.ReleaseKey(stroke.Key)
+		}); err != nil {
+			return err
+		}
 		if perChar > 0 {
 			time.Sleep(perChar)
 		}

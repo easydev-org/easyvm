@@ -460,9 +460,6 @@ func frameSize(path string) (int, int, error) {
 	return cfg.Width, cfg.Height, nil
 }
 
-
-
-
 func firstLine(s string) string {
 	if i := strings.IndexByte(s, '\n'); i >= 0 {
 		return s[:i]
@@ -760,6 +757,34 @@ func (c *Conn) Stroke(modifiers []string, key string) error {
 		return m.InputSendEvent(nil, nil, events)
 	}); err != nil {
 		return fmt.Errorf("input-send-event %v+%s: %w", modifiers, key, err)
+	}
+	return nil
+}
+
+// ReleaseKey sends ONE bare up-event for a single key, on its own request.
+//
+// THIS IS THE PER-CHARACTER HALF OF `ReleaseModifiers`, and it exists because a dropped release
+// inside a typed line is louder than a dropped release at the seam between lines. MEASURED on a real
+// zorin disk in the pod: the daemon's audit recorded three `minus` strokes for `A---B`, and the
+// guest's terminal rendered twelve - a 25 Hz autorepeat filling the 600 ms until the next key. Its
+// kernel never saw the release.
+//
+// An up-event for a key that is already up is a no-op, so a second one costs nothing when the first
+// arrived and is the whole fix when it did not. It is sent as its own `input-send-event` rather than
+// appended to the stroke so that a guest that drops ONE event is not helped by a second event in the
+// SAME request - the point is a separate delivery.
+func (c *Conn) ReleaseKey(name string) error {
+	code, err := qcodeByName(name)
+	if err != nil {
+		return err
+	}
+	events := []raw.InputEvent{
+		raw.InputEventKey(raw.InputKeyEvent{Down: false, Key: raw.KeyValueQcode(code)}),
+	}
+	if err := c.withRaw(func(m *raw.Monitor) error {
+		return m.InputSendEvent(nil, nil, events)
+	}); err != nil {
+		return fmt.Errorf("release %s: %w", name, err)
 	}
 	return nil
 }
