@@ -538,13 +538,20 @@ func (d *Driver) sendStrokes(strokes []keys.Stroke, perChar time.Duration) error
 		// note in qmp.go: "the only lever this side has over a guest's own driver"); the defect was
 		// that it was pulled only at the SEAM BETWEEN LINES, so a dropped release inside a line
 		// still repeated for as long as the line lasted.
+		// THE GAP COMES FIRST, AND THE SECOND RELEASE AFTER IT.
+		//
+		// MEASURED on the same real zorin disk, twice: with the second up sent IMMEDIATELY after the
+		// stroke, eleven dashes became FIVE - better, and still repeating. Two up-events back to
+		// back are two bytes for the guest's queue to swallow at the same instant, so when the first
+		// one is dropped the second one is dropped with it. After the gap the queue is empty, and the
+		// release lands.
+		if perChar > 0 {
+			time.Sleep(perChar)
+		}
 		if err := d.qmpRetry(func(conn *qmp.Conn) error {
 			return conn.ReleaseKey(stroke.Key)
 		}); err != nil {
 			return err
-		}
-		if perChar > 0 {
-			time.Sleep(perChar)
 		}
 	}
 	// THE SHIFT THAT THE LAST CHARACTER NEEDED IS RELEASED AGAIN, BY NAME.
