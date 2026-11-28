@@ -523,7 +523,11 @@ jobs:
         if: matrix.seed != '' && matrix.seed != 'false'
         run: |
           set -eu
-          disk="$GITHUB_WORKSPACE/work/${{ matrix.out || 'disk.qcow2' }}"
+          # THE INPUT IS ALWAYS `work/disk.qcow2` - that is where the pull puts it. `matrix.out` is
+          # the name this leg PUBLISHES, not the one it reads: using it here asked for
+          # `work/linux-ubuntu-ssh.qcow2` before anything had produced one, and the step failed
+          # with "no disk ... to seed" on the first CI run - MEASURED.
+          disk="$GITHUB_WORKSPACE/work/disk.qcow2"
           [ -s "$disk" ] || { echo "::error::no disk at $disk to seed"; exit 1; }
 
           # THE SCRIPT COMES FROM THE CALLER'S CHECKOUT, because that is where the walkthroughs
