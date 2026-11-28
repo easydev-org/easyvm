@@ -498,6 +498,51 @@ jobs:
             ls -l "$GITHUB_WORKSPACE/work"
           done
 
+      # SEED THE DISK WITH AN SSH SERVER BEFORE ITS FIRST BOOT.
+      #
+      # The leg that follows this one exists only to get an ssh session. Every Linux leg used to
+      # do that by TYPING `apt-get install openssh-server` into a desktop terminal, and MEASURED
+      # over ten zorin runs the virtual keyboard drops and doubles characters at line boundaries;
+      # one lost `'` leaves bash at a `>` prompt that swallows every later command, so the stage
+      # reached `wait for sshd` having never run its install.
+      #
+      # `debugfs -w` cannot fix that either: it writes inodes without recomputing ext4's
+      # `metadata_csum` bitmaps, and the guest's kernel answers "bad block bitmap checksum" and
+      # systemd reports "Structure needs cleaning" - the files are there and invisible. So the
+      # root filesystem is REBUILT the way microvm builds one: a tree, a chroot, `mke2fs -d`.
+      #
+      # MEASURED end to end on a real ubuntu disk: rdump 19 s, apt inside the chroot with no
+      # /proc mounted printed "Proceeding anyway" and installed, `mke2fs -d -U <old uuid>` passed
+      # `e2fsck -fn`, the disk came out with the SAME 128 GiB and the SAME partition table, and
+      # the guest reached `ssh_ready="true"` with no keystroke at all.
+      #
+      # IT IS A MATRIX ROW, NOT AN INPUT: a leg that needs a seeded disk says so and no other leg
+      # pays for it. `seed-family` picks the package manager; the script also probes, so a wrong
+      # value is not fatal.
+      - name: put an ssh server in the disk before it boots
+        if: matrix.seed != '' && matrix.seed != 'false'
+        run: |
+          set -eu
+          disk="$GITHUB_WORKSPACE/work/${{ matrix.out || 'disk.qcow2' }}"
+          [ -s "$disk" ] || { echo "::error::no disk at $disk to seed"; exit 1; }
+
+          # THE SCRIPT COMES FROM THE CALLER'S CHECKOUT, because that is where the walkthroughs
+          # live and the seed program is theirs, not the engine's - the engine drives a machine,
+          # it does not edit a filesystem.
+          script="$GITHUB_WORKSPACE/scripts/seed-ssh.sh"
+          [ -f "$script" ] || {
+            echo "::error::this repository has no scripts/seed-ssh.sh but asked for a seeded disk"
+            exit 1
+          }
+
+          chmod +x "$script"
+          sh "$script" "$disk" "${{ matrix.seed-family || 'apt' }}"
+
+          # THE CLAIM, CHECKED: the disk is still the size it was, so fstab, swap and growfs
+          # assumptions still hold.
+          echo "=== the seeded disk ==="
+          qemu-img info "$disk" | grep -E 'virtual size|disk size'
+
       - name: the guest's memory has to fit in the runner's
         # A GUEST BIGGER THAN THE RUNNER IS KILLED BY THE OOM KILLER A FEW MINUTES IN, AND NOTHING IN
         # THE LOGS SAYS SO. MEASURED, from the macos26 stage that first asked 16384:
