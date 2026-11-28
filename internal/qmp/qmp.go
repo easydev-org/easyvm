@@ -720,10 +720,19 @@ func (c *Conn) Stroke(modifiers []string, key string) error {
 	// not of a lost character. `-machine q35,...,i8042=off` reproduced ELEVEN on the same disk, so the
 	// PS/2 device is not the cause and no machine string can fix it.
 	//
-	// 25 ms IS NOT A TYPEMATIC DELAY. The old objection to holding a key was `send-key`'s own
-	// `hold-time`, which left the key down long enough to autorepeat ("vwmuserrrr"). 25 ms is an
-	// order of magnitude below the shortest typematic delay (250 ms), so it cannot repeat - it only
+	// 60 ms IS NOT A TYPEMATIC DELAY. The old objection to holding a key was `send-key`'s own
+	// `hold-time`, which left the key down long enough to autorepeat ("vwmuserrrr"). 60 ms is still
+	// well below the shortest typematic delay (typ. 250-500 ms), so it cannot repeat - it only
 	// guarantees that the guest's polling loop sees the key DOWN before it sees it UP.
+	//
+	// 25 ms WAS TOO SHORT AND ATE THE FIRST CHARACTER. MEASURED on run 46083083785's recording:
+	//
+	//	$ settings set org.gnome.desktop.session        <- gsettings lost its `g`
+	//	ectest -f /etc/ssh/sshd_config                  <- test lost its `t`
+	//
+	// A press that begins while the guest is still handling the previous line's Return is consumed
+	// by that handling, so the character is gone. 60 ms gives the guest's HID poll room to finish
+	// before the next key starts, and is still six times shorter than any typematic delay.
 	//
 	// A CHORD IS THE SAME SHAPE: modifiers down and the key down in the first request, the key up and
 	// modifiers up (in reverse) in the second, so `ctrl+alt+t` is still one keystroke.
@@ -747,7 +756,7 @@ func (c *Conn) Stroke(modifiers []string, key string) error {
 	}); err != nil {
 		return fmt.Errorf("press %v+%s: %w", modifiers, key, err)
 	}
-	time.Sleep(25 * time.Millisecond)
+	time.Sleep(60 * time.Millisecond)
 	up := []raw.InputEvent{
 		raw.InputEventKey(raw.InputKeyEvent{Down: false, Key: raw.KeyValueQcode(code)}),
 	}
